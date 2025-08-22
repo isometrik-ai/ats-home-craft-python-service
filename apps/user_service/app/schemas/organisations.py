@@ -1,0 +1,493 @@
+"""
+Organisation Schemas Module
+
+This module contains all Pydantic models and schemas related to organisation management.
+These schemas are used for request/response validation and API documentation.
+
+Author: AI Assistant
+Date: 2024-12-19
+Last Updated: 2024-12-19
+"""
+
+from typing import List, Optional
+from pydantic import BaseModel, Field, EmailStr
+
+from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
+
+
+class OrganisationInfo(BaseModel):
+    """Model for organisation information
+
+    This model contains all organisation information including basic details,
+    plan information, and user-specific data.
+
+    Attributes:
+        organization_id (str): Unique identifier for the organisation
+        name (str): Organisation's name
+        slug (str): URL-friendly slug for the organisation
+        domain (Optional[str]): Organisation's domain name
+        logo_url (Optional[str]): URL to organisation's logo
+        plan_type (str): Type of plan (starter, professional, enterprise)
+        status (str): Organisation's current status (active, suspended, trial)
+        max_users (int): Maximum number of users allowed
+        timezone (str): Organisation's timezone setting
+        created_at (Optional[str]): ISO timestamp when organisation was created
+        updated_at (Optional[str]): ISO timestamp when organisation was last updated
+        member_count (int): Number of active members in the organisation
+        user_role (Optional[str]): Current user's role in this organisation
+    """
+
+    organization_id: str = Field(
+        ..., description="Unique identifier for the organisation"
+    )
+    name: str = Field(..., description="Organisation's name")
+    slug: str = Field(..., description="URL-friendly slug for the organisation")
+    domain: Optional[str] = Field(None, description="Organisation's domain name")
+    logo_url: Optional[str] = Field(None, description="URL to organisation's logo")
+    plan_type: str = Field(
+        ..., description="Type of plan (starter, professional, enterprise)"
+    )
+    status: str = Field(
+        ..., description="Organisation's current status (active, suspended, trial)"
+    )
+    max_users: int = Field(..., description="Maximum number of users allowed")
+    timezone: str = Field(default="UTC", description="Organisation's timezone setting")
+    created_at: Optional[str] = Field(
+        None, description="ISO timestamp when organisation was created"
+    )
+    updated_at: Optional[str] = Field(
+        None, description="ISO timestamp when organisation was last updated"
+    )
+    member_count: int = Field(
+        default=0, description="Number of active members in the organisation"
+    )
+    user_role: Optional[str] = Field(
+        None, description="Current user's role in this organisation"
+    )
+
+    class Config:  # pylint: disable=R0903
+        """Pydantic configuration for OrganisationInfo model"""
+
+        schema_extra = {
+            "example": {
+                "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                "name": "Acme Corporation",
+                "slug": "acme-corp",
+                "domain": "acme.com",
+                "logo_url": "https://example.com/logo.png",
+                "plan_type": "professional",
+                "status": "active",
+                "max_users": 100,
+                "timezone": "UTC",
+                "created_at": "2024-12-19T10:00:00Z",
+                "updated_at": "2024-12-19T15:30:00Z",
+                "member_count": 25,
+                "user_role": "Administrator",
+            }
+        }
+
+
+class OrganisationListResponse(PaginationBase):
+    """Response model for organisation list operations
+
+    This is the standard response wrapper for organisation list endpoints.
+
+    Attributes:
+        status_code (int): HTTP status code
+        message (str): Response message describing the operation result
+        data (List[OrganisationInfo]): List of organisations if successful
+        total_count (int): Total number of organisations
+        page (int): Current page number
+        page_size (int): Number of items per page
+    """
+
+    status_code: int = Field(..., description="HTTP status code")
+    message: str = Field(
+        ..., description="Response message describing the operation result"
+    )
+    data: List[OrganisationInfo] = Field(
+        ..., description="List of organisations if successful"
+    )
+    total_count: int = Field(..., description="Total number of organisations")
+
+    class Config:  # pylint: disable=R0903
+        """Pydantic configuration for OrganisationListResponse model"""
+
+        schema_extra = {
+            "example": {
+                "status_code": 200,
+                "message": "Organizations retrieved successfully",
+                "data": [
+                    {
+                        "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                        "name": "Acme Corporation",
+                        "slug": "acme-corp",
+                        "domain": "acme.com",
+                        "logo_url": "https://example.com/logo.png",
+                        "plan_type": "professional",
+                        "status": "active",
+                        "max_users": 100,
+                        "timezone": "UTC",
+                        "created_at": "2024-12-19T10:00:00Z",
+                        "updated_at": "2024-12-19T15:30:00Z",
+                        "member_count": 25,
+                        "user_role": "Administrator",
+                    }
+                ],
+                "total_count": 1,
+                "page": 1,
+                "page_size": 20,
+            }
+        }
+
+
+class OrganisationResponse(SimpleResponse):
+    """Response model for basic organisation operations."""
+
+
+class CreateOrganisationRequest(BaseModel):
+    """Request model for creating a new organisation
+
+    Attributes:
+        name (str): Organisation's name (required)
+        slug (str): URL-friendly slug for the organisation (required)
+        domain (Optional[str]): Organisation's domain name
+        logo_url (Optional[str]): URL to organisation's logo
+        plan_type (str): Type of plan (starter, professional, enterprise)
+        max_users (int): Maximum number of users allowed
+        timezone (str): Organisation's timezone preference
+    """
+
+    name: str = Field(
+        ..., min_length=2, max_length=255, description="Organisation's name"
+    )
+    slug: str = Field(
+        ...,
+        min_length=2,
+        max_length=100,
+        description="URL-friendly slug for the organisation",
+    )
+    domain: Optional[str] = Field(None, description="Organisation's domain name")
+    logo_url: Optional[str] = Field(None, description="URL to organisation's logo")
+    plan_type: str = Field(
+        default="starter",
+        description="Type of plan (starter, professional, enterprise)",
+    )
+    max_users: int = Field(default=10, description="Maximum number of users allowed")
+    timezone: str = Field(
+        default="UTC", description="Organisation's timezone preference"
+    )
+
+    class Config:  # pylint: disable=R0903
+        """Pydantic configuration for CreateOrganisationRequest model"""
+
+        schema_extra = {
+            "example": {
+                "name": "Acme Corporation",
+                "slug": "acme-corp",
+                "domain": "acme.com",
+                "logo_url": "https://example.com/logo.png",
+                "plan_type": "professional",
+                "max_users": 100,
+                "timezone": "UTC",
+            }
+        }
+
+
+class UpdateOrganisationRequest(BaseModel):
+    """Request model for updating organisation information
+
+    All fields are optional for partial updates.
+
+    Attributes:
+        name (Optional[str]): Updated organisation name
+        slug (Optional[str]): Updated slug
+        domain (Optional[str]): Updated domain name
+        logo_url (Optional[str]): Updated logo URL
+        plan_type (Optional[str]): Updated plan type
+        max_users (Optional[int]): Updated maximum users
+        timezone (Optional[str]): Updated timezone preference
+    """
+
+    name: Optional[str] = Field(
+        None, min_length=2, max_length=255, description="Updated organisation name"
+    )
+    slug: Optional[str] = Field(
+        None, min_length=2, max_length=100, description="Updated slug"
+    )
+    domain: Optional[str] = Field(None, description="Updated domain name")
+    logo_url: Optional[str] = Field(None, description="Updated logo URL")
+    plan_type: Optional[str] = Field(None, description="Updated plan type")
+    max_users: Optional[int] = Field(None, description="Updated maximum users")
+    timezone: Optional[str] = Field(None, description="Updated timezone preference")
+
+    class Config:  # pylint: disable=R0903
+        """Pydantic configuration for UpdateOrganisationRequest model"""
+
+        schema_extra = {
+            "example": {
+                "name": "Updated Acme Corporation",
+                "domain": "newacme.com",
+                "plan_type": "enterprise",
+                "max_users": 200,
+            }
+        }
+
+
+class UpdateOrganisationResponse(BaseModel):
+    """Response model for organisation update operations
+
+    Attributes:
+        status_code (int): HTTP status code
+        message (str): Response message
+        data (Optional[OrganisationInfo]): Updated organisation data
+    """
+
+    status_code: int = Field(..., description="HTTP status code")
+    message: str = Field(..., description="Response message")
+    data: Optional[OrganisationInfo] = Field(
+        None, description="Updated organisation data"
+    )
+
+    class Config:  # pylint: disable=R0903
+        """Pydantic configuration for UpdateOrganisationResponse model"""
+
+        schema_extra = {
+            "example": {
+                "status_code": 200,
+                "message": "Organisation updated successfully",
+                "data": {
+                    "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                    "name": "Updated Acme Corporation",
+                    "slug": "acme-corp",
+                    "domain": "newacme.com",
+                    "plan_type": "enterprise",
+                    "status": "active",
+                    "max_users": 200,
+                    "timezone": "UTC",
+                },
+            }
+        }
+
+
+class OrganisationDetailResponse(BaseModel):
+    """Response model for organisation detail operations
+
+    Attributes:
+        status_code (int): HTTP status code
+        message (str): Response message describing the operation result
+        data (Optional[OrganisationInfo]): Organisation data if successful
+    """
+
+    status_code: int = Field(..., description="HTTP status code")
+    message: str = Field(
+        ..., description="Response message describing the operation result"
+    )
+    data: Optional[OrganisationInfo] = Field(
+        None, description="Organisation data if successful"
+    )
+
+    class Config:  # pylint: disable=R0903
+        """Pydantic configuration for OrganisationDetailResponse model"""
+
+        schema_extra = {
+            "example": {
+                "status_code": 200,
+                "message": "Organisation retrieved successfully",
+                "data": {
+                    "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                    "name": "Acme Corporation",
+                    "slug": "acme-corp",
+                    "domain": "acme.com",
+                    "plan_type": "professional",
+                    "status": "active",
+                    "max_users": 100,
+                    "timezone": "UTC",
+                    "member_count": 25,
+                    "user_role": "Administrator",
+                },
+            }
+        }
+
+
+class CreateOrganisationWithUserRequest(BaseModel):
+    """Request model for creating a new organisation with user signup
+
+    This schema is used when creating an organization along with the initial user account.
+
+    Attributes:
+        email (EmailStr): User's email address for signup (required)
+        password (str): User's password for signup (required)
+        full_name (str): User's full name (required)
+        name (str): Organisation's name (required)
+        slug (str): URL-friendly slug for the organisation (required)
+        domain (Optional[str]): Organisation's domain name
+        logo_url (Optional[str]): URL to organisation's logo
+        plan_type (str): Type of plan (starter, professional, enterprise)
+        max_users (int): Maximum number of users allowed
+        timezone (str): Organisation's timezone preference
+        phone (Optional[str]): User's phone number
+    """
+
+    email: EmailStr = Field(..., description="User's email address for signup")
+    password: str = Field(..., min_length=8, description="User's password for signup")
+    full_name: str = Field(
+        ..., min_length=2, max_length=255, description="User's full name"
+    )
+    name: str = Field(
+        ..., min_length=2, max_length=255, description="Organisation's name"
+    )
+    slug: str = Field(
+        ...,
+        min_length=2,
+        max_length=100,
+        description="URL-friendly slug for the organisation",
+    )
+    domain: Optional[str] = Field(None, description="Organisation's domain name")
+    logo_url: Optional[str] = Field(None, description="URL to organisation's logo")
+    plan_type: str = Field(
+        default="starter",
+        description="Type of plan (starter, professional, enterprise)",
+    )
+    max_users: int = Field(default=10, description="Maximum number of users allowed")
+    timezone: str = Field(
+        default="UTC", description="Organisation's timezone preference"
+    )
+    phone: Optional[str] = Field(None, description="User's phone number")
+
+    class Config:  # pylint: disable=R0903
+        """Pydantic configuration for CreateOrganisationWithUserRequest model"""
+
+        schema_extra = {
+            "example": {
+                "email": "admin@acme.com",
+                "password": "SecurePassword123!",
+                "full_name": "John Doe",
+                "name": "Acme Corporation",
+                "slug": "acme-corp",
+                "domain": "acme.com",
+                "logo_url": "https://example.com/logo.png",
+                "plan_type": "professional",
+                "max_users": 100,
+                "timezone": "UTC",
+                "phone": "+1234567890",
+            }
+        }
+
+
+class CreateOrganisationWithUserResponse(BaseModel):
+    """Response model for creating organisation with user signup
+
+    Attributes:
+        status_code (int): HTTP status code
+        message (str): Response message describing the operation result
+        data (dict): Created organisation and user data
+    """
+
+    status_code: int = Field(..., description="HTTP status code")
+    message: str = Field(
+        ..., description="Response message describing the operation result"
+    )
+    data: dict = Field(..., description="Created organisation and user data")
+
+    class Config:  # pylint: disable=R0903
+        """Pydantic configuration for CreateOrganisationWithUserResponse model"""
+
+        schema_extra = {
+            "example": {
+                "status_code": 201,
+                "message": "Organisation and user created successfully",
+                "data": {
+                    "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "organization_name": "Acme Corporation",
+                    "user_email": "admin@acme.com",
+                    "role_name": "Super Admin",
+                },
+            }
+        }
+
+
+class OrganizationUpdate(BaseModel):
+    """
+    Payload for organisation *owners or standard admins*.
+    Every field is optional so the caller may patch only what they need.
+    """
+
+    # ─── Brand & profile ───
+    name: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="Organisation's display name",
+    )
+    logo_url: Optional[str] = Field(
+        None,
+        description="URL to the organisation's logo image",
+    )
+    industry: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Industry or vertical the organisation operates in",
+    )
+    company_size: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Company size bracket (e.g. '1-10', '11-50')",
+    )
+    description: Optional[str] = Field(
+        None,
+        description="Short description or mission statement of the organisation",
+    )
+    referral_source: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="How the organisation first heard about the platform",
+    )
+
+    # ─── Preferences ───
+    settings: Optional[dict] = Field(
+        None,
+        description="Custom JSON settings that apply organisation-wide",
+    )
+    timezone: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Default timezone for the organisation",
+    )
+
+    class Config:  # pylint: disable=R0903
+        """Pydantic config: forbid extra fields, strip whitespace, enforce min string length."""
+
+        extra = "forbid"
+        anystr_strip_whitespace = True
+        min_anystr_length = 1
+
+
+class OrganizationAdminUpdate(OrganizationUpdate):
+    """
+    Superset for *platform or billing admins*.
+    Inherits the regular editable fields and adds sensitive columns.
+    """
+
+    slug: Optional[str] = Field(
+        None,
+        description="URL-friendly slug used in organisation-specific links",
+    )
+    domain: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="Primary domain name associated with the organisation",
+    )
+    plan_type: Optional[str] = Field(
+        None,
+        description="Subscription plan type (starter, professional, enterprise)",
+    )
+    status: Optional[str] = Field(
+        None,
+        description="Organisation's account status (active, suspended, trial)",
+    )
+    max_users: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Maximum number of users allowed under the current plan",
+    )
