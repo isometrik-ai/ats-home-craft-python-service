@@ -1,0 +1,97 @@
+name: Lint & Test
+
+on:
+  push:
+    branches:
+      - "*"
+  pull_request:
+    branches:
+      - "*"
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history (needed for --changed-since to find origin/staging)
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Initialize Pants
+        uses: pantsbuild/actions/init-pants@v8
+        with:
+          gha-cache-key: cache0-pants
+          named-caches-hash: ${{ hashFiles('python-default.lock') }}
+      
+      - name: Check BUILD files
+        run: |
+          pants tailor --check update-build-files --check ::
+
+      - name: Lint changed files
+        run: |
+          # For pull requests, compare against the base branch
+          # For direct pushes, compare against the previous commit
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pants --changed-since=${{ github.event.pull_request.base.sha }} lint
+          else
+            pants --changed-since=${{ github.event.before }} lint
+          fi
+
+  test:
+    name: Pytest
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history (needed for --changed-since to find origin/staging)
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Initialize Pants
+        uses: pantsbuild/actions/init-pants@v8
+        with:
+          gha-cache-key: cache0-pants
+          named-caches-hash: ${{ hashFiles('python-default.lock') }}
+            
+      - name: Run tests on changed files and their dependents
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
+        run: |
+          # Create coverage output directory
+          mkdir -p dist/coverage/python
+          
+          pants test :: \
+              --test-use-coverage \
+              --coverage-py-report=xml \
+              --coverage-py-output-dir=dist/coverage/python
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: dist/coverage/python/coverage.xml
+
+      - name: Run SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Upload Pants log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pants-log
+          path: .pants.d/workdir/pants.log
