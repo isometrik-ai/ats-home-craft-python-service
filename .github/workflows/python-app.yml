@@ -15,33 +15,31 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Fetch all history (needed for --changed-since to find origin/staging)
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Initialize Pants
-        uses: pantsbuild/actions/init-pants@v8
-        with:
-          gha-cache-key: cache0-pants
-          named-caches-hash: ${{ hashFiles('python-default.lock') }}
-      
-      - name: Check BUILD files
+      - name: Install dependencies
         run: |
-          pants tailor --check update-build-files --check ::
+          python -m pip install --upgrade pip
+          pip install flake8 black isort mypy pylint
 
-      - name: Lint changed files
+      - name: Lint with flake8
         run: |
-          # For pull requests, compare against the base branch
-          # For direct pushes, compare against the previous commit
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            pants --changed-since=${{ github.event.pull_request.base.sha }} lint
-          else
-            pants --changed-since=${{ github.event.before }} lint
-          fi
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Check formatting with black
+        run: black --check .
+
+      - name: Check imports with isort
+        run: isort --check-only .
+
+      - name: Lint with pylint
+        run: |
+          pylint **/*.py --disable=C0114,C0115,C0116 --max-line-length=127 --fail-under=7.0
 
   test:
     name: Pytest
@@ -50,48 +48,34 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Fetch all history (needed for --changed-since to find origin/staging)
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Initialize Pants
-        uses: pantsbuild/actions/init-pants@v8
-        with:
-          gha-cache-key: cache0-pants
-          named-caches-hash: ${{ hashFiles('python-default.lock') }}
-            
-      - name: Run tests on changed files and their dependents
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+          # Add your project dependencies here
+          # pip install -r requirements.txt
+
+      - name: Run tests with coverage
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
         run: |
-          # Create coverage output directory
-          mkdir -p dist/coverage/python
-          
-          pants test :: \
-              --test-use-coverage \
-              --coverage-py-report=xml \
-              --coverage-py-output-dir=dist/coverage/python
+          pytest --cov=. --cov-report=xml
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: dist/coverage/python/coverage.xml
+          path: coverage.xml
 
       - name: Run SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      - name: Upload Pants log
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pants-log
-          path: .pants.d/workdir/pants.log
