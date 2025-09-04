@@ -1,5 +1,3 @@
-
-
 """
 Organisation Management API Module
 

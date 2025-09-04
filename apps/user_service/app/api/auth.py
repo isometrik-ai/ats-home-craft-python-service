@@ -1,4 +1,3 @@
-
 """
 Authentication API Module
 

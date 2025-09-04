@@ -64,8 +64,6 @@ from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import ROLE_SELECT_FIELDS, PERMISSION_SELECT_FIELDS
 
 
-# Create router for roles endpoints
-router = APIRouter(prefix="/roles", tags=["Roles Management"])
 
 # Authentication description for API documentation
 AUTH_DESCRIPTION = "Bearer token required for authentication"
@@ -74,6 +72,8 @@ AUTH_DESCRIPTION = "Bearer token required for authentication"
 logger = get_logger("roles-api")
 logger.info("Roles API module loaded")
 
+# Create router for roles endpoints
+router = APIRouter(prefix="/roles", tags=["Roles Management"])
 
 class RoleResponse(BaseModel):
     """Response model for role operations"""

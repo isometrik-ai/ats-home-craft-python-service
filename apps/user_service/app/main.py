@@ -55,16 +55,6 @@ app_logger.info("Application logging initialized")
 patch_all()
 
 
-# adding audit logs
-@app.on_event("startup")
-async def startup_event():
-    """Start up event"""
-    app_logger.info("Starting up user service application")
-    db_pool = await get_async_connection_pool()
-    await audit_logger.start_processing(db_pool)
-    app_logger.info("Audit logger processing started successfully")
-
-
 # Update the app's metadata
 app.title = "XQtiv API"
 app.description = "API for XQtiv"

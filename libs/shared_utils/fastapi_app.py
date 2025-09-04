@@ -13,14 +13,17 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 
-def create_fastapi_app() -> tuple[FastAPI, Limiter]:
+def create_fastapi_app(lifespan=None) -> tuple[FastAPI, Limiter]:
     """
     Create a FastAPI application with rate limiting configured.
+
+    Args:
+        lifespan: Optional lifespan event handler for startup/shutdown events
 
     Returns:
         tuple[FastAPI, Limiter]: A tuple containing the FastAPI app instance and limiter
     """
-    app = FastAPI()
+    app = FastAPI(lifespan=lifespan)
     # Initialize the Limiter
     limiter = Limiter(key_func=get_remote_address)
     # Attach the Limiter to the app's state
