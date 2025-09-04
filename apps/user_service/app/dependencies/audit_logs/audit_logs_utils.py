@@ -1,4 +1,4 @@
-# pylint: disable=import-error,no-name-in-module
+# pylint: disable=R0902
 """
 Audit Logs Utility Functions Module
 
@@ -42,7 +42,7 @@ def build_audit_logs_filter_query(
     #     WHERE organization_id = $1
     # """
     base_query = """
-        SELECT 
+        SELECT
             id, organization_id, user_id, user_email, user_role,
             action_type, data_classification, table_name, record_id,
             old_values, new_values, changed_fields, compliance_tags,
@@ -84,7 +84,7 @@ def build_audit_logs_filter_query(
 
 
 def build_audit_logs_count_query(
-    organization_id: str,  # pylint: disable=unused-argument
+    # organization_id: str,
     search: Optional[str] = None,
 ) -> Tuple[str, List]:
     """
@@ -132,7 +132,7 @@ def build_audit_log_by_id_query() -> str:
         str: SQL query for getting audit log by ID
     """
     return """
-        SELECT 
+        SELECT
             id, organization_id, user_id, user_email, user_role,
             action_type, data_classification, table_name, record_id,
             old_values, new_values, changed_fields, compliance_tags,
@@ -188,7 +188,7 @@ def build_audit_logs_filter_message(
 
 def check_audit_logs_view_permission(
     user_context,
-    db_conn,  # pylint: disable=unused-argument
+    # db_conn,
 ) -> dict:
     """
     Check if user has permission to view audit logs.

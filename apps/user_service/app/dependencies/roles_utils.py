@@ -133,7 +133,7 @@ async def validate_permissions_exist(
     permissions_check_query = f"""
         SELECT COUNT(*) as valid_count
         FROM public.permissions p
-        WHERE p.organization_id = $1 
+        WHERE p.organization_id = $1
             AND p.id IN ({permission_placeholders});
     """
 
@@ -194,7 +194,7 @@ async def check_role_exists(
         start_time = time.time()
 
     role_check_query = """
-        SELECT id, name, is_default, description FROM public.roles 
+        SELECT id, name, is_default, description FROM public.roles
         WHERE id = $1 AND organization_id = $2;
     """
 
@@ -243,7 +243,7 @@ async def check_role_name_unique(
     if exclude_role_id:
         validate_uuid_format(exclude_role_id, "role ID")
         name_conflict_query = """
-            SELECT id FROM public.roles 
+            SELECT id FROM public.roles
             WHERE name = $1 AND organization_id = $2 AND id != $3;
         """
         name_conflict = await db_conn.fetchrow(
@@ -378,54 +378,54 @@ def build_roles_filter_query(
     # Build complete query
     roles_query = f"""
             WITH role_user_counts AS (
-                SELECT 
+                SELECT
                     r.id AS role_id,
                     COUNT(DISTINCT om.user_id) AS user_count
                 FROM public.roles r
-                LEFT JOIN public.organization_members om 
-                    ON r.id = om.role_id 
+                LEFT JOIN public.organization_members om
+                    ON r.id = om.role_id
                     AND om.organization_id = r.organization_id
                     AND om.status = 'active'
                 WHERE {where_clause}
                 GROUP BY r.id
             ),
             role_permission_counts AS (
-                SELECT 
+                SELECT
                     r.id AS role_id,
                     COUNT(DISTINCT rp.permission_id) AS permission_count,
                     COALESCE(
                         JSON_OBJECT_AGG(
-                            COALESCE(p.category, 'uncategorized'), 
+                            COALESCE(p.category, 'uncategorized'),
                             category_count
                         ) FILTER (WHERE category_count > 0),
                         '{{}}'::json
                     ) AS permission_categories
                 FROM public.roles r
-                LEFT JOIN public.role_permissions rp 
-                    ON r.id = rp.role_id 
+                LEFT JOIN public.role_permissions rp
+                    ON r.id = rp.role_id
                     AND rp.organization_id = r.organization_id
-                LEFT JOIN public.permissions p 
+                LEFT JOIN public.permissions p
                     ON rp.permission_id = p.id
                 LEFT JOIN (
-                    SELECT 
+                    SELECT
                         r2.id AS role_id,
                         COALESCE(p2.category, 'uncategorized') AS category,
                         COUNT(*) AS category_count
                     FROM public.roles r2
-                    LEFT JOIN public.role_permissions rp2 
-                        ON r2.id = rp2.role_id 
+                    LEFT JOIN public.role_permissions rp2
+                        ON r2.id = rp2.role_id
                         AND rp2.organization_id = r2.organization_id
-                    LEFT JOIN public.permissions p2 
+                    LEFT JOIN public.permissions p2
                         ON rp2.permission_id = p2.id
                     WHERE r2.organization_id = $1
                     GROUP BY r2.id, COALESCE(p2.category, 'uncategorized')
-                ) cat_counts 
-                ON r.id = cat_counts.role_id 
+                ) cat_counts
+                ON r.id = cat_counts.role_id
                 AND COALESCE(p.category, 'uncategorized') = cat_counts.category
                 WHERE {where_clause}
                 GROUP BY r.id
             )
-            SELECT 
+            SELECT
                 {ROLE_SELECT_FIELDS},
                 COALESCE(ruc.user_count, 0) AS user_count,
                 COALESCE(rpc.permission_count, 0) AS permission_count,
@@ -570,7 +570,7 @@ async def remove_all_permissions_from_role(
         start_time = time.time()
 
     delete_permissions_query = """
-        DELETE FROM public.role_permissions 
+        DELETE FROM public.role_permissions
         WHERE role_id = $1 AND organization_id = $2;
     """
 

@@ -1,5 +1,5 @@
-# pylint: disable=import-error,no-name-in-module
-# pylint: disable=logging-fstring-interpolation
+
+
 """
 Permissions Management API Module
 
@@ -80,7 +80,7 @@ class PermissionResponse(BaseModel):
 #     category="PERMISSION",
 # )
 async def get_permissions(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
 ):
@@ -108,9 +108,9 @@ async def get_permissions(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"GET /permissions request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}"
+        ("GET /permissions request started - Request ID: %s, ",request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s, ",current_user.get('organization_id'))
     )
 
     # Set audit context for permissions listing
@@ -121,23 +121,23 @@ async def get_permissions(
     # Extract and validate user context from JWT token
     user_context = await check_roles_manage_permission(current_user, db_conn)
     logger.debug(
-        f"User context extracted and permissions validated - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}"
+        ("User context extracted and permissions validated - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
     )
 
     permissions_data = await get_all_permission_from_db(
         user_context.organization_id, db_conn
     )
     logger.debug(
-        f"Permissions retrieved from database - Request ID: {request_id}, "
-        f"Organization ID: {user_context.organization_id}, "
-        f"Permissions count: {len(permissions_data) if permissions_data else 0}"
+        ("Permissions retrieved from database - Request ID: %s, ",request_id),
+        ("Organization ID: %s, ",user_context.organization_id),
+        ("Permissions count: %s",len(permissions_data) if permissions_data else 0)
     )
 
     if not permissions_data:
         logger.warning(
-            f"No permissions found - Request ID: {request_id}, "
-            f"Organization ID: {user_context.organization_id}"
+            ("No permissions found - Request ID: %s, ",request_id),
+            ("Organization ID: %s, ",user_context.organization_id)
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -159,8 +159,8 @@ async def get_permissions(
         for permission in permissions_data
     ]
     logger.debug(
-        f"Permissions data formatted - Request ID: {request_id}, "
-        f"Formatted permissions count: {len(permissions)}"
+        ("Permissions data formatted - Request ID: %s, ",request_id),
+        ("Formatted permissions count: %s",len(permissions))
     )
 
     # Set audit data for successful retrieval
@@ -174,9 +174,9 @@ async def get_permissions(
     }
 
     logger.info(
-        f"GET /permissions request completed successfully - Request ID: {request_id}, "
-        f"Organization ID: {user_context.organization_id}, "
-        f"Permissions Count: {len(permissions)}, Status Code: 200"
+        ("GET /permissions request completed successfully - Request ID: %s, ",request_id),
+        ("Organization ID: %s, ",user_context.organization_id),
+        ("Permissions Count: %s, Status Code: 200",len(permissions))
     )
 
     return PermissionsResponse(
@@ -201,7 +201,7 @@ async def get_permissions(
 #     category="PERMISSION",
 # )
 async def get_permission_by_id(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     permission_id: str,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
@@ -218,10 +218,10 @@ async def get_permission_by_id(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"GET /permissions/{permission_id} request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Permission ID: {permission_id}"
+        ("GET /permissions/%s request started - Request ID: %s, ",permission_id,request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s, ",current_user.get('organization_id')),
+        ("Permission ID: %s, ",permission_id)
     )
 
     # Set audit context for permission retrieval
@@ -233,29 +233,29 @@ async def get_permission_by_id(
     # Validate role_id format using utility function
     validate_uuid_format(permission_id, "permission ID")
     logger.debug(
-        f"Permission ID format validated - Request ID: {request_id}, "
-        f"Permission ID: {permission_id}"
+        ("Permission ID format validated - Request ID: %s, ",request_id),
+        ("Permission ID: %s, ",permission_id)
     )
 
     # Extract and validate user context from JWT token
     user_context = await check_roles_manage_permission(current_user, db_conn)
     logger.debug(
-        f"User context extracted and permissions validated - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}"
+        ("User context extracted and permissions validated - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
     )
 
     permission = await get_permission_by_id_from_db(
         permission_id, user_context.organization_id, db_conn
     )
     logger.debug(
-        f"Permission retrieved from database - Request ID: {request_id}, "
-        f"Permission ID: {permission_id}, Permission found: {permission is not None}"
+        ("Permission retrieved from database - Request ID: %s, ",request_id),
+        ("Permission ID: %s, Permission found: %s",permission_id,permission is not None)
     )
 
     if not permission:
         logger.warning(
-            f"Permission not found - Request ID: {request_id}, "
-            f"Permission ID: {permission_id}, Organization ID: {user_context.organization_id}"
+            ("Permission not found - Request ID: %s, ",request_id),
+            ("Permission ID: %s, Organization ID: %s",permission_id,user_context.organization_id)
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -275,9 +275,9 @@ async def get_permission_by_id(
         )
     ]
     logger.debug(
-        f"Permission data formatted - Request ID: {request_id}, "
-        f"Permission ID: {permission_id}, Permission Name: {permission['name']}, "
-        f"Permission Code: {permission['code']}"
+        ("Permission data formatted - Request ID: %s, ",request_id),
+        ("Permission ID: %s, Permission Name: %s",permission_id,permission['name']),
+        ("Permission Code: %s",permission['code'])
     )
 
     # Set audit data for successful retrieval
@@ -290,10 +290,10 @@ async def get_permission_by_id(
     }
 
     logger.info(
-        f"GET /permissions/{permission_id} request completed successfully - "
-        f"Request ID: {request_id}, "
-        f"Permission ID: {permission_id}, Permission Name: {permission['name']}, "
-        f"Permission Code: {permission['code']}, Status Code: 200"
+        ("GET /permissions/%s request completed successfully - ",permission_id),
+        ("Request ID: %s, ",request_id),
+        ("Permission ID: %s, Permission Name: %s",permission_id,permission['name']),
+        ("Permission Code: %s, Status Code: 200",permission['code'])
     )
 
     return PermissionsResponse(
@@ -316,7 +316,7 @@ async def get_permission_by_id(
 )
 async def create_permission(
     permission_data: CreatePermissionRequest,
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
 ):
@@ -329,11 +329,11 @@ async def create_permission(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"POST /permissions request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Permission Name: {permission_data.name}, "
-        f"Permission Code: {permission_data.code}"
+        ("POST /permissions request started - Request ID: %s, ",request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s, ",current_user.get('organization_id')),
+        ("Permission Name: %s, ",permission_data.name),
+        ("Permission Code: %s",permission_data.code)
     )
 
     # Set audit context for permission creation
@@ -346,24 +346,32 @@ async def create_permission(
     # Extract and validate user context from JWT token
     user_context = await check_roles_manage_permission(current_user, db_conn)
     logger.debug(
-        f"User context extracted and permissions validated - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}"
+        ("User context extracted and permissions validated - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
     )
 
     permission = await create_permission_in_db(
         permission_data, user_context.organization_id, db_conn
     )
     logger.debug(
-        f"Permission created in database - Request ID: {request_id}, "
-        f"Permission Name: {permission_data.name}, Permission Code: {permission_data.code}, "
-        f"Permission created: {permission is not None}"
+        ("Permission created in database - Request ID: %s, ",request_id),
+        (
+            "Permission Name: %s, Permission Code: %s, ",
+            permission_data.name,
+            permission_data.code,
+        ),
+        ("Permission created: %s",permission is not None)
     )
 
     if not permission:
         logger.warning(
-            f"Failed to create permission - Request ID: {request_id}, "
-            f"Permission Name: {permission_data.name}, Permission Code: {permission_data.code}, "
-            f"Organization ID: {user_context.organization_id}"
+            ("Failed to create permission - Request ID: %s, ",request_id),
+            (
+                "Permission Name: %s, Permission Code: %s, ",
+                permission_data.name,
+                permission_data.code,
+            ),
+            ("Organization ID: %s, ",user_context.organization_id)
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -383,9 +391,9 @@ async def create_permission(
         )
     ]
     logger.debug(
-        f"Created permission data formatted - Request ID: {request_id}, "
-        f"Permission ID: {permission['id']}, Permission Name: {permission['name']}, "
-        f"Permission Code: {permission['code']}"
+        ("Created permission data formatted - Request ID: %s, ",request_id),
+        ("Permission ID: %s, Permission Name: %s, ",permission['id'],permission['name']),
+        ("Permission Code: %s",permission['code'])
     )
 
     # Set audit data for successful creation
@@ -402,9 +410,9 @@ async def create_permission(
     }
 
     logger.info(
-        f"POST /permissions request completed successfully - Request ID: {request_id}, "
-        f"Permission ID: {permission['id']}, Permission Name: {permission['name']}, "
-        f"Permission Code: {permission['code']}, Status Code: 201"
+        ("POST /permissions request completed successfully - Request ID: %s, ",request_id),
+        ("Permission ID: %s, Permission Name: %s, ",permission['id'],permission['name']),
+        ("Permission Code: %s, Status Code: 201",permission['code'])
     )
 
     return PermissionsResponse(
@@ -428,7 +436,7 @@ async def create_permission(
     category="PERMISSION",
 )
 async def delete_permission(
-    request: Request, permission_id: int  # pylint: disable=unused-argument
+    request: Request, permission_id: int
 ):
     """
     Delete a permission
@@ -442,8 +450,8 @@ async def delete_permission(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"DELETE /permissions/{permission_id} request started - Request ID: {request_id}, "
-        f"Permission ID: {permission_id}"
+        ("DELETE /permissions/%s request started - Request ID: %s, ",permission_id,request_id),
+        ("Permission ID: %s, ",permission_id)
     )
 
     # Set audit context for permission deletion
@@ -466,14 +474,14 @@ async def delete_permission(
     }
 
     logger.debug(
-        f"Delete permission request processed - Request ID: {request_id}, "
-        f"Permission ID: {permission_id}"
+        ("Delete permission request processed - Request ID: %s, ",request_id),
+        ("Permission ID: %s, ",permission_id)
     )
 
     logger.info(
-        f"DELETE /permissions/{permission_id} request completed successfully - "
-        f"Request ID: {request_id}, "
-        f"Permission ID: {permission_id}, Status Code: 200"
+        ("DELETE /permissions/%s request completed successfully - ",permission_id),
+        ("Request ID: %s, ",request_id),
+        ("Permission ID: %s, Status Code: 200",permission_id)
     )
 
     return PermissionResponse(

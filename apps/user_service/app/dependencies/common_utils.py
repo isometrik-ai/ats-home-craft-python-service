@@ -134,7 +134,8 @@ def extract_user_context(current_user: dict) -> UserContext:
     if user_type not in valid_user_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid token: user type '{user_type}' is not supported. Expected one of: {', '.join(valid_user_types)}",
+            detail=f"Invalid token: user type '{user_type}' is not supported. "
+                   f"Expected one of: {', '.join(valid_user_types)}",
         )
 
     return UserContext(user_id, organization_id, token_email, user_type)

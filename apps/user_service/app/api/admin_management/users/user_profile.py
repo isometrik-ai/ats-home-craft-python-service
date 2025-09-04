@@ -1,4 +1,3 @@
-# pylint: disable=logging-fstring-interpolation
 """
 User Profile API Module
 This module provides user profile operations including getting own profile and getting user by ID.
@@ -8,22 +7,22 @@ All endpoints include proper authentication, validation, and database operations
 from datetime import datetime, timezone
 import uuid
 import json
+from typing import Tuple, Any
+from calendar import month_abbr
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 
-# Logger import
 from apps.user_service.app.dependencies.logger import get_logger
-
 from apps.user_service.app.dependencies.common_utils import (
     extract_user_context,
     require_permission,
 )
 from apps.user_service.app.dependencies.user_utils import (
     format_permissions,
-    format_timestamps,
     update_user_activity,
     fetch_user_profile,
     fetch_user_permissions,
+    create_user_profile_data,
 )
 
 # Schema imports
@@ -36,10 +35,10 @@ from apps.user_service.app.schemas.users import (
 
 from apps.user_service.app.app_instance import limiter
 
-# Audit logging imports
-from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
-    audit_api_call,
-)
+# # Audit logging imports
+# from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
+#     audit_api_call,
+# )
 
 # Local imports
 from libs.shared_db.postgres_db.db import get_async_db_conn
@@ -51,6 +50,18 @@ router = APIRouter(prefix="", tags=["User Profile"])
 # Initialize logger for user profile module
 logger = get_logger("user-profile-api")
 logger.info("User Profile API module loaded")
+
+
+def get_common_dependencies(
+    current_user: dict = Depends(get_user_from_auth),
+    db_conn: Any = Depends(get_async_db_conn)
+) -> Tuple[dict, Any]:
+    """Get common dependencies used across API endpoints.
+    
+    Returns:
+        Tuple containing (current_user, db_conn)
+    """
+    return current_user, db_conn
 
 
 @router.get(
@@ -71,26 +82,26 @@ logger.info("User Profile API module loaded")
 #     category="USER_PROFILE",
 # )
 async def get_user_profile(
-    request: Request,  # pylint: disable=unused-argument
-    current_user: dict = Depends(get_user_from_auth),
-    db_conn=Depends(get_async_db_conn),
+    request: Request,
+    commons: Tuple[dict, Any] = Depends(get_common_dependencies),
 ):
     """
     Retrieve the authenticated user's profile (optimized + async).
     """
+    current_user, db_conn = commons  # Destructure the tuple
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"GET /profile request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}"
+        ("GET /profile request started - Request ID: %s, ",request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s",current_user.get('organization_id'))
     )
 
     user_context = extract_user_context(current_user)
     logger.debug(
-        f"User context extracted - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}, "
-        f"User Type: {user_context.user_type}"
+        ("User context extracted - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s, ",user_context.email,user_context.organization_id),
+        ("User Type: %s",user_context.user_type)
     )
 
     # Set audit context for profile access based on user type
@@ -106,15 +117,14 @@ async def get_user_profile(
     # )
     # request.state.audit_risk_level = "low"
     # logger.debug(
-    #     f"Audit context set for profile access - Request ID: {request_id}, "
-    #     f"Email: {user_context.email}, Audit Table: {request.state.audit_table}"
+    #     ("Audit context set for profile access - Request ID: %s, ",request_id),
+    #     ("Email: %s, Audit Table: %s",user_context.email,request.state.audit_table)
     # )
 
-    # Handle different user types
-    if user_context.user_type == "organization_member":
-        # Original flow for organization members
-        profile_query = """
-            SELECT 
+    def _get_org_member_query() -> str:
+        """Get query for fetching organization member profile."""
+        return """
+            SELECT
                 om.id as member_id,
                 om.user_id,
                 om.organization_id,
@@ -132,27 +142,32 @@ async def get_user_profile(
                 r.name as role_name,
                 r.description as role_description
             FROM public.organization_members om
-            INNER JOIN public.roles r 
-                ON om.role_id = r.id 
+            INNER JOIN public.roles r
+                ON om.role_id = r.id
                 AND om.organization_id = r.organization_id
             WHERE om.user_id = $1 AND om.organization_id = $2
             LIMIT 1;
         """
 
+    async def _fetch_org_member_profile() -> dict:
+        """Fetch and validate organization member profile."""
         user_profile = await db_conn.fetchrow(
-            profile_query,
+            _get_org_member_query(),
             user_context.user_id,
             user_context.organization_id,
         )
         logger.debug(
-            f"User profile retrieved from database - Request ID: {request_id}, "
-            f"Profile found: {user_profile is not None}"
+            ("User profile retrieved from database - Request ID: %s, ",request_id),
+            ("Profile found: %s",user_profile is not None)
         )
 
         if not user_profile:
             logger.warning(
-                f"User profile not found - Request ID: {request_id}, "
-                f"User ID: {user_context.user_id}, Organization ID: {user_context.organization_id}"
+                ("User profile not found - Request ID: %s, ",request_id),
+                (
+                    "User ID: %s, Organization ID: %s",
+                    user_context.user_id,user_context.organization_id
+                )
             )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -161,97 +176,99 @@ async def get_user_profile(
 
         if user_profile["email"].lower() != user_context.email.lower():
             logger.warning(
-                f"Token email does not match user profile - Request ID: {request_id}, "
-                f"Token email: {user_context.email}, Profile email: {user_profile['email']}"
+                ("Token email does not match user profile - Request ID: %s, ",request_id),
+                ("Token email: %s, Profile email: %s",user_context.email,user_profile['email'])
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Token email does not match user profile",
             )
 
-        permissions_query = """
-            SELECT DISTINCT
-                p.id as permission_id,
-                p.code as permission_code,
-                p.name as permission_name,
-                p.description as permission_description,
-                p.category
-            FROM public.role_permissions rp
-            INNER JOIN public.permissions p 
-                ON rp.permission_id = p.id
-            WHERE rp.role_id = $1 AND rp.organization_id = $2
-            ORDER BY p.category NULLS LAST, p.name;
-        """
+        return user_profile
 
-        permissions_data = await db_conn.fetch(
-            permissions_query,
-            user_profile["role_id"],
-            user_context.organization_id,
-        )
-        logger.debug(
-            f"User permissions retrieved - Request ID: {request_id}, "
-            f"Permissions count: {len(permissions_data)}"
-        )
+    # Handle different user types
+    if user_context.user_type == "organization_member":
+        # Original flow for organization members
+        user_profile = await _fetch_org_member_profile()
 
-        await update_user_activity(
-            db_conn,
-            user_context.user_id,
-            user_context.organization_id,
-        )
-        logger.debug(
-            f"User activity updated - Request ID: {request_id}, "
-            f"User ID: {user_context.user_id}"
-        )
+        async def _fetch_permissions() -> list:
+            """Fetch user permissions and update activity."""
+            permissions_query = """
+                SELECT DISTINCT
+                    p.id as permission_id,
+                    p.code as permission_code,
+                    p.name as permission_name,
+                    p.description as permission_description,
+                    p.category
+                FROM public.role_permissions rp
+                INNER JOIN public.permissions p
+                    ON rp.permission_id = p.id
+                WHERE rp.role_id = $1 AND rp.organization_id = $2
+                ORDER BY p.category NULLS LAST, p.name;
+            """
 
-        role_info = RoleInfoWithDescription(
-            role_id=str(user_profile["role_id"]),
-            role_name=user_profile["role_name"],
-            description=user_profile.get("role_description", ""),
-        )
-        permissions = format_permissions(permissions_data)
-        joined_at, last_active_at = format_timestamps(user_profile)
-        logger.debug(
-            f"Profile data formatted - Request ID: {request_id}, "
-            f"Role: {role_info.role_name}, Permissions: {len(permissions)}"
-        )
+            permissions_data = await db_conn.fetch(
+                permissions_query,
+                user_profile["role_id"],
+                user_context.organization_id,
+            )
+            logger.debug(
+                ("User permissions retrieved - Request ID: %s, ",request_id),
+                ("Permissions count: %s",len(permissions_data))
+            )
+            await update_user_activity(
+                db_conn,
+                user_context.user_id,
+                user_context.organization_id,
+            )
+            logger.debug(
+                ("User activity updated - Request ID: %s, ",request_id),
+                ("User ID: %s",user_context.user_id)
+            )
+            return permissions_data
 
-        # Set audit data for profile access
-        request.state.raw_audit_new_data = {
-            "user_id": str(user_profile["user_id"]),
-            "email": user_profile["email"],
-            "full_name": user_profile["full_name"],
-            "organization_id": str(user_profile["organization_id"]),
-            "role_id": str(user_profile["role_id"]),
-            "role_name": user_profile["role_name"],
-            "status": user_profile["status"],
-            "permission_count": len(permissions),
-            "access_timestamp": datetime.now().isoformat(),
-        }
+        permissions_data = await _fetch_permissions()
 
-        profile_data = UserProfileData(
-            user_id=str(user_profile["user_id"]),
-            email=user_profile["email"],
-            full_name=user_profile["full_name"],
-            first_name=user_profile["first_name"],
-            last_name=user_profile["last_name"],
-            avatar_url=user_profile["avatar_url"],
-            phone=user_profile["phone"],
-            timezone=user_profile["timezone"] or "UTC",
-            status=user_profile["status"],
-            joined_at=joined_at,
-            last_active_at=last_active_at,
-            organization_id=str(user_profile["organization_id"]),
-            user_type=user_context.user_type,
-            role=role_info,
-            permissions=permissions,
-        )
+        def _format_org_member_data(user_profile: dict, permissions_data: list) -> UserProfileData:
+            """Format organization member profile data."""
+            role_info = RoleInfoWithDescription(
+                role_id=str(user_profile["role_id"]),
+                role_name=user_profile["role_name"],
+                description=user_profile.get("role_description", ""),
+            )
+            permissions = format_permissions(permissions_data)
+            # Timestamps are now handled by create_user_profile_data
+            logger.debug(
+                ("Profile data formatted - Request ID: %s, ",request_id),
+                ("Role: %s, Permissions: %s",role_info.role_name,len(permissions))
+            )
 
+            # Set audit data for profile access
+            request.state.raw_audit_new_data = {
+                "user_id": str(user_profile["user_id"]),
+                "email": user_profile["email"],
+                "full_name": user_profile["full_name"],
+                "organization_id": str(user_profile["organization_id"]),
+                "role_id": str(user_profile["role_id"]),
+                "role_name": user_profile["role_name"],
+                "status": user_profile["status"],
+                "permission_count": len(permissions),
+                "access_timestamp": datetime.now().isoformat(),
+            }
+
+            return create_user_profile_data(
+                user_profile=user_profile,
+                user_type=user_context.user_type,
+                role_info=role_info,
+                permissions=permissions
+            )
+
+        profile_data = _format_org_member_data(user_profile, permissions_data)
     elif user_context.user_type == "client":
         # Handle client user type
         # Extract from client_members table using user_id from JWT
-        permissions = []
         client_query = """
-            SELECT 
+            SELECT
                 cm.id,
                 cm.organization_id,
                 cm.first_name,
@@ -266,21 +283,23 @@ async def get_user_profile(
             WHERE cm.id = $1 AND cm.organization_id = $2
             LIMIT 1;
         """
-
         user_profile = await db_conn.fetchrow(
             client_query,
             user_context.user_id,
             user_context.organization_id,
         )
         logger.debug(
-            f"Client member profile retrieved from database - Request ID: {request_id}, "
-            f"Profile found: {user_profile is not None}"
+            ("Client member profile retrieved from database - Request ID: %s, ",request_id),
+            ("Profile found: %s",user_profile is not None)
         )
 
         if not user_profile:
             logger.warning(
-                f"Client member profile not found - Request ID: {request_id}, "
-                f"User ID: {user_context.user_id}, Organization ID: {user_context.organization_id}"
+                ("Client member profile not found - Request ID: %s, ",request_id),
+                (
+                    "User ID: %s, Organization ID: %s",
+                    user_context.user_id,user_context.organization_id
+                )
             )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -296,39 +315,27 @@ async def get_user_profile(
             "user_type": "client",
             "access_timestamp": datetime.now().isoformat(),
         }
-
-        profile_data = UserProfileData(
-            user_id=str(user_profile["id"]),
-            email=user_profile["email"]
-            or user_context.email,  # Use profile email or fallback to JWT email
-            full_name=f"{user_profile['first_name']} {user_profile['last_name']}".strip(),
-            first_name=user_profile["first_name"],
-            last_name=user_profile["last_name"],
-            avatar_url=None,  # client_members doesn't have avatar_url
-            phone=user_profile["phone"],
-            timezone="UTC",
-            status="active",
-            joined_at=(
-                user_profile["joined_at"].isoformat()
-                if user_profile["joined_at"]
-                else datetime.now().isoformat()
-            ),
-            last_active_at=(
-                user_profile["last_active_at"].isoformat()
-                if user_profile["last_active_at"]
-                else None
-            ),
-            organization_id=str(user_profile["organization_id"]),
+        profile_data = create_user_profile_data(
+            user_profile={
+                "user_id": user_profile["id"],
+                "email": user_profile["email"] or user_context.email,
+                "full_name": f"{user_profile['first_name']} {user_profile['last_name']}".strip(),
+                "first_name": user_profile["first_name"],
+                "last_name": user_profile["last_name"],
+                "avatar_url": None,  # client_members doesn't have avatar_url
+                "phone": user_profile["phone"],
+                "timezone": "UTC",
+                "status": "active",
+                "joined_at": user_profile["joined_at"],
+                "last_active_at": user_profile["last_active_at"],
+                "organization_id": user_profile["organization_id"],
+            },
             user_type=user_context.user_type,
-            role=None,
-            permissions=[],
         )
-
     elif user_context.user_type == "candidate":
         # Handle candidate user type
-        permissions = []
         candidate_query = """
-            SELECT 
+            SELECT
                 id,
                 candidate_id,
                 organization_id,
@@ -365,21 +372,22 @@ async def get_user_profile(
             WHERE candidate_id = $1 AND organization_id = $2
             LIMIT 1;
         """
-
         user_profile = await db_conn.fetchrow(
             candidate_query,
             user_context.user_id,
             user_context.organization_id,
         )
         logger.debug(
-            f"Candidate profile retrieved from database - Request ID: {request_id}, "
-            f"Profile found: {user_profile is not None}"
+            ("Candidate profile retrieved from database - Request ID: %s, ",request_id),
+            ("Profile found: %s",user_profile is not None)
         )
-
         if not user_profile:
             logger.warning(
-                f"Candidate profile not found - Request ID: {request_id}, "
-                f"User ID: {user_context.user_id}, Organization ID: {user_context.organization_id}"
+                ("Candidate profile not found - Request ID: %s, ",request_id),
+                (
+                    "User ID: %s, Organization ID: %s",
+                    user_context.user_id,user_context.organization_id
+                )
             )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -395,9 +403,26 @@ async def get_user_profile(
             "user_type": "candidate",
             "access_timestamp": datetime.now().isoformat(),
         }
-
+        profile_data = create_user_profile_data(
+            user_profile={
+                "user_id": user_profile["candidate_id"],
+                "email": user_profile["email"],
+                "full_name": f"{user_profile['first_name']} {user_profile['last_name']}".strip(),
+                "first_name": user_profile["first_name"],
+                "last_name": user_profile["last_name"],
+                "avatar_url": user_profile["avatar_url"],
+                "phone": user_profile["phone"],
+                "timezone": "UTC",
+                "status": "active",
+                "joined_at": user_profile["joined_at"],
+                "last_active_at": user_profile["last_active_at"],
+                "organization_id": user_profile["organization_id"],
+            },
+            user_type=user_context.user_type,
+        )
         # Transform candidate data similar to get_detailed_candidate_by_id
-        candidate_data = {
+        # & add it to the profile_data
+        profile_data.candidate_data = {
             "id": str(user_profile["id"]),
             "candidate_id": str(user_profile["id"]),  # Include candidate_id
             "profile": {
@@ -432,48 +457,25 @@ async def get_user_profile(
             .strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
-        profile_data = UserProfileData(
-            user_id=str(user_profile["candidate_id"]),
-            email=user_profile["email"],
-            full_name=f"{user_profile['first_name']} {user_profile['last_name']}".strip(),
-            first_name=user_profile["first_name"],
-            last_name=user_profile["last_name"],
-            avatar_url=user_profile["avatar_url"],
-            phone=user_profile["phone"],
-            timezone="UTC",
-            status="active",
-            joined_at=(
-                user_profile["joined_at"].isoformat()
-                if user_profile["joined_at"]
-                else datetime.now().isoformat()
-            ),
-            last_active_at=(
-                user_profile["last_active_at"].isoformat()
-                if user_profile["last_active_at"]
-                else None
-            ),
-            organization_id=str(user_profile["organization_id"]),
-            user_type=user_context.user_type,
-            role=None,
-            permissions=[],
-            candidate_data=candidate_data,  # Add candidate data to profile
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user type",
         )
 
     # User type validation is now handled in extract_user_context function
     # This else block should never be reached due to validation in common_utils
 
     logger.info(
-        f"GET /profile request completed successfully - Request ID: {request_id}, "
-        f"User ID: {user_context.user_id}, Email: {user_context.email}, "
-        f" Status Code: 200"
+        ("GET /profile request completed successfully - Request ID: %s, ",request_id),
+        ("User ID: %s, Email: %s, ",user_context.user_id,user_context.email),
+        (" Status Code: %s",status.HTTP_200_OK)
     )
-
     return UserProfileResponse(
         status_code=status.HTTP_200_OK,
         message="User profile retrieved successfully",
         data=profile_data,
     )
-
 
 # Transformation functions for candidate data
 def transform_documents(documents_data):
@@ -498,7 +500,6 @@ def transform_documents(documents_data):
             )
     return documents
 
-
 def transform_compensation(compensation_data):
     """Transform compensation JSONB to Compensation object"""
     if isinstance(compensation_data, str):
@@ -522,7 +523,6 @@ def transform_compensation(compensation_data):
         "isAIGenerated": False,
     }
 
-
 def transform_sector_expertise(sectors_data):
     """Transform sectors JSONB to SectorExpertise object"""
     if isinstance(sectors_data, str):
@@ -535,7 +535,6 @@ def transform_sector_expertise(sectors_data):
         "primary": sectors_data.get("primary", []),
         "secondary": sectors_data.get("secondary", []),
     }
-
 
 def transform_skills_detailed(skills_data):
     """Transform skills for detailed Candidate schema"""
@@ -556,7 +555,6 @@ def transform_skills_detailed(skills_data):
             )
 
     return skills
-
 
 def transform_awards(awards_data):
     """Transform awards JSONB to Awards object"""
@@ -594,69 +592,47 @@ def transform_awards(awards_data):
         "items": award_items,
     }
 
-
 def transform_work_history(work_experience_data):
     """Transform work experience to WorkHistoryItem objects"""
     if isinstance(work_experience_data, str):
         work_experience_data = json.loads(work_experience_data)
-
-    months_abs = {
-        1: "Jan",
-        2: "Feb",
-        3: "Mar",
-        4: "Apr",
-        5: "May",
-        6: "Jun",
-        7: "Jul",
-        8: "Aug",
-        9: "Sep",
-        10: "Oct",
-        11: "Nov",
-        12: "Dec",
-    }
-
     work_history = []
     for i, exp in enumerate(work_experience_data):
         if isinstance(exp, dict):
-            temp = exp.get("startDate")
-            startDate = ""
-            endDate = ""
-            if temp:
-                if isinstance(temp, dict):
-                    startDate = (
-                        f"{months_abs.get(exp.get('startDate').get('month'))} {exp.get('startDate').get('year')}"
-                        if exp.get("startDate")
+            start_date, end_date = "", ""
+            if exp.get("startDate"):
+                if isinstance(exp.get("startDate"), dict):
+                    start_date_obj = exp.get("startDate")
+                    start_date = (
+                        f"{month_abbr[start_date_obj.get('month')]} {start_date_obj.get('year')}"
+                        if start_date_obj
                         else ""
                     )
                 else:
-                    startDate = temp
-
-            endTemp = exp.get("endDate")
-
-            if endTemp:
-                if isinstance(endTemp, dict):
-                    endDate = (
-                        f"{months_abs.get(exp.get('endDate').get('month'))} {exp.get('endDate').get('year')}"
-                        if exp.get("endDate")
+                    start_date = exp.get("startDate")
+            if exp.get("endDate"):
+                if isinstance(exp.get("endDate"), dict):
+                    end_date_obj = exp.get("endDate")
+                    end_date = (
+                        f"{month_abbr[end_date_obj.get('month')]} {end_date_obj.get('year')}"
+                        if end_date_obj
                         else ""
                     )
                 else:
-                    endDate = endTemp
+                    end_date = exp.get("endDate")
 
             work_history.append(
                 {
                     "id": str(i),
                     "title": exp.get("title", ""),
                     "company": exp.get("companyName", ""),
-                    "startDate": startDate,
-                    "endDate": endDate,
-                    "isCurrent": exp.get("endDate") == None or endDate == "Present",
+                    "startDate": start_date,
+                    "endDate": end_date,
+                    "isCurrent": exp.get("endDate") is None or end_date == "Present",
                     "description": exp.get("description", ""),
                 }
             )
-
     return work_history
-
 
 def transform_motivating_factors(motivating_factors_data):
     """Transform motivating factors JSONB"""
@@ -749,17 +725,18 @@ def calculate_profile_completion_score(user_profile):
 
     completion_percentage = (completed_fields / total_fields) * 100
 
-    # Determine completion level
-    if completion_percentage >= 90:
-        completion_level = "EXCELLENT"
-    elif completion_percentage >= 75:
-        completion_level = "GOOD"
-    elif completion_percentage >= 60:
-        completion_level = "FAIR"
-    elif completion_percentage >= 40:
-        completion_level = "BASIC"
-    else:
-        completion_level = "MINIMAL"
+    # Determine completion level using match-case
+    match completion_percentage:
+        case p if p >= 90:
+            completion_level = "EXCELLENT"
+        case p if p >= 75:
+            completion_level = "GOOD"
+        case p if p >= 60:
+            completion_level = "FAIR"
+        case p if p >= 40:
+            completion_level = "BASIC"
+        case _:
+            completion_level = "MINIMAL"
 
     return {
         "score": round(completion_percentage, 1),
@@ -816,34 +793,34 @@ def calculate_profile_completion_score(user_profile):
 # )
 async def get_user_by_id(
     user_id: str,
-    request: Request,  # pylint: disable=unused-argument
-    current_user: dict = Depends(get_user_from_auth),
-    db_conn=Depends(get_async_db_conn),
+    request: Request,
+    commons: Tuple[dict, Any] = Depends(get_common_dependencies),
 ):
     """
     Get a user's profile by user_id (async, sequential)
     """
+    current_user, db_conn = commons  # Destructure the tuple
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"GET /{user_id} request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Target User ID: {user_id}"
+        ("GET /%s request started - Request ID: %s, ",user_id,request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s, ",current_user.get('organization_id')),
+        ("Target User ID: %s",user_id)
     )
 
     user_context = extract_user_context(current_user)
     logger.debug(
-        f"User context extracted - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}, "
-        f"User Type: {user_context.user_type}"
+        ("User context extracted - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s, ",user_context.email,user_context.organization_id),
+        ("User Type: %s",user_context.user_type)
     )
 
     # Only organization members can access other user profiles
     if user_context.user_type != "organization_member":
         logger.warning(
-            f"Non-organization member trying to access user profile - Request ID: {request_id}, "
-            f"User Type: {user_context.user_type}, Target User ID: {user_id}"
+            ("Non-organization member trying to access user profile - Request ID: %s, ",request_id),
+            ("User Type: %s, Target User ID: %s",user_context.user_id,user_id)
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -857,8 +834,8 @@ async def get_user_by_id(
         action_description="access user profiles",
     )
     logger.debug(
-        f"User permissions validated for profile access - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+        ("User permissions validated for profile access - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     # Set audit context for user profile access
@@ -868,22 +845,22 @@ async def get_user_by_id(
     request.state.audit_description = f"Admin accessed user profile: {user_id}"
     request.state.audit_risk_level = "medium"
     logger.debug(
-        f"Audit context set for user profile access - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+        ("Audit context set for user profile access - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     user_profile = await fetch_user_profile(
         db_conn, user_id, user_context.organization_id
     )
     logger.debug(
-        f"User profile fetched - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Profile found: {user_profile is not None}"
+        ("User profile fetched - Request ID: %s, ",request_id),
+        ("Target User ID: %s, Profile found: %s",user_id,user_profile is not None)
     )
 
     if not user_profile:
         logger.warning(
-            f"User not found in organization - Request ID: {request_id}, "
-            f"Target User ID: {user_id}, Organization ID: {user_context.organization_id}"
+            ("User not found in organization - Request ID: %s, ",request_id),
+            ("Target User ID: %s, Organization ID: %s",user_id,user_context.organization_id)
         )
         raise HTTPException(
             status_code=404,
@@ -894,9 +871,11 @@ async def get_user_by_id(
         db_conn, user_profile["role_id"], user_context.organization_id
     )
     logger.debug(
-        f"User permissions fetched - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Permissions count: "
-        f"{len(permissions_data) if permissions_data else 0}"
+        ("User permissions fetched - Request ID: %s, ",request_id),
+        (
+            "Target User ID: %s, Permissions count: %s",
+            user_id,len(permissions_data) if permissions_data else 0
+        )
     )
 
     print("permission_id")
@@ -927,8 +906,11 @@ async def get_user_by_id(
         description=user_profile.get("role_description", ""),
     )
     logger.debug(
-        f"Profile data formatted - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Role: {role_info.role_name}, Permissions: {len(permissions)}"
+        ("Profile data formatted - Request ID: %s, ",request_id),
+        (
+            "Target User ID: %s, Role: %s, Permissions: %s",
+            user_id,role_info.role_name,len(permissions)
+        )
     )
 
     # Set audit data for user profile access
@@ -946,36 +928,17 @@ async def get_user_by_id(
         "access_timestamp": datetime.now().isoformat(),
     }
 
-    profile_data = UserProfileData(
-        user_id=str(user_profile["user_id"]),
-        email=user_profile["email"],
-        full_name=user_profile["full_name"],
-        first_name=user_profile["first_name"],
-        last_name=user_profile["last_name"],
-        avatar_url=user_profile["avatar_url"],
-        phone=user_profile["phone"],
-        timezone=user_profile["timezone"] or "UTC",
-        status=user_profile["status"],
-        joined_at=(
-            user_profile["joined_at"].isoformat()
-            if user_profile["joined_at"]
-            else datetime.now().isoformat()
-        ),
-        last_active_at=(
-            user_profile["last_active_at"].isoformat()
-            if user_profile["last_active_at"]
-            else None
-        ),
-        organization_id=str(user_profile["organization_id"]),
+    profile_data = create_user_profile_data(
+        user_profile=user_profile,
         user_type="organization_member",  # This endpoint only handles organization members
-        role=role_info,
-        permissions=permissions,
+        role_info=role_info,
+        permissions=permissions
     )
 
     logger.info(
-        f"GET /{user_id} request completed successfully - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Email: {user_profile['email']}, "
-        f"Permissions: {len(permissions)}, Status Code: 200"
+        ("GET /%s request completed successfully - Request ID: %s, ",user_id,request_id),
+        ("Target User ID: %s, Email: %s, ",user_id,user_profile['email']),
+        ("Permissions: %s, Status Code: %s",len(permissions),status.HTTP_200_OK)
     )
 
     return UserProfileResponse(

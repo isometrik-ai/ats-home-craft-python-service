@@ -4,8 +4,9 @@ This module provides shared email functionality for sending emails via Supabase 
 """
 
 import os
-import requests
 import logging
+
+import requests
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -18,13 +19,13 @@ SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 def send_email(email: str, subject: str, message: str, html: str = None) -> bool:
     """
     Send an email using Supabase Edge Function with Resend.
-    
+
     Args:
         email (str): Recipient's email address
         subject (str): Email subject
         message (str): Email message content (plain text)
         html (str, optional): HTML version of the email
-        
+
     Returns:
         bool: True if email was sent successfully, False otherwise
     """
@@ -34,10 +35,10 @@ def send_email(email: str, subject: str, message: str, html: str = None) -> bool
             "subject": subject,
             "message": message
         }
-        
+
         if html:
             payload["html"] = html
-            
+
         response = requests.post(
             f"{SUPABASE_URL}/functions/v1/custom-email",
             headers={
@@ -55,4 +56,4 @@ def send_email(email: str, subject: str, message: str, html: str = None) -> bool
         return False
     except requests.RequestException as error:
         logger.error("Error sending email: %s", str(error))
-        return False 
+        return False

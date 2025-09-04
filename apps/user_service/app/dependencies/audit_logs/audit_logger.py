@@ -1,3 +1,4 @@
+# pylint: disable=R0902
 """
 Audit Logger Module
 
@@ -24,7 +25,7 @@ Date: 2024
 # apps/user_service/app/dependencies/audit_logs/audit_logger.py
 # apps/user_service/app/dependencies/audit_logs/audit_logger.py
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import hashlib
 import json
 import asyncio
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class AuditEventData:  # pylint: disable=too-many-instance-attributes
+class AuditEventData:
     """Data class for audit event information."""
 
     user_context: dict
@@ -56,7 +57,7 @@ class AuditEventData:  # pylint: disable=too-many-instance-attributes
     category: Optional[str] = None
 
 
-class AuditLogger:  # pylint: disable=too-many-instance-attributes
+class AuditLogger:
     """
     Simplified audit logger aligned with RBAC Audit Values Guide.
     Optimized for single-core processing with structured audit data.
@@ -125,13 +126,18 @@ class AuditLogger:  # pylint: disable=too-many-instance-attributes
                 except asyncio.TimeoutError:
                     print(f"Audit queue full, dropping {event_data.action_type} event")
 
-        except (ValueError, TypeError, KeyError) as e:
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            # Handle data validation and access errors
             print(f"Audit logging error - invalid data: {e}")
+            logger.warning("Data validation error in audit logging: %s", str(e))
         except (asyncio.QueueFull, asyncio.TimeoutError) as e:
+            # Handle queue operation errors
             print(f"Audit logging error - queue issue: {e}")
-        except Exception as e:  # pylint: disable=broad-except
-            print(f"Audit logging unexpected error: {e}")
-            logger.error("Unexpected error in audit logging: %s", e, exc_info=True)
+            logger.warning("Queue operation error in audit logging: %s", str(e))
+        except (RuntimeError, IOError) as e:
+            # Handle runtime and I/O errors (e.g., event loop issues)
+            print(f"Audit logging error - runtime error: {e}")
+            logger.error("Runtime error in audit logging: %s", str(e), exc_info=True)
 
     def _create_audit_event_dict(
         self,
@@ -169,115 +175,131 @@ class AuditLogger:  # pylint: disable=too-many-instance-attributes
             "category": event_data.category,
         }
 
+    async def _collect_batch_events(self, timeout: float) -> Tuple[List[Dict], bool]:
+        """
+        Collect events from queue up to batch size or until queue is empty.
+        Returns (batch, got_events) where got_events indicates if any events were collected.
+        """
+        batch = []
+        got_events = False
+        try:
+            event = await asyncio.wait_for(self._queue.get(), timeout=timeout)
+            batch.append(event)
+            got_events = True
+
+            while len(batch) < self._batch_size:
+                try:
+                    event = self._queue.get_nowait()
+                    batch.append(event)
+                except asyncio.QueueEmpty:
+                    break
+        except asyncio.TimeoutError:
+            pass
+        return batch, got_events
+
+    def _handle_batch_error(self, error: Exception, is_final: bool = False):
+        """Handle errors during batch processing."""
+        error_type = "unknown"
+        if isinstance(error, (asyncpg.PostgresError, ConnectionError)):
+            error_type = "database"
+        elif isinstance(error, (OSError, RuntimeError, IOError)):
+            error_type = "system"
+        elif isinstance(error, (json.JSONDecodeError, UnicodeError)):
+            error_type = "serialization"
+        elif isinstance(error, (AttributeError, LookupError)):
+            error_type = "data access"
+
+        prefix = "Failed to write final audit batch" if is_final else "Error processing audit batch"
+        print(f"{prefix} ({error_type}): {error}")
+        logger.error(f"{prefix} ({error_type}): %s", error, exc_info=True)
+
     async def _process_audit_queue(self, db_pool):
+        """Process audit events from queue in batches."""
         batch = []
         consecutive_empty_batches = 0
 
         while not self._shutdown_event.is_set():
             try:
                 timeout = 10.0 if consecutive_empty_batches > 3 else self._batch_timeout
+                batch, got_events = await self._collect_batch_events(timeout)
 
-                try:
-                    event = await asyncio.wait_for(self._queue.get(), timeout=timeout)
-                    batch.append(event)
-                    consecutive_empty_batches = 0
-
-                    while len(batch) < self._batch_size:
-                        try:
-                            event = self._queue.get_nowait()
-                            batch.append(event)
-                        except asyncio.QueueEmpty:
-                            break
-
-                except asyncio.TimeoutError:
+                if not got_events:  # Only increment on timeout, not empty batch
                     consecutive_empty_batches += 1
+                    continue
 
-                if batch:
-                    print("PROCESSING AUDIT LOGS")
-                    await self._write_audit_batch_with_retry(db_pool, batch)
-                    batch.clear()
-                    await asyncio.sleep(5)
+                consecutive_empty_batches = 0
+                print("PROCESSING AUDIT LOGS")
+                await self._write_audit_batch_with_retry(db_pool, batch)
+                batch.clear()
+                await asyncio.sleep(5)
 
             except (asyncio.CancelledError, asyncio.TimeoutError) as e:
                 print(f"Audit processing interrupted: {e}")
                 break
-            except (OSError, RuntimeError) as e:
-                print(f"System error processing audit batch: {e}")
-                logger.error(
-                    "System error processing audit batch: %s", e, exc_info=True
-                )
-                await asyncio.sleep(1)
-            except Exception as e:  # pylint: disable=broad-except
-                print(f"Error processing audit batch: {e}")
-                logger.error("Error processing audit batch: %s", e, exc_info=True)
+            except (
+                asyncpg.PostgresError, ConnectionError,
+                OSError, RuntimeError, IOError,
+                json.JSONDecodeError, UnicodeError,
+                AttributeError, LookupError
+            ) as e:
+                self._handle_batch_error(e)
                 await asyncio.sleep(1)
 
+        # Process remaining events
         if batch:
             try:
                 await self._write_audit_batch_with_retry(db_pool, batch)
-            except (asyncpg.PostgresError, ConnectionError) as e:
-                print(f"Failed to write final audit batch (database error): {e}")
-                logger.error(
-                    "Failed to write final audit batch (database error): %s",
-                    e,
-                    exc_info=True,
-                )
-            except Exception as e:  # pylint: disable=broad-except
-                print(f"Failed to write final audit batch: {e}")
-                logger.error("Failed to write final audit batch: %s", e, exc_info=True)
+            except (
+                asyncpg.PostgresError, ConnectionError,
+                OSError, RuntimeError, IOError,
+                json.JSONDecodeError, UnicodeError,
+                AttributeError, LookupError
+            ) as e:
+                self._handle_batch_error(e, is_final=True)
+
+    def _handle_write_error(self, error: Exception, attempt: int, error_type: str) -> None:
+        """Handle errors during audit batch write attempts."""
+        print(f"Audit write attempt {attempt + 1} failed ({error_type}): {error}")
+        logger.error(
+            "%s error in audit write attempt %d: %s",
+            error_type.title(),
+            attempt + 1,
+            error,
+            exc_info=True,
+        )
 
     async def _write_audit_batch_with_retry(self, db_pool, events: List[Dict]):
+        """Write audit batch with retries on failure."""
         for attempt in range(self._max_retries):
             try:
                 await self._write_audit_batch(db_pool, events)
                 return
             except (asyncpg.PostgresError, ConnectionError) as e:
-                print(f"Audit write attempt {attempt + 1} failed (database error): {e}")
-                if attempt < self._max_retries - 1:
-                    await asyncio.sleep(2**attempt)
-                else:
-                    print(
-                        f"Failed to write {len(events)} audit events after "
-                        f"{self._max_retries} attempts"
-                    )
-                    logger.error(
-                        "Failed to write audit events after %d attempts: %s",
-                        self._max_retries,
-                        e,
-                        exc_info=True,
-                    )
+                self._handle_write_error(e, attempt, "database")
+                if attempt == self._max_retries - 1:
+                    break
+                await asyncio.sleep(2**attempt)
             except (OSError, RuntimeError) as e:
-                print(f"Audit write attempt {attempt + 1} failed (system error): {e}")
-                logger.error(
-                    "System error in audit write attempt %d: %s",
-                    attempt + 1,
-                    e,
-                    exc_info=True,
-                )
-                if attempt < self._max_retries - 1:
-                    await asyncio.sleep(2**attempt)
-                else:
-                    print(
-                        f"Failed to write {len(events)} audit events after "
-                        f"{self._max_retries} attempts"
-                    )
-            except Exception as e:  # pylint: disable=broad-except
-                print(
-                    f"Audit write attempt {attempt + 1} failed (unexpected error): {e}"
-                )
-                logger.error(
-                    "Unexpected error in audit write attempt %d: %s",
-                    attempt + 1,
-                    e,
-                    exc_info=True,
-                )
-                if attempt < self._max_retries - 1:
-                    await asyncio.sleep(2**attempt)
-                else:
-                    print(
-                        f"Failed to write {len(events)} audit events after "
-                        f"{self._max_retries} attempts"
-                    )
+                self._handle_write_error(e, attempt, "system")
+                if attempt == self._max_retries - 1:
+                    break
+                await asyncio.sleep(2**attempt)
+            except (json.JSONDecodeError, UnicodeError) as e:
+                self._handle_write_error(e, attempt, "serialization")
+                if attempt == self._max_retries - 1:
+                    break
+                await asyncio.sleep(2**attempt)
+            except (LookupError, AttributeError) as e:
+                self._handle_write_error(e, attempt, "data access")
+                if attempt == self._max_retries - 1:
+                    break
+                await asyncio.sleep(2**attempt)
+
+        if attempt == self._max_retries - 1:
+            print(
+                f"Failed to write {len(events)} audit events "
+                f"after {self._max_retries} attempts"
+            )
 
     async def _get_last_hash_from_db(self, db_pool) -> Optional[str]:
         """
@@ -289,9 +311,9 @@ class AuditLogger:  # pylint: disable=too-many-instance-attributes
         try:
             async with db_pool.acquire() as conn:
                 query = """
-                    SELECT hash_signature 
-                    FROM public.audit_logs 
-                    ORDER BY timestamp DESC, id DESC 
+                    SELECT hash_signature
+                    FROM public.audit_logs
+                    ORDER BY timestamp DESC, id DESC
                     LIMIT 1
                 """
 
@@ -301,9 +323,13 @@ class AuditLogger:  # pylint: disable=too-many-instance-attributes
             print(f"Error fetching last hash from database: {e}")
             logger.error("Database error fetching last hash: %s", e, exc_info=True)
             return None
-        except Exception as e:  # pylint: disable=broad-except
-            print(f"Unexpected error fetching last hash from database: {e}")
-            logger.error("Unexpected error fetching last hash: %s", e, exc_info=True)
+        except (json.JSONDecodeError, UnicodeError) as e:
+            print(f"Serialization error fetching last hash: {e}")
+            logger.error("Serialization error fetching last hash: %s", e, exc_info=True)
+            return None
+        except (LookupError, AttributeError) as e:
+            print(f"Data access error fetching last hash: {e}")
+            logger.error("Data access error fetching last hash: %s", e, exc_info=True)
             return None
 
     async def _write_audit_batch(self, db_pool, events: List[Dict]):
@@ -387,7 +413,7 @@ class AuditLogger:  # pylint: disable=too-many-instance-attributes
                 print(f"Database write error: {e}")
                 logger.error("Database write error: %s", e, exc_info=True)
                 raise
-            except Exception as e:  # pylint: disable=broad-except
+            except Exception as e:
                 print(f"Unexpected database write error: {e}")
                 logger.error("Unexpected database write error: %s", e, exc_info=True)
                 raise

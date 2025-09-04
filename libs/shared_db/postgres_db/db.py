@@ -5,32 +5,22 @@ PostgreSQL database connections, loading environment variables,
 and creating a Supabase client for database operations.
 """
 
-# pylint: disable=import-error
+
 import os
-import sys
+# import random
 import asyncio
+# from contextlib import asynccontextmanager
 
 # Third-party imports
-import psycopg2
-from psycopg2 import pool
+# import psycopg2
+# from psycopg2 import pool
 import asyncpg
-import random
 
 # Local application imports
-from dotenv import load_dotenv
-from supabase import create_client
-from contextlib import asynccontextmanager
+from ..common import setup_import_paths_and_env
 
-# Configure import paths first
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-monorepo_root = os.path.abspath(os.path.join(base_path, "../.."))
-
-# Add necessary paths to sys.path
-sys.path.insert(0, base_path)
-sys.path.insert(0, monorepo_root)
-
-# Load environment variables from .env
-load_dotenv(os.path.join(monorepo_root, ".env"))
+# Setup import paths and environment
+setup_import_paths_and_env()
 pool_lock = asyncio.Lock()
 
 
@@ -46,11 +36,51 @@ MAX_CONNECTIONS = 15
 POOL_TIMEOUT = 10  # Increased from 10 seconds for load testing
 COMMAND_TIMEOUT = 1  # Increased from 20 seconds for load testing
 
-# Synchronous connection pool
-connection_pool = None
+# # Synchronous connection pool
+# connection_pool = None
 
-# Async connection pool
-async_connection_pool = None
+# Async connection pool manager
+class AsyncConnectionPoolManager:
+    """Singleton class to manage async connection pool."""
+
+    _instance = None
+    _pool = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    async def get_pool(self):
+        """Get or create an async connection pool for database connections."""
+        if self._pool is None:
+            async with pool_lock:
+                if self._pool is None:  # double-check inside lock
+                    try:
+                        self._pool = await asyncpg.create_pool(
+                            host=DB_HOST,
+                            database=DB_DATABASE,
+                            user=DB_USER,
+                            password=DB_PASSWORD,
+                            port=DB_PORT,
+                            min_size=MIN_CONNECTIONS,
+                            max_size=MAX_CONNECTIONS,
+                            timeout=POOL_TIMEOUT,
+                            command_timeout=COMMAND_TIMEOUT,
+                            max_inactive_connection_lifetime=300,  # Increased from 60
+                        )
+                        print(
+                            f"Async connection pool created with "
+                            f"{MIN_CONNECTIONS}-{MAX_CONNECTIONS} connections"
+                        )
+                    except Exception as e:
+                        print(f"Error creating async connection pool: {e}")
+                        raise
+        return self._pool
+
+
+# Global pool manager instance
+_pool_manager = AsyncConnectionPoolManager()
 
 
 async def get_async_connection_pool():
@@ -58,35 +88,14 @@ async def get_async_connection_pool():
     Get or create an async connection pool for database connections.
     Uses a lock to prevent race conditions.
     """
-    global async_connection_pool
-
-    if async_connection_pool is None:
-        async with pool_lock:
-            if async_connection_pool is None:  # double-check inside lock
-                try:
-                    async_connection_pool = await asyncpg.create_pool(
-                        host=DB_HOST,
-                        database=DB_DATABASE,
-                        user=DB_USER,
-                        password=DB_PASSWORD,
-                        port=DB_PORT,
-                        min_size=MIN_CONNECTIONS,
-                        max_size=MAX_CONNECTIONS,
-                        timeout=POOL_TIMEOUT,
-                        command_timeout=COMMAND_TIMEOUT,
-                        max_inactive_connection_lifetime=300,  # Increased from 60
-                    )
-                    print(
-                        f"Async connection pool created with {MIN_CONNECTIONS}-{MAX_CONNECTIONS} connections"
-                    )
-                except Exception as e:
-                    print(f"Error creating async connection pool: {e}")
-                    raise
-    return async_connection_pool
+    return await _pool_manager.get_pool()
 
 
 async def get_async_db_conn():
-    """FastAPI dependency yielding an asyncpg connection from the pool with optimized retries for load testing."""
+    """
+    FastAPI dependency yielding an asyncpg connection from the pool
+    with optimized retries for load testing.
+    """
     pool = await get_async_connection_pool()
     conn = None
     last_exc = None
@@ -104,7 +113,7 @@ async def get_async_db_conn():
             )
             # Shorter backoff for load testing
             await asyncio.sleep(min(1 + attempt, 3))
-        except Exception as e:
+        except (asyncpg.PostgresError, asyncio.CancelledError, OSError, RuntimeError) as e:
             print(f"[DB] Attempt {attempt+1}: error acquiring connection: {e}")
             last_exc = e
             await asyncio.sleep(min(1 + attempt, 3))
@@ -120,5 +129,5 @@ async def get_async_db_conn():
         if conn:
             try:
                 await pool.release(conn)
-            except Exception as e:
+            except (asyncpg.PostgresError, asyncio.CancelledError, OSError, RuntimeError) as e:
                 print(f"[DB] Error releasing connection: {e}")

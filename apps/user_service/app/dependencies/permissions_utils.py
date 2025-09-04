@@ -1,14 +1,14 @@
-# pylint: disable=import-error,no-name-in-module
+
 """
 Permmissions Management Utilities Module
 """
 
 from fastapi import HTTPException, status
 
-from app.dependencies.common_utils import validate_uuid_format
-from app.schemas.admin_access_management import CreatePermissionRequest
-
 from libs.shared_utils.common_query import PERMISSION_SELECT_FIELDS
+
+from ..dependencies.common_utils import validate_uuid_format
+from ..schemas.admin_access_management import CreatePermissionRequest
 
 
 async def create_permission_in_db(
@@ -51,7 +51,7 @@ async def get_all_permission_from_db(organization_id: str, db_conn):
     validate_uuid_format(organization_id, "organization ID")
 
     permissions_query = f"""
-            SELECT 
+            SELECT
                 {PERMISSION_SELECT_FIELDS}
             FROM public.permissions p
             WHERE p.organization_id = $1

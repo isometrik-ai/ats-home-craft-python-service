@@ -1,5 +1,3 @@
-# pylint: disable=import-error,no-name-in-module
-# pylint: disable=logging-fstring-interpolation
 """
 Users Management API Module
 This module provides CRUD operations for user management.
@@ -27,7 +25,7 @@ from apps.user_service.app.dependencies.user_utils import (
     build_update_query,
     fetch_user_permissions,
     fetch_user_profile,
-    construct_profile_response,
+    create_user_profile_data,
     phone_exists_for_other_user,
 )
 
@@ -86,7 +84,7 @@ logger.info("Users API module loaded")
 #     category="USER_LIST",
 # )
 async def get_users_list(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
     query_params: UserQueryParams = Depends(),
@@ -97,12 +95,18 @@ async def get_users_list(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"GET /users/list request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Search: {query_params.search}, "
-        f"Page: {query_params.page}, "
-        f"Page Size: {query_params.page_size}"
+        "GET /users/list request started - Request ID: %s, "
+        "User ID: %s, "
+        "Organization ID: %s, "
+        "Search: %s, "
+        "Page: %s, "
+        "Page Size: %s",
+        request_id,
+        current_user.get('user_id'),
+        current_user.get('organization_id'),
+        query_params.search,
+        query_params.page,
+        query_params.page_size
     )
 
     user_context = extract_user_context(current_user)
@@ -114,8 +118,8 @@ async def get_users_list(
     )
     request.state.audit_risk_level = "medium"
     logger.debug(
-        f"Audit context set for user list access - Request ID: {request_id}, "
-        f"Search: {query_params.search or 'none'}"
+        ("Audit context set for user list access - Request ID: %s, ",request_id),
+        ("Search: %s, ",query_params.search or 'none')
     )
 
     # Validate pagination params and calculate offset
@@ -123,8 +127,8 @@ async def get_users_list(
         query_params.page, query_params.page_size
     )
     logger.debug(
-        f"Pagination params validated - Request ID: {request_id}, "
-        f"Page: {page}, Page Size: {page_size}, Offset: {offset}"
+        ("Pagination params validated - Request ID: %s, ", request_id,),
+        ("Page: %s, Page Size: %s, Offset: %s", request_id, page, page_size, offset)
     )
 
     # Permission check
@@ -135,8 +139,8 @@ async def get_users_list(
         action_description="access roles",
     )
     logger.debug(
-        f"User permissions validated for user list access - Request ID: {request_id}, "
-        f"Organization ID: {user_context.organization_id}"
+        ("User permissions validated for user list access - Request ID: %s, ",request_id),
+        ("Organization ID: %s, ",user_context.organization_id)
     )
 
     # --- Build queries dynamically ---
@@ -158,12 +162,12 @@ async def get_users_list(
         query["base_query"], *query["query_args"], *query["limit_offset_args"]
     )
     logger.debug(
-        f"Retrieved {len(users_data)} users from database - Request ID: {request_id}"
+        ("Retrieved %s users from database - Request ID: %s, ",len(users_data),request_id)
     )
 
     count_result = await db_conn.fetchrow(query["count_query"], *query["query_args"])
     total_count = count_result["count"] if count_result else 0
-    logger.debug(f"Total users count: {total_count} - Request ID: {request_id}")
+    logger.debug(("Total users count: %s - Request ID: %s, ",total_count,request_id))
 
     # --- Fetch users and count ---
     # users_data = await db_conn.fetch(base_query, *query_args, *limit_offset_args)
@@ -171,8 +175,8 @@ async def get_users_list(
     # --- Transform results ---
     users = await transform_users(users_data, user_context.organization_id, db_conn)
     logger.debug(
-        f"Users data transformed successfully - Request ID: {request_id}, "
-        f"Transformed users count: {len(users)}"
+        ("Users data transformed successfully - Request ID: %s, ",request_id),
+        ("Transformed users count: %s, ",len(users))
     )
 
     # Set audit data for user list access
@@ -190,9 +194,14 @@ async def get_users_list(
     }
 
     logger.info(
-        f"GET /users/list request completed successfully - Request ID: {request_id}, "
-        f"Users Count: {len(users)}, Total Count: {total_count}, "
-        f"Page: {page}, Page Size: {page_size}, Status Code: 200"
+        "GET /users/list request completed successfully - Request ID: %s, "
+        "Users Count: %s, Total Count: %s, "
+        "Page: %s, Page Size: %s, Status Code: 200",
+        request_id,
+        len(users),
+        total_count,
+        page,
+        page_size
     )
 
     return UserListResponse(
@@ -230,10 +239,15 @@ async def create_user(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"POST /users request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Email: {body.email}, Role ID: {body.role_id}"
+        "POST /users request started - Request ID: %s, "
+        "User ID: %s, "
+        "Organization ID: %s, "
+        "Email: %s, Role ID: %s",
+        request_id,
+        current_user.get('user_id'),
+        current_user.get('organization_id'),
+        body.email,
+        body.role_id
     )
 
     user_context = extract_user_context(current_user)
@@ -254,8 +268,8 @@ async def create_user(
 
     # Check if user already exists in the organization
     exists_query = """
-        SELECT 1 
-        FROM public.organization_members 
+        SELECT 1
+        FROM public.organization_members
         WHERE email = $1 AND organization_id = $2;
     """
     exists = await db_conn.fetchrow(
@@ -264,8 +278,8 @@ async def create_user(
 
     if exists:
         logger.warning(
-            f"User already exists in organization - Request ID: {request_id}, "
-            f"Email: {body.email}, Organization ID: {user_context.organization_id}"
+            ("User already exists in organization - Request ID: %s, ",request_id),
+            ("Email: %s, Organization ID: %s",body.email,user_context.organization_id)
         )
         raise HTTPException(
             status_code=409,
@@ -275,10 +289,10 @@ async def create_user(
     # Insert the user (invite/add)
     insert_query = """
         INSERT INTO public.organization_members (
-            user_id, organization_id, role_id, email, full_name, 
+            user_id, organization_id, role_id, email, full_name,
             phone, timezone, status, joined_at, created_at, updated_at
         ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4, $5, $6, 
+            gen_random_uuid(), $1, $2, $3, $4, $5, $6,
             'invited', NOW(), NOW(), NOW()
         ) RETURNING user_id;
     """
@@ -294,8 +308,8 @@ async def create_user(
 
     new_user_id = str(result["user_id"]) if result else "unknown"
     logger.debug(
-        f"User created successfully - Request ID: {request_id}, "
-        f"New User ID: {new_user_id}, Email: {body.email}"
+        ("User created successfully - Request ID: %s, ",request_id),
+        ("New User ID: %s, Email: %s",new_user_id,body.email)
     )
 
     # Set audit data for user creation
@@ -314,8 +328,11 @@ async def create_user(
     }
 
     logger.info(
-        f"POST /users request completed successfully - Request ID: {request_id}, "
-        f"New User ID: {new_user_id}, Email: {body.email}, Status Code: 201"
+        "POST /users request completed successfully - Request ID: %s, "
+        "New User ID: %s, Email: %s, Status Code: 201",
+        request_id,
+        new_user_id,
+        body.email
     )
 
     return UserResponse(
@@ -343,7 +360,7 @@ async def create_user(
 )
 async def update_user(
     user_id: str,
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
     body: UpdateUserRequest = Body(...),
@@ -352,10 +369,14 @@ async def update_user(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"PUT /users/update/{user_id} request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Target User ID: {user_id}"
+        "PUT /users/update/{user_id} request started - Request ID: %s, "
+        "User ID: %s, "
+        "Organization ID: %s, "
+        "Target User ID: %s",
+        request_id,
+        current_user.get('user_id'),
+        current_user.get('organization_id'),
+        user_id
     )
 
     user_ctx = extract_user_context(current_user)
@@ -379,8 +400,8 @@ async def update_user(
         )
         if duplicate:
             logger.warning(
-                f"Phone number already exists for another user - Request ID: {request_id}, "
-                f"Phone: {body.phone}, Organization ID: {user_ctx.organization_id}"
+                ("Phone number already exists for another user - Request ID: %s, ",request_id),
+                ("Phone: %s, Organization ID: %s",body.phone,user_ctx.organization_id)
             )
             raise HTTPException(
                 status_code=400,
@@ -392,8 +413,8 @@ async def update_user(
         db_conn, user_id, user_ctx.organization_id
     )
     logger.debug(
-        f"Current user data retrieved for audit - Request ID: {request_id}, "
-        f"User ID: {user_id}, Email: {current_user_data.get('email', 'N/A')}"
+        ("Current user data retrieved for audit - Request ID: %s, ",request_id),
+        ("User ID: %s, Email: %s",user_id,current_user_data.get('email', 'N/A'))
     )
 
     # Set old values for audit comparison
@@ -417,26 +438,30 @@ async def update_user(
     result = await db_conn.fetchrow(update_stmt, *update_values)
     if not result:
         logger.warning(
-            f"User not found in organization - Request ID: {request_id}, "
-            f"User ID: {user_id}, Organization ID: {user_ctx.organization_id}"
+            ("User not found in organization - Request ID: %s, ",request_id),
+            ("User ID: %s, Organization ID: %s",user_id,user_ctx.organization_id)
         )
         raise HTTPException(status_code=404, detail="User not found in organization")
 
     user_profile = await fetch_user_profile(db_conn, user_id, user_ctx.organization_id)
     if not user_profile:
         logger.warning(
-            f"User profile not found in organization - Request ID: {request_id}, "
-            f"User ID: {user_id}, Organization ID: {user_ctx.organization_id}"
+            ("User profile not found in organization - Request ID: %s, ",request_id),
+            ("User ID: %s, Organization ID: %s",user_id,user_ctx.organization_id)
         )
         raise HTTPException(status_code=404, detail="User not found in organization")
 
     permissions = await fetch_user_permissions(
         db_conn, result["role_id"], user_ctx.organization_id
     )
-    profile_data = construct_profile_response(user_profile, permissions)
+    profile_data = create_user_profile_data(
+        user_profile=user_profile,
+        user_type="organization_member",
+        permissions=permissions
+    )
     logger.debug(
-        f"User profile and permissions fetched successfully - Request ID: {request_id}, "
-        f"User ID: {user_id}, Permissions count: {len(permissions) if permissions else 0}"
+        ("User profile and permissions fetched successfully - Request ID: %s, ",request_id),
+        ("User ID: %s, Permissions count: %s",user_id,len(permissions) if permissions else 0)
     )
 
     # Set new values for audit comparison
@@ -458,8 +483,12 @@ async def update_user(
     }
 
     logger.info(
-        f"PUT /users/update/{user_id} request completed successfully - Request ID: {request_id}, "
-        f"User ID: {user_id}, Email: {user_profile.get('email', 'N/A')}, Status Code: 200"
+        "PUT /users/update/%s request completed successfully - Request ID: %s, "
+        "User ID: %s, Email: %s, Status Code: 200",
+        user_id,
+        request_id,
+        user_id,
+        user_profile.get('email', 'N/A')
     )
 
     return UpdateUserResponse(
@@ -486,7 +515,7 @@ async def update_user(
 )
 async def delete_user(
     user_id: str,
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
     # supabase=Depends(get_supabase_admin_client),  # Add this dependency
@@ -497,10 +526,14 @@ async def delete_user(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"DELETE /users/delete/{user_id} request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Target User ID: {user_id}"
+        "DELETE /users/delete/{user_id} request started - Request ID: %s, "
+        "User ID: %s, "
+        "Organization ID: %s, "
+        "Target User ID: %s",
+        request_id,
+        current_user.get('user_id'),
+        current_user.get('organization_id'),
+        user_id
     )
 
     user_context = extract_user_context(current_user)
@@ -523,23 +556,23 @@ async def delete_user(
         db_conn, user_id, user_context.organization_id
     )
     logger.debug(
-        f"Current user data retrieved for deletion audit - Request ID: {request_id}, "
-        f"User ID: {user_id}, Email: {current_user_data.get('email', 'N/A')}"
+        ("Current user data retrieved for deletion audit - Request ID: %s, ",request_id),
+        ("User ID: %s, Email: %s",user_id,current_user_data.get('email', 'N/A'))
     )
 
     # Set old values for audit comparison (what was deleted)
     set_audit_old_data_from_user(request, current_user_data)
 
     delete_query = """
-        DELETE FROM public.organization_members 
-        WHERE user_id = $1 AND organization_id = $2 
+        DELETE FROM public.organization_members
+        WHERE user_id = $1 AND organization_id = $2
         RETURNING user_id;
     """
     result = await db_conn.fetchrow(delete_query, user_id, user_context.organization_id)
     if not result:
         logger.warning(
-            f"User not found in organization for deletion - Request ID: {request_id}, "
-            f"User ID: {user_id}, Organization ID: {user_context.organization_id}"
+            ("User not found in organization for deletion - Request ID: %s, ",request_id),
+            ("User ID: %s, Organization ID: %s",user_id,user_context.organization_id)
         )
         raise HTTPException(status_code=404, detail="User not found in organization")
 
@@ -548,8 +581,8 @@ async def delete_user(
 
     if not result:
         logger.warning(
-            f"Auth user not found for deletion - Request ID: {request_id}, "
-            f"User ID: {user_id}"
+            ("Auth user not found for deletion - Request ID: %s, ",request_id),
+            ("User ID: %s, ",user_id)
         )
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -567,9 +600,13 @@ async def delete_user(
     }
 
     logger.info(
-        f"DELETE /users/delete/{user_id} request completed successfully - "
-        f"Request ID: {request_id}, "
-        f"User ID: {user_id}, Email: {current_user_data.get('email', 'N/A')}, Status Code: 200"
+        "DELETE /users/delete/%s request completed successfully - "
+        "Request ID: %s, "
+        "User ID: %s, Email: %s, Status Code: 200",
+        user_id,
+        request_id,
+        user_id,
+        current_user_data.get('email', 'N/A')
     )
 
     return UserResponse(
@@ -594,7 +631,7 @@ async def delete_user(
     category="USER_INVITATION",
 )
 async def invite_user(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
     supabase=Depends(get_supabase_admin_client),
@@ -606,10 +643,15 @@ async def invite_user(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"POST /users/invite request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Email: {body.email}, Role ID: {body.role_id}"
+        "POST /users/invite request started - Request ID: %s, "
+        "User ID: %s, "
+        "Organization ID: %s, "
+        "Email: %s, Role ID: %s",
+        request_id,
+        current_user.get('user_id'),
+        current_user.get('organization_id'),
+        body.email,
+        body.role_id
     )
 
     user_context = extract_user_context(current_user)
@@ -633,10 +675,10 @@ async def invite_user(
             db_conn, body.phone, user_context.organization_id
         )
         if duplicate:
+            logger.warning("Phone number already exists for another user during invitation - ")
             logger.warning(
-                f"Phone number already exists for another user during invitation - "
-                f"Request ID: {request_id}, "
-                f"Phone: {body.phone}, Organization ID: {user_context.organization_id}"
+                ("Request ID: %s, ",request_id),
+                ("Phone: %s, Organization ID: %s",body.phone,user_context.organization_id)
             )
             raise HTTPException(
                 status_code=400,
@@ -657,8 +699,8 @@ async def invite_user(
         )
         user_id = response.user.id
         logger.debug(
-            f"Supabase user invitation sent successfully - Request ID: {request_id}, "
-            f"Email: {body.email}, User ID: {user_id}"
+            ("Supabase user invitation sent successfully - Request ID: %s, ",request_id),
+            ("Email: %s, User ID: %s",body.email,user_id)
         )
     except Exception as e:
         error_message = str(e).lower()
@@ -668,22 +710,22 @@ async def invite_user(
             or "user already exists" in error_message
         ):
             logger.warning(
-                f"User already exists during invitation - Request ID: {request_id}, "
-                f"Email: {body.email}, Organization ID: {user_context.organization_id}"
+                ("User already exists during invitation - Request ID: %s, ",request_id),
+                ("Email: %s, Organization ID: %s",body.email,user_context.organization_id)
             )
             raise HTTPException(
                 status_code=409,
                 detail="User with this email already exists in the organization",
-            )
-        else:
-            logger.error(
-                f"Supabase invitation error - Request ID: {request_id}, "
-                f"Email: {body.email}, Error: {str(e)}"
-            )
-            raise HTTPException(
-                status_code=409,
-                detail=str(e),
-            )
+            ) from e
+
+        logger.error(
+            ("Supabase invitation error - Request ID: %s, ",request_id),
+            ("Email: %s, Error: %s",body.email,str(e))
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=str(e),
+        ) from e
 
     insert_query = """
         INSERT INTO public.organization_members (
@@ -703,8 +745,8 @@ async def invite_user(
         body.timezone or "UTC",
     )
     logger.debug(
-        f"User organization member record created - Request ID: {request_id}, "
-        f"User ID: {user_id}, Email: {body.email}"
+        ("User organization member record created - Request ID: %s, ",request_id),
+        ("User ID: %s, Email: %s",user_id,body.email)
     )
 
     # Set audit data for user invitation
@@ -724,17 +766,17 @@ async def invite_user(
     }
 
     logger.info(
-        f"POST /users/invite request completed successfully - Request ID: {request_id}, "
-        f"User ID: {user_id}, Email: {body.email}, Status Code: 201"
+        "POST /users/invite request completed successfully - Request ID: %s, "
+        "User ID: %s, Email: %s, Status Code: 201",
+        request_id,
+        user_id,
+        body.email
     )
 
     return UserResponse(
         message="Invite sent successfully",
         status="success",
     )
-
-
-# pylint: disable=too-many-arguments, too-many-positional-arguments
 
 # Include update user routes (more specific routes)
 router.include_router(update_user_router)

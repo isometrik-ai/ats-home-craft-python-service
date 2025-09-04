@@ -1,9 +1,10 @@
+# pylint: disable=invalid-name,E0213
 """Common shared schemas for pagination and responses."""
 
 from typing import Optional  # standard
 from typing import Dict, Any
 
-from pydantic import BaseModel, Field  # third-party
+from pydantic import BaseModel, Field, ConfigDict  # third-party
 
 
 class AuditContext(BaseModel):
@@ -42,16 +43,15 @@ class AuditLogsQueryParams(BaseModel):
         description="Maximum number of audit logs to return (max: 100)",
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for AuditLogsQueryParams model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "search": "user login",
                 "skip": 0,
                 "limit": 20,
             }
         }
+    )
 
 
 class PaginationBase(BaseModel):
@@ -60,15 +60,14 @@ class PaginationBase(BaseModel):
     page: int = Field(default=1, description="Current page number")
     page_size: int = Field(default=20, description="Number of items per page")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for pagination models"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "page": 1,
                 "page_size": 20,
             }
         }
+    )
 
 
 class SimpleResponse(BaseModel):
@@ -77,15 +76,14 @@ class SimpleResponse(BaseModel):
     message: str = Field(..., description="Response message")
     status: str = Field(default="success", description="Operation status indicator")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for SimpleResponse"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "message": "Operation completed successfully",
                 "status": "success",
             }
         }
+    )
 
 
 class CommonSearchQueryParams(BaseModel):
@@ -105,13 +103,12 @@ class CommonSearchQueryParams(BaseModel):
         10, ge=1, le=100, description="Maximum number of items to return (max: 100)"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for CommonSearchQueryParams"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "search": "client",
                 "skip": 0,
                 "limit": 20,
             }
         }
+    )

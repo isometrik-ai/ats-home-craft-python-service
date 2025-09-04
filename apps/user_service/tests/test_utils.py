@@ -1,3 +1,4 @@
+# pylint: disable=all
 """
 Shared Test Utilities
 
@@ -9,11 +10,24 @@ Date: 2024-12-19
 Last Updated: 2024-12-19
 """
 
+from datetime import datetime
 import uuid
 from unittest.mock import Mock, AsyncMock, MagicMock, patch
-from fastapi import FastAPI
+
+from fastapi import FastAPI, APIRouter
+from fastapi.exceptions import HTTPException
 from fastapi.testclient import TestClient
-from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from apps.user_service.app.api.admin_management.users.users import router as users_router
+from apps.user_service.app.api.admin_management.roles import router as roles_router
+from apps.user_service.app.dependencies.exception_middleware import unified_exception_handler
+from libs.shared_middleware.jwt_auth import get_user_from_auth, check_user_access_async
+from libs.shared_db.postgres_db.db import get_async_db_conn as real_get_async_db_conn
+from libs.shared_db.supabase_db.db import (
+    get_supabase_admin_client as real_get_supabase_admin_client
+)
 
 # Mock data constants
 MOCK_USER_ID = "550e8400-e29b-41d4-a716-446655440000"
@@ -54,18 +68,18 @@ class FakeCursor:
         """Mock execute method"""
         self.execute_calls.append((query, params))
         if self.should_fail:
-            raise Exception("Database error")
+            raise RuntimeError("Database error")
 
     def fetchone(self):
         """Mock fetchone method"""
         if self.should_fail:
-            raise Exception("Database error")
+            raise RuntimeError("Database error")
         return self.fetchone_data
 
     def fetchall(self):
         """Mock fetchall method"""
         if self.should_fail:
-            raise Exception("Database error")
+            raise RuntimeError("Database error")
         return self.fetchall_data
 
 
@@ -125,7 +139,7 @@ class FakeConn:
         # Handle insert for rst_templates
         if "insert into rst_templates" in query_lower and "returning" in query_lower:
             if getattr(self, "should_fail_insert", False):
-                raise Exception("Database insert failed")
+                raise RuntimeError("Database insert failed")
             new_id = str(uuid.uuid4())
             self.last_inserted_template_id = new_id
             return {"id": new_id}
@@ -205,7 +219,7 @@ class FakeConn:
                 return None  # User not found
 
             # Use cursor data if provided and has required profile fields, otherwise use default
-            from datetime import datetime
+
 
             if (
                 hasattr(self.cursor.fetchone_data, "get")
@@ -258,7 +272,7 @@ class FakeConn:
         self.fetch_calls.append((query, params))
 
         if self.should_fail_data_fetch:
-            raise Exception("Data fetch database error")
+            raise RuntimeError("Data fetch database error")
 
         if self.should_fail_query:
             raise HTTPException(status_code=500, detail="Simulated DB failure")
@@ -272,7 +286,6 @@ class FakeConn:
             ):
                 return []  # Return empty list as set by test
             # Return sample user data to prevent index error and with proper datetime handling
-            from datetime import datetime
 
             return [
                 {
@@ -317,10 +330,10 @@ class FakeConn:
             # raise Exception("Database insert failed")
 
         if self.should_fail_update and "UPDATE" in query:
-            raise Exception("Database update failed")
+            raise RuntimeError("Database update failed")
 
         if self.should_fail_delete and "DELETE" in query:
-            raise Exception("Database delete failed")
+            raise RuntimeError("Database delete failed")
 
         # For DELETE operations, simulate the return value
         if "DELETE" in query:
@@ -336,7 +349,7 @@ class FakeConn:
         self.execute_calls.append((query, params_list))
 
         if self.should_fail_insert and "INSERT" in query:
-            raise Exception("Database bulk insert failed")
+            raise RuntimeError("Database bulk insert failed")
 
     def transaction(self):
         """Mock transaction context manager"""
@@ -407,9 +420,9 @@ def get_supabase_admin_client():
     return MockSupabaseClient()
 
 
-def get_user_from_auth():
-    """Mock JWT auth dependency"""
-    return VALID_CURRENT_USER
+# def get_user_from_auth():
+#     """Mock JWT auth dependency"""
+#     return VALID_CURRENT_USER
 
 
 # Test app creation utilities
@@ -417,27 +430,12 @@ def create_test_app():
     """Create a test FastAPI application with mocked dependencies"""
     app = FastAPI()
 
-    # Import and include routers first
-    from apps.user_service.app.api.admin_management.users.users import (
-        router as users_router,
-    )
-    from apps.user_service.app.api.admin_management.roles import router as roles_router
-
-    # Create admin router
-    from fastapi import APIRouter
-
-    # Add exception handlers for proper error handling in tests
-    from apps.user_service.app.dependencies.exception_middleware import (
-        unified_exception_handler,
-    )
-    from fastapi.exceptions import RequestValidationError
-    from fastapi import HTTPException as FastAPIHTTPException
-    from starlette.exceptions import HTTPException as StarletteHTTPException
+    # Include routers and add exception handlers
 
     app.add_exception_handler(Exception, unified_exception_handler)
     app.add_exception_handler(StarletteHTTPException, unified_exception_handler)
     app.add_exception_handler(RequestValidationError, unified_exception_handler)
-    app.add_exception_handler(FastAPIHTTPException, unified_exception_handler)
+    app.add_exception_handler(HTTPException, unified_exception_handler)
 
     admin_router = APIRouter(prefix="/v1/admin")
     admin_router.include_router(users_router)
@@ -445,17 +443,7 @@ def create_test_app():
 
     app.include_router(admin_router)
 
-    # Now override dependencies after app is set up
-    from libs.shared_middleware.jwt_auth import (
-        get_user_from_auth,
-        check_user_access_async,
-    )
-    from libs.shared_db.postgres_db.db import (
-        get_async_db_conn as real_get_async_db_conn,
-    )
-    from libs.shared_db.supabase_db.db import (
-        get_supabase_admin_client as real_get_supabase_admin_client,
-    )
+    # Override dependencies after app is set up
 
     # Override JWT auth to return valid user
     app.dependency_overrides[get_user_from_auth] = lambda: VALID_CURRENT_USER
@@ -522,7 +510,7 @@ def setup_permission_check_mock(has_permission=True):
     """Setup mock for permission checking"""
 
     def mock_check_permission(*args, **kwargs):
-        permission_code = kwargs.get("permission_code", "")
+        # permission_code = kwargs.get("permission_code", "")  # Not used in this mock
         if "USERS_CREATE" in permissions_state:
             return permissions_state["USERS_CREATE"]
         if "USERS_DELETE" in permissions_state:
@@ -566,7 +554,6 @@ async def mock_check_user_access_async(
 
 def create_mock_db_conn():
     """Create a properly configured mock database connection"""
-    from unittest.mock import AsyncMock, MagicMock
 
     mock_conn = AsyncMock()
 

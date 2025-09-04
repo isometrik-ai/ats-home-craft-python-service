@@ -32,7 +32,7 @@ request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=Non
 IST_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 
 
-class RequestIdFilter(logging.Filter):  # pylint: disable=too-few-public-methods
+class RequestIdFilter(logging.Filter):
     """Filter to add request ID to log records."""
 
     def filter(self, record):
@@ -163,8 +163,7 @@ def get_logger(name: str = None) -> logging.Logger:
     # Always return the main configured logger for now
     # This ensures all loggers use the same configuration
 
-    print(name)
-    return logging.getLogger("user-service")
+    return logging.getLogger(name) if name else logging.getLogger("user-service")
 
 
 def set_request_id(request_id: str):

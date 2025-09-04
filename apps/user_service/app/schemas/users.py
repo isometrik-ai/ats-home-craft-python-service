@@ -1,3 +1,4 @@
+# pylint: disable=invalid-name,E0213
 """
 User Schemas Module
 
@@ -12,12 +13,11 @@ Last Updated: 2024-12-19
 from typing import List, Optional
 from enum import Enum
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
 
 
-# pylint: disable=missing-class-docstring,invalid-name
 class UserStatus(str, Enum):
     """Enumeration for user account status"""
 
@@ -37,15 +37,14 @@ class RoleInfo(BaseModel):
     role_id: str = Field(..., description="Unique identifier for the role")
     role_name: str = Field(..., description="Human-readable name of the role")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for RoleInfo model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "role_name": "Administrator",
             }
         }
+    )
 
 
 class RoleInfoWithDescription(RoleInfo):
@@ -53,17 +52,17 @@ class RoleInfoWithDescription(RoleInfo):
 
     description: str = Field(..., description="Optional description for the role")
 
-    class Config:  # pylint: disable=R0903
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "role_name": "Administrator",
                 "description": "This role can manage users and permissions.",
             }
         }
+    )
 
 
-# pylint: disable=R0903
 class PermissionInfo(BaseModel):
     """Model for permission information
 
@@ -83,10 +82,8 @@ class PermissionInfo(BaseModel):
         None, description="Category grouping for the permission"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for PermissionInfo model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "permission_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                 "permission_name": "Read Organization",
@@ -94,6 +91,7 @@ class PermissionInfo(BaseModel):
                 "category": "organization",
             }
         }
+    )
 
 
 class UserProfileData(BaseModel):
@@ -114,8 +112,10 @@ class UserProfileData(BaseModel):
         last_active_at (Optional[str]): ISO timestamp of last activity
         organization_id (str): ID of the organization user belongs to
         user_type (str): Type of user (organization_member, client, candidate)
-        role (Optional[RoleInfoWithDescription]): User's assigned role information (only for organization_member)
-        permissions (List[PermissionInfo]): List of all user permissions (only for organization_member)
+        role (Optional[RoleInfoWithDescription]): User's assigned role information
+            (only for organization_member)
+        permissions (List[PermissionInfo]): List of all user permissions
+            (only for organization_member)
     """
 
     user_id: str = Field(..., description="Unique identifier for the user")
@@ -152,10 +152,8 @@ class UserProfileData(BaseModel):
         description="Detailed candidate profile data (only for candidate user type)",
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UserProfileData model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "email": "john.doe@example.com",
@@ -184,9 +182,10 @@ class UserProfileData(BaseModel):
                 "candidate_data": None,
             }
         }
+    )
 
 
-# pylint: disable=R0903
+
 class UserProfileResponse(BaseModel):
     """Response model for user profile operations
 
@@ -206,10 +205,8 @@ class UserProfileResponse(BaseModel):
         None, description="User profile data if successful"
     )
 
-    class Config:
-        """Pydantic configuration for UserProfileResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "User profile retrieved successfully",
@@ -219,12 +216,13 @@ class UserProfileResponse(BaseModel):
                     "full_name": "John Doe",
                     "timezone": "UTC",
                     "status": "active",
-                },
+                }
             }
         }
+    )
 
 
-# pylint: disable=R0903
+
 class UserResponse(SimpleResponse):
     """Response model for basic User operations."""
 
@@ -239,7 +237,7 @@ class UpdateUserEmailRequest(BaseModel):
     email: EmailStr = Field(..., description="User's email address")
 
 
-# pylint: disable=R0903
+
 class CreateUserRequest(BaseModel):
     """Request model for creating a new user
 
@@ -265,10 +263,8 @@ class CreateUserRequest(BaseModel):
         None, description="ID of the organization to add user to"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for CreateUserRequest model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "email": "new.user@example.com",
                 "full_name": "New User",
@@ -278,6 +274,7 @@ class CreateUserRequest(BaseModel):
                 "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
             }
         }
+    )
 
 
 class UpdateUserRequest(BaseModel):
@@ -306,10 +303,8 @@ class UpdateUserRequest(BaseModel):
         None, description="User status: active, invited, or suspended"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UpdateUserRequest model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "full_name": "Updated Name",
                 "phone": "+0987654321",
@@ -318,6 +313,7 @@ class UpdateUserRequest(BaseModel):
                 "role_id": "new-role-id",
             }
         }
+    )
 
 
 class UpdateUserResponse(BaseModel):
@@ -335,16 +331,15 @@ class UpdateUserResponse(BaseModel):
         None, description="Updated user profile data"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UpdateUserResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "User updated successfully",
                 "data": None,
             }
         }
+    )
 
 
 class BanRequest(BaseModel):
@@ -406,10 +401,8 @@ class UserListItem(BaseModel):
     )
     role_id: str = Field(..., description="ID of the role assigned to the user")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UserListItem model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "email": "john.doe@example.com",
@@ -422,6 +415,7 @@ class UserListItem(BaseModel):
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
             }
         }
+    )
 
 
 class UserListResponse(PaginationBase):
@@ -441,10 +435,8 @@ class UserListResponse(PaginationBase):
     data: List[UserListItem] = Field(..., description="List of users")
     total_count: int = Field(..., description="Total number of users")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UserListResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Users retrieved successfully",
@@ -454,3 +446,4 @@ class UserListResponse(PaginationBase):
                 "page_size": 20,
             }
         }
+    )

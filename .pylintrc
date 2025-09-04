@@ -1,0 +1,63 @@
+; # For main codebase
+[MASTER]
+disable=
+    too-few-public-methods,  # Disabled because Pydantic models typically don't need methods
+
+; # Specific rules for schemas directory
+; [apps.user_service.app.schemas.*]
+; disable=
+;     invalid-name,  # Disabled for Pydantic model constants that use lowercase
+;     E0213  # Method should have "self" as first argument - disabled for Pydantic validators
+
+; [apps.user_service.app.dependencies.audit_logs.*]
+; disable=
+;     R0902  # Too many instance attributes - disabled for data classes and loggers
+
+; [apps.user_service.tests.*]
+; disable=
+;     missing-function-docstring,  # Test function names are usually self-explanatory
+;     missing-class-docstring,     # Test classes don't need docstrings
+;     redefined-outer-name,        # Common in pytest fixtures and parametrized tests
+;     import-outside-toplevel,     # Often necessary for mocking in tests
+;     unused-argument,             # Common in mock functions
+;     wrong-import-order,          # Can be relaxed for tests
+;     unused-import,               # Sometimes needed for test setup
+;     too-many-arguments,          # Test functions often have many parameters
+;     R0917,                       # Too many positional arguments
+;     too-many-return-statements,  # Test functions can have many returns
+;     too-many-branches,           # Test functions can be complex
+;     no-else-return,              # Can be relaxed for tests
+;     pointless-string-statement,  # Sometimes used for test documentation
+;     reimported,                  # Common in test files
+;     unnecessary-lambda,          # Can be relaxed for tests
+;     singleton-comparison,        # Can be relaxed for tests
+;     ungrouped-imports,          # Can be relaxed for tests
+;     duplicate-code
+; --------------------------------------------------------------------------------------------------
+
+# For main codebase
+; [MASTER]
+; disable=
+;     too-few-public-methods  # Disabled because Pydantic models typically don't need methods
+
+; [MESSAGES CONTROL]
+; # Global disables that apply to all files
+; disable=
+;     too-few-public-methods
+
+; # Path-specific configuration using per-module-messages
+; # For schemas directory
+;     apps.user_service.app.schemas.*:disable=invalid-name,E0213,
+;     apps.user_service.app.dependencies.audit_logs.*:disable=R0902,
+;     apps.user_service.tests.*:disable=missing-function-docstring,missing-class-docstring,redefined-outer-name,import-outside-toplevel,unused-argument,wrong-import-order,unused-import,too-many-arguments,R0917,too-many-return-statements,too-many-branches,no-else-return,pointless-string-statement,reimported,unnecessary-lambda,singleton-comparison,ungrouped-imports,duplicate-code
+
+; # Alternative approach using ignore-paths for entire directories
+; # ignore-paths=
+; #     apps/user_service/tests/.*
+
+; [FORMAT]
+; max-line-length=100
+
+; ; [DESIGN]
+; ; max-args=10
+; ; max-locals=20

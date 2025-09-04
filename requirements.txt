@@ -23,7 +23,7 @@ slowapi==0.1.9
 
 requests==2.31.0
 
-supabase==2.15.1
+supabase==2.18.1
 psycopg2-binary==2.9.10
 SQLAlchemy==2.0.41
 

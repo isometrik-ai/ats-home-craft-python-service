@@ -1,4 +1,4 @@
-# pylint: disable=import-error,no-name-in-module
+
 """
 Authentication API Module
 
@@ -147,14 +147,10 @@ def _get_max_users_for_plan(plan_type: str) -> int:
     return plan_limits.get(plan_type, 5)
 
 
-# pylint: disable=too-many-arguments, too-many-positional-arguments
 async def _create_organization_with_permissions_for_signup(
     db_conn,
     signup_data: SignupRequest,
-    organization_id: str,
-    organization_name: str,
-    slug: str,
-    user_id: str,
+    org_data: dict,
 ) -> tuple:
     """
     Create organization with roles and permissions in database transaction.
@@ -164,11 +160,17 @@ async def _create_organization_with_permissions_for_signup(
     company_data = signup_data.company_data
     max_users = _get_max_users_for_plan(signup_data.plan_type.value)
 
+    # Extract org data
+    organization_id = org_data["organization_id"]
+    organization_name = org_data["organization_name"]
+    slug = org_data["slug"]
+    user_id = org_data["user_id"]
+
     # Create organization
     org_insert_query = """
         INSERT INTO public.organizations (
-            id, name, slug, domain, logo_url, industry, company_size, 
-            description, referral_source, plan_type, max_users, timezone, 
+            id, name, slug, domain, logo_url, industry, company_size,
+            description, referral_source, plan_type, max_users, timezone,
             status, created_by_id, created_at, updated_at
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'trial', $13, NOW(), NOW()
@@ -353,17 +355,86 @@ async def _create_supabase_user(
 
 
 # ============================================================================
+# SIGNUP HELPER FUNCTIONS
+# ============================================================================
+
+def _prepare_signup_audit_data(
+    organization_id: str,
+    organization_name: str,
+    slug: str,
+    user_id: str,
+    signup_data: SignupRequest
+) -> dict:
+    """Prepare audit data for successful signup."""
+    audit_data = {
+        "organization_id": organization_id,
+        "organization_name": organization_name,
+        "organization_slug": slug,
+        "user_id": user_id,
+        "user_email": signup_data.user_data.email,
+        "user_full_name": f"{signup_data.user_data.first_name} {signup_data.user_data.last_name}",
+        "account_type": signup_data.account_type.value,
+        "plan_type": signup_data.plan_type.value,
+        "status": "trial",
+        "max_users": _get_max_users_for_plan(signup_data.plan_type.value),
+        "signup_timestamp": datetime.now().isoformat(),
+        "signup_method": "email_password",
+        "super_admin_role_created": True,
+        "default_permissions_created": True,
+        "audit_user_context": {
+            "organization_id": organization_id,
+            "user_id": user_id,
+            "user_email": signup_data.user_data.email
+        },
+        "company_website": None,
+        "company_industry": None,
+        "company_size": None
+    }
+
+    if signup_data.company_data:
+        audit_data.update({
+            "company_website": signup_data.company_data.company_website,
+            "company_industry": signup_data.company_data.industry,
+            "company_size": signup_data.company_data.company_size,
+        })
+
+    return audit_data
+
+def _prepare_signup_response_data(
+    organization_id: str,
+    user_id: str,
+    organization_name: str,
+    slug: str,
+    signup_data: SignupRequest
+) -> dict:
+    """Prepare response data for successful signup."""
+    return {
+        "organization_id": organization_id,
+        "user_id": user_id,
+        "organization_name": organization_name,
+        "user_email": signup_data.user_data.email,
+        "account_type": signup_data.account_type.value,
+        "plan_type": signup_data.plan_type.value,
+        "slug": slug,
+        "status": "trial",
+        "role_name": "Super Admin",
+        "max_users": _get_max_users_for_plan(signup_data.plan_type.value),
+    }
+
+# ============================================================================
 # API ENDPOINTS
 # ============================================================================
 
 
 @router.post("/login", response_model=AuthResponse, status_code=status.HTTP_200_OK)
 @limiter.limit("100/minute")
-def login(request: Request, data: AuthLogin):  # pylint: disable=unused-argument
+# pylint: disable=unused-argument  # Required by @limiter.limit
+def login(request: Request, data: AuthLogin):
     """
     User login endpoint
 
     Args:
+        request (Request): FastAPI request object
         data (AuthLogin): Login credentials containing email and password
 
     Returns:
@@ -406,12 +477,35 @@ def login(request: Request, data: AuthLogin):  # pylint: disable=unused-argument
     table_name="organizations",
     category="USER_SIGNUP",
 )
+def _init_audit_context(request: Request, signup_data: SignupRequest, request_id: str):
+    """Initialize audit context for signup request."""
+    request.state.audit_table = "organizations"
+    request.state.audit_description = (
+        "New user signup: %s with account type: %s",
+        signup_data.user_data.email,
+        signup_data.account_type.value
+    )
+    request.state.audit_risk_level = "medium"
+    request.state.audit_user_context = {
+        "organization_id": None,
+        "user_id": None,
+        "user_email": signup_data.user_data.email,
+        "user_type": "signup_user"
+    }
+
+    logger.info(
+        ("POST /auth/signup request started - Request ID: %s, ", request_id),
+        ("Email: %s, ", signup_data.user_data.email),
+        ("Account Type: %s, ", signup_data.account_type.value),
+        ("Plan Type: %s", signup_data.plan_type.value)
+    )
+
 async def signup(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     signup_data: SignupRequest = Body(...),
     db_conn=Depends(get_async_db_conn),
     supabase=Depends(get_supabase_client),
-    admin_supabase=Depends(get_supabase_admin_client),  # Add this dependency
+    admin_supabase=Depends(get_supabase_admin_client),
 ):
     """
     User signup endpoint for both personal and business accounts
@@ -454,30 +548,9 @@ async def signup(
     - Transaction rollback on failures
     - Proper error handling without exposing internal details
     """
-    # Generate request ID for tracking
+    # Generate request ID and initialize audit context
     request_id = str(uuid.uuid4())
-    logger.info(
-        f"POST /auth/signup request started - Request ID: {request_id}, "
-        f"Email: {signup_data.user_data.email}, "
-        f"Account Type: {signup_data.account_type.value}, "
-        f"Plan Type: {signup_data.plan_type.value}"
-    )
-
-    # Set audit context for user signup
-    request.state.audit_table = "organizations"
-    request.state.audit_description = (
-        f"New user signup: {signup_data.user_data.email} with account type: {signup_data.account_type.value}"
-    )
-    request.state.audit_risk_level = "medium"
-
-    # Set audit user context for signup (required by audit decorator)
-    # For signup, we use the email from signup data and generate a temporary context
-    request.state.audit_user_context = {
-        "organization_id": None,  # Will be set after organization creation
-        "user_id": None,  # Will be set after user creation
-        "user_email": signup_data.user_data.email,
-        "user_type": "signup_user"
-    }
+    _init_audit_context(request, signup_data, request_id)
 
     # Generate organization details
     organization_id = str(uuid.uuid4())
@@ -511,10 +584,12 @@ async def signup(
             await _create_organization_with_permissions_for_signup(
                 db_conn,
                 signup_data,
-                organization_id,
-                organization_name,
-                slug,
-                user_id,
+                {
+                "organization_id": organization_id,
+                "organization_name": organization_name,
+                "slug": slug,
+                "user_id": user_id,
+                },
             )
         )
         print(f"Created organization: {org_result['id']}")
@@ -546,52 +621,34 @@ async def signup(
         ) from db_error
 
     # Set audit data for successful user signup
-    request.state.raw_audit_new_data = {
-        "organization_id": organization_id,
-        "organization_name": organization_name,
-        "organization_slug": slug,
-        "user_id": user_id,
-        "user_email": signup_data.user_data.email,
-        "user_full_name": f"{signup_data.user_data.first_name} {signup_data.user_data.last_name}",
-        "account_type": signup_data.account_type.value,
-        "plan_type": signup_data.plan_type.value,
-        "status": "trial",
-        "max_users": _get_max_users_for_plan(signup_data.plan_type.value),
-        "company_website": signup_data.company_data.company_website if signup_data.company_data else None,
-        "company_industry": signup_data.company_data.industry if signup_data.company_data else None,
-        "company_size": signup_data.company_data.company_size if signup_data.company_data else None,
-        "signup_timestamp": datetime.now().isoformat(),
-        "signup_method": "email_password",
-        "super_admin_role_created": True,
-        "default_permissions_created": True,
-        "audit_user_context": {
-            "organization_id": organization_id,
-            "user_id": user_id,
-            "user_email": signup_data.user_data.email
-        }
-    }
+    request.state.raw_audit_new_data = _prepare_signup_audit_data(
+        organization_id=organization_id,
+        organization_name=organization_name,
+        slug=slug,
+        user_id=user_id,
+        signup_data=signup_data
+    )
 
     logger.info(
-        f"POST /auth/signup request completed successfully - Request ID: {request_id}, "
-        f"Organization ID: {organization_id}, User ID: {user_id}, "
-        f"Email: {signup_data.user_data.email}, Status Code: 201"
+        "POST /auth/signup request completed successfully - Request ID: %s, "
+        "Organization ID: %s, User ID: %s, "
+        "Email: %s, Status Code: 201",
+        request_id,
+        organization_id,
+        user_id,
+        signup_data.user_data.email
     )
 
     return SignupResponse(
         status_code=status.HTTP_201_CREATED,
         message="Account created successfully! Please check your email for verification.",
-        data={
-            "organization_id": organization_id,
-            "user_id": user_id,
-            "organization_name": organization_name,
-            "user_email": signup_data.user_data.email,
-            "account_type": signup_data.account_type.value,
-            "plan_type": signup_data.plan_type.value,
-            "slug": slug,
-            "status": "trial",
-            "role_name": "Super Admin",
-            "max_users": _get_max_users_for_plan(signup_data.plan_type.value),
-        },
+        data=_prepare_signup_response_data(
+            organization_id=organization_id,
+            user_id=user_id,
+            organization_name=organization_name,
+            slug=slug,
+            signup_data=signup_data
+        ),
     )
 
 
@@ -599,8 +656,9 @@ async def signup(
 @router.post(
     "/email/verify", response_model=VerifyEmailResponse, status_code=status.HTTP_200_OK
 )
+# pylint: disable=unused-argument  # Required by @limiter.limit
 async def verify_email(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     db_conn=Depends(get_async_db_conn),
     body: VerifyEmailRequest = Body(...),
 ):
@@ -608,15 +666,7 @@ async def verify_email(
     Verify user email and status by determining user type from auth.users metadata
     and checking the corresponding table for status.
     """
-    # 1) Determine user type from auth.users metadata
-    auth_user_query = """
-        SELECT id, email, raw_app_meta_data, raw_user_meta_data
-        FROM auth.users
-        WHERE email = $1
-        LIMIT 1;
-    """
-    auth_user = await db_conn.fetchrow(auth_user_query, body.email)
-    if not auth_user:
+    def _get_not_found_response():
         return VerifyEmailResponse(
             status_code=404,
             message="Email not found.",
@@ -631,7 +681,7 @@ async def verify_email(
         if isinstance(meta_val, str):
             try:
                 return json.loads(meta_val)
-            except Exception:
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                 return None
         return None
 
@@ -648,19 +698,6 @@ async def verify_email(
             return app_meta.get("type") or app_meta.get("user_type")
         return None
 
-    user_type = _extract_user_type_strict(auth_user)
-    print("user_type")
-    print(user_type)
-    if not user_type:
-        return VerifyEmailResponse(
-            status_code=404,
-            message="Email not found.",
-            email_found=False,
-            status=None,
-            can_login=False,
-        )
-
-    # Helper to build response
     def _response_found(status_value: str) -> VerifyEmailResponse:
         can_login_local = status_value == "active"
         return VerifyEmailResponse(
@@ -671,100 +708,77 @@ async def verify_email(
             can_login=can_login_local,
         )
 
-    # 2) Check tables based strictly on user_type
-    # Organization Member
+    # 1) Get user from auth.users
+    auth_user_query = """
+        SELECT id, email, raw_app_meta_data, raw_user_meta_data
+        FROM auth.users
+        WHERE email = $1
+        LIMIT 1;
+    """
+    auth_user = await db_conn.fetchrow(auth_user_query, body.email)
+    if not auth_user:
+        return _get_not_found_response()
+
+    # 2) Extract and validate user type
+    user_type = _extract_user_type_strict(auth_user)
+    if not user_type:
+        return _get_not_found_response()
+
+    # 3) Check appropriate table based on user type
+    status_value = None
+
     if user_type == "organization_member":
-        org_member_query = """
-            SELECT status
-            FROM public.organization_members
-            WHERE email = $1
-            LIMIT 1;
-        """
-        org_record = await db_conn.fetchrow(org_member_query, body.email)
+        org_record = await db_conn.fetchrow(
+            "SELECT status FROM public.organization_members WHERE email = $1 LIMIT 1;",
+            body.email
+        )
         if org_record:
-            return _response_found(org_record["status"])
-        return VerifyEmailResponse(
-            status_code=404,
-            message="Email not found.",
-            email_found=False,
-            status=None,
-            can_login=False,
-        )
+            status_value = org_record["status"]
 
-    # Client Member (no explicit status column; treat presence as active)
-    if user_type == "client":
-        client_query = """
-            SELECT id
-            FROM public.client_members
-            WHERE email = $1
-            LIMIT 1;
-        """
-        client_record = await db_conn.fetchrow(client_query, body.email)
+    elif user_type == "client":
+        client_record = await db_conn.fetchrow(
+            "SELECT id FROM public.client_members WHERE email = $1 LIMIT 1;",
+            body.email
+        )
         if client_record:
-            return _response_found("active")
-        return VerifyEmailResponse(
-            status_code=404,
-            message="Email not found.",
-            email_found=False,
-            status=None,
-            can_login=False,
+            status_value = "active"
+
+    elif user_type == "candidate":
+        candidate_record = await db_conn.fetchrow(
+            "SELECT is_active FROM public.candidates WHERE email = $1 LIMIT 1;",
+            body.email
         )
-
-    # Candidate (boolean is_active mapped to status)
-    if user_type == "candidate":
-
-        candidate_query = """
-            SELECT is_active
-            FROM public.candidates
-            WHERE email = $1
-            LIMIT 1;
-        """
-        candidate_record = await db_conn.fetchrow(candidate_query, body.email)
         if candidate_record is not None:
             status_value = "active" if candidate_record["is_active"] else "suspended"
-            return _response_found(status_value)
-        return VerifyEmailResponse(
-            status_code=404,
-            message="Email not found.",
-            email_found=False,
-            status=None,
-            can_login=False,
-        )
 
-    # Not found anywhere
-    return VerifyEmailResponse(
-        status_code=404,
-        message="Email not found.",
-        email_found=False,
-        status=None,
-        can_login=False,
-    )
+    return _response_found(status_value) if status_value else _get_not_found_response()
 
 
 @handle_api_exceptions("delete user")
 @router.delete("/user/{user_id}", status_code=status.HTTP_200_OK)
+# pylint: disable=unused-argument  # Required by @limiter.limit
 async def delete_user(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     user_id: str,
     db_conn=Depends(get_async_db_conn),
 ):
     """
     Delete user directly from auth.users table without validation.
-    
+
     This endpoint allows administrators to delete a user account directly
     from the database auth.users table. Use with caution as this operation
     is irreversible and will remove all user authentication data.
-    
+
     Args:
         user_id (str): The ID of the user to delete
         db_conn: AsyncPG database connection for direct database access
-        
+
     Returns:
         dict: Success response with deletion confirmation
-        
+
     Raises:
         HTTPException: 500 for database errors or deletion failures
-        
+
     Security Note:
     - This endpoint requires database access privileges
     - No validation is performed - user will be deleted immediately
@@ -773,12 +787,12 @@ async def delete_user(
     try:
         # Delete user directly from auth.users table
         delete_query = """
-            DELETE FROM auth.users 
+            DELETE FROM auth.users
             WHERE id = $1;
         """
-        
+
         result = await db_conn.execute(delete_query, user_id)
-        
+
         if result == "DELETE 1":
             return {
                 "status_code": 200,
@@ -786,14 +800,13 @@ async def delete_user(
                 "deleted_user_id": user_id,
                 "timestamp": "now"
             }
-        else:
-            return {
-                "status_code": 200,
-                "message": f"No user found with ID {user_id}",
-                "deleted_user_id": None,
-                "timestamp": "now"
-            }
-        
+        return {
+            "status_code": 200,
+            "message": f"No user found with ID {user_id}",
+            "deleted_user_id": None,
+            "timestamp": "now"
+        }
+
     except Exception as error:
         print(f"Failed to delete user {user_id}: {error}")
         raise HTTPException(

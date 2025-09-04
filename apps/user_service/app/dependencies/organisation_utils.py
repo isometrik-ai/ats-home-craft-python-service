@@ -21,6 +21,7 @@ import time
 import asyncio
 from typing import List, Optional, Any, Dict, Tuple
 
+import asyncpg
 from fastapi import HTTPException, status
 
 # First party imports
@@ -36,6 +37,41 @@ from .common_utils import validate_uuid_format, ORG_STATUSES
 # ───────────────────────── Helper types ──────────────────────────
 PermissionRow = Tuple[str, str, str, str]  # code, name, desc, category
 PermissionsMap = Dict[str, str]
+
+class PermissionBatch:
+    """Helper class to manage permission data for bulk operations"""
+    def __init__(self, perms: List[PermissionRow], org_id: str):
+        self.codes = [p[0] for p in perms]
+        self.names = [p[1] for p in perms]
+        self.descriptions = [p[2] for p in perms]
+        self.categories = [p[3] for p in perms]
+        self.org_ids = [org_id] * len(perms)
+        self.size = len(perms)
+
+    def get_insert_params(self) -> tuple:
+        """Get parameters for the UNNEST insert query"""
+        return (
+            self.org_ids,
+            self.codes,
+            self.names,
+            self.descriptions,
+            self.categories,
+        )
+
+    def get_insert_query(self) -> str:
+        """Get the SQL query for inserting permissions"""
+        return """
+            INSERT INTO public.permissions
+                   (organization_id, code, name, description, category, created_at)
+            SELECT  UNNEST($1::uuid[]),
+                    UNNEST($2::text[]),
+                    UNNEST($3::text[]),
+                    UNNEST($4::text[]),
+                    UNNEST($5::text[]),
+                    NOW()
+            ON CONFLICT (organization_id, code) DO NOTHING
+            RETURNING code, id;
+        """
 
 
 def validate_organisation_status(org_status: str) -> None:
@@ -148,7 +184,7 @@ async def check_organisation_exists(
         start_time = time.time()
 
     org_check_query = """
-        SELECT id, name, slug, status FROM public.organizations 
+        SELECT id, name, slug, status FROM public.organizations
         WHERE id = $1;
     """
 
@@ -192,7 +228,7 @@ async def check_organisation_slug_unique(
     if exclude_org_id:
         validate_uuid_format(exclude_org_id, "organisation ID")
         slug_conflict_query = """
-            SELECT id FROM public.organizations 
+            SELECT id FROM public.organizations
             WHERE slug = $1 AND id != $2;
         """
         slug_conflict = await db_conn.fetchrow(
@@ -323,7 +359,7 @@ def build_organisations_filter_query(
 
     # Build complete query
     organizations_query = f"""
-        SELECT 
+        SELECT
             o.id as organization_id,
             o.name,
             o.slug,
@@ -337,10 +373,10 @@ def build_organisations_filter_query(
             o.updated_at,
             COUNT(om.id) as member_count
         FROM public.organizations o
-        LEFT JOIN public.organization_members om ON o.id = om.organization_id 
+        LEFT JOIN public.organization_members om ON o.id = om.organization_id
             AND om.status = 'active'
         {where_clause}
-        GROUP BY o.id, o.name, o.slug, o.domain, o.logo_url, o.plan_type, 
+        GROUP BY o.id, o.name, o.slug, o.domain, o.logo_url, o.plan_type,
                  o.status, o.max_users, o.timezone, o.created_at, o.updated_at
         ORDER BY o.created_at DESC
         LIMIT {limit_param} OFFSET {offset_param};
@@ -412,7 +448,7 @@ def build_organisation_detail_query() -> str:
         query = build_organisation_detail_query()
     """
     return """
-        SELECT 
+        SELECT
             o.id as organization_id,
             o.name,
             o.slug,
@@ -427,10 +463,10 @@ def build_organisation_detail_query() -> str:
             o.updated_at,
             COUNT(om.id) as member_count
         FROM public.organizations o
-        LEFT JOIN public.organization_members om ON o.id = om.organization_id 
+        LEFT JOIN public.organization_members om ON o.id = om.organization_id
             AND om.status = 'active'
         WHERE o.id = $1
-        GROUP BY o.id, o.name, o.slug, o.domain, o.logo_url, o.plan_type, 
+        GROUP BY o.id, o.name, o.slug, o.domain, o.logo_url, o.plan_type,
                  o.status, o.max_users, o.timezone, o.settings, o.created_at, o.updated_at
         LIMIT 1;
     """
@@ -452,7 +488,7 @@ def get_default_permissions() -> List[tuple]:
         permissions = get_default_permissions()
     """
     return [
-        
+
         (
             "business.dashboard.view",
             "View Dashboard",
@@ -603,82 +639,60 @@ async def create_default_permissions_for_new_org(
     returns IDs in the original default order.
     """
     validate_uuid_format(organisation_id, "organisation ID")
+    start_time = time.time() if with_timing else None
+
+    # Prepare permission data
+    perms = PermissionBatch(get_default_permissions(), organisation_id)
+    inserted_rows = await _insert_permissions_with_retry(db_conn, perms)
+
+    # Map results back to original codes
+    code_to_id = {r["code"]: r["id"] for r in inserted_rows}
+    ids = [code_to_id.get(code) for code in perms.codes if code in code_to_id]
 
     if with_timing:
-        _start = time.time()
+        elapsed = (time.time() - start_time) * 1000
+        print(f"Inserted {len(ids)}/{perms.size} default permissions in {elapsed:.2f} ms")
 
-    default_perms: List[PermissionRow] = get_default_permissions()
+    return ids
 
-    # Prepare arrays for UNNEST
-    codes = [p[0] for p in default_perms]
-    names = [p[1] for p in default_perms]
-    descs = [p[2] for p in default_perms]
-    cats = [p[3] for p in default_perms]
-    org_ids = [organisation_id] * len(default_perms)
-
-    # Retry bulk insert with exponential backoff to avoid transient lock/timeout
+async def _insert_permissions_with_retry(db_conn, perms: PermissionBatch) -> List[dict]:
+    """Helper function to handle permission insertion with retry logic"""
     max_attempts = 3
     base_timeout_seconds = 15
-    inserted_rows = []
 
     for attempt in range(1, max_attempts + 1):
         try:
-            # Set local timeouts per attempt; increase statement_timeout on retries
+            # Set local timeouts per attempt
             stmt_timeout = base_timeout_seconds * attempt
             try:
-                await db_conn.execute(
-                    f"SET LOCAL statement_timeout = '{stmt_timeout}s';"
-                )
+                await db_conn.execute(f"SET LOCAL statement_timeout = '{stmt_timeout}s';")
                 await db_conn.execute("SET LOCAL lock_timeout = '2s';")
-            except Exception:
+            except asyncpg.PostgresError:
                 # Non-fatal if we're not inside a transaction context
                 pass
 
-            inserted_rows = await db_conn.fetch(
-                """
-                INSERT INTO public.permissions
-                       (organization_id, code, name, description, category, created_at)
-                SELECT  UNNEST($1::uuid[]),
-                        UNNEST($2::text[]),
-                        UNNEST($3::text[]),
-                        UNNEST($4::text[]),
-                        UNNEST($5::text[]),
-                        NOW()
-                ON CONFLICT (organization_id, code) DO NOTHING
-                RETURNING code, id;
-                """,
-                org_ids,
-                codes,
-                names,
-                descs,
-                cats,
+            return await db_conn.fetch(
+                perms.get_insert_query(),
+                *perms.get_insert_params()
             )
-            break
-        except Exception as error:
+        except (asyncpg.DeadlockDetectedError, asyncpg.exceptions.QueryCanceledError):
+            # Handle specific database timeout/lock errors
+            if attempt == max_attempts:
+                raise
+            await asyncio.sleep(0.25 * attempt)
+        except asyncpg.PostgresError as error:
+            # For any other Postgres errors, check if it's timeout related
             err_text = str(error).lower()
             is_timeout_like = (
-                isinstance(error, TimeoutError)
-                or "statement timeout" in err_text
+                "statement timeout" in err_text
                 or "canceling statement" in err_text
                 or "lock timeout" in err_text
             )
             if attempt == max_attempts or not is_timeout_like:
                 raise
-            # Backoff before retry
             await asyncio.sleep(0.25 * attempt)
 
-    code_to_id = {r["code"]: r["id"] for r in inserted_rows}
-
-    # Build IDs in the same order as defaults
-    ids: List[str] = [code_to_id.get(code) for code in codes if code in code_to_id]
-
-    if with_timing:
-        print(
-            f"Inserted {len(ids)}/{len(default_perms)} default permissions in "
-            f"{(time.time() - _start)*1000:.2f} ms"
-        )
-
-    return ids
+    return []  # Return empty list if all attempts failed
 
 
 # ────────────────────────── Helpers ──────────────────────────────
@@ -764,7 +778,7 @@ async def create_super_admin_role(
         INSERT INTO public.roles (
             id, name, description, organization_id, is_default, created_at, updated_at
         ) VALUES (
-            gen_random_uuid(), 'Super Admin', 'Full administrative access to all system features', 
+            gen_random_uuid(), 'Super Admin', 'Full administrative access to all system features',
             $1, true, NOW(), NOW()
         ) RETURNING id;
     """

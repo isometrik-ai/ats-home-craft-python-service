@@ -1,10 +1,8 @@
-# pylint: disable=logging-fstring-interpolation
-# pylint: disable=broad-exception-caught
-# pylint: disable=protected-access
 """Exception middleware for the API service."""
 import sys
 import traceback
 import uuid
+import asyncio
 
 # Standard library imports
 from fastapi import Request
@@ -45,14 +43,17 @@ def extract_request_context(request: Request) -> dict:
     }
 
     # Add request body if available (truncated for security)
+    # pylint: disable=protected-access
     if hasattr(request.state, "_cached_body"):
         try:
             body_str = request.state._cached_body.decode("utf-8", errors="ignore")
             context["body_preview"] = (
                 body_str[:200] + "..." if len(body_str) > 200 else body_str
             )
-        except Exception:
-            context["body_preview"] = "[Unable to decode body]"
+        except UnicodeError:
+            context["body_preview"] = "[Unable to decode body - Unicode error]"
+        except (ValueError, AttributeError) as e:
+            context["body_preview"] = f"[Unable to decode body - {str(e)}]"
 
     return context
 
@@ -95,15 +96,17 @@ def extract_exception_context(exc: Exception) -> dict:
     return context
 
 
-class CacheRequestBodyMiddleware(
-    BaseHTTPMiddleware
-):  # pylint: disable=too-few-public-methods
+class CacheRequestBodyMiddleware(BaseHTTPMiddleware):
     """
     Middleware to cache request body for potential reuse.
 
     This middleware caches the request body in request.state._cached_body
     to allow multiple reads of the request body, which is useful for
     audit logging and other middleware that need to access the body.
+
+    Note: Using _cached_body is an accepted pattern in FastAPI middleware
+    for caching request bodies. The protected access warning is suppressed
+    as this is the intended usage.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -125,24 +128,73 @@ class CacheRequestBodyMiddleware(
                 body_bytes = await request.body()
                 # pylint: disable=protected-access
                 request.state._cached_body = body_bytes
-                exception_logger.debug(  # pylint: disable=logging-fstring-interpolation
-                    f"Request body cached successfully - "
-                    f"Request ID: {request_id}, "
-                    f"Method: {request.method}, "
-                    f"URL: {str(request.url)}, Body Size: {len(body_bytes)} bytes"
+
+                log_msg = (
+                    "Request body cached successfully - Request ID: %s, "
+                    "Method: %s, URL: %s, Body Size: %s bytes"
                 )
-            except (OSError, ValueError) as e:  # pylint: disable=broad-exception-caught
+                exception_logger.debug(
+                    log_msg,
+                    request_id,
+                    request.method,
+                    str(request.url),
+                    len(body_bytes),
+                )
+            except (OSError, ValueError) as e:
                 # pylint: disable=protected-access
                 request.state._cached_body = b""
-                exception_logger.warning(  # pylint: disable=logging-fstring-interpolation
-                    f"Failed to cache request body - "
-                    f"Request ID: {request_id}, "
-                    f"Method: {request.method}, "
-                    f"URL: {str(request.url)}, Error: {str(e)}"
+
+                log_msg = (
+                    "Failed to cache request body - Request ID: %s, "
+                    "Method: %s, URL: %s, Error: %s"
+                )
+                exception_logger.warning(
+                    log_msg,
+                    request_id,
+                    request.method,
+                    str(request.url),
+                    str(e),
                 )
 
         response = await call_next(request)
         return response
+
+
+async def _handle_audit_logging(
+    request: Request,
+    error_message: str,
+    status_code: int,
+    context: str = "general"
+) -> None:
+    """
+    Handle audit logging with proper error handling.
+
+    Args:
+        request: The FastAPI request object
+        error_message: The error message to log
+        status_code: The HTTP status code
+        context: Context string for the log message
+    """
+    try:
+        await maybe_log_audit_on_error(request, error_message, status_code=status_code)
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        exception_logger.warning(
+            "Audit logging failed during %s handling - data error: %s",
+            context,
+            str(e),
+        )
+    except (OSError, IOError) as e:
+        exception_logger.warning(
+            "Audit logging failed during %s handling - I/O error: %s",
+            context,
+            str(e),
+        )
+    except (RuntimeError, asyncio.CancelledError) as e:
+        exception_logger.warning(
+            "Audit logging failed during %s handling - runtime error: %s",
+            context,
+            str(e),
+        )
 
 
 async def unified_exception_handler(request: Request, exc: Exception):
@@ -152,7 +204,6 @@ async def unified_exception_handler(request: Request, exc: Exception):
     print("unified_exception_handler")
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    # timestamp = datetime.utcnow().isoformat()
 
     # Extract request and exception information
     operation_name = request.scope.get("endpoint", str(request.url.path))
@@ -160,14 +211,19 @@ async def unified_exception_handler(request: Request, exc: Exception):
     exception_context = extract_exception_context(exc)
 
     # Log exception start
+    log_msg = (
+        "Exception handler triggered - Request ID: %s, Operation: %s, "
+        "Type: %s, Method: %s, URL: %s, File: %s:%s"
+    )
     exception_logger.info(
-        f"Exception handler triggered - Request ID: {request_id}, "
-        f"Operation: {operation_name}, "
-        f"Exception Type: {exception_context['exception_type']}, "
-        f"Method: {request_context['method']}, "
-        f"URL: {request_context['url']}, "
-        f"File: {exception_context.get('file_path', 'unknown')}:"
-        f"{exception_context.get('line_number', 'unknown')}"
+        log_msg,
+        request_id,
+        operation_name,
+        exception_context['exception_type'],
+        request_context['method'],
+        request_context['url'],
+        exception_context.get('file_path', 'unknown'),
+        exception_context.get('line_number', 'unknown'),
     )
 
     # Extract route information
@@ -175,9 +231,10 @@ async def unified_exception_handler(request: Request, exc: Exception):
     if route and hasattr(route.endpoint, "__audit_api_call_params__"):
         audit_params = route.endpoint.__audit_api_call_params__
         request.state.audit_metadata = audit_params
-        exception_logger.debug(  # pylint: disable=logging-fstring-interpolation
-            f"Audit metadata extracted from route - Request ID: {request_id}, "
-            f"Audit Params: {str(audit_params)}"
+        exception_logger.debug(
+            "Audit metadata extracted from route - Request ID: %s, Params: %s",
+            request_id,
+            str(audit_params),
         )
 
     # Handle HTTP Exceptions (4xx, 5xx)
@@ -185,47 +242,43 @@ async def unified_exception_handler(request: Request, exc: Exception):
         status_code = getattr(exc, "status_code", 500)
         detail = getattr(exc, "detail", str(exc))
 
-        exception_logger.warning(  # pylint: disable=logging-fstring-interpolation
-            f"HTTP Exception occurred - Status Code: {status_code}, "
-            f"Detail: {detail}, Request ID: {request_id}, "
-            f"Method: {request_context['method']}, URL: "
-            f"{request_context['url']}, "
-            f"File: {exception_context.get('file_path', 'unknown')}:"
-            f"{exception_context.get('line_number', 'unknown')}"
+        log_msg = (
+            "HTTP Exception occurred - Status Code: %s, Detail: %s, Request ID: %s, "
+            "Method: %s, URL: %s, File: %s:%s"
+        )
+        exception_logger.warning(
+            log_msg,
+            status_code,
+            detail,
+            request_id,
+            request_context['method'],
+            request_context['url'],
+            exception_context.get('file_path', 'unknown'),
+            exception_context.get('line_number', 'unknown'),
         )
 
-        try:
-            await maybe_log_audit_on_error(
-                request, str(detail), status_code=status_code
-            )
-        except Exception as audit_error:
-            exception_logger.warning(
-                f"Audit logging failed during exception handling: {audit_error}"
-            )
-
+        await _handle_audit_logging(request, str(detail), status_code, "HTTP exception")
         return JSONResponse(status_code=status_code, content={"detail": detail})
 
     # Handle Request Validation Errors (422)
     if isinstance(exc, RequestValidationError):
         validation_errors = exc.errors()
 
-        exception_logger.warning(  # pylint: disable=logging-fstring-interpolation
-            f"Request validation error occurred - Status Code: 422, "
-            f"Request ID: {request_id}, "
-            f"Method: {request_context['method']}, "
-            f"URL: {request_context['url']}, "
-            f"File: {exception_context.get('file_path', 'unknown')}:"
-            f"{exception_context.get('line_number', 'unknown')}, "
-            f"Validation Errors: {str(validation_errors)}"
+        log_msg = (
+            "Request validation error occurred - Status Code: 422, Request ID: %s, "
+            "Method: %s, URL: %s, File: %s:%s, Validation Errors: %s"
+        )
+        exception_logger.warning(
+            log_msg,
+            request_id,
+            request_context['method'],
+            request_context['url'],
+            exception_context.get('file_path', 'unknown'),
+            exception_context.get('line_number', 'unknown'),
+            str(validation_errors),
         )
 
-        try:
-            await maybe_log_audit_on_error(request, str(exc), status_code=422)
-        except Exception as audit_error:
-            exception_logger.warning(
-                f"Audit logging failed during validation error: {audit_error}"
-            )
-
+        await _handle_audit_logging(request, str(exc), 422, "validation error")
         return JSONResponse(
             status_code=422,
             content={"detail": "Validation error", "errors": validation_errors},
@@ -235,26 +288,29 @@ async def unified_exception_handler(request: Request, exc: Exception):
     error_message = str(exc)
     full_traceback = traceback.format_exc()
 
-    exception_logger.error(  # pylint: disable=logging-fstring-interpolation
-        f"Unexpected exception occurred - Error: {error_message}, "
-        f"Exception Type: {exception_context['exception_type']}, "
-        f"Request ID: {request_id}, Method: {request_context['method']}, "
-        f"URL: {request_context['url']}, Operation: {operation_name}, "
-        f"File: {exception_context.get('file_path', 'unknown')}:"
-        f"{exception_context.get('line_number', 'unknown')}, "
-        f"Function: {exception_context.get('function_name', 'unknown')}"
+    log_msg = (
+        "Unexpected exception occurred - Error: %s, Exception Type: %s, "
+        "Request ID: %s, Method: %s, URL: %s, Operation: %s, File: %s:%s, "
+        "Function: %s"
+    )
+    exception_logger.error(
+        log_msg,
+        error_message,
+        exception_context['exception_type'],
+        request_id,
+        request_context['method'],
+        request_context['url'],
+        operation_name,
+        exception_context.get('file_path', 'unknown'),
+        exception_context.get('line_number', 'unknown'),
+        exception_context.get('function_name', 'unknown'),
     )
 
     # Also log to the audit logger for backward compatibility
     logger.error("Error in %s: %s", operation_name, error_message)
     logger.debug(full_traceback)
 
-    try:
-        await maybe_log_audit_on_error(request, error_message, status_code=500)
-    except Exception as audit_error:
-        exception_logger.warning(
-            f"Audit logging failed during unexpected error: {audit_error}"
-        )
+    await _handle_audit_logging(request, error_message, 500, "unexpected error")
     print("JSONResponse 500")
     return JSONResponse(
         status_code=500,

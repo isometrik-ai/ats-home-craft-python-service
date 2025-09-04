@@ -1,3 +1,4 @@
+# pylint: disable=invalid-name,E0213
 """
 Auth Schemas Module
 
@@ -5,7 +6,7 @@ Auth Schemas Module
 
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 
 # ============================================================================
 # ENUMS AND CONSTANTS
@@ -69,8 +70,9 @@ class UserSignupData(BaseModel):
     phone: Optional[str] = None
     timezone: str = "UTC"
 
-    @validator("first_name", "last_name")
-    def validate_name_fields(cls, v):  # pylint: disable=no-self-argument
+    @classmethod
+    @field_validator("first_name", "last_name")
+    def validate_name_fields(cls, v):
         """Validate name fields are not empty and meet minimum length requirements"""
         if not v or not v.strip():
             raise ValueError("Name fields cannot be empty")
@@ -78,8 +80,9 @@ class UserSignupData(BaseModel):
             raise ValueError("Name must be at least 2 characters long")
         return v.strip()
 
-    @validator("password")
-    def validate_password(cls, v):  # pylint: disable=no-self-argument
+    @classmethod
+    @field_validator("password")
+    def validate_password(cls, v):
         """Validate password meets minimum length requirements"""
         if len(v) < 6:
             raise ValueError("Password must be at least 6 characters long")
@@ -96,8 +99,9 @@ class CompanySignupData(BaseModel):
     description: Optional[str] = None
     referral_source: Optional[str] = None
 
-    @validator("company_name")
-    def validate_company_name(cls, v):  # pylint: disable=no-self-argument
+    @classmethod
+    @field_validator("company_name")
+    def validate_company_name(cls, v):
         """Validate non-empty company name with minimum 2 characters."""
         if not v or not v.strip():
             raise ValueError("Company name cannot be empty")
@@ -105,15 +109,16 @@ class CompanySignupData(BaseModel):
             raise ValueError("Company name must be at least 2 characters long")
         return v.strip()
 
-    @validator("company_website")
-    def validate_website(cls, v):  # pylint: disable=no-self-argument
+    @classmethod
+    @field_validator("company_website")
+    def validate_website(cls, v):
         """Ensure company website starts with http:// or https://."""
         if v and not v.startswith(("http://", "https://")):
             return f"https://{v}"
         return v
 
 
-# pylint: disable=R0903
+
 class VerifyEmailRequest(BaseModel):
     """Request model for Verify Email operations"""
 
@@ -138,9 +143,11 @@ class SignupRequest(BaseModel):
     company_data: Optional[CompanySignupData] = None
     plan_type: PlanType = PlanType.STARTER
 
-    @validator("company_data")
-    def validate_company_data(cls, v, values):  # pylint: disable=no-self-argument
+    @classmethod
+    @field_validator("company_data")
+    def validate_company_data(cls, v, info):
         """Validate company data for business account type."""
+        values = info.data
         if values.get("account_type") == AccountType.BUSINESS and not v:
             raise ValueError("Company data is required for business accounts")
         return v

@@ -1,4 +1,4 @@
-# pylint: disable=logging-fstring-interpolation
+
 """
 User Update Operations API Module
 This module provides user update operations including email updates, ban, and unban functionality.
@@ -7,6 +7,7 @@ All endpoints include proper authentication, validation, and database operations
 
 from datetime import datetime, timedelta, timezone
 import uuid
+from typing import Tuple, Any
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request, Body
 
@@ -54,8 +55,20 @@ logger = get_logger("user-update-api")
 logger.info("User Update API module loaded")
 
 
+def get_common_dependencies(
+    current_user: dict = Depends(get_user_from_auth),
+    db_conn: Any = Depends(get_async_db_conn)
+) -> Tuple[dict, Any]:
+    """Get common dependencies used across API endpoints.
+    
+    Returns:
+        Tuple containing (current_user, db_conn)
+    """
+    return current_user, db_conn
+
+
 @handle_api_exceptions("update user email")
-@router.put(  # pylint: disable=too-many-arguments
+@router.put(
     "/{user_id}/email",
     response_model=UserResponse,
     status_code=status.HTTP_200_OK,
@@ -72,36 +85,36 @@ logger.info("User Update API module loaded")
     table_name="organization_members",
     category="USER_EMAIL_UPDATE",
 )
-async def update_user_email(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+async def update_user_email(
     user_id: str,
     request: Request,
-    current_user: dict = Depends(get_user_from_auth),
-    db_conn=Depends(get_async_db_conn),
+    commons: Tuple[dict, Any] = Depends(get_common_dependencies),
     body: UpdateUserEmailRequest = Body(...),
     supabase=Depends(get_supabase_admin_client),
 ):
     """
     Update user email
     """
+    current_user, db_conn = commons  # Destructure the tuple
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info(  # pylint: disable=logging-fstring-interpolation
-        f"PUT /{user_id}/email request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Target User ID: {user_id}, New Email: {body.email}"
+    logger.info(
+        ("PUT /%s/email request started - Request ID: %s, ",user_id,request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s, ",current_user.get('organization_id')),
+        ("Target User ID: %s, New Email: %s",user_id,body.email)
     )
 
     validate_uuid_format(user_id, "role ID")
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"User ID format validated - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+    logger.debug(
+        ("User ID format validated - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     user_context = extract_user_context(current_user)
     logger.debug(
-        f"User context extracted - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}"
+        ("User context extracted - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
     )
 
     # Set audit context for user email update
@@ -111,9 +124,9 @@ async def update_user_email(  # pylint: disable=too-many-arguments,too-many-posi
     request.state.audit_description = (
         f"Admin updating user email: {user_id} to {body.email}"
     )
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"Audit context set for email update - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, New Email: {body.email}"
+    logger.debug(
+        ("Audit context set for email update - Request ID: %s, ",request_id),
+        ("Target User ID: %s, New Email: %s",user_id,body.email)
     )
 
     await require_permission(
@@ -122,18 +135,18 @@ async def update_user_email(  # pylint: disable=too-many-arguments,too-many-posi
         db_conn=db_conn,
         action_description="delete roles",
     )
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"User permissions validated for email update - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+    logger.debug(
+        ("User permissions validated for email update - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     # Get current user data for audit before email update
     current_user_data = await get_user_in_organization(
         db_conn, user_id, user_context.organization_id
     )
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"Current user data retrieved for audit - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Current Email: {current_user_data.get('email', 'N/A')}"
+    logger.debug(
+        ("Current user data retrieved for audit - Request ID: %s, ",request_id),
+        ("Target User ID: %s, Current Email: %s",user_id,current_user_data.get('email', 'N/A'))
     )
 
     # Set old values for audit comparison
@@ -142,9 +155,9 @@ async def update_user_email(  # pylint: disable=too-many-arguments,too-many-posi
     await update_supabase_user_email(
         user_id, user_context.organization_id, body.email, supabase, db_conn
     )
-    logger.info(  # pylint: disable=logging-fstring-interpolation
-        f"Supabase user email updated and magic link sent - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, New Email: {body.email}"
+    logger.info(
+        ("Supabase user email updated and magic link sent - Request ID: %s, ",request_id),
+        ("Target User ID: %s, New Email: %s",user_id,body.email)
     )
 
     # Set new values for audit comparison
@@ -158,10 +171,10 @@ async def update_user_email(  # pylint: disable=too-many-arguments,too-many-posi
         "email_update_timestamp": datetime.now().isoformat(),
     }
 
-    logger.info(  # pylint: disable=logging-fstring-interpolation
-        f"PUT /{user_id}/email request completed successfully - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Old Email: {current_user_data.get('email', 'N/A')}, "
-        f"New Email: {body.email}, Status Code: 200"
+    logger.info(
+        ("PUT /%s/email request completed successfully - Request ID: %s, ",user_id,request_id),
+        ("Target User ID: %s, Old Email: %s, ",user_id,current_user_data.get('email', 'N/A')),
+        ("New Email: %s, Status Code: %s",body.email,status.HTTP_200_OK)
     )
 
     return UserResponse(
@@ -189,11 +202,10 @@ async def update_user_email(  # pylint: disable=too-many-arguments,too-many-posi
 )
 async def ban_user(
     user_id: str,
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     # req: BanRequest = Body(...),
-    current_user: dict = Depends(get_user_from_auth),
-    db_conn=Depends(get_async_db_conn),
-):  # pylint: disable=unused-argument
+    commons: Tuple[dict, Any] = Depends(get_common_dependencies),
+):
     """
     Ban a user for a specified duration.
 
@@ -204,25 +216,26 @@ async def ban_user(
     Returns:
     - BanResponse: Confirmation message of user ban.
     """
+    current_user, db_conn = commons  # Destructure the tuple
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info(  # pylint: disable=logging-fstring-interpolation
-        f"POST /ban/{user_id} request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Target User ID: {user_id}"
+    logger.info(
+        ("POST /ban/%s request started - Request ID: %s, ",user_id,request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s, ",current_user.get('organization_id')),
+        ("Target User ID: %s",user_id)
     )
 
     validate_uuid_format(user_id, "User ID")
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"User ID format validated - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+    logger.debug(
+        ("User ID format validated - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     user_context = extract_user_context(current_user)
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"User context extracted - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}"
+    logger.debug(
+        ("User context extracted - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
     )
 
     # Set audit context for user banning
@@ -230,9 +243,9 @@ async def ban_user(
     request.state.audit_table = "organization_members"
     request.state.audit_requested_id = user_id
     request.state.audit_description = f"Admin banned user: {user_id}"
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"Audit context set for user banning - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+    logger.debug(
+        ("Audit context set for user banning - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     await require_permission(
@@ -241,15 +254,15 @@ async def ban_user(
         db_conn=db_conn,
         action_description="delete roles",
     )
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"User permissions validated for user banning - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+    logger.debug(
+        ("User permissions validated for user banning - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     if user_id == user_context.user_id:
         logger.warning(
-            f"User attempted to ban themselves - Request ID: {request_id}, "
-            f"User ID: {user_id}"
+            ("User attempted to ban themselves - Request ID: %s, ",request_id),
+            ("User ID: %s",user_id)
         )
         raise HTTPException(status_code=400, detail="You cannot ban yourself.")
 
@@ -258,8 +271,8 @@ async def ban_user(
         db_conn, user_id, user_context.organization_id
     )
     logger.debug(
-        f"Current user data retrieved for ban audit - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Email: {current_user_data.get('email', 'N/A')}"
+        ("Current user data retrieved for ban audit - Request ID: %s, ",request_id),
+        ("Target User ID: %s, Email: %s",user_id,current_user_data.get('email', 'N/A'))
     )
 
     # Set old values for audit comparison
@@ -267,8 +280,8 @@ async def ban_user(
 
     banned_until = datetime.now(timezone.utc) + timedelta(days=365 * 100)
     logger.debug(
-        f"Ban duration calculated - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Banned until: {banned_until}"
+        ("Ban duration calculated - Request ID: %s, ",request_id),
+        ("Target User ID: %s, Banned until: %s",user_id,banned_until)
     )
 
     update_sql = """
@@ -285,16 +298,16 @@ async def ban_user(
     )
 
     if not result:
-        logger.warning(  # pylint: disable=logging-fstring-interpolation
-            f"User not found for banning in auth.users - Request ID: {request_id}, "
-            f"Target User ID: {user_id}"
+        logger.warning(
+            ("User not found for banning in auth.users - Request ID: %s, ",request_id),
+            ("Target User ID: %s",user_id)
         )
         # logging.warning("User not found for banning: %s", user_id)
         raise HTTPException(status_code=404, detail="User not found")
 
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"User banned in auth.users successfully - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+    logger.debug(
+        ("User banned in auth.users successfully - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     suspend_member_sql = """
@@ -308,16 +321,16 @@ async def ban_user(
     )
 
     if not result:
-        logger.warning(  # pylint: disable=logging-fstring-interpolation
-            f"Organization user not found for banning - Request ID: {request_id}, "
-            f"Target User ID: {user_id}, Organization ID: {user_context.organization_id}"
+        logger.warning(
+            ("Organization user not found for banning - Request ID: %s, ",request_id),
+            ("Target User ID: %s, Organization ID: %s",user_id,user_context.organization_id)
         )
         # logging.warning("User not found for banning: %s", user_id)
         raise HTTPException(status_code=404, detail="Organization User not found")
 
-    logger.debug(  # pylint: disable=logging-fstring-interpolation
-        f"User suspended in organization successfully - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Organization ID: {user_context.organization_id}"
+    logger.debug(
+        ("User suspended in organization successfully - Request ID: %s, ",request_id),
+        ("Target User ID: %s, Organization ID: %s",user_id,user_context.organization_id)
     )
 
     # Set new values for audit comparison
@@ -336,9 +349,9 @@ async def ban_user(
 
     # logging.info("Banned user: %s for reason: %s", user_id, req.reason)
     logger.info(
-        f"POST /ban/{user_id} request completed successfully - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Email: {current_user_data.get('email', 'N/A')}, "
-        f"Banned until: {banned_until}, Status Code: 200"
+        ("POST /ban/%s request completed successfully - Request ID: %s, ",user_id,request_id),
+        ("Target User ID: %s, Email: %s, ",user_id,current_user_data.get('email', 'N/A')),
+        ("Banned until: %s, Status Code: %s",banned_until,status.HTTP_200_OK)
     )
 
     return BanResponse(message="User successfully banned", reason="")
@@ -363,10 +376,9 @@ async def ban_user(
 )
 async def unban_user(
     user_id: str,
-    request: Request,  # pylint: disable=unused-argument
-    current_user: dict = Depends(get_user_from_auth),
-    db_conn=Depends(get_async_db_conn),
-):  # pylint: disable=unused-argument
+    request: Request,
+    commons: Tuple[dict, Any] = Depends(get_common_dependencies),
+):
     """
     Unban a user by user ID.
     Parameters:
@@ -375,27 +387,28 @@ async def unban_user(
     Returns:
     - UnbanResponse: Confirmation message of user unban.
     """
+    current_user, db_conn = commons  # Destructure the tuple
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"POST /unban/{user_id} request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Target User ID: {user_id}"
+        ("POST /unban/%s request started - Request ID: %s, ",user_id,request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s, ",current_user.get('organization_id')),
+        ("Target User ID: %s",user_id)
     )
 
     # Validate user access
     validate_uuid_format(user_id, "User ID")
     logger.debug(
-        f"User ID format validated - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+        ("User ID format validated - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     # Extract and validate user context from JWT token
     user_context = extract_user_context(current_user)
     logger.debug(
-        f"User context extracted - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}"
+        ("User context extracted - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
     )
 
     # Set audit context for user unbanning
@@ -404,8 +417,8 @@ async def unban_user(
     request.state.audit_description = f"Admin unbanned user: {user_id}"
     request.state.audit_risk_level = "medium"
     logger.debug(
-        f"Audit context set for user unbanning - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+        ("Audit context set for user unbanning - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     # Check permission using utility function
@@ -416,14 +429,14 @@ async def unban_user(
         action_description="delete roles",
     )
     logger.debug(
-        f"User permissions validated for user unbanning - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+        ("User permissions validated for user unbanning - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     if user_id == user_context.user_id:
         logger.warning(
-            f"User attempted to unban themselves - Request ID: {request_id}, "
-            f"User ID: {user_id}"
+            ("User attempted to unban themselves - Request ID: %s, ",request_id),
+            ("User ID: %s",user_id)
         )
         raise HTTPException(status_code=400, detail="You cannot Unban yourself.")
 
@@ -432,8 +445,8 @@ async def unban_user(
         db_conn, user_id, user_context.organization_id
     )
     logger.debug(
-        f"Current user data retrieved for unban audit - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Email: {current_user_data.get('email', 'N/A')}"
+        ("Current user data retrieved for unban audit - Request ID: %s, ",request_id),
+        ("Target User ID: %s, Email: %s",user_id,current_user_data.get('email', 'N/A'))
     )
 
     # Set old values for audit comparison
@@ -450,14 +463,14 @@ async def unban_user(
 
     if not result:
         logger.warning(
-            f"User not found or not banned in auth.users - Request ID: {request_id}, "
-            f"Target User ID: {user_id}"
+            ("User not found or not banned in auth.users - Request ID: %s, ",request_id),
+            ("Target User ID: %s",user_id)
         )
         raise HTTPException(status_code=404, detail="User not found or not banned")
 
     logger.debug(
-        f"User unbanned in auth.users successfully - Request ID: {request_id}, "
-        f"Target User ID: {user_id}"
+        ("User unbanned in auth.users successfully - Request ID: %s, ",request_id),
+        ("Target User ID: %s",user_id)
     )
 
     suspend_member_sql = """
@@ -472,15 +485,15 @@ async def unban_user(
 
     if not result:
         logger.warning(
-            f"Organization user not found for unbanning - Request ID: {request_id}, "
-            f"Target User ID: {user_id}, Organization ID: {user_context.organization_id}"
+            ("Organization user not found for unbanning - Request ID: %s, ",request_id),
+            ("Target User ID: %s, Organization ID: %s",user_id,user_context.organization_id)
         )
         # logging.warning("User not found for banning: %s", user_id)
         raise HTTPException(status_code=404, detail="Organization User not found")
 
     logger.debug(
-        f"User activated in organization successfully - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Organization ID: {user_context.organization_id}"
+        ("User activated in organization successfully - Request ID: %s, ",request_id),
+        ("Target User ID: %s, Organization ID: %s",user_id,user_context.organization_id)
     )
 
     # Set new values for audit comparison
@@ -498,9 +511,9 @@ async def unban_user(
 
     # logging.info("Unbanned user: %s", user_id)
     logger.info(
-        f"POST /unban/{user_id} request completed successfully - Request ID: {request_id}, "
-        f"Target User ID: {user_id}, Email: {current_user_data.get('email', 'N/A')}, "
-        f"Status Code: 200"
+        ("POST /unban/%s request completed successfully - Request ID: %s, ",user_id,request_id),
+        ("Target User ID: %s, Email: %s, ",user_id,current_user_data.get('email', 'N/A')),
+        ("Status Code: %s",status.HTTP_200_OK)
     )
 
     return UnbanResponse(message="User successfully unbanned")

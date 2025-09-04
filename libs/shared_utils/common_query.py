@@ -43,7 +43,7 @@ WHERE rp.role_id = $1
 
 MEMBER_INSERT_QUERY = """
         INSERT INTO public.organization_members (
-            user_id, organization_id, role_id, email, full_name, phone, timezone, 
+            user_id, organization_id, role_id, email, full_name, phone, timezone,
             status, joined_at, created_at, updated_at
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, 'active', NOW(), NOW(), NOW()

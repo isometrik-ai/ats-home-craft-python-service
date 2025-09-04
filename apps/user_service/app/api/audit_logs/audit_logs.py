@@ -1,4 +1,4 @@
-# pylint: disable=import-error,no-name-in-module
+
 """
 Audit Logs API Module
 
@@ -82,9 +82,10 @@ class AuditLogResponse(BaseModel):
 #     table_name="audit_logs",
 #     category="audit_management",
 # )
+# pylint: disable=unused-argument  # Required by @limiter.limit
 async def get_audit_logs(
-    request: Request,  # pylint: disable=unused-argument
-    current_user: dict = Depends(get_user_from_auth),  # pylint: disable=unused-argument
+    request: Request,
+    current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
     query_params: AuditLogsQueryParams = Depends(),
 ):
@@ -144,8 +145,8 @@ async def get_audit_logs(
     audit_logs_data = await db_conn.fetch(audit_logs_query, *query_params_list)
 
     # Build and execute count query
+        # organization_id=user_context.organization_id,
     count_query, count_params = build_audit_logs_count_query(
-        organization_id=user_context.organization_id,
         search=query_params.search,
     )
 
@@ -213,8 +214,8 @@ async def get_audit_logs(
 # )
 async def get_audit_log_by_id(
     audit_log_id: str,
-    request: Request,  # pylint: disable=unused-argument
-    current_user: dict = Depends(get_user_from_auth),  # pylint: disable=unused-argument
+    request: Request,
+    # current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
 ):
     """
@@ -323,9 +324,10 @@ async def get_audit_log_by_id(
 #     table_name="audit_logs",
 #     category="audit_management",
 # )
+# pylint: disable=unused-argument  # Required by @limiter.limit
 async def delete_all_audit_logs(
-    request: Request,  # pylint: disable=unused-argument
-    current_user: dict = Depends(get_user_from_auth),  # pylint: disable=unused-argument
+    request: Request,
+    # current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
 ):
     """
