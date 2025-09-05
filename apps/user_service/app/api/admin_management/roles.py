@@ -520,8 +520,9 @@ async def create_role(
         "POST /roles request completed successfully - Request ID: %s, "
         "Role ID: %s, Role Name: %s, "
         "Status Code: %s",
+        request_id,str(role_id),role_data.name,status.HTTP_201_CREATED)
+    logger.info(
         "Permissions Count: %s, ",
-        request_id,str(role_id),role_data.name,status.HTTP_201_CREATED,
         (len(role_data.permission_ids) if role_data.permission_ids else 0)
     )
 

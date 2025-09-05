@@ -31,14 +31,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # Local application imports
 from apps.user_service.app.app_instance import app
 from apps.user_service.app.api.routes import router as api_router
-from apps.user_service.app.dependencies.audit_logs.audit_logger import audit_logger
 from apps.user_service.app.dependencies.exception_middleware import (
     unified_exception_handler,
     CacheRequestBodyMiddleware,
 )
 from apps.user_service.app.dependencies.logger import app_logger, setup_logging
 from libs.shared_middleware.jwt_auth import JWTAuthMiddleware
-from libs.shared_db.postgres_db.db import get_async_connection_pool
 
 # Setup paths and environment
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

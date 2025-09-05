@@ -10,7 +10,6 @@ for different API endpoints.
 
 import os
 import sys
-import importlib.util
 
 from fastapi import APIRouter
 
@@ -30,6 +29,7 @@ from apps.user_service.app.api.admin_management.permissions import (
     router as permissions_router,
 )
 
+from apps.user_service.app.api.admin_management.router import router as admin_management_router
 from apps.user_service.app.api.audit_logs.audit_logs import router as audit_logs_router
 
 
@@ -41,14 +41,6 @@ sys.path.insert(0, base_path)
 monorepo_root = os.path.abspath(os.path.join(base_path, "../.."))
 sys.path.insert(0, monorepo_root)
 
-role_permissions_spec = importlib.util.spec_from_file_location(
-    "role_permissions", "apps/user_service/app/api/admin_management/role_permissions.py"
-)
-role_permissions_module = importlib.util.module_from_spec(role_permissions_spec)
-role_permissions_spec.loader.exec_module(role_permissions_module)
-role_permissions_router = role_permissions_module.router
-
-# pylint: enable=wrong-import-position
 
 # Create main API router
 router = APIRouter(prefix="/v1")
@@ -60,7 +52,7 @@ router.include_router(users_router, prefix="/admin")
 router.include_router(roles_router, prefix="/admin")
 router.include_router(sessions_router, prefix="/admin")
 router.include_router(permissions_router, prefix="/admin")
-router.include_router(role_permissions_router, prefix="/admin")
+router.include_router(admin_management_router, prefix="/admin")
 router.include_router(audit_logs_router, prefix="/admin")
 
 

@@ -163,7 +163,10 @@ def get_logger(name: str = None) -> logging.Logger:
     # Always return the main configured logger for now
     # This ensures all loggers use the same configuration
 
-    return logging.getLogger(name) if name else logging.getLogger("user-service")
+    if name:
+        return logging.getLogger(name)
+    else:
+        return logging.getLogger("user-service")
 
 
 def set_request_id(request_id: str):
