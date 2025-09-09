@@ -1,3 +1,4 @@
+# pylint: disable=invalid-name,E0213
 """
 Admin Access Management Schemas Module
 
@@ -10,7 +11,7 @@ Last Updated: 2024-12-19
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class UserQueryParams(BaseModel):
@@ -28,16 +29,15 @@ class UserQueryParams(BaseModel):
         20, ge=1, le=100, description="Maximum number of Users to return (max: 100)"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UserQueryParams model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "search": "admin",
                 "page": 1,
                 "page_size": 20,
             }
         }
+    )
 
 
 class RoleQueryParams(BaseModel):
@@ -68,10 +68,8 @@ class RoleQueryParams(BaseModel):
         ),
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for RoleQueryParams model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "search": "admin",
                 "skip": 0,
@@ -80,6 +78,7 @@ class RoleQueryParams(BaseModel):
                 "sort_type": False,
             }
         }
+    )
 
 
 class RoleItem(BaseModel):
@@ -111,10 +110,8 @@ class RoleItem(BaseModel):
         ..., description="Count of permissions by category"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for RoleItem model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "name": "Administrator",
@@ -128,9 +125,10 @@ class RoleItem(BaseModel):
                     "settings": 4,
                     "automation": 2,
                     "talent": 1,
-                },
+                }
             }
         }
+    )
 
 
 class PermissionItem(BaseModel):
@@ -158,10 +156,8 @@ class PermissionItem(BaseModel):
         ..., description="ISO timestamp when permission was created"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for PermissionItem model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                 "name": "Manage Roles",
@@ -171,6 +167,7 @@ class PermissionItem(BaseModel):
                 "created_at": "2024-12-19T10:00:00Z",
             }
         }
+    )
 
 
 class RolesResponse(BaseModel):
@@ -192,10 +189,8 @@ class RolesResponse(BaseModel):
         ..., description="Total number of roles available (for pagination)"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for RolesResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Roles retrieved successfully with filters: limit=10",
@@ -211,6 +206,7 @@ class RolesResponse(BaseModel):
                 "total_count": 1,
             }
         }
+    )
 
 
 class PermissionsResponse(BaseModel):
@@ -228,10 +224,8 @@ class PermissionsResponse(BaseModel):
     )
     permissions: List[PermissionItem] = Field(..., description="List of permissions")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for PermissionsResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Permissions retrieved successfully",
@@ -247,6 +241,7 @@ class PermissionsResponse(BaseModel):
                 ],
             }
         }
+    )
 
 
 class RoleDetailItem(BaseModel):
@@ -274,10 +269,8 @@ class RoleDetailItem(BaseModel):
         ..., description="List of permissions assigned to this role"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for RoleDetailItem model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "name": "Administrator",
@@ -297,6 +290,7 @@ class RoleDetailItem(BaseModel):
                 ],
             }
         }
+    )
 
 
 class RoleDetailResponse(BaseModel):
@@ -316,10 +310,8 @@ class RoleDetailResponse(BaseModel):
         ..., description="Detailed role information with permissions"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for RoleDetailResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Role details retrieved successfully",
@@ -331,9 +323,10 @@ class RoleDetailResponse(BaseModel):
                     "created_at": "2024-12-19T10:00:00Z",
                     "updated_at": "2024-12-19T12:00:00Z",
                     "permissions": [],
-                },
+                }
             }
         }
+    )
 
 
 class CreateRoleRequest(BaseModel):
@@ -355,10 +348,8 @@ class CreateRoleRequest(BaseModel):
         ..., description="List of permission IDs to assign to this role"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for CreateRoleRequest model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "Project Manager",
                 "role_type": "custom",
@@ -369,6 +360,7 @@ class CreateRoleRequest(BaseModel):
                 ],
             }
         }
+    )
 
 
 class CreateRoleResponse(BaseModel):
@@ -384,12 +376,11 @@ class CreateRoleResponse(BaseModel):
         ..., description="Response message describing the operation result"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for CreateRoleResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {"status_code": 201, "message": "Role created successfully"}
         }
+    )
 
 
 class UpdateRoleRequest(BaseModel):
@@ -420,10 +411,8 @@ class UpdateRoleRequest(BaseModel):
         None, description="List of permission IDs to assign to this role"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UpdateRoleRequest model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "Senior Project Manager",
                 "description": "Manages multiple projects and senior team members",
@@ -434,6 +423,7 @@ class UpdateRoleRequest(BaseModel):
                 ],
             }
         }
+    )
 
 
 class UpdateRoleResponse(BaseModel):
@@ -449,12 +439,11 @@ class UpdateRoleResponse(BaseModel):
         ..., description="Response message describing the operation result"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UpdateRoleResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {"status_code": 200, "message": "Role updated successfully"}
         }
+    )
 
 
 class DeleteRoleResponse(BaseModel):
@@ -470,12 +459,11 @@ class DeleteRoleResponse(BaseModel):
         ..., description="Response message describing the operation result"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for DeleteRoleResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {"status_code": 200, "message": "Role deleted successfully"}
         }
+    )
 
 
 class CreatePermissionRequest(BaseModel):
@@ -521,10 +509,8 @@ class CreatePermissionRequest(BaseModel):
         description="Logical grouping for easier filtering (e.g. 'projects')",
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic/OpenAPI configuration"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "code": "project.create",
                 "name": "Create Projects",
@@ -532,6 +518,7 @@ class CreatePermissionRequest(BaseModel):
                 "category": "projects",
             }
         }
+    )
 
 
 # ============================================================================
@@ -566,10 +553,8 @@ class SessionQueryParams(BaseModel):
         None, description="Filter by login method (password, sso, mfa)"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for SessionQueryParams model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "search": "192.168.1.1",
                 "page": 1,
@@ -578,6 +563,7 @@ class SessionQueryParams(BaseModel):
                 "login_method": "password",
             }
         }
+    )
 
 
 class SessionItem(BaseModel):
@@ -649,10 +635,8 @@ class SessionsResponse(BaseModel):
     page: int = Field(..., description="Current page number")
     page_size: int = Field(..., description="Number of items per page")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for SessionsResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Sessions retrieved successfully",
@@ -662,6 +646,7 @@ class SessionsResponse(BaseModel):
                 "page_size": 20,
             }
         }
+    )
 
 
 class CreateSessionRequest(BaseModel):
@@ -681,10 +666,9 @@ class CreateSessionRequest(BaseModel):
     - X-Real-IP: Real client IP address (if behind proxy)
     """
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for CreateSessionRequest model"""
-
-        schema_extra = {"example": {"note": "No request body required. "}}
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"note": "No request body required. "}}
+    )
 
 
 class CreateSessionResponse(BaseModel):
@@ -702,10 +686,8 @@ class CreateSessionResponse(BaseModel):
     )
     session: SessionItem = Field(..., description="Created session information")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for CreateSessionResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 201,
                 "message": "Session created successfully",
@@ -723,9 +705,10 @@ class CreateSessionResponse(BaseModel):
                     "login_method": "password",
                     "accessed_phi": False,
                     "phi_access_purpose": None,
-                },
+                }
             }
         }
+    )
 
 
 class UpdateSessionRequest(BaseModel):
@@ -758,14 +741,13 @@ class UpdateSessionRequest(BaseModel):
         description="Reason for logout (user_logout, timeout, admin_terminated, etc.)",
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UpdateSessionRequest model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "note": "No request body required. Session logout is automatic based on JWT token."
             }
         }
+    )
 
 
 class UpdateSessionResponse(BaseModel):
@@ -783,10 +765,8 @@ class UpdateSessionResponse(BaseModel):
     )
     session: SessionItem = Field(..., description="Updated session information")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UpdateSessionResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Session logout updated successfully",
@@ -804,6 +784,7 @@ class UpdateSessionResponse(BaseModel):
                     "login_method": "password",
                     "accessed_phi": False,
                     "phi_access_purpose": None,
-                },
+                }
             }
         }
+    )

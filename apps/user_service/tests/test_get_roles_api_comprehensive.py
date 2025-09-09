@@ -106,12 +106,12 @@ class FakeConn:
         """Mock fetchrow for async database operations"""
         if "has_permission" in str(query) or "EXISTS" in str(query):
             if self.should_fail_permission:
-                raise Exception("Permission check database error")
+                raise RuntimeError("Permission check database error")
             return {"has_permission": PERMISSION_MAPPING.get("ROLES_READ", True)}
 
         if "COUNT(*)" in str(query) or "total_count" in str(query):
             if self.should_fail_data_fetch:
-                raise Exception("Count query database error")
+                raise RuntimeError("Count query database error")
             return self.cursor_obj.fetchone_data
 
         return self.cursor_obj.fetchone_data
@@ -119,7 +119,7 @@ class FakeConn:
     async def fetch(self, query, *args):
         """Mock fetch for async database operations"""
         if self.should_fail_data_fetch:
-            raise Exception("Data fetch database error")
+            raise RuntimeError("Data fetch database error")
         return self.cursor_obj.fetchall_data
 
 
@@ -133,36 +133,48 @@ async def mock_check_user_access_async(
         and hasattr(db_conn, "should_fail_permission")
         and db_conn.should_fail_permission
     ):
-        raise Exception("Permission check database error")
+        raise RuntimeError("Permission check database error")
 
     if permission_code == "settings.roles.manage":
         return PERMISSION_MAPPING.get("ROLES_READ", True)
     return False
 
 
-# Global variable to control authentication behavior
-_MOCK_AUTH_SHOULD_FAIL = False
+# Class to control authentication behavior without global variables
+class MockAuthController:
+    """Controller for mock authentication behavior"""
+    def __init__(self):
+        self.should_fail = False
 
+    def set_auth_failure(self, should_fail: bool):
+        """Control whether authentication should fail"""
+        self.should_fail = should_fail
+
+    def mock_get_user_from_auth_conditional(self):
+        """Mock that can be configured to fail authentication"""
+        if self.should_fail:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+            )
+        return {
+            "sub": MOCK_ADMIN_UUID,
+            "email": "admin@example.com",
+            "user_metadata": {"organization_id": MOCK_ORG_ID, "type": "organization_member"},
+        }
+
+
+# Global instance for backward compatibility
+_mock_auth_controller = MockAuthController()
 
 def mock_get_user_from_auth_conditional():
     """Mock that can be configured to fail authentication"""
-    global _MOCK_AUTH_SHOULD_FAIL
-    if _MOCK_AUTH_SHOULD_FAIL:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-        )
-    return {
-        "sub": MOCK_ADMIN_UUID,
-        "email": "admin@example.com",
-        "user_metadata": {"organization_id": MOCK_ORG_ID, "type": "organization_member"},
-    }
+    return _mock_auth_controller.mock_get_user_from_auth_conditional()
 
 
 def set_mock_auth_failure(should_fail: bool):
     """Control whether authentication should fail"""
-    global _MOCK_AUTH_SHOULD_FAIL
-    _MOCK_AUTH_SHOULD_FAIL = should_fail
+    _mock_auth_controller.set_auth_failure(should_fail)
 
 
 # Create test app for integration tests
@@ -174,7 +186,7 @@ def create_test_app():
     return app
 
 
-test_app = create_test_app()
+app_instance = create_test_app()
 
 
 # Shared Fixtures
@@ -183,7 +195,7 @@ def mock_request():
     """Mock FastAPI request object"""
     from starlette.requests import Request
     from starlette.datastructures import State
-    
+
     mock_req = Mock(spec=Request)
     mock_req.headers = {}
     mock_req.state = State()
@@ -191,10 +203,10 @@ def mock_request():
     mock_req.url = Mock()
     mock_req.url.path = "/v1/admin/roles"
     mock_req.query_params = {}
-    
+
     # Add dictionary-style access for rate limiter
     mock_req.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-    
+
     return mock_req
 
 
@@ -225,7 +237,7 @@ def default_query_params():
 @pytest.fixture
 def app():
     """Create a FastAPI app for integration testing"""
-    return test_app
+    return app_instance
 
 
 @pytest.fixture
@@ -275,7 +287,7 @@ class TestGetRolesEssential:
         """Unit Test 1: Successful roles retrieval with default parameters (covers happy path)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -284,10 +296,10 @@ class TestGetRolesEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             return_value=True,
@@ -339,7 +351,7 @@ class TestGetRolesEssential:
         """Unit Test 2: Invalid role_type parameter (covers input validation)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -348,10 +360,10 @@ class TestGetRolesEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         invalid_query_params = RoleQueryParams(
             search=None, role_type="invalid_type", skip=0, limit=50
         )
@@ -383,7 +395,7 @@ class TestGetRolesEssential:
         """Unit Test 3: Insufficient permissions (covers authorization)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -392,10 +404,10 @@ class TestGetRolesEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             return_value=False,
@@ -433,7 +445,7 @@ class TestGetRolesEssential:
         """Unit Test 4: Database error (covers exception handling)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -442,10 +454,10 @@ class TestGetRolesEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             side_effect=Exception("Database connection failed"),
@@ -473,7 +485,7 @@ class TestGetRolesEssential:
             assert response.status_code == 500
             data = response.json()
             assert "Internal server error" in data["detail"]
-        except Exception as e:
+        except RuntimeError as e:
             # If exception bubbles up, verify it's the expected database error
             assert "Data fetch database error" in str(e)
 
@@ -485,7 +497,7 @@ class TestGetRolesEssential:
         """Unit Test 5: Search functionality with filters (covers query parameter handling)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -494,10 +506,10 @@ class TestGetRolesEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         search_query_params = RoleQueryParams(
             search="Admin", role_type="system", skip=5, limit=10
         )

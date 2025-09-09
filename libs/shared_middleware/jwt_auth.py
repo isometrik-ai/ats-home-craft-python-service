@@ -13,24 +13,215 @@ The module integrates with Supabase for user authentication and
 permission management, using environment variables for configuration.
 """
 
-# pylint: disable=import-error
+
 
 import os  # Standard library import first
-import jwt
+from typing import List, Tuple, Optional
 
-from fastapi import Request, HTTPException, status, responses, Depends
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.status import HTTP_401_UNAUTHORIZED
+import jwt
 from supabase import Client
-from typing import List
+from starlette.status import HTTP_401_UNAUTHORIZED
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import Request, HTTPException, status, responses, Depends
 
 from psycopg2.extras import RealDictCursor
 
 from libs.shared_db.supabase_db.db import get_supabase_client
 from libs.shared_db.postgres_db.db import get_async_db_conn
-from libs.shared_models import ALLOWED_USER_STATUSES, is_allowed_user_status
+from libs.shared_models import is_allowed_user_status
 
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
+
+
+# Centralized error handlers
+def raise_auth_error(request: Request, description: str, detail: str) -> None:
+    """Raise 401 Unauthorized error with audit context."""
+    request.state.audit_description = description
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def raise_forbidden_error(request: Request, description: str, detail: str) -> None:
+    """Raise 403 Forbidden error with audit context."""
+    request.state.audit_description = description
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=detail,
+    )
+
+
+def raise_internal_error(request: Request, description: str, detail: str) -> None:
+    """Raise 500 Internal Server Error with audit context."""
+    request.state.audit_description = description
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=detail,
+    )
+
+
+# Helper functions for user validation
+def extract_user_data(
+    user: dict
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Extract user data from JWT token."""
+    if not user:
+        return None, None, None, None
+
+    user_id = user.get("sub")
+    user_metadata = user.get("user_metadata", {})
+    organization_id = user_metadata.get("organization_id")
+    user_email = user.get("email")
+    session_id = user.get("session_id")
+
+    return user_id, organization_id, user_email, session_id
+
+
+def validate_email_match(
+    request: Request,
+    db_email: str,
+    user_email: str,
+    user_role: str,
+    error_context: str,
+) -> None:
+    """Validate email match between database and JWT token."""
+    if (db_email and user_email and
+        db_email.strip().lower() != user_email.strip().lower()):
+        request.state.audit_user_context["user_role"] = user_role
+        raise_forbidden_error(
+            request,
+            f"JWT email does not match {error_context}",
+            f"Email mismatch between token and {error_context}.",
+        )
+
+
+def setup_audit_context(
+    request: Request,
+    user_id: str,
+    user_email: str,
+    organization_id: str,
+    session_id: str,
+) -> None:
+    """Setup default audit context for request."""
+    request.state.audit_risk_level = "high"
+    request.state.audit_description = "Authentication or authorization failure"
+    request.state.audit_user_context = {
+        "user_id": user_id,
+        "user_email": user_email,
+        "user_role": "unknown",
+        "organization_id": organization_id,
+        "session_id": session_id,
+    }
+
+
+async def validate_organization_member(
+    request: Request,
+    db_conn,
+    user_id: str,
+    organization_id: str,
+    user_email: str,
+) -> str:
+    """Validate organization member and return role name."""
+    row = await db_conn.fetchrow(
+        """
+        SELECT m.status, m.email AS db_email, r.name AS role_name
+        FROM public.organization_members m
+        LEFT JOIN public.roles r ON r.id = m.role_id
+        WHERE m.user_id = $1 AND m.organization_id = $2
+        """,
+        user_id,
+        organization_id,
+    )
+
+    if not row:
+        raise_forbidden_error(
+            request,
+            "User is not a member of the organization",
+            "User is not a member of this organization.",
+        )
+
+    if not is_allowed_user_status(row["status"]):
+        raise_forbidden_error(
+            request,
+            f"Membership status is '{row['status']}'",
+            "Your account is suspended or inactive.",
+        )
+
+    validate_email_match(
+        request,
+        row["db_email"],
+        user_email,
+        row["role_name"] or "unknown",
+        "organization membership",
+    )
+    return row["role_name"] or "unknown"
+
+
+async def validate_client_member(
+    request: Request,
+    db_conn,
+    user_id: str,
+    organization_id: str,
+    user_email: str,
+) -> str:
+    """Validate client member and return role name."""
+    row = await db_conn.fetchrow(
+        """
+        SELECT email AS db_email
+        FROM public.client_members
+        WHERE id = $1 AND organization_id = $2
+        """,
+        user_id,
+        organization_id,
+    )
+
+    if not row:
+        raise_forbidden_error(
+            request,
+            "Client user not found in organization",
+            "User is not a client member of this organization.",
+        )
+
+    validate_email_match(request, row["db_email"], user_email, "client", "client membership")
+    return "client"
+
+
+async def validate_candidate(
+    request: Request,
+    db_conn,
+    user_id: str,
+    organization_id: str,
+    user_email: str,
+) -> str:
+    """Validate candidate and return role name."""
+    row = await db_conn.fetchrow(
+        """
+        SELECT email AS db_email, is_active
+        FROM public.candidates
+        WHERE candidate_id = $1 AND organization_id = $2
+        """,
+        user_id,
+        organization_id,
+    )
+
+    if not row:
+        raise_forbidden_error(
+            request,
+            "Candidate user not found in organization",
+            "User is not a candidate of this organization.",
+        )
+
+    if not row["is_active"]:
+        raise_forbidden_error(
+            request,
+            "Candidate account is inactive",
+            "Your candidate account is inactive.",
+        )
+
+    validate_email_match(request, row["db_email"], user_email, "candidate", "candidate profile")
+    return "candidate"
 
 
 def check_user_access(permission_code, user_id, organisation_id):
@@ -185,50 +376,28 @@ async def get_user_from_auth(
     and sets audit context in request.state.
     Ensures audit context is populated even during authentication/authorization failures.
     """
-
     user = getattr(request.state, "user", None)
     print(user)
 
-    user_id = None
-    organization_id = None
-    user_email = None
-    session_id = None
+    # Extract user data from JWT token
+    user_id, organization_id, user_email, session_id = extract_user_data(user)
 
-    # Default values for audit log
-    # request.state.audit_table = "organization_members"
-    request.state.audit_risk_level = "high"  # auth failures are high risk
-    request.state.audit_description = "Authentication or authorization failure"
+    # Setup audit context
+    setup_audit_context(request, user_id, user_email, organization_id, session_id)
 
-    if user:
-        user_id = user.get("sub")
-        user_metadata = user.get("user_metadata", {})
-        organization_id = user_metadata.get("organization_id")
-        user_email = user.get("email")
-        session_id = user.get("session_id")
-
-    request.state.audit_user_context = {
-        "user_id": user_id,
-        "user_email": user_email,
-        "user_role": "unknown",
-        "organization_id": organization_id,
-        "session_id": session_id,
-    }
-
+    # Validate basic authentication
     if not user:
-        request.state.audit_description = (
-            "User not authenticated (missing token or invalid token)"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
+        raise_auth_error(
+            request,
+            "User not authenticated (missing token or invalid token)",
+            "Not authenticated",
         )
 
     if not user_id or not organization_id:
-        request.state.audit_description = "JWT token missing user_id or organization_id"
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token: missing user or organization ID",
+        raise_auth_error(
+            request,
+            "JWT token missing user_id or organization_id",
+            "Invalid token: missing user or organization ID",
         )
 
 #     if not session_id:
@@ -238,170 +407,35 @@ async def get_user_from_auth(
 #             detail="Invalid token: missing session ID",
 #         )
 
-#    # Check session status first
-#     session_row = await db_conn.fetchrow(
-#         """
-#         SELECT session_status, logout_timestamp
-#         FROM public.user_sessions
-#         WHERE id = $1 AND user_id = $2 AND organization_id = $3
-#         """,
-#         session_id,
-#         user_id,
-#         organization_id,
-#     )
-
-#     if not session_row:
-#         request.state.audit_description = "Session not found in database"
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Invalid session: session not found",
-#         )
-
-#     if session_row["session_status"] != "active" or session_row["logout_timestamp"] is not None:
-#         request.state.audit_description = f"Session is {session_row['session_status']} or logged out"
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Session expired or logged out. Please login again.",
-#         )
-
-    # row = await db_conn.fetchrow(
-    #     """
-    #     SELECT m.status, r.name AS role_name
-    #     FROM public.organization_members m
-    #     LEFT JOIN public.roles r ON r.id = m.role_id
-    #     WHERE m.user_id = $1 AND m.organization_id = $2
-    #     """,
-    #     user_id,
-    #     organization_id,
-    # )
-    print("user_id")
-    print(user_id)
-    print(organization_id)
-    print("new")
-    # Determine strict user type from JWT metadata
+    # Get user metadata and validate user type
+    user_metadata = user.get("user_metadata", {})
     user_type = user_metadata.get("type")
+
     if not user_type:
-        request.state.audit_description = "JWT token missing user type"
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token: missing user type",
+        raise_auth_error(
+            request,
+            "JWT token missing user type",
+            "Invalid token: missing user type",
         )
 
-    # Branch by user type and validate membership/status
-    role_name = "unknown"
-    if user_type == "organization_member":
-        row = await db_conn.fetchrow(
-            """
-            SELECT m.status, m.email AS db_email, r.name AS role_name
-            FROM public.organization_members m
-            LEFT JOIN public.roles r ON r.id = m.role_id
-            WHERE m.user_id = $1 AND m.organization_id = $2
-            """,
-            user_id,
-            organization_id,
+    # Validate user based on type using helper functions
+    user_type_validators = {
+        "organization_member": validate_organization_member,
+        "client": validate_client_member,
+        "candidate": validate_candidate,
+    }
+
+    if user_type not in user_type_validators:
+        raise_auth_error(
+            request,
+            f"Unsupported user type: {user_type}",
+            "Invalid token: unsupported user type",
         )
 
-        if not row:
-            request.state.audit_description = "User is not a member of the organization"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User is not a member of this organization.",
-            )
-
-        if not is_allowed_user_status(row["status"]):
-            request.state.audit_description = f"Membership status is '{row['status']}'"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your account is suspended or inactive.",
-            )
-
-        db_email = row["db_email"]
-        if (
-            db_email
-            and user_email
-            and db_email.strip().lower() != user_email.strip().lower()
-        ):
-            request.state.audit_user_context["user_role"] = row["role_name"] or "unknown"
-            request.state.audit_description = "JWT email does not match member record"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Email mismatch between token and organization membership.",
-            )
-
-        role_name = row["role_name"] or "unknown"
-
-    elif user_type == "client":
-        row = await db_conn.fetchrow(
-            """
-            SELECT email AS db_email
-            FROM public.client_members
-            WHERE id = $1 AND organization_id = $2
-            """,
-            user_id,
-            organization_id,
-        )
-        if not row:
-            request.state.audit_description = "Client user not found in organization"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User is not a client member of this organization.",
-            )
-        db_email = row["db_email"]
-        if (
-            db_email
-            and user_email
-            and db_email.strip().lower() != user_email.strip().lower()
-        ):
-            request.state.audit_user_context["user_role"] = "client"
-            request.state.audit_description = "JWT email does not match client member record"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Email mismatch between token and client membership.",
-            )
-        role_name = "client"
-
-    elif user_type == "candidate":
-        row = await db_conn.fetchrow(
-            """
-            SELECT email AS db_email, is_active
-            FROM public.candidates
-            WHERE candidate_id = $1 AND organization_id = $2
-            """,
-            user_id,
-            organization_id,
-        )
-        if not row:
-            request.state.audit_description = "Candidate user not found in organization"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User is not a candidate of this organization.",
-            )
-        if not row["is_active"]:
-            request.state.audit_description = "Candidate account is inactive"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your candidate account is inactive.",
-            )
-        db_email = row["db_email"]
-        if (
-            db_email
-            and user_email
-            and db_email.strip().lower() != user_email.strip().lower()
-        ):
-            request.state.audit_user_context["user_role"] = "candidate"
-            request.state.audit_description = "JWT email does not match candidate record"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Email mismatch between token and candidate profile.",
-            )
-        role_name = "candidate"
-
-    else:
-        request.state.audit_description = f"Unsupported user type: {user_type}"
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token: unsupported user type",
-        )
+    # Validate user and get role
+    role_name = await user_type_validators[user_type](
+        request, db_conn, user_id, organization_id, user_email
+    )
 
     # ✅ User is valid, update audit context and success markers
     request.state.audit_user_context["user_role"] = role_name
@@ -441,8 +475,6 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         app (FastAPI): The FastAPI application instance
         supabase (Client): The Supabase client instance
     """
-
-    # pylint: disable=R0903
 
     async def dispatch(self, request: Request, call_next):
         """Process incoming requests to validate JWT tokens

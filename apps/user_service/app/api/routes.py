@@ -4,7 +4,6 @@ This module sets up the main API router and includes all sub-routers
 for different API endpoints.
 """
 
-# pylint: disable=all
 # flake8: noqa
 # type: ignore
 # pants: no-infer-dep
@@ -12,15 +11,6 @@ for different API endpoints.
 import os
 import sys
 
-# Add apps/api_service to sys.path so 'app' and 'libs' can be imported
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, base_path)
-
-# Also add the monorepo root for shared `libs`
-monorepo_root = os.path.abspath(os.path.join(base_path, "../.."))
-sys.path.insert(0, monorepo_root)
-
-# pylint: disable=wrong-import-position
 from fastapi import APIRouter
 
 # Import admin management routers
@@ -39,18 +29,18 @@ from apps.user_service.app.api.admin_management.permissions import (
     router as permissions_router,
 )
 
+from apps.user_service.app.api.admin_management.router import router as admin_management_router
 from apps.user_service.app.api.audit_logs.audit_logs import router as audit_logs_router
 
-import importlib.util
 
-role_permissions_spec = importlib.util.spec_from_file_location(
-    "role_permissions", "apps/user_service/app/api/admin_management/role_permissions.py"
-)
-role_permissions_module = importlib.util.module_from_spec(role_permissions_spec)
-role_permissions_spec.loader.exec_module(role_permissions_module)
-role_permissions_router = role_permissions_module.router
+# Add apps/api_service to sys.path so 'app' and 'libs' can be imported
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, base_path)
 
-# pylint: enable=wrong-import-position
+# Also add the monorepo root for shared `libs`
+monorepo_root = os.path.abspath(os.path.join(base_path, "../.."))
+sys.path.insert(0, monorepo_root)
+
 
 # Create main API router
 router = APIRouter(prefix="/v1")
@@ -62,7 +52,7 @@ router.include_router(users_router, prefix="/admin")
 router.include_router(roles_router, prefix="/admin")
 router.include_router(sessions_router, prefix="/admin")
 router.include_router(permissions_router, prefix="/admin")
-router.include_router(role_permissions_router, prefix="/admin")
+router.include_router(admin_management_router, prefix="/admin")
 router.include_router(audit_logs_router, prefix="/admin")
 
 

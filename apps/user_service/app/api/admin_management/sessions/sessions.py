@@ -1,5 +1,5 @@
-# pylint: disable=import-error,no-name-in-module
-# pylint: disable=logging-fstring-interpolation
+
+
 """
 Sessions Management API Module
 
@@ -90,7 +90,7 @@ async def check_session_exists(session_id: str, db_conn) -> bool:
     """
     query = """
         SELECT EXISTS(
-            SELECT 1 FROM public.user_sessions 
+            SELECT 1 FROM public.user_sessions
             WHERE id = $1
         );
     """
@@ -192,14 +192,14 @@ def build_sessions_filter_query(
     Build SQL query for filtering sessions with search and pagination.
     """
     base_query = """
-        SELECT 
+        SELECT
             us.id, us.user_id, us.organization_id, us.ip_address, us.user_agent,
             us.device_fingerprint, us.risk_score, us.login_timestamp,
             us.logout_timestamp, us.session_status, us.login_method,
             us.accessed_phi, us.phi_access_purpose,
             om.email as user_email, om.full_name as user_name
         FROM public.user_sessions us
-        LEFT JOIN public.organization_members om 
+        LEFT JOIN public.organization_members om
             ON us.user_id = om.user_id AND us.organization_id = om.organization_id
         WHERE us.organization_id = $1
     """
@@ -233,7 +233,7 @@ def build_sessions_filter_query(
     offset_param = f"${param_count}"
 
     base_query += f"""
-        ORDER BY us.login_timestamp DESC 
+        ORDER BY us.login_timestamp DESC
         LIMIT {limit_param} OFFSET {offset_param}
     """
     params.extend([filters.limit, filters.offset])
@@ -255,7 +255,7 @@ def build_sessions_count_query(
     count_query = """
         SELECT COUNT(*) as total_count
         FROM public.user_sessions us
-        LEFT JOIN public.organization_members om 
+        LEFT JOIN public.organization_members om
             ON us.user_id = om.user_id AND us.organization_id = om.organization_id
         WHERE us.organization_id = $1
     """
@@ -269,7 +269,7 @@ def build_sessions_count_query(
         count_query += f"""
             AND (
                 om.email ILIKE ${param_count} OR
-                om.full_name ILIKE ${param_count} 
+                om.full_name ILIKE ${param_count}
             )
         """
         params.append(f"%{search}%")
@@ -323,7 +323,7 @@ async def check_session_exists_in_org(
 
     """
     query = """
-        SELECT 
+        SELECT
             us.id, us.user_id, us.organization_id, us.ip_address, us.user_agent,
             us.device_fingerprint, us.risk_score, us.login_timestamp,
             us.logout_timestamp, us.session_status, us.login_method,
@@ -391,10 +391,10 @@ def build_session_update_query(
     update_params.append(organization_id)
 
     update_query = f"""
-        UPDATE public.user_sessions 
+        UPDATE public.user_sessions
         SET {', '.join(update_fields)}
         WHERE id = {session_id_param} AND organization_id = {org_id_param}
-        RETURNING 
+        RETURNING
             id, user_id, organization_id, ip_address, user_agent,
             device_fingerprint, risk_score, login_timestamp,
             logout_timestamp, session_status, login_method,
@@ -426,7 +426,7 @@ async def _create_session_record(
             session_status, login_method, accessed_phi, phi_access_purpose
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), 'active', $8, $9, $10)
-        RETURNING 
+        RETURNING
             id, user_id, organization_id, ip_address, user_agent,
             device_fingerprint, risk_score, login_timestamp,
             logout_timestamp, session_status, login_method,
@@ -483,23 +483,23 @@ async def create_session(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"POST /sessions request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}"
+        ("POST /sessions request started - Request ID: %s, ",request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s, ",current_user.get('organization_id'))
     )
 
     # Extract and validate user context from JWT token
     user_context = extract_user_context(current_user)
     logger.debug(
-        f"User context extracted - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}"
+        ("User context extracted - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
     )
 
     # Extract session ID from JWT token
     session_id = extract_session_id_from_token(current_user)
     logger.debug(
-        f"Session ID extracted from token - Request ID: {request_id}, "
-        f"Session ID: {session_id}"
+        ("Session ID extracted from token - Request ID: %s, ",request_id),
+        ("Session ID: %s, ",session_id)
     )
 
     # Set audit context for session creation
@@ -510,21 +510,21 @@ async def create_session(
     )
     request.state.audit_risk_level = "medium"
     logger.debug(
-        f"Audit context set for session creation - Request ID: {request_id}, "
-        f"Session ID: {session_id}, User Email: {user_context.email}"
+        ("Audit context set for session creation - Request ID: %s, ",request_id),
+        ("Session ID: %s, User Email: %s",session_id,user_context.email)
     )
 
     # Check if session already exists
     session_exists = await check_session_exists(session_id, db_conn)
     logger.debug(
-        f"Session existence check completed - Request ID: {request_id}, "
-        f"Session ID: {session_id}, Session exists: {session_exists}"
+        ("Session existence check completed - Request ID: %s, ",request_id),
+        ("Session ID: %s, Session exists: %s",session_id,session_exists)
     )
 
     if session_exists:
         logger.warning(
-            f"Session already exists - Request ID: {request_id}, "
-            f"Session ID: {session_id}"
+            ("Session already exists - Request ID: %s, ",request_id),
+            ("Session ID: %s, ",session_id)
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -534,11 +534,11 @@ async def create_session(
     # Extract client information from request headers
     session_data = await _extract_session_data_from_request(request)
     logger.debug(
-        f"Session data extracted from request - Request ID: {request_id}, "
-        f"IP Address: {session_data['ip_address']}, "
-        f"User Agent: {session_data['user_agent'][:50]}..., "
-        f"Risk Score: {session_data['risk_score']}, "
-        f"Login Method: {session_data['login_method']}"
+        ("Session data extracted from request - Request ID: %s, ",request_id),
+        ("IP Address: %s, ",session_data['ip_address']),
+        ("User Agent: %s, ",session_data['user_agent'][:50]),
+        ("Risk Score: %s, ",session_data['risk_score']),
+        ("Login Method: %s",session_data['login_method'])
     )
 
     # Create the session using async SQL
@@ -546,8 +546,8 @@ async def create_session(
         db_conn, session_data, user_context, session_id
     )
     logger.debug(
-        f"Session record created in database - Request ID: {request_id}, "
-        f"Session ID: {session_id}, User ID: {user_context.user_id}"
+        ("Session record created in database - Request ID: %s, ",request_id),
+        ("Session ID: %s, User ID: %s",session_id,user_context.user_id)
     )
 
     # Set audit context with new session data
@@ -587,10 +587,10 @@ async def create_session(
     )
 
     logger.info(
-        f"POST /sessions request completed successfully - Request ID: {request_id}, "
-        f"Session ID: {session_id}, User ID: {user_context.user_id}, "
-        f"IP Address: {session_data['ip_address']}, Risk Score: {session_data['risk_score']}, "
-        f"Status Code: 201"
+        ("POST /sessions request completed successfully - Request ID: %s, ",request_id),
+        ("Session ID: %s, User ID: %s, ",session_id,user_context.user_id),
+        ("IP Address: %s, Risk Score: %s, ",session_data['ip_address'],session_data['risk_score']),
+        ("Status Code: 201")
     )
 
     return CreateSessionResponse(
@@ -681,21 +681,21 @@ async def update_session_logout(
     """
     request_id = str(uuid.uuid4())
     logger.info(
-        f"PUT /sessions/logout request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
+        ("PUT /sessions/logout request started - Request ID: %s, ",request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
     )
 
     session_id = extract_session_id_from_token(current_user)
     logger.debug(
-        f"Session ID extracted from token - Request ID: {request_id}, "
-        f"Session ID: {session_id}"
+        ("Session ID extracted from token - Request ID: %s, ",request_id),
+        ("Session ID: %s, ",session_id)
     )
 
     # Extract and validate user context from JWT token
     user_context = extract_user_context(current_user)
     logger.debug(
-        f"User context extracted - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}"
+        ("User context extracted - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
     )
 
     # Check permission using utility function
@@ -712,8 +712,8 @@ async def update_session_logout(
     request.state.audit_description = "Updated session logout information"
     request.state.audit_risk_level = "medium"
     logger.debug(
-        f"Audit context set for session logout update - Request ID: {request_id}, "
-        f"Session ID: {session_id}"
+        ("Audit context set for session logout update - Request ID: %s, ",request_id),
+        ("Session ID: %s, ",session_id)
     )
 
     # Check if session exists in organization and get current data
@@ -721,8 +721,8 @@ async def update_session_logout(
         session_id, user_context.organization_id, db_conn
     )
     logger.debug(
-        f"Existing session retrieved - Request ID: {request_id}, "
-        f"Session ID: {session_id}, Session Status: {existing_session['session_status']}"
+        ("Existing session retrieved - Request ID: %s, ",request_id),
+        ("Session ID: %s, Session Status: %s",session_id,existing_session['session_status'])
     )
 
     # Set old values for audit comparison
@@ -747,8 +747,8 @@ async def update_session_logout(
         logout_reason="user_logout",
     )
     logger.debug(
-        f"Logout data prepared - Request ID: {request_id}, "
-        f"Session ID: {session_id}, New Status: inactive"
+        ("Logout data prepared - Request ID: %s, ",request_id),
+        ("Session ID: %s, New Status: inactive",session_id)
     )
 
     # Build update query using utility function
@@ -759,8 +759,8 @@ async def update_session_logout(
     # Execute update query
     updated_session = await db_conn.fetchrow(update_query, *update_params)
     logger.debug(
-        f"Session logout updated in database - Request ID: {request_id}, "
-        f"Session ID: {session_id}, Update successful: {updated_session is not None}"
+        ("Session logout updated in database - Request ID: %s, ",request_id),
+        ("Session ID: %s, Update successful: %s",session_id,updated_session is not None)
     )
 
     # Set new values for audit comparison
@@ -796,10 +796,10 @@ async def update_session_logout(
     )
 
     logger.info(
-        f"PUT /sessions/logout request completed successfully - Request ID: {request_id}, "
-        f"Session ID: {session_id}, User ID: {user_context.user_id}, "
-        f"Old Status: {existing_session['session_status']}, New Status: inactive, "
-        f"Status Code: 200"
+        ("PUT /sessions/logout request completed successfully - Request ID: %s, ",request_id),
+        ("Session ID: %s, User ID: %s, ",session_id,user_context.user_id),
+        ("Old Status: %s, New Status: inactive, ",existing_session['session_status']),
+        ("Status Code: 200")
     )
 
     return UpdateSessionResponse(
@@ -823,7 +823,7 @@ async def update_session_logout(
 #     category="SESSION",
 # )
 async def get_sessions(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
     query_params: SessionQueryParams = Depends(),
@@ -846,19 +846,19 @@ async def get_sessions(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"GET /sessions request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Search: {query_params.search}, Session Status: {query_params.session_status}, "
-        f"Login Method: {query_params.login_method}, Page: {query_params.page}, "
-        f"Page Size: {query_params.page_size}"
+        ("GET /sessions request started - Request ID: %s, ",request_id),
+        ("User ID: %s, ",current_user.get('user_id')),
+        ("Organization ID: %s, ",current_user.get('organization_id')),
+        ("Search: %s, Session Status: %s, ",query_params.search,query_params.session_status),
+        ("Login Method: %s, Page: %s, ",query_params.login_method,query_params.page),
+        ("Page Size: %s",query_params.page_size)
     )
 
     # Extract and validate user context from JWT token
     user_context = extract_user_context(current_user)
     logger.debug(
-        f"User context extracted - Request ID: {request_id}, "
-        f"Email: {user_context.email}, Organization ID: {user_context.organization_id}"
+        ("User context extracted - Request ID: %s, ",request_id),
+        ("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
     )
 
     # Check permission using utility function
@@ -876,8 +876,8 @@ async def get_sessions(
     )
     request.state.audit_risk_level = "medium"
     logger.debug(
-        f"Audit context set for session list access - Request ID: {request_id}, "
-        f"Search: {query_params.search or 'none'}"
+        ("Audit context set for session list access - Request ID: %s, ",request_id),
+        ("Search: %s, ",query_params.search or 'none')
     )
 
     # Validate pagination parameters and calculate offset
@@ -885,8 +885,8 @@ async def get_sessions(
         query_params.page, query_params.page_size
     )
     logger.debug(
-        f"Pagination parameters validated - Request ID: {request_id}, "
-        f"Page: {page}, Page Size: {page_size}, Offset: {offset}"
+        ("Pagination parameters validated - Request ID: %s, ",request_id),
+        ("Page: %s, Page Size: %s, Offset: %s",page,page_size,offset)
     )
 
     # Fetch sessions data and count
@@ -894,15 +894,15 @@ async def get_sessions(
         db_conn, user_context, query_params, page_size, offset
     )
     logger.debug(
-        f"Sessions data fetched - Request ID: {request_id}, "
-        f"Sessions count: {len(sessions_data)}, Total count: {total_count}"
+        ("Sessions data fetched - Request ID: %s, ",request_id),
+        ("Sessions count: %s, Total count: %s",len(sessions_data),total_count)
     )
 
     # Format sessions data using utility functions
     sessions = [_format_session_item(session) for session in sessions_data]
     logger.debug(
-        f"Sessions data formatted - Request ID: {request_id}, "
-        f"Formatted sessions count: {len(sessions)}"
+        ("Sessions data formatted - Request ID: %s, ",request_id),
+        ("Formatted sessions count: %s",len(sessions))
     )
 
     # Build response message using utility function
@@ -927,9 +927,9 @@ async def get_sessions(
     }
 
     logger.info(
-        f"GET /sessions request completed successfully - Request ID: {request_id}, "
-        f"Sessions Count: {len(sessions)}, Total Count: {total_count}, "
-        f"Page: {page}, Page Size: {page_size}, Status Code: 200"
+        ("GET /sessions request completed successfully - Request ID: %s, ",request_id),
+        ("Sessions Count: %s, Total Count: %s, ",len(sessions),total_count),
+        ("Page: %s, Page Size: %s, Status Code: 200",page,page_size)
     )
 
     return SessionsResponse(

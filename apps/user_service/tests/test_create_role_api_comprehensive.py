@@ -49,13 +49,13 @@ with patch("supabase.create_client") as mock_create_client:
     from libs.shared_db.postgres_db.db import get_async_db_conn
 
 # Create test app
-test_app = create_test_app()
+app_instance = create_test_app()
 
 
 # Additional fixtures for this endpoint
 @pytest.fixture
 def app():
-    return test_app
+    return app_instance
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ class TestCreateRoleEssential:
         """Unit Test 1: Successful role creation with permissions (covers happy path)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -94,10 +94,10 @@ class TestCreateRoleEssential:
         request.url.path = "/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             return_value=True,
@@ -107,7 +107,7 @@ class TestCreateRoleEssential:
                 {"valid_count": 2},  # Permission validation
                 None,  # Name uniqueness check
                 {
-                    "id": uuid.uuid4(), 
+                    "id": uuid.uuid4(),
                     "name": "Test Role",
                     "description": "Test role description",
                     "is_default": False,
@@ -132,7 +132,7 @@ class TestCreateRoleEssential:
     ):
         """Integration Test 1: Successful role creation via HTTP"""
         from datetime import datetime
-        
+
         # Clear any previous responses and set up specific ones
         fake_conn.clear_query_responses()
         fake_conn.set_query_response(
@@ -141,14 +141,14 @@ class TestCreateRoleEssential:
         fake_conn.set_query_response(
             "name = $1", None
         )  # No name conflict (broader pattern)
-        
+
         # Set up response for role creation with proper datetime objects
         fake_conn.set_query_response(
-            "INSERT INTO public.roles", 
+            "INSERT INTO public.roles",
             {
                 "id": str(uuid.uuid4()),
                 "name": "Test Role",
-                "description": "Test role description", 
+                "description": "Test role description",
                 "is_default": False,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
@@ -183,7 +183,7 @@ class TestCreateRoleEssential:
         """Unit Test 2: Invalid permission IDs (covers input validation)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -192,10 +192,10 @@ class TestCreateRoleEssential:
         request.url.path = "/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/roles"}.get(key))
-        
+
         invalid_request = CreateRoleRequest(
             name="Test Role",
             description="Test description",
@@ -237,7 +237,7 @@ class TestCreateRoleEssential:
         """Unit Test 3: Insufficient permissions (covers authorization)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -246,10 +246,10 @@ class TestCreateRoleEssential:
         request.url.path = "/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             return_value=False,
@@ -294,7 +294,7 @@ class TestCreateRoleEssential:
         """Unit Test 4: Role name conflict (covers error handling for conflicts)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -303,10 +303,10 @@ class TestCreateRoleEssential:
         request.url.path = "/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             return_value=True,
@@ -369,7 +369,7 @@ class TestCreateRoleEssential:
         """Unit Test 5: Database error (covers exception handling)"""
         from starlette.requests import Request
         from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -378,10 +378,10 @@ class TestCreateRoleEssential:
         request.url.path = "/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             side_effect=Exception("Database connection failed"),
@@ -431,8 +431,8 @@ class TestCreateRoleEssential:
                 # If we get a response, it should be 500
                 assert response.status_code == 500
                 data = response.json()
-                assert "Internal server error" in data["detail"]
-            except Exception as e:
+                assert "Database insert failed" in data["detail"]
+            except RuntimeError as e:
                 # If exception bubbles up, verify it's the expected database error
                 assert "Database insert failed" in str(e)
 
@@ -458,7 +458,7 @@ def mock_request():
     """Mock FastAPI Request object"""
     from starlette.requests import Request
     from starlette.datastructures import State
-    
+
     mock_req = Mock(spec=Request)
     mock_req.headers = {}
     mock_req.state = State()

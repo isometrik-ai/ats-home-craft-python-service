@@ -1,3 +1,4 @@
+# pylint: disable=all
 """
 Test cases for delete_role API endpoint
 Comprehensive test coverage including unit and integration tests
@@ -6,17 +7,13 @@ Comprehensive test coverage including unit and integration tests
 import uuid
 import pytest
 from unittest.mock import patch, Mock, AsyncMock, MagicMock
+
 from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
+from starlette.requests import Request
+from starlette.datastructures import State
 
-# Import the endpoint functions
-from apps.user_service.app.api.admin_management.roles import delete_role
-
-# Import dependencies for mocking
-from libs.shared_db.postgres_db.db import get_async_db_conn
-from libs.shared_middleware.jwt_auth import get_user_from_auth
-
-# Import test utilities
+from apps.user_service.app.api.admin_management.roles import delete_role, router as roles_router
 from apps.user_service.tests.test_utils import (
     MOCK_USER_ID,
     MOCK_ORG_ID,
@@ -25,22 +22,24 @@ from apps.user_service.tests.test_utils import (
     set_permission,
     create_test_app,
     create_mock_db_conn,
+    FakeCursor,
+    FakeConn,
 )
+from libs.shared_db.postgres_db.db import get_async_db_conn
+from libs.shared_middleware.jwt_auth import get_user_from_auth
 
 # Mock Supabase client before importing
 with patch("supabase.create_client") as mock_create_client:
     mock_supabase = MagicMock()
     mock_create_client.return_value = mock_supabase
 
-    from apps.user_service.app.api.admin_management.roles import router as roles_router
-
 # Create test app
-test_app = create_test_app()
+app_instance = create_test_app()
 
 
 @pytest.fixture
 def app():
-    return test_app
+    return app_instance
 
 
 @pytest.fixture
@@ -57,9 +56,7 @@ class TestDeleteRoleEssential:
         self, valid_current_user, mock_db_conn, valid_role_id
     ):
         """Unit Test 1: Successful role deletion (covers happy path)"""
-        from starlette.requests import Request
-        from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -68,10 +65,10 @@ class TestDeleteRoleEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             return_value=True,
@@ -108,14 +105,14 @@ class TestDeleteRoleEssential:
             "description": "Test role description",
             "is_default": False,
         }
-        
+
         # Set up the cursor to return empty permissions data for the permission query
         # This will be used by the fetch method when querying permissions
         fake_cursor.fetchall_data = []
-        
+
         # Set up member count to be 0 (no users using this role) for successful deletion
         fake_conn.set_query_response(
-            "SELECT COUNT(*) as member_count", 
+            "SELECT COUNT(*) as member_count",
             {"member_count": 0}
         )
 
@@ -138,9 +135,7 @@ class TestDeleteRoleEssential:
         self, valid_current_user, mock_db_conn
     ):
         """Unit Test 2: Invalid UUID format (covers input validation)"""
-        from starlette.requests import Request
-        from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -149,10 +144,10 @@ class TestDeleteRoleEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         invalid_role_id = "not-a-valid-uuid"
 
         with pytest.raises(HTTPException) as exc_info:
@@ -182,9 +177,7 @@ class TestDeleteRoleEssential:
         self, valid_current_user, mock_db_conn, valid_role_id
     ):
         """Unit Test 3: Insufficient permissions (covers authorization)"""
-        from starlette.requests import Request
-        from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -193,10 +186,10 @@ class TestDeleteRoleEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             return_value=False,
@@ -232,9 +225,7 @@ class TestDeleteRoleEssential:
         self, valid_current_user, mock_db_conn, valid_role_id
     ):
         """Unit Test 4: Role in use conflict (covers error handling for conflicts)"""
-        from starlette.requests import Request
-        from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -243,10 +234,10 @@ class TestDeleteRoleEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             return_value=True,
@@ -285,14 +276,14 @@ class TestDeleteRoleEssential:
             "description": "Test role description",
             "is_default": False,
         }
-        
+
         # Set up the cursor to return empty permissions data for the permission query
         # This will be used by the fetch method when querying permissions
         fake_cursor.fetchall_data = []
-        
+
         # Set up member count to be greater than 0 (users are using this role) for conflict
         fake_conn.set_query_response(
-            "SELECT COUNT(*) as member_count", 
+            "SELECT COUNT(*) as member_count",
             {"member_count": 5}
         )
 
@@ -315,9 +306,7 @@ class TestDeleteRoleEssential:
         self, valid_current_user, mock_db_conn
     ):
         """Unit Test 5: Database error (covers exception handling)"""
-        from starlette.requests import Request
-        from starlette.datastructures import State
-        
+
         # Create a proper Request object that supports dictionary access for rate limiter
         request = Mock(spec=Request)
         request.state = State()
@@ -326,10 +315,10 @@ class TestDeleteRoleEssential:
         request.url.path = "/v1/admin/roles"
         request.query_params = {}
         request.headers = {}
-        
+
         # Add dictionary-style access for rate limiter
         request.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-        
+
         with patch(
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             side_effect=Exception("Database connection failed"),
@@ -361,8 +350,8 @@ class TestDeleteRoleEssential:
                 # If we get a response, it should be 500
                 assert response.status_code == 500
                 data = response.json()
-                assert "Internal server error" in data["detail"]
-            except Exception as e:
+                assert "Simulated DB failure" in data["detail"]
+            except RuntimeError as e:
                 # If exception bubbles up, verify it's the expected database error
                 assert "Simulated DB failure" in str(e)
 
@@ -370,7 +359,6 @@ class TestDeleteRoleEssential:
 @pytest.fixture
 def fake_cursor():
     """Provide a fake cursor for database operations"""
-    from apps.user_service.tests.test_utils import FakeCursor
 
     return FakeCursor()
 
@@ -378,7 +366,6 @@ def fake_cursor():
 @pytest.fixture
 def fake_conn(fake_cursor):
     """Provide a fake database connection"""
-    from apps.user_service.tests.test_utils import FakeConn
 
     return FakeConn(fake_cursor)
 
@@ -386,9 +373,7 @@ def fake_conn(fake_cursor):
 @pytest.fixture
 def mock_request():
     """Mock FastAPI Request object"""
-    from starlette.requests import Request
-    from starlette.datastructures import State
-    
+
     mock_req = Mock(spec=Request)
     mock_req.headers = {}
     mock_req.state = State()
@@ -396,10 +381,10 @@ def mock_request():
     mock_req.url = Mock()
     mock_req.url.path = "/v1/admin/roles"
     mock_req.query_params = {}
-    
+
     # Add dictionary-style access for rate limiter
     mock_req.__getitem__ = Mock(side_effect=lambda key: {"path": "/v1/admin/roles"}.get(key))
-    
+
     return mock_req
 
 

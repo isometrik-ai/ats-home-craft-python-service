@@ -1,4 +1,3 @@
-# pylint: disable=import-error,no-name-in-module
 """
 Role_Permissions Relation API Module
 

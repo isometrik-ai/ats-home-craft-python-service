@@ -1,5 +1,3 @@
-# pylint: disable=import-error,no-name-in-module
-# pylint: disable=logging-fstring-interpolation
 """
 Roles Management API Module
 
@@ -66,8 +64,6 @@ from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import ROLE_SELECT_FIELDS, PERMISSION_SELECT_FIELDS
 
 
-# Create router for roles endpoints
-router = APIRouter(prefix="/roles", tags=["Roles Management"])
 
 # Authentication description for API documentation
 AUTH_DESCRIPTION = "Bearer token required for authentication"
@@ -76,6 +72,8 @@ AUTH_DESCRIPTION = "Bearer token required for authentication"
 logger = get_logger("roles-api")
 logger.info("Roles API module loaded")
 
+# Create router for roles endpoints
+router = APIRouter(prefix="/roles", tags=["Roles Management"])
 
 class RoleResponse(BaseModel):
     """Response model for role operations"""
@@ -98,8 +96,9 @@ class RoleResponse(BaseModel):
 #     table_name="roles",
 #     category="ROLE",
 # )
+# pylint: disable=unused-argument  # Required by @limiter.limit
 async def get_roles(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
     query_params: RoleQueryParams = Depends(),
@@ -130,25 +129,30 @@ async def get_roles(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"GET /roles request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Search: {query_params.search}, Role Type: {query_params.role_type}, "
-        f"Skip: {query_params.skip}, Limit: {query_params.limit}"
+        "GET /roles request started - Request ID: %s, "
+        "User ID: %s, "
+        "Organization ID: %s, "
+        "Search: %s, Role Type: %s, "
+        "Skip: %s, Limit: %s",
+        request_id,current_user.get('user_id'),current_user.get('organization_id'),
+        query_params.search,query_params.role_type,query_params.skip,query_params.limit
     )
     # Validate role_type parameter
     if query_params.role_type:
         validate_role_type(query_params.role_type)
         logger.debug(
-            f"Role type validation passed: {query_params.role_type} - Request ID: {request_id}"
+            (
+                "Role type validation passed: %s - Request ID: %s",
+                query_params.role_type,request_id
+            )
         )
 
     # Extract and validate user context from JWT token
     user_context = await check_roles_manage_multiple_permission(current_user, db_conn)
     logger.debug(
-        f"User permissions validated for "
-        f"organization: {user_context.organization_id} - "
-        f"Request ID: {request_id}"
+        ("User permissions validated for "
+        "organization: %s - "
+        "Request ID: %s",user_context.organization_id,request_id)
     )
 
     # Build query using utility function
@@ -164,7 +168,7 @@ async def get_roles(
     # Execute roles query
     roles_data = await db_conn.fetch(roles_query, *query_params_list)
     logger.debug(
-        f"Retrieved {len(roles_data)} roles from database - Request ID: {request_id}"
+        ("Retrieved %s roles from database - Request ID: %s",len(roles_data),request_id)
     )
 
     # Build and execute count query
@@ -177,7 +181,7 @@ async def get_roles(
 
     count_result = await db_conn.fetchrow(count_query, *count_params)
     total_count = count_result["total_count"] if count_result else 0
-    logger.debug(f"Total roles count: {total_count} - Request ID: {request_id}")
+    logger.debug(("Total roles count: %s - Request ID: %s",total_count,request_id))
 
     # Format roles data using utility functions
     roles = [
@@ -203,9 +207,10 @@ async def get_roles(
     )
 
     logger.info(
-        f"GET /roles request completed successfully - Request ID: {request_id}, "
-        f"Roles Count: {len(roles)}, Total Count: {total_count}, "
-        f"Status Code: {status.HTTP_200_OK}"
+        "GET /roles request completed successfully - Request ID: %s, "
+        "Roles Count: %s, Total Count: %s, "
+        "Status Code: %s",
+        request_id,len(roles),total_count,status.HTTP_200_OK
     )
 
     return RolesResponse(
@@ -234,7 +239,7 @@ async def get_roles(
 # )
 async def get_role_by_id(
     role_id: str,
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
 ):
@@ -253,21 +258,22 @@ async def get_role_by_id(
     """
     request_id = str(uuid.uuid4())
     logger.info(
-        f"GET /roles/{role_id} request started - Request ID: {request_id}, "
-        f"Role ID: {role_id}, User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}"
+        "GET /roles/%s request started - Request ID: %s, "
+        "Role ID: %s, User ID: %s, "
+        "Organization ID: %s",
+        role_id,request_id,role_id,current_user.get('user_id'),current_user.get('organization_id')
     )
     # Validate role_id format using utility function
     request.state.audit_requested_id = role_id
     validate_uuid_format(role_id, "role ID")
     logger.debug(
-        f"Role ID format validation passed: {role_id} - Request ID: {request_id}"
+        "Role ID format validation passed: %s - Request ID: %s",role_id,request_id
     )
 
     # Extract and validate user context from JWT token
     user_context = await check_roles_manage_permission(current_user, db_conn)
     logger.debug(
-        f"User permissions validated for organization: {user_context.organization_id}",
+        "User permissions validated for organization: %s",user_context.organization_id,
         extra={"request_id": request_id},
     )
 
@@ -286,9 +292,10 @@ async def get_role_by_id(
     # Check if role exists in user's organization
     if not role_data:
         logger.warning(
-            f"Role not found or access denied - Request ID: {request_id}, "
-            f"Role ID: {role_id}, Organization ID: {user_context.organization_id}, "
-            f"Status Code: {status.HTTP_404_NOT_FOUND}"
+            "Role not found or access denied - Request ID: %s, "
+            "Role ID: %s, Organization ID: %s, "
+            "Status Code: %s",
+            request_id,role_id,user_context.organization_id,status.HTTP_404_NOT_FOUND
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -311,7 +318,7 @@ async def get_role_by_id(
         permissions_query, role_id, user_context.organization_id
     )
     logger.debug(
-        f"Retrieved {len(permissions_data)} permissions for role - Request ID: {request_id}"
+        "Retrieved %s permissions for role - Request ID: %s",len(permissions_data),request_id
     )
 
     # Format permissions data using utility functions
@@ -339,9 +346,10 @@ async def get_role_by_id(
     )
 
     logger.info(
-        f"GET /roles/{role_id} request completed successfully - Request ID: {request_id}, "
-        f"Role ID: {role_id}, Role Name: {role_data['name']}, "
-        f"Permissions Count: {len(permissions)}, Status Code: {status.HTTP_200_OK}"
+        "GET /roles/%s request completed successfully - Request ID: %s, "
+        "Role ID: %s, Role Name: %s, "
+        "Permissions Count: %s, Status Code: %s",
+        role_id,request_id,role_id,role_data['name'],len(permissions),status.HTTP_200_OK
     )
 
     return RoleDetailResponse(
@@ -370,7 +378,7 @@ async def get_role_by_id(
 )
 async def create_role(
     role_data: CreateRoleRequest,
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
 ):
@@ -391,11 +399,17 @@ async def create_role(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"POST /roles request started - Request ID: {request_id}, "
-        f"User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Role Name: {role_data.name}, Role Type: {role_data.role_type}, "
-        f"Permissions Count: {len(role_data.permission_ids) if role_data.permission_ids else 0}"
+        "POST /roles request started - Request ID: %s, "
+        "User ID: %s, "
+        "Organization ID: %s, "
+        "Role Name: %s, Role Type: %s, "
+        "Permissions Count: %s",
+        request_id,
+        current_user.get('user_id'),
+        current_user.get('organization_id'),
+        role_data.name,
+        role_data.role_type,
+        len(role_data.permission_ids) if role_data.permission_ids else 0
     )
     # Validate role type using utility function
     # Set audit context for role creation
@@ -407,15 +421,15 @@ async def create_role(
 
     validate_role_type(role_data.role_type)
     logger.debug(
-        f"Role type validation passed: {role_data.role_type} - Request ID: {request_id}"
+        ("Role type validation passed: %s - Request ID: %s",role_data.role_type,request_id)
     )
 
     # Validate permission IDs format using utility function
     if role_data.permission_ids:
         validate_uuid_list(role_data.permission_ids, "permission ID")
         logger.debug(
-            f"Permission IDs validation passed: {len(role_data.permission_ids)}"
-            f" permissions - Request ID: {request_id}"
+            "Permission IDs validation passed: %s \n permissions - Request ID: %s",
+            len(role_data.permission_ids),request_id
         )
 
     # Extract and validate user context from JWT token
@@ -429,7 +443,7 @@ async def create_role(
         action_description="create roles",
     )
     logger.debug(
-        f"User permissions validated for role creation - Request ID: {request_id}"
+        "User permissions validated for role creation - Request ID: %s",request_id
     )
 
     # Validate that all permission IDs exist in the organization
@@ -438,7 +452,7 @@ async def create_role(
         organization_id=user_context.organization_id,
         db_conn=db_conn,
     )
-    logger.debug(f"Permission existence validation passed - Request ID: {request_id}")
+    logger.debug("Permission existence validation passed - Request ID: %s",request_id)
 
     # Check if role name is unique using utility function
     await check_role_name_unique(
@@ -447,7 +461,8 @@ async def create_role(
         db_conn=db_conn,
     )
     logger.debug(
-        f"Role name uniqueness validation passed: {role_data.name} - Request ID: {request_id}"
+        "Role name uniqueness validation passed: %s - Request ID: %s",
+        role_data.name,request_id
     )
 
     # Convert role_type to is_default boolean
@@ -472,7 +487,7 @@ async def create_role(
         )
 
         role_id = created_role["id"]
-        logger.debug(f"Role created with ID: {role_id} - Request ID: {request_id}")
+        logger.debug("Role created with ID: %s - Request ID: %s",role_id,request_id)
 
         # Set audit context with new role data
         request.state.raw_audit_new_data = {
@@ -497,16 +512,18 @@ async def create_role(
             db_conn=db_conn,
         )
         logger.debug(
-            f"Permissions assigned to role: "
-            f"{len(role_data.permission_ids) if role_data.permission_ids else 0} "
-            f"permissions - Request ID: {request_id}"
+            "Permissions assigned to role: %s \npermissions - Request ID: %s",
+            len(role_data.permission_ids) if role_data.permission_ids else 0,request_id
         )
 
     logger.info(
-        f"POST /roles request completed successfully - Request ID: {request_id}, "
-        f"Role ID: {str(role_id)}, Role Name: {role_data.name}, "
-        f"Permissions Count: {len(role_data.permission_ids) if role_data.permission_ids else 0}, "
-        f"Status Code: {status.HTTP_201_CREATED}"
+        "POST /roles request completed successfully - Request ID: %s, "
+        "Role ID: %s, Role Name: %s, "
+        "Status Code: %s",
+        request_id,str(role_id),role_data.name,status.HTTP_201_CREATED)
+    logger.info(
+        "Permissions Count: %s, ",
+        (len(role_data.permission_ids) if role_data.permission_ids else 0)
     )
 
     return CreateRoleResponse(
@@ -550,7 +567,7 @@ def _build_update_query(role_data: UpdateRoleRequest, user_context, role_id: str
         update_params.append(user_context.organization_id)
 
         update_role_query = f"""
-            UPDATE public.roles 
+            UPDATE public.roles
             SET {', '.join(update_fields)}
             WHERE id = {role_id_param} AND organization_id = {org_id_param};
         """
@@ -605,7 +622,7 @@ def _build_update_response_message(role_data: UpdateRoleRequest):
 async def update_role(
     role_id: str,
     role_data: UpdateRoleRequest,
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
 ):
@@ -635,42 +652,42 @@ async def update_role(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"PUT /roles/{role_id} request started - Request ID: {request_id}, "
-        f"Role ID: {role_id}, User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}, "
-        f"Update Fields: name={role_data.name is not None}, "
-        f"description={role_data.description is not None}, "
-        f"is_default={role_data.is_default is not None}, "
-        f"permissions={role_data.permission_ids is not None}"
+        "PUT /roles/%s request started - Request ID: %s, "
+        "Role ID: %s, User ID: %s, "
+        "Organization ID: %s, "
+        "Update Fields: name=%s, "
+        "description=%s, "
+        "is_default=%s, "
+        "permissions=%s",
+        role_id,request_id,role_id,current_user.get('user_id'),current_user.get('organization_id'),
+        role_data.name is not None,role_data.description is not None,
+        role_data.is_default is not None,role_data.permission_ids is not None
     )
     request.state.audit_requested_id = role_id
 
     # Validate role_id format using utility function
     validate_uuid_format(role_id, "role ID")
     logger.debug(
-        f"Role ID format validation passed: {role_id}", extra={"request_id": request_id}
+        "Role ID format validation passed: %s - Request ID: %s",role_id,request_id
     )
 
     # Extract and validate user context from JWT token
     user_context = await check_roles_manage_permission(current_user, db_conn)
     logger.debug(
-        f"User permissions validated for organization: {user_context.organization_id}",
-        extra={"request_id": request_id},
+        "User permissions validated for organization: %s - Request ID: %s",
+        user_context.organization_id,request_id
     )
 
     # Check if role exists in organization using utility function
     existing_role = await check_role_exists(
         role_id, user_context.organization_id, db_conn
     )
-    logger.debug(
-        f"Role existence confirmed: {existing_role['name']}",
-        extra={"request_id": request_id},
-    )
+    logger.debug("Role existence confirmed: %s - Request ID: %s",existing_role['name'],request_id)
 
     # Get current permissions for the role
     current_permissions_query = """
-        SELECT permission_id 
-        FROM public.role_permissions 
+        SELECT permission_id
+        FROM public.role_permissions
         WHERE role_id = $1 AND organization_id = $2
     """
     current_permissions = await db_conn.fetch(
@@ -705,9 +722,8 @@ async def update_role(
             db_conn=db_conn,
         )
         logger.debug(
-            f"Permission IDs validation passed: "
-            f"{len(role_data.permission_ids)} permissions - "
-            f"Request ID: {request_id}"
+            "Permission IDs validation passed: %s \npermissions - Request ID: %s",
+            len(role_data.permission_ids),request_id
         )
 
     # Check if new name conflicts with existing roles using utility function
@@ -719,7 +735,8 @@ async def update_role(
             exclude_role_id=role_id,
         )
         logger.debug(
-            f"Role name uniqueness validation passed: {role_data.name} - Request ID: {request_id}"
+            "Role name uniqueness validation passed: %s - Request ID: %s",
+            role_data.name,request_id
         )
 
     # Update the role with dynamic fields
@@ -727,13 +744,13 @@ async def update_role(
 
     if update_query:
         await db_conn.execute(update_query, *update_params)
-        logger.debug(f"Role fields updated successfully - Request ID: {request_id}")
+        logger.debug("Role fields updated successfully - Request ID: %s",request_id)
     else:
-        logger.debug(f"No role fields to update - Request ID: {request_id}")
+        logger.debug("No role fields to update - Request ID: %s",request_id)
 
     # Handle permissions update if provided using utility functions
     if role_data.permission_ids is not None:
-        logger.debug(f"Updating permissions for role - Request ID: {request_id}")
+        logger.debug("Updating permissions for role - Request ID: %s",request_id)
         # Start transaction for permissions update
         async with db_conn.transaction():
             # Remove all existing permissions using utility function
@@ -743,7 +760,7 @@ async def update_role(
                 db_conn=db_conn,
             )
             logger.debug(
-                f"Removed all existing permissions from role - Request ID: {request_id}"
+                "Removed all existing permissions from role - Request ID: %s",request_id
             )
 
             # Add new permissions if any are provided using utility function
@@ -755,11 +772,11 @@ async def update_role(
                     db_conn=db_conn,
                 )
                 logger.debug(
-                    f"Assigned {len(role_data.permission_ids)} "
-                    f"new permissions to role - Request ID: {request_id}"
+                    "Assigned %s new permissions to role - Request ID: %s",
+                    len(role_data.permission_ids),request_id
                 )
             else:
-                logger.debug(f"No new permissions to assign - Request ID: {request_id}")
+                logger.debug("No new permissions to assign - Request ID: %s",request_id)
 
     # Build response message based on what was updated
     message = _build_update_response_message(role_data)
@@ -787,9 +804,10 @@ async def update_role(
     request.state.raw_audit_new_data = new_role_data
 
     logger.info(
-        f"PUT /roles/{role_id} request completed successfully - Request ID: {request_id}, "
-        f"Role ID: {role_id}, Role Name: {existing_role['name']}, "
-        f"Update Message: {message}, Status Code: {status.HTTP_200_OK}"
+        "PUT /roles/%s request completed successfully - Request ID: %s, "
+        "Role ID: %s, Role Name: %s, "
+        "Update Message: %s, Status Code: %s",
+        role_id,request_id,role_id,existing_role['name'],message,status.HTTP_200_OK
     )
 
     return UpdateRoleResponse(
@@ -818,7 +836,7 @@ async def update_role(
 )
 async def delete_role(
     role_id: str,
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_conn=Depends(get_async_db_conn),
 ):
@@ -833,29 +851,26 @@ async def delete_role(
 
     Returns:
         DeleteRoleResponse: Success message for role deletion
-
-
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info(
-        f"DELETE /roles/{role_id} request started - Request ID: {request_id}, "
-        f"Role ID: {role_id}, User ID: {current_user.get('user_id')}, "
-        f"Organization ID: {current_user.get('organization_id')}"
+        "DELETE /roles/%s request started - Request ID: %s, "
+        "Role ID: %s, User ID: %s, "
+        "Organization ID: %s",
+        role_id,request_id,role_id,current_user.get('user_id'),current_user.get('organization_id')
     )
     request.state.audit_requested_id = role_id
 
     # Validate role_id format using utility function
     validate_uuid_format(role_id, "role ID")
-    logger.debug(
-        f"Role ID format validation passed: {role_id}", extra={"request_id": request_id}
-    )
+    logger.debug("Role ID format validation passed: %s - Request ID: %s",role_id,request_id)
 
     # Extract and validate user context from JWT token
     user_context = await check_roles_manage_permission(current_user, db_conn)
     logger.debug(
-        f"User permissions validated for organization: {user_context.organization_id}",
-        extra={"request_id": request_id},
+        "User permissions validated for organization: %s - Request ID: %s",
+        user_context.organization_id,request_id
     )
 
     # Check if role exists in organization using utility function
@@ -863,22 +878,20 @@ async def delete_role(
         role_id, user_context.organization_id, db_conn
     )
     logger.debug(
-        f"Role existence confirmed: {existing_role['name']}",
+        "Role existence confirmed: %s",existing_role['name'],
         extra={"request_id": request_id},
     )
 
     # Get current permissions for the role
     current_permissions_query = """
-        SELECT permission_id 
-        FROM public.role_permissions 
+        SELECT permission_id
+        FROM public.role_permissions
         WHERE role_id = $1 AND organization_id = $2
     """
     current_permissions = await db_conn.fetch(
         current_permissions_query, role_id, user_context.organization_id
     )
-    current_permission_ids = [
-        str(perm["permission_id"]) for perm in current_permissions
-    ]
+    current_permission_ids = [str(perm["permission_id"]) for perm in current_permissions]
 
     # Set audit context for role deletion
     request.state.audit_table = "roles"
@@ -897,20 +910,14 @@ async def delete_role(
     }
 
     # Check if role is in use by organization members using utility function
-    member_count = await check_role_usage(
-        role_id, user_context.organization_id, db_conn
-    )
-    logger.debug(
-        f"Role usage check completed: {member_count} "
-        f"members using this role - Request ID: {request_id}"
-    )
+    member_count = await check_role_usage(role_id, user_context.organization_id, db_conn)
+    logger.debug("Role usage check completed: %s ",member_count)
+    logger.debug("members using this role - Request ID: %s",request_id)
 
     if member_count > 0:
-        logger.warning(
-            f"Cannot delete role - it is currently in use - Request ID: {request_id}, "
-            f"Role ID: {role_id}, Role Name: {existing_role['name']}, "
-            f"Member Count: {member_count}, Status Code: {status.HTTP_409_CONFLICT}"
-        )
+        logger.warning("Cannot delete role - it is currently in use - Request ID: %s, ",request_id)
+        logger.warning("Role ID: %s, Role Name: %s, ",role_id,existing_role['name'])
+        logger.warning("Member Count: %s, Status Code: %s",member_count,status.HTTP_409_CONFLICT)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -928,12 +935,12 @@ async def delete_role(
             db_conn=db_conn,
         )
         logger.debug(
-            f"Removed all permissions from role before deletion - Request ID: {request_id}"
+            "Removed all permissions from role before deletion - Request ID: %s",request_id
         )
 
         # Then, delete the role itself
         delete_role_query = """
-            DELETE FROM public.roles 
+            DELETE FROM public.roles
             WHERE id = $1 AND organization_id = $2;
         """
 
@@ -944,9 +951,10 @@ async def delete_role(
         # Check if the role was actually deleted
         if result == "DELETE 0":
             logger.warning(
-                f"Role not found or already deleted - Request ID: {request_id}, "
-                f"Role ID: {role_id}, Organization ID: {user_context.organization_id}, "
-                f"Status Code: {status.HTTP_404_NOT_FOUND}"
+                "Role not found or already deleted - Request ID: %s, "
+                "Role ID: %s, Organization ID: %s, "
+                "Status Code: %s",
+                request_id,role_id,user_context.organization_id,status.HTTP_404_NOT_FOUND
             )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -965,9 +973,10 @@ async def delete_role(
         }
 
     logger.info(
-        f"DELETE /roles/{role_id} request completed successfully - Request ID: {request_id}, "
-        f"Role ID: {role_id}, Role Name: {existing_role['name']}, "
-        f"Status Code: {status.HTTP_200_OK}"
+        "DELETE /roles/%s request completed successfully - Request ID: %s, "
+        "Role ID: %s, Role Name: %s, "
+        "Status Code: %s",
+        role_id,request_id,role_id,existing_role['name'],status.HTTP_200_OK
     )
 
     return DeleteRoleResponse(

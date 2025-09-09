@@ -1,3 +1,4 @@
+# pylint: disable=invalid-name,E0213
 """
 Audit Logs Schemas Module
 
@@ -10,7 +11,7 @@ Last Updated: 2024-12-19
 """
 
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class AuditLogItem(BaseModel):
@@ -90,10 +91,8 @@ class AuditLogItem(BaseModel):
         None, description="Category classification for the audit log"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for AuditLogItem model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "organization_id": "550e8400-e29b-41d4-a716-446655440001",
@@ -116,6 +115,7 @@ class AuditLogItem(BaseModel):
                 "category": "user_management",
             }
         }
+    )
 
 
 class AuditLogDetailItem(BaseModel):
@@ -207,10 +207,8 @@ class AuditLogDetailItem(BaseModel):
         None, description="Category classification for the audit log"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for AuditLogDetailItem model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "organization_id": "550e8400-e29b-41d4-a716-446655440001",
@@ -236,6 +234,7 @@ class AuditLogDetailItem(BaseModel):
                 "category": "user_management",
             }
         }
+    )
 
 
 class AuditLogsResponse(BaseModel):
@@ -257,10 +256,8 @@ class AuditLogsResponse(BaseModel):
         ..., description="Total number of audit logs available (for pagination)"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for AuditLogsResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Audit logs retrieved successfully (showing 10 of 150 total)",
@@ -290,6 +287,7 @@ class AuditLogsResponse(BaseModel):
                 "total_count": 150,
             }
         }
+    )
 
 
 class AuditLogDetailResponse(BaseModel):
@@ -309,10 +307,8 @@ class AuditLogDetailResponse(BaseModel):
         ..., description="Detailed audit log information"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for AuditLogDetailResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Audit log details retrieved successfully",
@@ -342,6 +338,7 @@ class AuditLogDetailResponse(BaseModel):
                 },
             }
         }
+    )
 
 
 class DeleteAuditLogsResponse(BaseModel):
@@ -361,13 +358,12 @@ class DeleteAuditLogsResponse(BaseModel):
         ..., description="Number of audit logs that were deleted"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for DeleteAuditLogsResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "All audit logs deleted successfully",
                 "deleted_count": 150,
             }
         }
+    )

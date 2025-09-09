@@ -1,20 +1,14 @@
-# pylint: disable=import-error,no-name-in-module
 """
 Permmissions Management Utilities Module
 """
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Union, Dict, Any
 
+import asyncpg
 from fastapi import HTTPException, status
 from asyncpg import Record
 
-# Logger import
-from apps.user_service.app.dependencies.logger import get_logger
-
-# Shared utilities import
-from libs.shared_utils.email_utils import send_email
-
-# Schema imports
+from apps.user_service.app.dependencies.logger import get_logger  # Logger import
 from apps.user_service.app.schemas.users import (
     RoleInfo,
     PermissionInfo,
@@ -23,6 +17,7 @@ from apps.user_service.app.schemas.users import (
     UserProfileData,
     UpdateUserRequest,
 )
+from libs.shared_utils.email_utils import send_email
 
 # Initialize logger
 logger = get_logger("user-utils")
@@ -62,9 +57,15 @@ def generate_magic_link(supabase_client, email: str) -> Optional[str]:
         logger.error("Magic link not found in Supabase client response")
         return None
 
-    except Exception as error:
+    except (ValueError, AttributeError) as error:
         logger.error("Error generating magic link with Supabase client: %s", str(error))
         return None
+    except Exception as error:
+        logger.error("Unexpected error generating magic link: %s", str(error))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate magic link"
+        ) from error
 
 
 def create_admin_update_email_content(user: dict, magic_link: str) -> Tuple[str, str]:
@@ -87,37 +88,37 @@ def create_admin_update_email_content(user: dict, magic_link: str) -> Tuple[str,
         <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
             Hello {full_name},
         </p>
-        
+
         <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
             Your email id has been updated by the admin.
         </p>
-        
+
         <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
             Login using the link below:
         </p>
-        
+
         <div style="text-align: center !important; margin: 24px 0 !important;">
-            <a href="{magic_link}" 
+            <a href="{magic_link}"
                style="background-color: #3498db !important; color: white !important; padding: 12px 24px !important; text-decoration: none !important; border-radius: 6px !important; display: inline-block !important; font-weight: bold !important;">
                 Magic Link
             </a>
         </div>
-        
+
         <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
             If the button doesn't work, you can copy and paste this link into your browser:
         </p>
-        
+
         <p style="margin: 0 0 16px 0 !important; color: #3498db !important; word-break: break-all !important;">
             {magic_link}
         </p>
-        
+
         <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
             Best regards,<br>
             Team XQtiv
         </p>
-        
+
         <hr style="border: none !important; border-top: 1px solid #dee2e6 !important; margin: 24px 0 !important;">
-        
+
         <p style="font-size: 11px !important; color: #868e96 !important; margin: 0 !important;">
             This is an automated notification from XQtiv. Please do not reply to this email.
         </p>
@@ -161,13 +162,19 @@ def send_admin_update_email(supabase_client, user: dict) -> bool:
         if email_sent:
             logger.info("Admin update email sent successfully to %s", user.get("email"))
             return True
-        else:
-            logger.error("Failed to send admin update email to %s", user.get("email"))
-            return False
 
-    except Exception as error:
-        logger.error("Error sending admin update email: %s", str(error))
+        logger.error("Failed to send admin update email to %s", user.get("email"))
         return False
+
+    except (ValueError, AttributeError) as error:
+        logger.error("Error sending admin update email - validation error: %s", str(error))
+        return False
+    except Exception as error:
+        logger.error("Unexpected error sending admin update email: %s", str(error))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send admin update email"
+        ) from error
 
 
 def build_user_query(organization_id, search, page_size, offset):
@@ -175,20 +182,20 @@ def build_user_query(organization_id, search, page_size, offset):
     Build Query Get User Lists and Get count Query
     """
     base_query = """
-        SELECT 
+        SELECT
             om.user_id, om.email, om.full_name, om.status, om.first_name,
             om.last_name, om.phone, om.joined_at, om.last_active_at,
             r.name as role_name, r.id as role_id
         FROM public.organization_members om
-        INNER JOIN public.roles r 
+        INNER JOIN public.roles r
             ON om.role_id = r.id AND om.organization_id = r.organization_id
         WHERE om.organization_id = $1 AND r.name != 'Super Admin'
     """
 
     count_query = """
-        SELECT COUNT(*) 
+        SELECT COUNT(*)
         FROM public.organization_members om
-        INNER JOIN public.roles r 
+        INNER JOIN public.roles r
             ON om.role_id = r.id AND om.organization_id = r.organization_id
         WHERE om.organization_id = $1 AND r.name != 'Super Admin'
     """
@@ -217,7 +224,6 @@ def build_user_query(organization_id, search, page_size, offset):
     base_query += (
         f" ORDER BY om.joined_at DESC LIMIT ${limit_index} OFFSET ${offset_index};"
     )
-    # limit_offset_args = [page_size, offset]
 
     return {
         "base_query": base_query,
@@ -238,8 +244,8 @@ async def transform_users(users_data, organization_id, db_conn):
     role_id = users_data[0]["role_id"]
     result = await db_conn.fetchrow(
         """
-        SELECT COUNT(*) 
-        FROM public.role_permissions 
+        SELECT COUNT(*)
+        FROM public.role_permissions
         WHERE organization_id = $1 AND role_id = $2;
         """,
         organization_id,
@@ -399,20 +405,51 @@ def format_timestamps(user_profile):
     return joined_at, last_active_at
 
 
-async def update_user_activity(db_conn, user_id, org_id):
+async def update_user_activity(db_conn, user_id: str, org_id: str) -> None:
     """
     Update user's last_active_at and updated_at timestamps.
+    This is a non-critical background operation that logs errors but doesn't raise them.
+
+    Args:
+        db_conn: Database connection
+        user_id: User ID to update
+        org_id: Organization ID for the user
+
+    Note:
+        This function intentionally catches and logs all errors without raising them
+        since it's used for background activity tracking that shouldn't interrupt the main flow.
     """
+    if not isinstance(user_id, str) or not isinstance(org_id, str):
+        logger.warning(
+            "Invalid type for user_id or org_id. Expected str, got %s and %s",
+            type(user_id),
+            type(org_id)
+        )
+        return
+
+    update_query = """
+        UPDATE public.organization_members
+        SET last_active_at = NOW(), updated_at = NOW()
+        WHERE user_id = $1 AND organization_id = $2 AND status = 'active';
+    """
+
     try:
-        # async with db_conn.transaction():
-        update_query = """
-            UPDATE public.organization_members 
-            SET last_active_at = NOW(), updated_at = NOW()
-            WHERE user_id = $1 AND organization_id = $2 AND status = 'active';
-        """
         await db_conn.execute(update_query, user_id, org_id)
-    except Exception as activity_error:  # pylint: disable=broad-exception-caught
-        print(f"[WARN] Activity update failed: {activity_error}")
+    except asyncpg.exceptions.DataError as err:
+        # Handles issues with data format/content
+        logger.warning("Data error updating user activity: %s", str(err))
+    except asyncpg.exceptions.ForeignKeyViolationError as err:
+        # Handles foreign key violations
+        logger.warning("Foreign key violation updating user activity: %s", str(err))
+    except asyncpg.exceptions.UniqueViolationError as err:
+        # Handles unique constraint violations
+        logger.warning("Unique constraint violation updating user activity: %s", str(err))
+    except asyncpg.exceptions.ConnectionDoesNotExistError as err:
+        # Handles connection issues
+        logger.warning("Connection error updating user activity: %s", str(err))
+    except asyncpg.PostgresError as err:
+        # Catches any other Postgres-specific errors
+        logger.warning("Database error updating user activity: %s", str(err))
 
 
 def build_update_query(
@@ -455,13 +492,13 @@ async def fetch_user_profile(db_conn, user_id: str, org_id: str) -> Optional[Rec
     """Fetches a user's profile and role info from the database."""
     return await db_conn.fetchrow(
         """
-        SELECT 
-            om.user_id, om.email, om.full_name, om.first_name, om.last_name, 
+        SELECT
+            om.user_id, om.email, om.full_name, om.first_name, om.last_name,
             om.avatar_url, om.phone, om.timezone, om.status,
             om.joined_at, om.last_active_at,
             om.organization_id, r.id as role_id, r.name as role_name
         FROM public.organization_members om
-        INNER JOIN public.roles r ON om.role_id = r.id 
+        INNER JOIN public.roles r ON om.role_id = r.id
             AND om.organization_id = r.organization_id
         WHERE om.user_id = $1 AND om.organization_id = $2
         LIMIT 1;
@@ -478,7 +515,7 @@ async def fetch_user_permissions(
     rows = await db_conn.fetch(
         """
         SELECT DISTINCT
-            p.id as permission_id, p.code as permission_code, 
+            p.id as permission_id, p.code as permission_code,
             p.name as permission_name, p.category
         FROM public.role_permissions rp
         INNER JOIN public.permissions p ON rp.permission_id = p.id
@@ -499,22 +536,25 @@ async def fetch_user_permissions(
     ]
 
 
-def construct_profile_response(
-    user_profile: Record, permissions: list[PermissionInfo]
+def create_user_profile_data(
+    user_profile: Union[Record, Dict[str, Any]],
+    user_type: str = "organization_member",
+    role_info: Optional[Union[RoleInfo, RoleInfoWithDescription]] = None,
+    permissions: Optional[List[PermissionInfo]] = None,
 ) -> UserProfileData:
-    """Builds a UserProfileData response object from DB data and permissions."""
-    # role_info = RoleInfo(
-    #     role_id=str(user_profile["role_id"]),
-    #     role_name=user_profile["role_name"],
-    # )
-    role_info = RoleInfoWithDescription(
-        role_id=str(user_profile["role_id"]),
-        role_name=user_profile["role_name"],
-        description=user_profile.get(
-            "role_description", ""
-        ),  # fallback to empty string
-    )
+    """
+    Creates a UserProfileData object from user profile data.
+    This is the single source of truth for creating user profile responses.
 
+    Args:
+        user_profile: User profile data from database
+        user_type: Type of user (default: organization_member)
+        role_info: Optional role information
+        permissions: Optional list of permissions
+
+    Returns:
+        UserProfileData object with formatted user profile
+    """
     return UserProfileData(
         user_id=str(user_profile["user_id"]),
         email=user_profile["email"],
@@ -536,18 +576,36 @@ def construct_profile_response(
             else None
         ),
         organization_id=str(user_profile["organization_id"]),
+        user_type=user_type,
         role=role_info,
-        permissions=permissions,
+        permissions=permissions or [],
     )
 
-
-async def phone_exists_for_other_user(db_conn, phone: str, org_id: str) -> bool:
-    """Checks if user phone number exists in DB for a particular organization"""
+async def phone_exists_for_other_user(
+    db_conn,
+    phone: str,
+    org_id: str,
+    user_id: Optional[str] = None
+) -> bool:
+    """
+    Checks if user phone number exists in DB for a particular organization.
+    
+    Args:
+        db_conn: Database connection
+        phone: Phone number to check
+        org_id: Organization ID
+        user_id: Optional user ID to exclude from the check (for updates)
+    
+    Returns:
+        bool: True if phone exists for another user, False otherwise
+    """
     query = """
         SELECT 1
         FROM public.organization_members
-        WHERE phone = $1 AND organization_id = $2
+        WHERE phone = $1 
+        AND organization_id = $2
+        AND ($3::uuid IS NULL OR user_id != $3)
         LIMIT 1;
     """
-    row = await db_conn.fetchrow(query, phone, org_id)
+    row = await db_conn.fetchrow(query, phone, org_id, user_id)
     return row is not None

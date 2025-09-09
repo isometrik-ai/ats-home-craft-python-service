@@ -1,3 +1,4 @@
+# pylint: disable=all
 """
 Comprehensive Tests for Users Management API Module
 
@@ -13,26 +14,11 @@ import pytest
 import uuid
 from datetime import datetime
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from fastapi.testclient import TestClient
+
 from fastapi import FastAPI, status
+from fastapi.testclient import TestClient
 
-MOCK_ADMIN_UUID = str(uuid.uuid4())
-
-
-with patch("supabase.create_client") as mock_create_client:
-    mock_supabase = MagicMock()
-    mock_create_client.return_value = mock_supabase
-
-    # from apps.user_service.app.api.admin_management.users import get_user_profile
-    # from apps.user_service.app.api.admin_management.users import (
-    #     get_user_profile,
-    #     get_user_from_auth,
-    #     invite_user,
-    #     get_user_by_id,
-    # )
-
-
-# Import test utilities
+from apps.user_service.app.schemas.users import CreateUserRequest
 from apps.user_service.tests.test_utils import (
     FakeCursor,
     FakeConn,
@@ -48,14 +34,16 @@ from apps.user_service.tests.test_utils import (
     reset_permissions,
     create_mock_db_conn,
 )
-
-# Import schemas for testing
-from apps.user_service.app.schemas.users import CreateUserRequest
-
-# Import the dependencies we need to override
 from libs.shared_db.postgres_db.db import get_async_db_conn
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+
+MOCK_ADMIN_UUID = str(uuid.uuid4())
+
+# Mock Supabase client before importing
+with patch("supabase.create_client") as mock_create_client:
+    mock_supabase = MagicMock()
+    mock_create_client.return_value = mock_supabase
 
 
 # Test Configuration and Fixtures
@@ -474,7 +462,7 @@ class TestDeleteUserEssential:
     def test_1_success_integration(self, client, app, fake_cursor, fake_conn):
         """Integration Test 1: Successful user deletion via HTTP"""
         set_permission("USERS_DELETE", True)
-        
+
         # Mock complete user data that matches the fetch_user_profile query structure
         mock_user_data = {
             "user_id": MOCK_USER_ID,
@@ -492,7 +480,7 @@ class TestDeleteUserEssential:
             "role_id": MOCK_ROLE_ID,
             "role_name": "Administrator",
         }
-        
+
         fake_cursor.fetchone_data = mock_user_data  # User found
         fake_conn.should_return_delete_result = True  # Ensure delete succeeds
 
@@ -593,7 +581,6 @@ class TestGetUserByIdEssential:
 
     def test_1_success_integration(self, client, app, fake_cursor, fake_conn):
         """Integration Test 1: Successful get user by ID via HTTP"""
-        from datetime import datetime
 
         profile_data = {
             "user_id": "target-user-id",
@@ -688,7 +675,6 @@ class TestUpdateUserEssential:
 
     def test_1_success_integration(self, client, app, fake_cursor, fake_conn):
         """Integration Test 1: Successful user update via HTTP"""
-        from datetime import datetime
 
         # Mock user data that matches the fetch_user_profile query structure
         mock_user_data = {
@@ -914,12 +900,13 @@ class TestInviteUserEssential:
             "apps.user_service.app.dependencies.common_utils.check_user_access_async",
             return_value=True,
         ):
-            # Since the endpoint doesn't handle Supabase errors properly,
-            # we expect the exception to be raised
-            with pytest.raises(Exception) as exc_info:
-                response = client.post("/v1/admin/users/invite", json=request_data)
-
-            assert "Supabase error" in str(exc_info.value)
+            # The endpoint properly handles Supabase errors and returns HTTP response
+            response = client.post("/v1/admin/users/invite", json=request_data)
+            
+            # Should return 409 status code with the error message
+            assert response.status_code == 409
+            data = response.json()
+            assert "Supabase error" in data["detail"]
 
     def test_5_database_error_integration(self, client, app, fake_cursor, fake_conn):
         """Integration Test 5: Database error via HTTP"""

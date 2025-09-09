@@ -7,7 +7,7 @@
 # def read_root():
 #     return {"message": "Hello, World!"}
 
-# pylint: disable=import-error,wrong-import-position
+
 """Main FastAPI application module for the API service.
 
 This module initializes the FastAPI application, sets up middleware,
@@ -18,43 +18,32 @@ import os
 import sys
 
 # Third-party imports
-from dotenv import load_dotenv
-from fastapi import status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
-from fastapi import HTTPException as FastAPIHTTPException
 from ddtrace import patch_all
 from ddtrace.trace import tracer
 from ddtrace.contrib.asgi import TraceMiddleware
+from dotenv import load_dotenv
+from fastapi import status, HTTPException as FastAPIHTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
-
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-monorepo_root = os.path.abspath(os.path.join(base_path, "../.."))
-
-# Add necessary paths to sys.path
-sys.path.insert(0, base_path)
-sys.path.insert(0, monorepo_root)
-# Load environment variables from .env
-load_dotenv(os.path.join(monorepo_root, ".env"))
-
-
 # Local application imports
-from app.app_instance import app  # pylint: disable=no-name-in-module
-from app.api.routes import router as api_router  # pylint: disable=no-name-in-module
-
-from libs.shared_middleware.jwt_auth import JWTAuthMiddleware
-from libs.shared_db.postgres_db.db import get_async_connection_pool
-
+from apps.user_service.app.app_instance import app
+from apps.user_service.app.api.routes import router as api_router
 from apps.user_service.app.dependencies.exception_middleware import (
     unified_exception_handler,
     CacheRequestBodyMiddleware,
 )
-from apps.user_service.app.dependencies.audit_logs.audit_logger import (
-    audit_logger,
-)
 from apps.user_service.app.dependencies.logger import app_logger, setup_logging
+from libs.shared_middleware.jwt_auth import JWTAuthMiddleware
+
+# Setup paths and environment
+base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+monorepo_root = os.path.abspath(os.path.join(base_path, "../.."))
+sys.path.insert(0, base_path)
+sys.path.insert(0, monorepo_root)
+load_dotenv(os.path.join(monorepo_root, ".env"))
 
 # Initialize logging at module level
 app_logger = setup_logging(log_level="INFO")
@@ -62,16 +51,6 @@ app_logger.info("Application logging initialized")
 
 # Patch supported libraries (httpx, sqlalchemy, etc.)
 patch_all()
-
-
-# adding audit logs
-@app.on_event("startup")
-async def startup_event():
-    """Start up event"""
-    app_logger.info("Starting up user service application")
-    db_pool = await get_async_connection_pool()
-    await audit_logger.start_processing(db_pool)
-    app_logger.info("Audit logger processing started successfully")
 
 
 # Update the app's metadata

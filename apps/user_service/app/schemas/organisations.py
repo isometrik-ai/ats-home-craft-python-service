@@ -1,3 +1,4 @@
+# pylint: disable=invalid-name,E0213
 """
 Organisation Schemas Module
 
@@ -10,7 +11,7 @@ Last Updated: 2024-12-19
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
 
@@ -65,10 +66,8 @@ class OrganisationInfo(BaseModel):
         None, description="Current user's role in this organisation"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for OrganisationInfo model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                 "name": "Acme Corporation",
@@ -85,6 +84,7 @@ class OrganisationInfo(BaseModel):
                 "user_role": "Administrator",
             }
         }
+    )
 
 
 class OrganisationListResponse(PaginationBase):
@@ -110,10 +110,8 @@ class OrganisationListResponse(PaginationBase):
     )
     total_count: int = Field(..., description="Total number of organisations")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for OrganisationListResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Organizations retrieved successfully",
@@ -139,6 +137,7 @@ class OrganisationListResponse(PaginationBase):
                 "page_size": 20,
             }
         }
+    )
 
 
 class OrganisationResponse(SimpleResponse):
@@ -178,10 +177,8 @@ class CreateOrganisationRequest(BaseModel):
         default="UTC", description="Organisation's timezone preference"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for CreateOrganisationRequest model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "Acme Corporation",
                 "slug": "acme-corp",
@@ -192,6 +189,7 @@ class CreateOrganisationRequest(BaseModel):
                 "timezone": "UTC",
             }
         }
+    )
 
 
 class UpdateOrganisationRequest(BaseModel):
@@ -221,10 +219,8 @@ class UpdateOrganisationRequest(BaseModel):
     max_users: Optional[int] = Field(None, description="Updated maximum users")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UpdateOrganisationRequest model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "Updated Acme Corporation",
                 "domain": "newacme.com",
@@ -232,6 +228,7 @@ class UpdateOrganisationRequest(BaseModel):
                 "max_users": 200,
             }
         }
+    )
 
 
 class UpdateOrganisationResponse(BaseModel):
@@ -249,10 +246,8 @@ class UpdateOrganisationResponse(BaseModel):
         None, description="Updated organisation data"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for UpdateOrganisationResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Organisation updated successfully",
@@ -265,9 +260,10 @@ class UpdateOrganisationResponse(BaseModel):
                     "status": "active",
                     "max_users": 200,
                     "timezone": "UTC",
-                },
+                }
             }
         }
+    )
 
 
 class OrganisationDetailResponse(BaseModel):
@@ -287,10 +283,8 @@ class OrganisationDetailResponse(BaseModel):
         None, description="Organisation data if successful"
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for OrganisationDetailResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 200,
                 "message": "Organisation retrieved successfully",
@@ -305,9 +299,10 @@ class OrganisationDetailResponse(BaseModel):
                     "timezone": "UTC",
                     "member_count": 25,
                     "user_role": "Administrator",
-                },
+                }
             }
         }
+    )
 
 
 class CreateOrganisationWithUserRequest(BaseModel):
@@ -355,10 +350,8 @@ class CreateOrganisationWithUserRequest(BaseModel):
     )
     phone: Optional[str] = Field(None, description="User's phone number")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for CreateOrganisationWithUserRequest model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "email": "admin@acme.com",
                 "password": "SecurePassword123!",
@@ -373,6 +366,7 @@ class CreateOrganisationWithUserRequest(BaseModel):
                 "phone": "+1234567890",
             }
         }
+    )
 
 
 class CreateOrganisationWithUserResponse(BaseModel):
@@ -390,10 +384,8 @@ class CreateOrganisationWithUserResponse(BaseModel):
     )
     data: dict = Field(..., description="Created organisation and user data")
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic configuration for CreateOrganisationWithUserResponse model"""
-
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "status_code": 201,
                 "message": "Organisation and user created successfully",
@@ -403,9 +395,10 @@ class CreateOrganisationWithUserResponse(BaseModel):
                     "organization_name": "Acme Corporation",
                     "user_email": "admin@acme.com",
                     "role_name": "Super Admin",
-                },
+                }
             }
         }
+    )
 
 
 class OrganizationUpdate(BaseModel):
@@ -455,13 +448,11 @@ class OrganizationUpdate(BaseModel):
         description="Default timezone for the organisation",
     )
 
-    class Config:  # pylint: disable=R0903
-        """Pydantic config: forbid extra fields, strip whitespace, enforce min string length."""
-
-        extra = "forbid"
-        anystr_strip_whitespace = True
-        min_anystr_length = 1
-
+    model_config = ConfigDict(
+        extra = "forbid",
+        str_strip_whitespace = True,
+        str_min_length = 1,
+    )
 
 class OrganizationAdminUpdate(OrganizationUpdate):
     """
