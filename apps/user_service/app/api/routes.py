@@ -28,18 +28,8 @@ from apps.user_service.app.api.admin_management.sessions.sessions import (
 from apps.user_service.app.api.admin_management.permissions import (
     router as permissions_router,
 )
-
 from apps.user_service.app.api.admin_management.router import router as admin_management_router
 from apps.user_service.app.api.audit_logs.audit_logs import router as audit_logs_router
-
-
-# Add apps/api_service to sys.path so 'app' and 'libs' can be imported
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, base_path)
-
-# Also add the monorepo root for shared `libs`
-monorepo_root = os.path.abspath(os.path.join(base_path, "../.."))
-sys.path.insert(0, monorepo_root)
 
 
 # Create main API router
