@@ -10,151 +10,16 @@ Date: 2024-12-19
 Last Updated: 2024-12-19
 """
 import json
-from typing import List, Tuple, Optional
+from typing import Optional
 from fastapi import HTTPException, status
 
 
-def build_audit_logs_filter_query(
-    organization_id: str,
-    search: Optional[str] = None,
-    limit: int = 20,
-    offset: int = 0,
-) -> Tuple[str, List]:
-    """
-    Build SQL query for filtering audit logs with search and pagination.
-
-    Args:
-        organization_id (str): Organization ID to filter audit logs
-        search (Optional[str]): Search term to filter by description, action_type, or table_name
-        limit (int): Maximum number of records to return
-        offset (int): Number of records to skip
-
-    Returns:
-        Tuple[str, List]: SQL query and parameters list
-    """
-    # base_query = """
-    #     SELECT
-    #         id, organization_id, user_id, user_email, user_role,
-    #         action_type, data_classification, table_name, record_id,
-    #         old_values, new_values, changed_fields, compliance_tags,
-    #         risk_level, ip_address, description, timestamp
-    #     FROM public.audit_logs
-    #     WHERE organization_id = $1
-    # """
-    base_query = """
-        SELECT
-            id, organization_id, user_id, user_email, user_role,
-            action_type, data_classification, table_name, record_id,
-            old_values, new_values, changed_fields, compliance_tags,
-            risk_level, ip_address, description, timestamp,
-            status_code, category
-        FROM public.audit_logs
-    """
-    params = [organization_id]
-    param_count = 1
-    params = []
-    param_count = 0
-
-    # Add search condition if provided
-    if search:
-        param_count += 1
-        search_condition = f"""
-            WHERE (
-                LOWER(description) LIKE LOWER(${param_count}) OR
-                LOWER(action_type) LIKE LOWER(${param_count}) OR
-                LOWER(table_name) LIKE LOWER(${param_count})
-            )
-        """
-        base_query += search_condition
-        params.append(f"%{search}%")
-
-    # Add ordering and pagination
-    base_query += (
-        """
-        ORDER BY timestamp DESC
-        LIMIT $"""
-        + str(param_count + 1)
-        + " OFFSET $"
-        + str(param_count + 2)
-    )
-
-    params.extend([limit, offset])
-
-    return base_query, params
-
-
-def build_audit_logs_count_query(
-    # organization_id: str,
-    search: Optional[str] = None,
-) -> Tuple[str, List]:
-    """
-    Build SQL query for counting total audit logs with search filter.
-
-    Args:
-        organization_id (str): Organization ID to filter audit logs
-        search (Optional[str]): Search term to filter by description, action_type, or table_name
-
-    Returns:
-        Tuple[str, List]: SQL query and parameters list
-    """
-    base_query = """
-        SELECT COUNT(*) as total_count
-        FROM public.audit_logs
-    """
-    # base_query = """
-    #     SELECT COUNT(*) as total_count
-    #     FROM public.audit_logs
-    #     WHERE organization_id = $1
-    # """
-
-    params = []
-
-    # Add search condition if provided
-    if search:
-        search_condition = """
-            WHERE (
-                LOWER(description) LIKE LOWER($1) OR
-                LOWER(action_type) LIKE LOWER($1) OR
-                LOWER(table_name) LIKE LOWER($1)
-            )
-        """
-        base_query += search_condition
-        params.append(f"%{search}%")
-
-    return base_query, params
-
-
-def build_audit_log_by_id_query() -> str:
-    """
-    Build SQL query for getting a single audit log by ID.
-
-    Returns:
-        str: SQL query for getting audit log by ID
-    """
-    return """
-        SELECT
-            id, organization_id, user_id, user_email, user_role,
-            action_type, data_classification, table_name, record_id,
-            old_values, new_values, changed_fields, compliance_tags,
-            risk_level, ip_address, description, timestamp,
-            hash_signature, previous_hash, retention_date,
-            status_code, category
-        FROM public.audit_logs
-        WHERE id = $1
-        LIMIT 1;
-    """
-
-
-def build_delete_all_audit_logs_query() -> str:
-    """
-    Build SQL query for deleting all audit logs.
-
-    Returns:
-        str: SQL query for deleting all audit logs
-    """
-    return """
-        DELETE FROM public.audit_logs;
-    """
+# Query building functions moved to centralized audit_operations.py
+# These functions are now available as:
+# - build_audit_logs_filter_query -> in audit_operations.py (improved version)
+# - build_audit_logs_count_query -> in audit_operations.py (improved version)
+# - build_audit_log_by_id_query -> in audit_operations.py (improved version)
+# - build_delete_all_audit_logs_query -> in audit_operations.py (improved version)
 
 
 def build_audit_logs_filter_message(
@@ -315,42 +180,11 @@ def format_audit_log_detail_data(audit_log_row) -> dict:
     return basic_data
 
 
-async def check_audit_log_exists(audit_log_id: str, db_conn) -> dict:
-    """
-    Check if audit log exists and return its data.
-
-    Args:
-        audit_log_id (str): ID of the audit log to check
-        db_conn: Database connection
-
-    Returns:
-        dict: Audit log data if exists
-
-    Raises:
-        HTTPException: If audit log not found
-    """
-    query = build_audit_log_by_id_query()
-    audit_log_data = await db_conn.fetchrow(query, audit_log_id)
-
-    if not audit_log_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Audit log not found",
-        )
-
-    return audit_log_data
-
-
-async def get_audit_logs_count(db_conn) -> int:
-    """
-    Get the total count of audit logs in the system.
-
-    Args:
-        db_conn: Database connection
-
-    Returns:
-        int: Total number of audit logs
-    """
-    count_query = "SELECT COUNT(*) as total_count FROM public.audit_logs;"
-    count_result = await db_conn.fetchrow(count_query)
-    return count_result["total_count"] if count_result else 0
+# Database operations and query building functions moved to centralized audit_operations.py
+# These functions are now available as:
+# - check_audit_log_exists -> get_audit_log_by_id from audit_operations
+# - get_audit_logs_count -> get_audit_logs_count from audit_operations
+# - build_audit_logs_filter_query -> in audit_operations.py (improved version)
+# - build_audit_logs_count_query -> in audit_operations.py (improved version)
+# - build_audit_log_by_id_query -> in audit_operations.py (improved version)
+# - build_delete_all_audit_logs_query -> in audit_operations.py (improved version)

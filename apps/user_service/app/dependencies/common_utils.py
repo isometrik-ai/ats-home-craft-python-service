@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from fastapi import HTTPException, status
 from libs.shared_middleware.jwt_auth import check_user_access_async
 
-from apps.user_service.app.dependencies.user_utils import fetch_user_profile
+from libs.shared_db.postgres_db.user_service_operations.user_operations import get_user_profile_by_id
 
 # ============================================================================
 # DATA CLASSES
@@ -149,7 +149,6 @@ def extract_user_context(current_user: dict) -> UserContext:
 async def require_permission(
     permission_code: Union[str, List[str]],
     user_context: UserContext,
-    db_conn,
     action_description: str = "perform this action",
     with_timing: bool = True,
 ) -> None:
@@ -164,7 +163,6 @@ async def require_permission(
     Args:
         permission_code (str): Permission code to check (e.g., "settings.roles.manage")
         user_context (UserContext): Validated user context
-        db_conn: AsyncPG database connection
         action_description (str): Description for error message (default: "perform this action")
         with_timing (bool): Whether to log timing information (default: True)
 
@@ -172,7 +170,7 @@ async def require_permission(
         HTTPException: 403 for insufficient permissions
 
     Usage:
-        await require_permission("settings.roles.manage", user_context, db_conn, "manage roles")
+        await require_permission("settings.roles.manage", user_context, "manage roles")
     """
     if with_timing:
         permission_start = time.time()
@@ -185,8 +183,7 @@ async def require_permission(
     has_permission = await check_user_access_async(
         permission_code=permission_codes,
         user_id=user_context.user_id,
-        organisation_id=user_context.organization_id,
-        db_conn=db_conn,
+        organisation_id=user_context.organization_id
     )
 
     if with_timing:
@@ -433,7 +430,7 @@ MAX_PAGE_SIZE = 100
 UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 
-async def get_user_in_organization(db_conn, user_id: str, organization_id: str):
+async def get_user_in_organization(user_id: str, organization_id: str):
     """
     Fetch user profile data and raise 404 if not found in organization.
 
@@ -443,7 +440,6 @@ async def get_user_in_organization(db_conn, user_id: str, organization_id: str):
     3. Raising 404 if user not found
 
     Args:
-        db_conn: Database connection
         user_id (str): User ID to fetch
         organization_id (str): Organization ID for filtering
 
@@ -454,7 +450,7 @@ async def get_user_in_organization(db_conn, user_id: str, organization_id: str):
         HTTPException: 404 if user not found in organization
     """
 
-    current_user_data = await fetch_user_profile(db_conn, user_id, organization_id)
+    current_user_data = await get_user_profile_by_id(user_id, organization_id)
     if not current_user_data:
         raise HTTPException(status_code=404, detail="User not found in organization")
 

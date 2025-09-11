@@ -1,5 +1,6 @@
 """Constants for query used across the application."""
 
+ROLE_TYPES = ["system", "custom"]
 # libs/shared_utils/common_query.py
 
 

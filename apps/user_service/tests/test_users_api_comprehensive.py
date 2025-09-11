@@ -902,7 +902,7 @@ class TestInviteUserEssential:
         ):
             # The endpoint properly handles Supabase errors and returns HTTP response
             response = client.post("/v1/admin/users/invite", json=request_data)
-            
+
             # Should return 409 status code with the error message
             assert response.status_code == 409
             data = response.json()

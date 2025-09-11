@@ -17,164 +17,9 @@ from apps.user_service.app.schemas.users import (
     UserProfileData,
     UpdateUserRequest,
 )
-from libs.shared_utils.email_utils import send_email
 
 # Initialize logger
 logger = get_logger("user-utils")
-
-
-def generate_magic_link(supabase_client, email: str) -> Optional[str]:
-    """
-    Generate a magic link using Supabase Auth Admin API generateLink.
-
-    Args:
-        supabase_client: Supabase client instance
-        email (str): User's email address
-
-    Returns:
-        Optional[str]: Generated magic link URL or None if failed
-    """
-    try:
-        response = supabase_client.auth.admin.generate_link(
-            {
-                "type": "magiclink",
-                "email": email,
-            }
-        )
-
-        logger.debug("Magic link generation response: %s", response)
-
-        if response and hasattr(response, "properties") and response.properties:
-            magic_link = response.properties.action_link
-            logger.debug("Generated magic link: %s", magic_link)
-            if magic_link:
-                logger.info(
-                    "Magic link generated successfully using Supabase client for %s",
-                    email,
-                )
-                return magic_link
-
-        logger.error("Magic link not found in Supabase client response")
-        return None
-
-    except (ValueError, AttributeError) as error:
-        logger.error("Error generating magic link with Supabase client: %s", str(error))
-        return None
-    except Exception as error:
-        logger.error("Unexpected error generating magic link: %s", str(error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate magic link"
-        ) from error
-
-
-def create_admin_update_email_content(user: dict, magic_link: str) -> Tuple[str, str]:
-    """
-    Create email subject and content for admin update notification with magic link.
-
-    Args:
-        user (dict): User information containing full_name, email
-        magic_link (str): Generated magic link for authentication
-
-    Returns:
-        Tuple[str, str]: Email subject and HTML message content
-    """
-    full_name = user.get("full_name", "")
-
-    subject = "Your Email Has Been Updated - XQtiv"
-
-    html_message = f"""
-    <div style="font-family: Arial, sans-serif !important; font-size: 14px !important; color: #333333 !important; line-height: 1.6 !important; max-width: 600px !important;">
-        <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
-            Hello {full_name},
-        </p>
-
-        <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
-            Your email id has been updated by the admin.
-        </p>
-
-        <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
-            Login using the link below:
-        </p>
-
-        <div style="text-align: center !important; margin: 24px 0 !important;">
-            <a href="{magic_link}"
-               style="background-color: #3498db !important; color: white !important; padding: 12px 24px !important; text-decoration: none !important; border-radius: 6px !important; display: inline-block !important; font-weight: bold !important;">
-                Magic Link
-            </a>
-        </div>
-
-        <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
-            If the button doesn't work, you can copy and paste this link into your browser:
-        </p>
-
-        <p style="margin: 0 0 16px 0 !important; color: #3498db !important; word-break: break-all !important;">
-            {magic_link}
-        </p>
-
-        <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
-            Best regards,<br>
-            Team XQtiv
-        </p>
-
-        <hr style="border: none !important; border-top: 1px solid #dee2e6 !important; margin: 24px 0 !important;">
-
-        <p style="font-size: 11px !important; color: #868e96 !important; margin: 0 !important;">
-            This is an automated notification from XQtiv. Please do not reply to this email.
-        </p>
-    </div>
-    """
-
-    return subject, html_message.strip()
-
-
-def send_admin_update_email(supabase_client, user: dict) -> bool:
-    """
-    Send admin update notification email with magic link.
-
-    Args:
-        supabase_client: Supabase client instance
-        user (dict): User information containing id, full_name, email
-
-    Returns:
-        bool: True if email was sent successfully, False otherwise
-    """
-    try:
-        # Generate magic link using Supabase Auth Admin API
-        magic_link = generate_magic_link(supabase_client, user.get("email"))
-        logger.debug("Generated magic link for email update: %s", magic_link)
-
-        if magic_link is None:
-            logger.error("Failed to generate magic link for %s", user.get("email"))
-            return False
-
-        # Create email content with the actual magic link
-        subject, html_message = create_admin_update_email_content(user, magic_link)
-
-        # Send email with HTML content
-        email_sent = send_email(
-            user.get("email"),
-            subject,
-            "Please check the HTML version of this email.",
-            html_message,
-        )
-
-        if email_sent:
-            logger.info("Admin update email sent successfully to %s", user.get("email"))
-            return True
-
-        logger.error("Failed to send admin update email to %s", user.get("email"))
-        return False
-
-    except (ValueError, AttributeError) as error:
-        logger.error("Error sending admin update email - validation error: %s", str(error))
-        return False
-    except Exception as error:
-        logger.error("Unexpected error sending admin update email: %s", str(error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send admin update email"
-        ) from error
 
 
 def build_user_query(organization_id, search, page_size, offset):
@@ -233,123 +78,8 @@ def build_user_query(organization_id, search, page_size, offset):
     }
 
 
-async def transform_users(users_data, organization_id, db_conn):
-    """
-    Build Proper response for User list
-    """
-    if not users_data:
-        return []
-
-    # Use role_id from first user for permission count
-    role_id = users_data[0]["role_id"]
-    result = await db_conn.fetchrow(
-        """
-        SELECT COUNT(*)
-        FROM public.role_permissions
-        WHERE organization_id = $1 AND role_id = $2;
-        """,
-        organization_id,
-        role_id,
-    )
-    permissions_count = result["count"] if result else 0
-
-    # Convert DB rows to response objects
-    return [
-        UserListItem(
-            user_id=str(u["user_id"]),
-            email=u["email"],
-            full_name=u["full_name"],
-            first_name=u["first_name"],
-            last_name=u["last_name"],
-            phone=u["phone"],
-            role_name=u["role_name"],
-            role_id=str(u["role_id"]),
-            status=u["status"],
-            joined_at=(
-                u["joined_at"].isoformat()
-                if u["joined_at"]
-                else datetime.now().isoformat()
-            ),
-            last_active_at=(
-                u["last_active_at"].isoformat() if u["last_active_at"] else None
-            ),
-            permissions_count=permissions_count,
-        )
-        for u in users_data
-    ]
 
 
-async def update_supabase_user_email(
-    user_id: str, organization_id: str, email: str, supabase_client, db_conn
-):
-    """
-    Update user email and send magic link notification
-    """
-    try:
-        # Get user information before updating email for email notification
-        user_info_query = """
-            SELECT full_name, last_name, email as old_email
-            FROM public.organization_members
-            WHERE user_id = $1 AND organization_id = $2
-        """
-        user_info = await db_conn.fetchrow(user_info_query, user_id, organization_id)
-
-        if user_info is None:
-            raise HTTPException(status_code=404, detail="Member not found")
-
-        # Update user email in Supabase Auth
-        response = supabase_client.auth.admin.update_user_by_id(
-            user_id, {"email": email}
-        )
-
-        # Check if the update was successful
-        if response.user is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update user email",
-            )
-
-        # Update email in organization_members table
-        email_update_query = """
-            UPDATE public.organization_members
-            SET    email      = $1,
-                updated_at = NOW()
-            WHERE  user_id          = $2
-            AND  organization_id  = $3
-            RETURNING id, email, updated_at;
-        """
-
-        result = await db_conn.fetchrow(
-            email_update_query, email, user_id, organization_id
-        )
-        if result is None:
-            raise HTTPException(status_code=404, detail="Member not found")
-
-        # Prepare user data for email notification
-        user_data = {
-            "id": user_id,
-            "full_name": user_info.get("full_name", ""),
-            "email": email,  # Use the new email
-        }
-
-        # Send magic link email notification
-        logger.info("Sending magic link email notification to user %s", user_id)
-        email_sent = send_admin_update_email(supabase_client, user_data)
-
-        if email_sent:
-            logger.info("Magic link email sent successfully to %s", email)
-        else:
-            logger.warning("Failed to send magic link email to %s", email)
-            # Note: We don't fail the entire operation if email fails
-            # The email update was successful, only the notification failed
-
-    except HTTPException:  # ⬅️ re-raise FastAPI errors untouched
-        raise
-    except Exception as e:  # ⬅️ handle every other failure
-        logger.error("Error updating Supabase user email: %s", str(e))
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error"
-        ) from e
 
 
 def format_permissions(permissions_data):
@@ -589,20 +319,20 @@ async def phone_exists_for_other_user(
 ) -> bool:
     """
     Checks if user phone number exists in DB for a particular organization.
-    
+
     Args:
         db_conn: Database connection
         phone: Phone number to check
         org_id: Organization ID
         user_id: Optional user ID to exclude from the check (for updates)
-    
+
     Returns:
         bool: True if phone exists for another user, False otherwise
     """
     query = """
         SELECT 1
         FROM public.organization_members
-        WHERE phone = $1 
+        WHERE phone = $1
         AND organization_id = $2
         AND ($3::uuid IS NULL OR user_id != $3)
         LIMIT 1;
