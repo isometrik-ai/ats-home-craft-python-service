@@ -191,7 +191,7 @@ async def _create_organization_with_permissions_for_signup(
         signup_data.plan_type.value,
         max_users,
         user_data.timezone,
-        user_id,  # Use org_id as created_by_id temporarily
+        user_id,  # created_by_id
     )
 
     # Create Super Admin role
@@ -476,49 +476,26 @@ def login(request: Request, data: AuthLogin):
     table_name="organizations",
     category="USER_SIGNUP",
 )
-def _init_audit_context(request: Request, signup_data: SignupRequest, request_id: str):
-    """Initialize audit context for signup request."""
-    request.state.audit_table = "organizations"
-    request.state.audit_description = (
-        "New user signup: %s with account type: %s",
-        signup_data.user_data.email,
-        signup_data.account_type.value
-    )
-    request.state.audit_risk_level = "medium"
-    request.state.audit_user_context = {
-        "organization_id": None,
-        "user_id": None,
-        "user_email": signup_data.user_data.email,
-        "user_type": "signup_user"
-    }
-
-    logger.info(
-        ("POST /auth/signup request started - Request ID: %s, ", request_id),
-        ("Email: %s, ", signup_data.user_data.email),
-        ("Account Type: %s, ", signup_data.account_type.value),
-        ("Plan Type: %s", signup_data.plan_type.value)
-    )
-
 async def signup(
-    request: Request,
+    request: Request,  # pylint: disable=unused-argument
     signup_data: SignupRequest = Body(...),
     db_conn=Depends(get_async_db_conn),
     supabase=Depends(get_supabase_client),
-    admin_supabase=Depends(get_supabase_admin_client),
+    admin_supabase=Depends(get_supabase_admin_client),  # Add this dependency
 ):
     """
     User signup endpoint for both personal and business accounts
-
+ 
     This endpoint creates a complete account setup including:
     1. User signup with Supabase Auth
     2. Organization creation based on account type
     3. Super Admin role and permissions setup
     4. Organization member creation with role assignment
-
+ 
     Account Types:
     - Personal: Individual account for freelancers, students, personal use
     - Business: Corporate account for companies, teams, organizations
-
+ 
     Features:
     - Email validation and duplicate checking
     - Password strength requirements (minimum 6 characters)
@@ -526,20 +503,20 @@ async def signup(
     - Trial status for new organizations
     - Automatic Super Admin role assignment
     - Complete permission system setup
-
+ 
     Args:
         signup_data (SignupRequest): Signup data including user info and optionally company info
         db_conn: AsyncPG database connection
         supabase: Supabase client for user authentication
-
+ 
     Returns:
         SignupResponse: Success response with organization and user data
-
+ 
     Raises:
         HTTPException: 400 for validation errors
         HTTPException: 409 for duplicate email or organization slug
         HTTPException: 500 for database or Supabase errors
-
+ 
     Security Features:
     - Password hashing handled by Supabase
     - Email validation and uniqueness checking
@@ -547,62 +524,85 @@ async def signup(
     - Transaction rollback on failures
     - Proper error handling without exposing internal details
     """
-    # Generate request ID and initialize audit context
+    # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    _init_audit_context(request, signup_data, request_id)
-
+    logger.info(
+        "POST /auth/signup request started - Request ID: %s, "
+        "Email: %s, "
+        "Account Type: %s, "
+        "Plan Type: %s",
+        request_id,
+        signup_data.user_data.email,
+        signup_data.account_type.value,
+        signup_data.plan_type.value
+    )
+ 
+    # Set audit context for user signup
+    request.state.audit_table = "organizations"
+    request.state.audit_description = "New user signup: %s with account type: %s" % (signup_data.user_data.email, signup_data.account_type.value)
+    request.state.audit_risk_level = "medium"
+ 
+    # Set audit user context for signup (required by audit decorator)
+    # For signup, we use the email from signup data and generate a temporary context
+    request.state.audit_user_context = {
+        "organization_id": None,  # Will be set after organization creation
+        "user_id": None,  # Will be set after user creation
+        "user_email": signup_data.user_data.email,
+        "user_type": "signup_user",
+    }
+ 
     # Generate organization details
     organization_id = str(uuid.uuid4())
     organization_name = _determine_organization_name(signup_data)
     slug = _generate_organization_slug(
         organization_name, signup_data.account_type.value
     )
-
+ 
     print(f"Generated organization_id: {organization_id}")
     print(f"Organization name: {organization_name}")
     print(f"Organization slug: {slug}")
-
+ 
     # Validate slug uniqueness
     await check_organisation_slug_unique(slug, db_conn)
-
+ 
     # Create user in Supabase Auth
     user_id = await _create_supabase_user(supabase, signup_data, organization_id)
     print(f"Created Supabase user: {user_id}")
-
+ 
     # Update audit user context with the created user_id
-    request.state.audit_user_context.update({
-        "user_id": user_id,
-        "organization_id": organization_id
-    })
-
+    request.state.audit_user_context.update(
+        {"user_id": user_id, "organization_id": organization_id}
+    )
+ 
     # Create organization, role, permissions, and member in database transaction
     try:
         # async with db_conn.transaction():
-            # Create organization with permissions
+        # Create organization with permissions
+        org_data = {
+            "organization_id": organization_id,
+            "organization_name": organization_name,
+            "slug": slug,
+            "user_id": user_id,
+        }
         org_result, super_admin_role_id = (
             await _create_organization_with_permissions_for_signup(
                 db_conn,
                 signup_data,
-                {
-                "organization_id": organization_id,
-                "organization_name": organization_name,
-                "slug": slug,
-                "user_id": user_id,
-                },
+                org_data,
             )
         )
         print(f"Created organization: {org_result['id']}")
         print(f"Created Super Admin role: {super_admin_role_id}")
-
+ 
         # Create organization member
         member_result = await _create_organization_member(
             db_conn, user_id, organization_id, super_admin_role_id, signup_data
         )
         print(f"Created organization member: {member_result['id']}")
-
+ 
     except Exception as db_error:
         print(f"Database transaction failed: {db_error}")
-
+ 
         # Try to delete the Supabase user if database transaction fails
         try:
             admin_supabase.auth.admin.delete_user(user_id)
@@ -613,21 +613,46 @@ async def signup(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create account. Please try again.",
             ) from cleanup_error
-
+ 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create account. Please try again.",
         ) from db_error
-
+ 
     # Set audit data for successful user signup
-    request.state.raw_audit_new_data = _prepare_signup_audit_data(
-        organization_id=organization_id,
-        organization_name=organization_name,
-        slug=slug,
-        user_id=user_id,
-        signup_data=signup_data
-    )
-
+    request.state.raw_audit_new_data = {
+        "organization_id": organization_id,
+        "organization_name": organization_name,
+        "organization_slug": slug,
+        "user_id": user_id,
+        "user_email": signup_data.user_data.email,
+        "user_full_name": f"{signup_data.user_data.first_name} {signup_data.user_data.last_name}",
+        "account_type": signup_data.account_type.value,
+        "plan_type": signup_data.plan_type.value,
+        "status": "trial",
+        "max_users": _get_max_users_for_plan(signup_data.plan_type.value),
+        "company_website": (
+            signup_data.company_data.company_website
+            if signup_data.company_data
+            else None
+        ),
+        "company_industry": (
+            signup_data.company_data.industry if signup_data.company_data else None
+        ),
+        "company_size": (
+            signup_data.company_data.company_size if signup_data.company_data else None
+        ),
+        "signup_timestamp": datetime.now().isoformat(),
+        "signup_method": "email_password",
+        "super_admin_role_created": True,
+        "default_permissions_created": True,
+        "audit_user_context": {
+            "organization_id": organization_id,
+            "user_id": user_id,
+            "user_email": signup_data.user_data.email,
+        },
+    }
+ 
     logger.info(
         "POST /auth/signup request completed successfully - Request ID: %s, "
         "Organization ID: %s, User ID: %s, "
@@ -637,17 +662,22 @@ async def signup(
         user_id,
         signup_data.user_data.email
     )
-
+ 
     return SignupResponse(
         status_code=status.HTTP_201_CREATED,
         message="Account created successfully! Please check your email for verification.",
-        data=_prepare_signup_response_data(
-            organization_id=organization_id,
-            user_id=user_id,
-            organization_name=organization_name,
-            slug=slug,
-            signup_data=signup_data
-        ),
+        data={
+            "organization_id": organization_id,
+            "user_id": user_id,
+            "organization_name": organization_name,
+            "user_email": signup_data.user_data.email,
+            "account_type": signup_data.account_type.value,
+            "plan_type": signup_data.plan_type.value,
+            "slug": slug,
+            "status": "trial",
+            "role_name": "Super Admin",
+            "max_users": _get_max_users_for_plan(signup_data.plan_type.value),
+        },
     )
 
 
