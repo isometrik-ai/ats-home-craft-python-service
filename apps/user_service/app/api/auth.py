@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, status, Depends, Body, Request
 # Internal utility imports
 from apps.user_service.app.dependencies.common_utils import (
     handle_api_exceptions,
+    extract_user_context,
 )
 from apps.user_service.app.dependencies.organisation_utils import (
     check_organisation_slug_unique,
@@ -51,6 +52,10 @@ from apps.user_service.app.schemas.auth import (
     VerifyEmailRequest,
     VerifyEmailResponse,
 )
+from apps.user_service.app.schemas.signup_wizard import (
+    SignupWizardRequest,
+    SignupWizardResponse,
+)
 
 # App instance
 from apps.user_service.app.app_instance import limiter
@@ -59,6 +64,7 @@ from apps.user_service.app.app_instance import limiter
 from libs.shared_db.supabase_db.db import get_supabase_client, get_supabase_admin_client
 from libs.shared_db.postgres_db.db import get_async_db_conn
 from libs.shared_utils.common_query import MEMBER_INSERT_QUERY
+from libs.shared_middleware.jwt_auth import get_user_from_auth
 
 
 # Modify sys.path to support monorepo imports
@@ -250,6 +256,292 @@ async def _create_organization_member(
         user_data.phone,
         user_data.timezone,
     )
+
+
+def _map_wizard_data_to_organization(wizard_data: SignupWizardRequest, user_id: str) -> dict:
+    """
+    Map signup wizard data to organization database fields.
+    
+    Args:
+        wizard_data: Signup wizard request data
+        user_id: User ID from bearer token
+        
+    Returns:
+        dict: Mapped organization data
+    """
+    # Generate slug from firm name
+    clean_name = wizard_data.firm_name.lower().strip()
+    clean_name = "".join(c if c.isalnum() else "-" for c in clean_name)
+    clean_name = "-".join(filter(None, clean_name.split("-")))
+    unique_suffix = str(uuid.uuid4())[:8]
+    slug = f"business-{clean_name}-{unique_suffix}"
+    
+    # Map firm size to max_users
+    firm_size_mapping = {
+        "Solo Practitioner": 1,
+        "Small Firm (2-10 attorneys)": 10,
+        "Mid-Size/Large Firm (11-100 attorneys)": 100,
+        "Enterprise Firm (100+ attorneys)": 1000,
+    }
+    max_users = firm_size_mapping.get(wizard_data.firm_size.value, 10)
+    
+    # Handle enterprise features
+    if wizard_data.enterprise_features:
+        max_users = max(max_users, wizard_data.enterprise_features.expected_number_of_users)
+    
+    # Map practice areas to arrays
+    primary_practice_areas = [area.value for area in wizard_data.primary_practice_areas]
+    secondary_practice_areas = [area.value for area in wizard_data.secondary_practice_areas] if wizard_data.secondary_practice_areas else None
+    specializations = [spec.value for spec in wizard_data.specializations] if wizard_data.specializations else None
+    preferred_integrations = [integration.value for integration in wizard_data.preferred_integration] if wizard_data.preferred_integration else None
+    
+    # Map role
+    role = wizard_data.team_setup.your_role.value if wizard_data.team_setup else None
+    
+    import json
+    
+    # Build settings JSON with additional wizard data
+    settings = {
+        "need_migration_assistance": wizard_data.need_migration_assistance,
+        "need_help_importing_data": wizard_data.need_help_importing_data,
+    }
+    
+    # Add compliance_security to settings if provided
+    if wizard_data.compliance_security:
+        settings["compliance_security"] = {
+            "required_compliance_standards": [std.value for std in wizard_data.compliance_security.required_compliance_standards],
+            "data_retention_period": wizard_data.compliance_security.data_retention_period,
+            "auditing_frequency": wizard_data.compliance_security.auditing_frequency.value,
+            "encryption_requirements": [req.value for req in wizard_data.compliance_security.encryption_requirements],
+            "compliance_officer_email": wizard_data.compliance_security.compliance_officer_email,
+            "additional_requirements": wizard_data.compliance_security.additional_requirements,
+        }
+    
+    # Add enterprise_features to settings if provided
+    if wizard_data.enterprise_features:
+        settings["enterprise_features"] = {
+            "expected_number_of_users": wizard_data.enterprise_features.expected_number_of_users,
+            "preferred_go_live_date": wizard_data.enterprise_features.preferred_go_live_date,
+            "support_service_options": [opt.value for opt in wizard_data.enterprise_features.support_service_options],
+            "sla_requirements": wizard_data.enterprise_features.sla_requirements,
+            "customization_options": [opt.value for opt in wizard_data.enterprise_features.customization_options],
+            "custom_integration": [intg.value for intg in wizard_data.enterprise_features.custom_integration],
+            "custom_reporting": [rpt.value for rpt in wizard_data.enterprise_features.custom_reporting],
+            "primary_contact_information": {
+                "contact_name": wizard_data.enterprise_features.primary_contact_information.contact_name,
+                "contact_email": wizard_data.enterprise_features.primary_contact_information.contact_email,
+                "contact_phone": wizard_data.enterprise_features.primary_contact_information.contact_phone,
+            }
+        }
+    
+    # Convert settings dict to JSON string for database storage
+    settings_json = json.dumps(settings)
+    
+    return {
+        "id": None,  # Will be set by caller
+        "name": wizard_data.firm_name,
+        "slug": slug,
+        "domain": None,  # Not provided in wizard
+        "logo_url": None,  # Not provided in wizard
+        "settings": settings_json,  # JSON string for database storage
+        "plan_type": "starter",  # Default plan
+        "status": "active",
+        "max_users": max_users,
+        "timezone": wizard_data.timezone,
+        "created_by_id": user_id,
+        "industry": None,  # Not provided in wizard
+        "company_size": wizard_data.firm_size.value,
+        "description": None,  # Not provided in wizard
+        "referral_source": None,  # Not provided in wizard
+        "first_name": wizard_data.firstname,
+        "last_name": wizard_data.lastname,
+        "phone_number": wizard_data.phone_number,
+        "preferred_language": wizard_data.prefred_lang,
+        "firm_size": wizard_data.firm_size.value,
+        "address": wizard_data.address,
+        "city": wizard_data.city,
+        "state": wizard_data.state,
+        "zip_code": wizard_data.zip_code,
+        "country": wizard_data.country,
+        "primary_practice_areas": primary_practice_areas,
+        "secondary_practice_areas": secondary_practice_areas,
+        "specializations": specializations,
+        "role": role,
+        "preferred_integrations": preferred_integrations,
+    }
+
+
+async def _update_organization_with_wizard_data(db_conn, organization_id: str, org_data: dict) -> dict:
+    """
+    Update existing organization with wizard data.
+    
+    Args:
+        db_conn: Database connection
+        organization_id: Organization ID to update
+        org_data: Organization data from wizard
+        
+    Returns:
+        dict: Updated organization data
+    """
+    import asyncio
+    import asyncpg
+    
+    
+    # Set timeout and retry logic
+    max_retries = 3
+    base_timeout_seconds = 30
+    
+    for attempt in range(max_retries):
+        try:
+            # Set statement timeout for this query
+            await db_conn.execute("SET LOCAL statement_timeout = '30s';")
+            await db_conn.execute("SET LOCAL lock_timeout = '5s';")
+            
+            update_query = """
+                UPDATE public.organizations SET
+                    name = $2,
+                    slug = $3,
+                    settings = $4,
+                    max_users = $5,
+                    timezone = $6,
+                    company_size = $7,
+                    first_name = $8,
+                    last_name = $9,
+                    phone_number = $10,
+                    preferred_language = $11,
+                    firm_size = $12,
+                    address = $13,
+                    city = $14,
+                    state = $15,
+                    zip_code = $16,
+                    country = $17,
+                    primary_practice_areas = $18,
+                    secondary_practice_areas = $19,
+                    specializations = $20,
+                    role = $21,
+                    preferred_integrations = $22,
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING id, name, slug, created_at, updated_at;
+            """
+            
+            result = await db_conn.fetchrow(
+                update_query,
+                organization_id,
+                org_data["name"],
+                org_data["slug"],
+                org_data["settings"],
+                org_data["max_users"],
+                org_data["timezone"],
+                org_data["company_size"],
+                org_data["first_name"],
+                org_data["last_name"],
+                org_data["phone_number"],
+                org_data["preferred_language"],
+                org_data["firm_size"],
+                org_data["address"],
+                org_data["city"],
+                org_data["state"],
+                org_data["zip_code"],
+                org_data["country"],
+                org_data["primary_practice_areas"],
+                org_data["secondary_practice_areas"],
+                org_data["specializations"],
+                org_data["role"],
+                org_data["preferred_integrations"],
+            )
+            
+            return result
+            
+        except (asyncpg.PostgresError, TimeoutError) as e:
+            if attempt < max_retries - 1:
+                wait_time = 0.5 * (2 ** attempt)  # Exponential backoff
+                await asyncio.sleep(wait_time)
+            else:
+                raise e
+
+
+async def _create_organization_with_wizard_data(db_conn, organization_id: str, org_data: dict) -> dict:
+    """
+    Create new organization with wizard data.
+    
+    Args:
+        db_conn: Database connection
+        organization_id: Organization ID to create
+        org_data: Organization data from wizard
+        
+    Returns:
+        dict: Created organization data
+    """
+    import asyncio
+    import asyncpg
+    
+    # Set timeout and retry logic
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        try:
+            # Set statement timeout for this query
+            await db_conn.execute("SET LOCAL statement_timeout = '30s';")
+            await db_conn.execute("SET LOCAL lock_timeout = '5s';")
+            
+            insert_query = """
+                INSERT INTO public.organizations (
+                    id, name, slug, domain, logo_url, settings, plan_type, status,
+                    max_users, timezone, created_by_id, industry, company_size,
+                    description, referral_source, first_name, last_name, phone_number,
+                    preferred_language, firm_size, address, city, state, zip_code,
+                    country, primary_practice_areas, secondary_practice_areas,
+                    specializations, role, preferred_integrations, created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
+                    $29, $30, $31, NOW(), NOW()
+                ) RETURNING id, name, slug, created_at, updated_at;
+            """
+            
+            result = await db_conn.fetchrow(
+                insert_query,
+                organization_id,
+                org_data["name"],
+                org_data["slug"],
+                org_data["domain"],
+                org_data["logo_url"],
+                org_data["settings"],
+                org_data["plan_type"],
+                org_data["status"],
+                org_data["max_users"],
+                org_data["timezone"],
+                org_data["created_by_id"],
+                org_data["industry"],
+                org_data["company_size"],
+                org_data["description"],
+                org_data["referral_source"],
+                org_data["first_name"],
+                org_data["last_name"],
+                org_data["phone_number"],
+                org_data["preferred_language"],
+                org_data["firm_size"],
+                org_data["address"],
+                org_data["city"],
+                org_data["state"],
+                org_data["zip_code"],
+                org_data["country"],
+                org_data["primary_practice_areas"],
+                org_data["secondary_practice_areas"],
+                org_data["specializations"],
+                org_data["role"],
+                org_data["preferred_integrations"],
+            )
+            
+            return result
+            
+        except (asyncpg.PostgresError, TimeoutError) as e:
+            if attempt < max_retries - 1:
+                wait_time = 0.5 * (2 ** attempt)  # Exponential backoff
+                await asyncio.sleep(wait_time)
+            else:
+                raise e
 
 
 # ============================================================================
@@ -591,15 +883,12 @@ async def signup(
                 org_data,
             )
         )
-        print(f"Created organization: {org_result['id']}")
-        print(f"Created Super Admin role: {super_admin_role_id}")
- 
+
         # Create organization member
         member_result = await _create_organization_member(
             db_conn, user_id, organization_id, super_admin_role_id, signup_data
         )
-        print(f"Created organization member: {member_result['id']}")
- 
+
     except Exception as db_error:
         print(f"Database transaction failed: {db_error}")
  
@@ -842,3 +1131,142 @@ async def delete_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete user: {str(error)}"
         ) from error
+
+
+@handle_api_exceptions("signup wizard")
+@router.post(
+    "/signup-wizard", response_model=SignupWizardResponse, status_code=status.HTTP_200_OK
+)
+@limiter.limit("50/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Signup wizard involves personal information
+        "pii",  # Contains personally identifiable information
+        "audit_required",  # Must be logged for compliance and security audits
+    ],
+    table_name="organizations",
+    category="SIGNUP_WIZARD",
+)
+async def signup_wizard(
+    request: Request,
+    wizard_data: SignupWizardRequest = Body(...),
+    current_user: dict = Depends(get_user_from_auth),
+    db_conn=Depends(get_async_db_conn),
+):
+    """
+    Signup wizard endpoint for updating organization with detailed firm information.
+    
+    This endpoint:
+    1. Validates bearer token and extracts user information
+    2. Checks if organization exists with user's created_by_id
+    3. Updates existing organization or creates new one with wizard data
+    4. Maps wizard fields to database structure
+    
+    Args:
+        wizard_data (SignupWizardRequest): Complete signup wizard data
+        current_user (dict): Authenticated user from bearer token
+        db_conn: Database connection
+        
+    Returns:
+        SignupWizardResponse: Success response with organization data
+        
+    Raises:
+        HTTPException: 401 for authentication errors
+        HTTPException: 400 for validation errors
+        HTTPException: 500 for database errors
+    """
+    # Generate request ID for tracking
+    request_id = str(uuid.uuid4())
+    logger.info(
+        "POST /auth/signup-wizard request started - Request ID: %s, "
+        "Firm Name: %s, Firm Size: %s, Contact: %s %s",
+        request_id,
+        wizard_data.firm_name,
+        wizard_data.firm_size.value,
+        wizard_data.firstname,
+        wizard_data.lastname
+    )
+    
+    # Extract user context from JWT token
+    user_context = extract_user_context(current_user)
+    user_id = user_context.user_id
+    
+    # Set audit context
+    request.state.audit_table = "organizations"
+    request.state.audit_description = "Signup wizard organization update: %s (%s)" % (
+        wizard_data.firm_name, 
+        wizard_data.firm_size.value
+    )
+    request.state.audit_risk_level = "medium"
+    
+    # Set audit user context
+    request.state.audit_user_context = {
+        "organization_id": user_context.organization_id,
+        "user_id": user_id,
+        "user_email": user_context.email,
+        "user_type": "organization_member",
+    }
+    
+    # Check if organization exists with this user's created_by_id
+    existing_org_query = """
+        SELECT id, name, slug FROM public.organizations 
+        WHERE created_by_id = $1
+        LIMIT 1;
+    """
+    existing_org = await db_conn.fetchrow(existing_org_query, user_id)
+    
+    # Map wizard data to database fields
+    org_data = _map_wizard_data_to_organization(wizard_data, user_id)
+    
+    if existing_org:
+        # Update existing organization
+        organization_id = existing_org["id"]
+        updated_org = await _update_organization_with_wizard_data(
+            db_conn, organization_id, org_data
+        )
+        action = "updated"
+    else:
+        # Create new organization
+        organization_id = str(uuid.uuid4())
+        updated_org = await _create_organization_with_wizard_data(
+            db_conn, organization_id, org_data
+        )
+        action = "created"
+    
+    # Set audit data for successful operation
+    request.state.raw_audit_new_data = {
+        "request_id": request_id,
+        "organization_id": organization_id,
+        "action": action,
+        "firm_name": wizard_data.firm_name,
+        "firm_size": wizard_data.firm_size.value,
+        "contact_name": f"{wizard_data.firstname} {wizard_data.lastname}",
+        "country": wizard_data.country,
+        "primary_practice_areas": [area.value for area in wizard_data.primary_practice_areas],
+        "secondary_practice_areas": [area.value for area in wizard_data.secondary_practice_areas] if wizard_data.secondary_practice_areas else None,
+        "specializations": [spec.value for spec in wizard_data.specializations] if wizard_data.specializations else None,
+        "has_enterprise_features": wizard_data.enterprise_features is not None,
+        "operation_timestamp": datetime.now().isoformat(),
+        "audit_user_context": {
+            "organization_id": organization_id,
+            "user_id": user_id,
+            "user_email": user_context.email,
+        },
+    }
+    
+    logger.info(
+        "POST /auth/signup-wizard request completed successfully - Request ID: %s, "
+        "Organization ID: %s, Action: %s, Status Code: 200",
+        request_id,
+        organization_id,
+        action
+    )
+    
+    return SignupWizardResponse(
+        status_code=status.HTTP_200_OK,
+        message=f"Organization {action} successfully with signup wizard data",
+        data={},
+        validation_passed=True
+    )
