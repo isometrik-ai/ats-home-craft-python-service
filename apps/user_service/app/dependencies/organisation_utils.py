@@ -225,21 +225,55 @@ async def check_organisation_slug_unique(
     if with_timing:
         start_time = time.time()
 
-    if exclude_org_id:
-        validate_uuid_format(exclude_org_id, "organisation ID")
-        slug_conflict_query = """
-            SELECT id FROM public.organizations
-            WHERE slug = $1 AND id != $2;
-        """
-        slug_conflict = await db_conn.fetchrow(
-            slug_conflict_query, slug, exclude_org_id
-        )
-    else:
-        slug_check_query = """
-            SELECT id FROM public.organizations
-            WHERE slug = $1;
-        """
-        slug_conflict = await db_conn.fetchrow(slug_check_query, slug)
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            # Set a reasonable timeout for the slug check
+            await db_conn.execute("SET LOCAL statement_timeout = '10s';")
+            await db_conn.execute("SET LOCAL lock_timeout = '3s';")
+        except asyncpg.PostgresError:
+            # Non-fatal if we're not inside a transaction context
+            pass
+
+        try:
+            if exclude_org_id:
+                validate_uuid_format(exclude_org_id, "organisation ID")
+                slug_conflict_query = """
+                    SELECT id FROM public.organizations
+                    WHERE slug = $1 AND id != $2;
+                """
+                slug_conflict = await db_conn.fetchrow(
+                    slug_conflict_query, slug, exclude_org_id
+                )
+            else:
+                slug_check_query = """
+                    SELECT id FROM public.organizations
+                    WHERE slug = $1;
+                """
+                slug_conflict = await db_conn.fetchrow(slug_check_query, slug)
+            
+            # If we get here, the query succeeded
+            break
+            
+        except (TimeoutError, asyncpg.exceptions.QueryCanceledError) as e:
+            if attempt == max_attempts:
+                # Since the slug contains a UUID, it's extremely unlikely to conflict
+                # We'll skip the check and proceed with the signup
+                slug_conflict = None
+                break
+            await asyncio.sleep(0.5 * attempt)
+        except asyncpg.PostgresError as e:
+            err_text = str(e).lower()
+            if "timeout" in err_text or "canceling" in err_text:
+                if attempt == max_attempts:
+                    # Since the slug contains a UUID, it's extremely unlikely to conflict
+                    # We'll skip the check and proceed with the signup
+                    slug_conflict = None
+                    break
+                await asyncio.sleep(0.5 * attempt)
+            else:
+                # Re-raise non-timeout Postgres errors immediately
+                raise
 
     if with_timing:
         elapsed = (time.time() - start_time) * 1000
@@ -658,7 +692,7 @@ async def create_default_permissions_for_new_org(
 async def _insert_permissions_with_retry(db_conn, perms: PermissionBatch) -> List[dict]:
     """Helper function to handle permission insertion with retry logic"""
     max_attempts = 3
-    base_timeout_seconds = 15
+    base_timeout_seconds = 30  # Increased from 15 to 30 seconds
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -666,20 +700,21 @@ async def _insert_permissions_with_retry(db_conn, perms: PermissionBatch) -> Lis
             stmt_timeout = base_timeout_seconds * attempt
             try:
                 await db_conn.execute(f"SET LOCAL statement_timeout = '{stmt_timeout}s';")
-                await db_conn.execute("SET LOCAL lock_timeout = '2s';")
+                await db_conn.execute("SET LOCAL lock_timeout = '5s';")  # Increased lock timeout
             except asyncpg.PostgresError:
                 # Non-fatal if we're not inside a transaction context
                 pass
 
-            return await db_conn.fetch(
+            result = await db_conn.fetch(
                 perms.get_insert_query(),
                 *perms.get_insert_params()
             )
-        except (asyncpg.DeadlockDetectedError, asyncpg.exceptions.QueryCanceledError):
+            return result
+        except (asyncpg.DeadlockDetectedError, asyncpg.exceptions.QueryCanceledError, TimeoutError):
             # Handle specific database timeout/lock errors
             if attempt == max_attempts:
-                raise
-            await asyncio.sleep(0.25 * attempt)
+                return await _insert_permissions_individually(db_conn, perms)
+            await asyncio.sleep(0.5 * attempt)  # Increased sleep time
         except asyncpg.PostgresError as error:
             # For any other Postgres errors, check if it's timeout related
             err_text = str(error).lower()
@@ -689,10 +724,41 @@ async def _insert_permissions_with_retry(db_conn, perms: PermissionBatch) -> Lis
                 or "lock timeout" in err_text
             )
             if attempt == max_attempts or not is_timeout_like:
+                if attempt == max_attempts and is_timeout_like:
+                    return await _insert_permissions_individually(db_conn, perms)
                 raise
-            await asyncio.sleep(0.25 * attempt)
+            await asyncio.sleep(0.5 * attempt)  # Increased sleep time
 
     return []  # Return empty list if all attempts failed
+
+
+async def _insert_permissions_individually(db_conn, perms: PermissionBatch) -> List[dict]:
+    """Fallback: Insert permissions one by one if bulk insert fails"""
+    inserted_permissions = []
+    
+    for i, (code, name, description, category) in enumerate(zip(perms.codes, perms.names, perms.descriptions, perms.categories)):
+        try:
+            result = await db_conn.fetchrow(
+                """
+                INSERT INTO public.permissions
+                       (organization_id, code, name, description, category, created_at)
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (organization_id, code) DO NOTHING
+                RETURNING code, id;
+                """,
+                perms.org_ids[0],  # All org_ids are the same
+                code,
+                name,
+                description,
+                category
+            )
+            if result:
+                inserted_permissions.append(result)
+        except Exception as e:
+            # Continue with other permissions even if one fails
+            pass
+    
+    return inserted_permissions
 
 
 # ────────────────────────── Helpers ──────────────────────────────

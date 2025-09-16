@@ -374,12 +374,12 @@ class AuditLogger:
                             event["table_name"],
                             event["record_id"],
                             (
-                                json.dumps(event["old_values"])
+                                json.dumps(event["old_values"], default=str)
                                 if event["old_values"]
                                 else None
                             ),
                             (
-                                json.dumps(event["new_values"])
+                                json.dumps(event["new_values"], default=str)
                                 if event["new_values"]
                                 else None
                             ),
