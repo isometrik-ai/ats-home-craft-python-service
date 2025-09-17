@@ -190,3 +190,64 @@ class SignupResponse(BaseModel):
     status_code: int
     message: str
     data: dict
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Request model for forgot password operations"""
+    
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Response model for forgot password operations"""
+    
+    status_code: int
+    message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request model for reset password operations
+    
+    The token should be the access_token extracted from the password reset email URL.
+    Email URL format: http://localhost:3000/#access_token=eyJhbGciOiJIUzI1NiIs...&expires_at=1758009136&expires_in=3600&refresh_token=4bz3ixdhgdbv&token_type=bearer&type=recovery
+    """
+    
+    token: str  # access_token from the password reset email URL
+    new_password: str
+    
+    @classmethod
+    @field_validator("new_password")
+    def validate_password(cls, v):
+        """Validate password meets minimum length requirements"""
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters long")
+        return v
+
+
+class ResetPasswordResponse(BaseModel):
+    """Response model for reset password operations"""
+    
+    status_code: int
+    message: str
+
+
+class ChangePasswordRequest(BaseModel):
+    """Request model for change password operations"""
+    
+    current_password: str
+    new_password: str
+    
+    @classmethod
+    @field_validator("new_password")
+    def validate_password(cls, v):
+        """Validate password meets minimum length requirements"""
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters long")
+        return v
+
+
+class ChangePasswordResponse(BaseModel):
+    """Response model for change password operations"""
+    
+    status_code: int
+    message: str

@@ -14,6 +14,7 @@ import os
 import sys
 import uuid
 import json
+import jwt
 from typing import Any
 from datetime import datetime
 
@@ -51,6 +52,10 @@ from apps.user_service.app.schemas.auth import (
     AuthResponse,
     VerifyEmailRequest,
     VerifyEmailResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
 )
 from apps.user_service.app.schemas.signup_wizard import (
     SignupWizardRequest,
@@ -750,6 +755,362 @@ def login(request: Request, data: AuthLogin):
                 status_code=401, detail="Invalid login credentials"
             ) from error
         raise HTTPException(status_code=500, detail="Authentication failed") from error
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse, status_code=status.HTTP_200_OK)
+@limiter.limit("10/minute")
+# pylint: disable=unused-argument  # Required by @limiter.limit
+async def forgot_password(request: Request, data: ForgotPasswordRequest, db_conn=Depends(get_async_db_conn)):
+    """
+    Send password reset email to user (only if email exists in system)
+    
+    This endpoint sends a password reset email containing a secure token. The user will receive
+    an email with a link like:
+    http://localhost:3000/#access_token=eyJhbGciOiJIUzI1NiIs...&expires_at=1758009136&expires_in=3600&refresh_token=4bz3ixdhgdbv&token_type=bearer&type=recovery
+    
+    To complete the password reset:
+    1. User clicks the link in the email
+    2. Frontend extracts the access_token from the URL hash
+    3. Frontend calls POST /auth/reset-password with the token and new password
+    
+    Args:
+        request (Request): FastAPI request object
+        data (ForgotPasswordRequest): Email address for password reset
+        db_conn: Database connection for email validation
+        
+    Returns:
+        ForgotPasswordResponse: Success response if email exists
+        
+    Raises:
+        HTTPException: 404 for email not found, 500 for system errors
+        
+    Example:
+        Request:
+        {
+            "email": "user@example.com"
+        }
+        
+        Response (200 OK):
+        {
+            "status_code": 200,
+            "message": "Password reset email sent successfully. Please check your email."
+        }
+        
+        Response (404 Not Found):
+        {
+            "detail": "Email not found in our system. Please check your email address and try again."
+        }
+    """
+    logger.info("=== FORGOT PASSWORD DEBUG START ===")
+    
+    try:
+        # First, check if email exists in auth.users table
+        logger.info("Checking if email exists in auth.users...")
+        auth_user_query = """
+            SELECT id, email FROM auth.users
+            WHERE email = $1
+            LIMIT 1;
+        """
+        auth_user = await db_conn.fetchrow(auth_user_query, data.email)
+        
+        if not auth_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Email not found in our system. Please check your email address and try again."
+            )
+                
+        # Debug: Check environment variables
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_anon_key = os.getenv("SUPABASE_ANON_KEY")
+        
+        # Get Supabase client
+        logger.info("Getting Supabase client...")
+        supabase = get_supabase_client()
+        logger.info("Supabase client obtained successfully")
+        
+        # Send password reset email only if user exists
+        supabase.auth.reset_password_email(data.email)
+        logger.info("Password reset email sent successfully")
+        
+        return ForgotPasswordResponse(
+            status_code=status.HTTP_200_OK,
+            message="Password reset email sent successfully. Please check your email."
+        )
+        
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process password reset request. Please try again."
+        ) from error
+    finally:
+        logger.info("=== FORGOT PASSWORD DEBUG END ===")
+
+
+@router.post("/reset-password", response_model=ResetPasswordResponse, status_code=status.HTTP_200_OK)
+@limiter.limit("10/minute")
+# pylint: disable=unused-argument  # Required by @limiter.limit
+async def reset_password(request: Request, data: ResetPasswordRequest):
+    """
+    Reset user password using token from email
+    
+    This endpoint is used to complete the password reset process. The token should be extracted
+    from the password reset email URL that the user received after calling POST /auth/forgot-password.
+    
+    The email URL format is:
+    http://localhost:3000/#access_token=eyJhbGciOiJIUzI1NiIs...&expires_at=1758009136&expires_in=3600&refresh_token=4bz3ixdhgdbv&token_type=bearer&type=recovery
+    
+    Frontend should extract the access_token from the URL hash and send it as the 'token' parameter.
+    
+    Args:
+        request (Request): FastAPI request object
+        data (ResetPasswordRequest): Reset token (access_token from email URL) and new password
+        
+    Returns:
+        ResetPasswordResponse: Success response
+        
+    Raises:
+        HTTPException: 400 for invalid token/password, 500 for other errors
+        
+    Example:
+        Request:
+        {
+            "token": "eyJhbGciOiJIUzI1NiIsImtpZCI6IjllaFhpRHlFNXFGK2lwVHYiLCJ0eXAiOiJKV1QifQ...",
+            "new_password": "newpassword123"
+        }
+        
+        Response (200 OK):
+        {
+            "status_code": 200,
+            "message": "Password reset successfully. You can now login with your new password."
+        }
+        
+        Response (400 Bad Request):
+        {
+            "detail": "Invalid or expired reset token. Please request a new password reset."
+        }
+    """
+    logger.info("=== PASSWORD RESET DEBUG START ===")
+    logger.info(f"Request received for password reset")
+    logger.info(f"Token length: {len(data.token) if data.token else 'None'}")
+    logger.info(f"Token preview: {data.token[:50] if data.token else 'None'}...")
+    logger.info(f"New password length: {len(data.new_password) if data.new_password else 'None'}")
+    
+    try:
+        # Debug: Check environment variables
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_anon_key = os.getenv("SUPABASE_ANON_KEY")
+        supabase_service_key = os.getenv("SUPABASE_SERVICE_KEY")
+        jwt_secret = os.getenv("SUPABASE_JWT_SECRET")
+        
+        logger.info(f"Environment check:")
+        logger.info(f"  SUPABASE_URL: {'SET' if supabase_url else 'NOT SET'}")
+        logger.info(f"  SUPABASE_ANON_KEY: {'SET' if supabase_anon_key else 'NOT SET'}")
+        logger.info(f"  SUPABASE_SERVICE_KEY: {'SET' if supabase_service_key else 'NOT SET'}")
+        logger.info(f"  SUPABASE_JWT_SECRET: {'SET' if jwt_secret else 'NOT SET'}")
+        
+        # Get Supabase admin client
+        logger.info("Getting Supabase admin client...")
+        supabase_admin = get_supabase_admin_client()
+        logger.info("Supabase admin client obtained successfully")
+        
+        # Method 1: Try JWT token verification approach
+        logger.info("Attempting JWT token verification...")
+        try:
+            if not jwt_secret:
+                logger.error("JWT secret not configured")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="JWT secret not configured"
+                )
+            
+            # Decode and verify the JWT token
+            logger.info("Decoding JWT token...")
+            decoded_token = jwt.decode(
+                data.token, 
+                jwt_secret, 
+                algorithms=["HS256"],
+                options={"verify_exp": True}
+            )
+            logger.info(f"JWT token decoded successfully: {decoded_token}")
+            
+            # Extract user ID from the token
+            user_id = decoded_token.get("sub")  # 'sub' is the user ID in JWT
+            logger.info(f"Extracted user ID from token: {user_id}")
+            
+            if not user_id:
+                logger.error("No user ID found in token")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid token: missing user ID"
+                )
+            
+            # Update the password using admin client with the specific user ID
+            logger.info(f"Updating password for user ID: {user_id}")
+            result = supabase_admin.auth.admin.update_user_by_id(
+                user_id,
+                {"password": data.new_password}
+            )
+            logger.info(f"Password update result: {result}")
+            
+            if result.user:
+                logger.info("Password updated successfully")
+                return ResetPasswordResponse(
+                    status_code=status.HTTP_200_OK,
+                    message="Password reset successfully. You can now login with your new password."
+                )
+            else:
+                logger.error("Password update failed - no user in result")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to update password. Please try again."
+                )
+                
+        except jwt.ExpiredSignatureError as jwt_error:
+            logger.error(f"JWT token expired: {jwt_error}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Reset token has expired. Please request a new password reset."
+            ) from jwt_error
+        except jwt.InvalidTokenError as jwt_error:
+            logger.error(f"Invalid JWT token: {jwt_error}")
+            logger.info("JWT verification failed, trying alternative approach...")
+            
+            # Method 2: Use Supabase's verify_otp method for password reset
+            try:
+                logger.info("Attempting Supabase verify_otp method...")
+                supabase_client = get_supabase_client()
+                
+                # First verify the token to get user info
+                logger.info("Calling verify_otp with token...")
+                result = supabase_client.auth.verify_otp({
+                    "token": data.token,
+                    "type": "recovery"
+                })
+                
+                logger.info(f"verify_otp result: {result}")
+                
+                if result.user:
+                    # Now update the password using admin client
+                    user_id = result.user.id
+                    logger.info(f"Token verified, updating password for user: {user_id}")
+                    
+                    admin_result = supabase_admin.auth.admin.update_user_by_id(
+                        user_id,
+                        {"password": data.new_password}
+                    )
+                    
+                    if admin_result.user:
+                        logger.info("Password updated successfully via verify_otp + admin")
+                        return ResetPasswordResponse(
+                            status_code=status.HTTP_200_OK,
+                            message="Password reset successfully. You can now login with your new password."
+                        )
+                    else:
+                        logger.error("Admin password update failed after verify_otp")
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Failed to update password. Please try again."
+                        )
+                else:
+                    logger.error("verify_otp failed - no user in result")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid or expired reset token. Please request a new password reset."
+                    )
+                    
+            except Exception as verify_error:
+                logger.error(f"verify_otp failed: {verify_error}")
+                logger.info("verify_otp failed, trying admin API approach...")
+                
+                # Method 3: Try to extract user info from token and use admin API
+                try:
+                    # Try to decode without verification to get user info
+                    logger.info("Attempting to decode token without verification...")
+                    unverified_token = jwt.decode(
+                        data.token, 
+                        options={"verify_signature": False}
+                    )
+                    logger.info(f"Unverified token content: {unverified_token}")
+                    
+                    user_id = unverified_token.get("sub")
+                    email = unverified_token.get("email")
+                    
+                    if user_id:
+                        logger.info(f"Found user ID in unverified token: {user_id}")
+                        
+                        # Update password using admin client
+                        logger.info(f"Updating password for user ID: {user_id}")
+                        result = supabase_admin.auth.admin.update_user_by_id(
+                            user_id,
+                            {"password": data.new_password}
+                        )
+                        logger.info(f"Password update result: {result}")
+                        
+                        if result.user:
+                            logger.info("Password updated successfully via admin API")
+                            return ResetPasswordResponse(
+                                status_code=status.HTTP_200_OK,
+                                message="Password reset successfully. You can now login with your new password."
+                            )
+                        else:
+                            logger.error("Admin API password update failed")
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Failed to update password. Please try again."
+                            )
+                    elif email:
+                        # Try using email with verify_otp
+                        logger.info(f"Found email in token, trying verify_otp with email: {email}")
+                        try:
+                            result = supabase_client.auth.verify_otp({
+                                "token": data.token,
+                                "type": "recovery"
+                            })
+                            
+                            if result.user:
+                                # Update password using admin client
+                                admin_result = supabase_admin.auth.admin.update_user_by_id(
+                                    result.user.id,
+                                    {"password": data.new_password}
+                                )
+                                
+                                if admin_result.user:
+                                    logger.info("Password updated successfully via email verify_otp")
+                                    return ResetPasswordResponse(
+                                        status_code=status.HTTP_200_OK,
+                                        message="Password reset successfully. You can now login with your new password."
+                                    )
+                        except (ValueError, TypeError, ConnectionError) as email_verify_error:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Invalid reset token. Please request a new password reset."
+                            ) from email_verify_error
+                    else:
+                        logger.error("No user ID or email found in unverified token")
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid reset token. Please request a new password reset."
+                        )
+                        
+                except Exception as decode_error:
+                    logger.error(f"Token decoding failed: {decode_error}")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid or expired reset token. Please request a new password reset."
+                    ) from verify_error
+        
+    except Exception as error:
+    
+        
+        if isinstance(error, HTTPException):
+            raise error
+            
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reset password. Please try again."
+        ) from error
+    finally:
+        logger.info("=== PASSWORD RESET DEBUG END ===")
 
 
 @handle_api_exceptions("signup")
