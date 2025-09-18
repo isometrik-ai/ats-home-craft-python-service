@@ -8,7 +8,7 @@ events for the application.
 from contextlib import asynccontextmanager
 from apps.user_service.app.dependencies.audit_logs.audit_logger import audit_logger
 from apps.user_service.app.dependencies.logger import app_logger
-from libs.shared_db.postgres_db.db import get_async_connection_pool
+
 
 
 @asynccontextmanager
@@ -16,8 +16,8 @@ async def lifespan(app):  # pylint: disable=unused-argument
     """Application lifespan event handler"""
     # Startup
     app_logger.info("Starting up user service application")
-    db_pool = await get_async_connection_pool()
-    await audit_logger.start_processing(db_pool)
+    # db_pool = await get_async_connection_pool()
+    await audit_logger.start_processing()
     app_logger.info("Audit logger processing started successfully")
 
     yield

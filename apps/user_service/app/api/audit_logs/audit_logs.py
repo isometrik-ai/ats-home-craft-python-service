@@ -25,12 +25,7 @@ from apps.user_service.app.dependencies.common_utils import (
 
 # Audit logs utility imports
 from apps.user_service.app.dependencies.audit_logs.audit_logs_utils import (
-    build_audit_logs_filter_query,
-    build_audit_logs_count_query,
     build_audit_logs_filter_message,
-    build_audit_log_by_id_query,
-    build_delete_all_audit_logs_query,
-    get_audit_logs_count,
 )
 
 # Schema imports
@@ -39,7 +34,7 @@ from apps.user_service.app.schemas.audit_logs import (
     AuditLogItem,
     AuditLogDetailResponse,
     AuditLogDetailItem,
-    DeleteAuditLogsResponse,
+    DeleteAuditLogsResponse
 )
 
 from apps.user_service.app.schemas.common import (
@@ -48,11 +43,18 @@ from apps.user_service.app.schemas.common import (
 
 from apps.user_service.app.app_instance import limiter
 
-
 # Local imports
-from libs.shared_db.postgres_db.db import get_async_db_conn
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 
+
+# Database operations imports
+from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
+    get_audit_logs_list,
+    get_audit_logs_count,
+    get_audit_log_by_id,
+    delete_all_audit_logs,
+    AuditLogFilter,
+)
 
 # Create router for audit logs endpoints
 router = APIRouter(prefix="/audit-logs", tags=["Audit Logs Management"])
@@ -86,7 +88,6 @@ class AuditLogResponse(BaseModel):
 async def get_audit_logs(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
-    db_conn=Depends(get_async_db_conn),
     query_params: AuditLogsQueryParams = Depends(),
 ):
     """
@@ -130,28 +131,19 @@ async def get_audit_logs(
     #     action_description="view audit logs",
     # )
 
-    # Build query using utility function
-    print("user_context")
-    audit_logs_query, query_params_list = build_audit_logs_filter_query(
+    # Create filter parameters
+    filter_params = AuditLogFilter(
         organization_id=user_context.organization_id,
         search=query_params.search,
         limit=query_params.limit,
         offset=query_params.skip,
     )
-    # print(audit_logs_query)
-    # print(query_params_list)
 
-    # Execute audit logs query
-    audit_logs_data = await db_conn.fetch(audit_logs_query, *query_params_list)
+    # Get audit logs using centralized database operations
+    audit_logs_data = await get_audit_logs_list(filter_params)
 
-    # Build and execute count query
-        # organization_id=user_context.organization_id,
-    count_query, count_params = build_audit_logs_count_query(
-        search=query_params.search,
-    )
-
-    count_result = await db_conn.fetchrow(count_query, *count_params)
-    total_count = count_result["total_count"] if count_result else 0
+    # Get total count using centralized database operations
+    total_count = await get_audit_logs_count(filter_params)
 
     # Format audit logs data using utility functions
     audit_logs = [
@@ -212,11 +204,10 @@ async def get_audit_logs(
 #     table_name="audit_logs",
 #     category="audit_management",
 # )
-async def get_audit_log_by_id(
+async def get_audit_log_from_id(
     audit_log_id: str,
     request: Request,
     # current_user: dict = Depends(get_user_from_auth),
-    db_conn=Depends(get_async_db_conn),
 ):
     """
     Get audit log by ID with all details (Optimized & Truly Async)
@@ -236,7 +227,6 @@ async def get_audit_log_by_id(
         audit_log_id (str): UUID of the audit log to retrieve
         request (Request): The FastAPI request object
         current_user (dict): Decoded JWT token containing user information
-        db_conn: AsyncPG database connection (truly async)
 
     Returns:
         AuditLogDetailResponse: Detailed audit log information with all metadata
@@ -263,10 +253,8 @@ async def get_audit_log_by_id(
     #     action_description="view audit log details",
     # )
 
-    # Fetch audit log details using async SQL
-    audit_log_query = build_audit_log_by_id_query()
-
-    audit_log_data = await db_conn.fetchrow(audit_log_query, audit_log_id)
+    # Get audit log using centralized database operations
+    audit_log_data = await get_audit_log_by_id(audit_log_id)
 
     # Check if audit log exists
     if not audit_log_data:
@@ -325,10 +313,9 @@ async def get_audit_log_by_id(
 #     category="audit_management",
 # )
 # pylint: disable=unused-argument  # Required by @limiter.limit
-async def delete_all_audit_logs(
+async def delete_all_audit_logs_data(
     request: Request,
     # current_user: dict = Depends(get_user_from_auth),
-    db_conn=Depends(get_async_db_conn),
 ):
     """
     Delete all audit logs from the system (Optimized & Truly Async)
@@ -378,23 +365,11 @@ async def delete_all_audit_logs(
     #     action_description="delete all audit logs",
     # )
 
-    # Get count of audit logs before deletion for response
-    audit_logs_count = await get_audit_logs_count(db_conn)
-
-    # Delete all audit logs using async transaction
-    # async with db_conn.transaction():
-    delete_query = build_delete_all_audit_logs_query()
-    result = await db_conn.execute(delete_query)
-
-    # Check if the deletion was successful
-    if result == "DELETE 0" and audit_logs_count > 0:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete audit logs",
-        )
+    # Delete all audit logs using centralized database operations
+    deleted_count = await delete_all_audit_logs()
 
     return DeleteAuditLogsResponse(
         status_code=status.HTTP_200_OK,
         message="All audit logs deleted successfully",
-        deleted_count=audit_logs_count,
+        deleted_count=deleted_count,
     )

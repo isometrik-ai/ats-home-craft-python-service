@@ -1,47 +1,19 @@
-# Get Roles API Tests
+# Minimal Mocked Test Suite
 
-Simple test suite for the Get Roles API endpoint with **15+ comprehensive test cases**.
+This test suite uses fully mocked operations to avoid network calls and aligns with the current API routers and signatures.
 
-## 🚀 Quick Start
+## Run
 
-### **1. Setup Virtual Environment**
-```bash
-rm -rf venv
-python3 -m venv venv
-source venv/bin/activate
-pip install -r apps/requirements.txt
+```
+cd apps/user_service/tests
+PYTHONPATH=.. python -m pytest -v --tb=short
 ```
 
-### **2. Run All Tests**
-```bash
-cd tests && PYTHONPATH=.. python -m pytest test_get_roles_api.py -v
-```
-
-### **3. Run All Tests with Coverage**
-```bash
-PYTHONPATH=.. python -m pytest apps/user_service/tests/test_users_api_comprehensive.py --cov=apps --cov-report=html --cov-report=term-missing -v -s
-
-PYTHONPATH=.. python -m pytest . --cov=apps --cov-report=html --cov-report=term-missing -v
-
-
-
-cd tests && PYTHONPATH=.. python -m pytest . --cov=apps.api.admin_management.roles --cov-report=html --cov-report=term-missing -v
-```
-
-## 📋 Test Commands
-
-| Command | Description |
-|---------|-------------|
-| `PYTHONPATH=.. python -m pytest test_get_roles_api.py -v` | Run all tests |
-| `PYTHONPATH=.. python -m pytest . --cov=apps.api.admin_management.roles --cov-report=html -v` | Run with coverage |
-| `PYTHONPATH=.. python -m pytest test_get_roles_api.py::TestGetRolesAPI -v` | Run unit tests only |
-| `PYTHONPATH=.. python -m pytest test_get_roles_api.py -k "auth" -v` | Run authentication tests |
-
-## 📊 Coverage Report
-After running coverage tests, open `htmlcov/index.html` in your browser.
-
-## ✅ Test Coverage
-- **Success Scenarios**: Default params, search, filters, pagination
-- **Authentication**: JWT validation, permissions
-- **Validation**: Invalid inputs, edge cases
-- **Database Errors**: Connection failures, query errors 
+## Files
+- conftest.py: global patches for operations to use an in-memory Supabase mock and ensure a running event loop.
+- test_roles_api.py: roles list/get/create/update.
+- test_users_api.py: users list/get/invite/update.
+- test_permissions_api.py: permissions list.
+- test_organisations_api.py: organisations list and details.
+- test_sessions_api.py: sessions list.
+- test_audit_logs_api.py: audit logs list.

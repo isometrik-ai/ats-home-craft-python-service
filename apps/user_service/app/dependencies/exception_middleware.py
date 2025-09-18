@@ -14,9 +14,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     maybe_log_audit_on_error,
-    logger,
 )
 from apps.user_service.app.dependencies.logger import get_logger
+
+# Use the shared application logger
+logger = get_logger()
 
 # Initialize logger for exception middleware
 exception_logger = get_logger("exception-middleware")
