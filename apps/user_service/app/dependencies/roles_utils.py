@@ -15,46 +15,6 @@ Role-Specific Operations Covered:
 
 from typing import Optional
 
-from .common_utils import (
-    extract_user_context,
-    require_permission,
-)
-
-# ============================================================================
-# ROLE PERMISSION CHECKING
-# ============================================================================
-
-
-async def check_roles_manage_permission(
-    current_user, action_description="access role details"
-):
-    """
-    Extracts user context and checks if the user has 'settings.roles.manage' permission.
-    """
-    user_context = extract_user_context(current_user)
-    await require_permission(
-        permission_code="settings.roles.manage",
-        user_context=user_context,
-        action_description=action_description,
-    )
-    return user_context
-
-
-async def check_roles_manage_multiple_permission(
-    current_user, action_description="access role details"
-):
-    """
-    Extracts user context and checks if the user has 'settings.roles.manage' permission.
-    """
-    user_context = extract_user_context(current_user)
-    await require_permission(
-        permission_code=["settings.roles.manage", "settings.users.manage"],
-        user_context=user_context,
-        action_description=action_description,
-    )
-    return user_context
-
-
 # ============================================================================
 # ROLE RESPONSE HELPERS
 # ============================================================================

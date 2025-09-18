@@ -19,8 +19,7 @@ import os  # Standard library import first
 from typing import List, Tuple, Optional
 
 import jwt
-from supabase import AsyncClient, Client
-from starlette.status import HTTP_401_UNAUTHORIZED
+from supabase import AsyncClient
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request, HTTPException, status, responses
 
@@ -137,14 +136,14 @@ async def validate_organization_member(
             )
 
         row = response.data[0]
-        status = row.get("status")
+        user_status = row.get("status")
         db_email = row.get("email")
         role_name = row.get("roles", {}).get("name") if row.get("roles") else None
 
-        if not is_allowed_user_status(status):
+        if not is_allowed_user_status(user_status):
             raise_forbidden_error(
                 request,
-                f"Membership status is '{status}'",
+                f"Membership status is '{user_status}'",
                 "Your account is suspended or inactive.",
             )
 
@@ -358,12 +357,12 @@ async def get_user_from_auth(
             "Not authenticated",
         )
 
-    if not user_id or not organization_id:
-        raise_auth_error(
-            request,
-            "JWT token missing user_id or organization_id",
-            "Invalid token: missing user or organization ID",
-        )
+    # if not user_id or not organization_id:
+    #     raise_auth_error(
+    #         request,
+    #         "JWT token missing user_id or organization_id",
+    #         "Invalid token: missing user or organization ID",
+    #     )
 
 #     if not session_id:
 #         request.state.audit_description = "JWT token missing session_id"
@@ -376,34 +375,34 @@ async def get_user_from_auth(
     user_metadata = user.get("user_metadata", {})
     user_type = user_metadata.get("type")
 
-    if not user_type:
-        raise_auth_error(
-            request,
-            "JWT token missing user type",
-            "Invalid token: missing user type",
-        )
+    # if not user_type:
+    #     raise_auth_error(
+    #         request,
+    #         "JWT token missing user type",
+    #         "Invalid token: missing user type",
+    #     )
 
-    # Validate user based on type using helper functions
-    user_type_validators = {
-        "organization_member": validate_organization_member,
-        "client": validate_client_member,
-        "candidate": validate_candidate,
-    }
+    # # Validate user based on type using helper functions
+    # user_type_validators = {
+    #     "organization_member": validate_organization_member,
+    #     "client": validate_client_member,
+    #     "candidate": validate_candidate,
+    # }
 
-    if user_type not in user_type_validators:
-        raise_auth_error(
-            request,
-            f"Unsupported user type: {user_type}",
-            "Invalid token: unsupported user type",
-        )
+    # if user_type not in user_type_validators:
+    #     raise_auth_error(
+    #         request,
+    #         f"Unsupported user type: {user_type}",
+    #         "Invalid token: unsupported user type",
+    #     )
 
-    # Validate user and get role
-    role_name = await user_type_validators[user_type](
-        request, user_id, organization_id, user_email
-    )
+    # # Validate user and get role
+    # role_name = await user_type_validators[user_type](
+    #     request, user_id, organization_id, user_email
+    # )
 
     # ✅ User is valid, update audit context and success markers
-    request.state.audit_user_context["user_role"] = role_name
+    # request.state.audit_user_context["user_role"] = role_name
     request.state.audit_risk_level = "low"
     request.state.audit_description = "Successfully authenticated and authorized user"
     print("get_user_from_auth")
@@ -427,6 +426,35 @@ async def get_user_from_auth(
 
 
 #     return user
+
+async def get_user_from_token(token: str) -> dict:
+    """
+    Get user from token
+
+    Args:
+        token (str): The JWT token to decode
+
+    Returns:
+        dict: The user data from the token
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Token expired"}
+        )
+    except jwt.InvalidTokenError as exception:
+        print("JWT DECODE ERROR:", str(exception))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"}
+        )
+
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
@@ -481,12 +509,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             print(payload)
         except jwt.ExpiredSignatureError:
             return responses.JSONResponse(
-                status_code=HTTP_401_UNAUTHORIZED, content={"detail": "Token expired"}
+                status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Token expired"}
             )
         except jwt.InvalidTokenError as exception:
             print("JWT DECODE ERROR:", str(exception))
             return responses.JSONResponse(
-                status_code=HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"}
+                status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"}
             )
 
         return await call_next(request)

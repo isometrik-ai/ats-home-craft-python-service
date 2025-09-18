@@ -18,13 +18,10 @@ Operations Covered:
 
 from typing import List, Dict, Any, Optional
 
-from postgrest import APIError
-from httpx import HTTPError, RequestError, TimeoutException
-
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
-from libs.shared_utils.common_query import ROLE_SELECT_FIELDS, PERMISSION_SELECT_FIELDS
+from libs.shared_utils.common_query import ROLE_SELECT_FIELDS
 from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.schemas.admin_access_management import RoleQueryParams
+from .exception_handling import handle_database_errors, create_error_messages
 
 # Initialize logger
 logger = get_logger("role_operations")
@@ -34,58 +31,46 @@ logger = get_logger("role_operations")
 # ROLE CRUD OPERATIONS
 # ============================================================================
 
+@handle_database_errors(
+    "create_role",
+    custom_messages=create_error_messages("create_role", "creating")
+)
 async def create_role(name: str, description: str, organization_id: str,
                      is_default: bool = False) -> Dict[str, Any]:
     """Create a new role."""
-    supabase = get_supabase_admin_client()
-    try:
-        role_record = {
-            "name": name,
-            "description": description,
-            "organization_id": organization_id,
-            "is_default": is_default,
-            "created_at": "now()",
-            "updated_at": "now()"
-        }
+    supabase = await get_supabase_admin_client()
 
-        result = await supabase.table("roles").insert(role_record).execute()
+    role_record = {
+        "name": name,
+        "description": description,
+        "organization_id": organization_id,
+        "is_default": is_default,
+        "created_at": "now()",
+        "updated_at": "now()"
+    }
 
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return {}
+    result = await supabase.table("roles").insert(role_record).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error creating role: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error creating role: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error creating role: %s", e, exc_info=True)
-        raise
+    if result.data and len(result.data) > 0:
+        return result.data[0]
+    return {}
 
 
+@handle_database_errors(
+    "get_role_by_id",
+    custom_messages=create_error_messages("get_role_by_id", "getting")
+)
 async def get_role_by_id(role_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
     """Get role by ID and organization ID."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("roles").select(ROLE_SELECT_FIELDS).eq(
-            "id", role_id
-        ).eq("organization_id", organization_id).execute()
+    supabase = await get_supabase_admin_client()
 
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return None
+    result = await supabase.table("roles").select(ROLE_SELECT_FIELDS).eq(
+        "id", role_id
+    ).eq("organization_id", organization_id).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error getting role by ID: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting role by ID: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting role by ID: %s", e, exc_info=True)
-        raise
+    if result.data and len(result.data) > 0:
+        return result.data[0]
+    return None
 
 
 # async def get_role_by_name(name: str, organization_id: str) -> Optional[Dict[str, Any]]:
@@ -111,89 +96,75 @@ async def get_role_by_id(role_id: str, organization_id: str) -> Optional[Dict[st
 #             raise
 
 
-async def update_role(role_id: str, organization_id: str, update_data: Dict[str, Any]) -> Dict[str, Any]:
+@handle_database_errors(
+    "update_role",
+    custom_messages=create_error_messages("update_role", "updating"))
+async def update_role(
+    role_id: str,
+    organization_id: str,
+    update_data: Dict[str, Any]
+) -> Dict[str, Any]:
     """Update role information."""
-    supabase = get_supabase_admin_client()
-    try:
-        # Prepare update data
-        update_payload = {}
+    supabase = await get_supabase_admin_client()
 
-        for field, value in update_data.items():
-            if value is not None:
-                update_payload[field] = value
+    # Prepare update data
+    update_payload = {}
 
-        if not update_payload:
-            # No fields to update
-            return {}
+    for field, value in update_data.items():
+        if value is not None:
+            update_payload[field] = value
 
-        # Add updated_at
-        update_payload["updated_at"] = "now()"
-
-        result = await supabase.table("roles").update(update_payload).eq(
-            "id", role_id
-        ).eq("organization_id", organization_id).execute()
-
-        if result.data and len(result.data) > 0:
-            return result.data[0]
+    if not update_payload:
+        # No fields to update
         return {}
 
-    except APIError as e:
-        logger.error("Supabase API error updating role: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error updating role: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error updating role: %s", e, exc_info=True)
-        raise
+    # Add updated_at
+    update_payload["updated_at"] = "now()"
+
+    result = await supabase.table("roles").update(update_payload).eq(
+        "id", role_id
+    ).eq("organization_id", organization_id).execute()
+
+    if result.data and len(result.data) > 0:
+        return result.data[0]
+    return {}
 
 
+@handle_database_errors(
+    "delete_role",
+    custom_messages=create_error_messages("delete_role", "deleting"))
 async def delete_role(role_id: str, organization_id: str) -> bool:
     """Delete role from organization."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("roles").delete().eq(
-            "id", role_id
-        ).eq("organization_id", organization_id).execute()
+    supabase = await get_supabase_admin_client()
 
-        return len(result.data) > 0 if result.data else False
+    result = await supabase.table("roles").delete().eq(
+        "id", role_id
+    ).eq("organization_id", organization_id).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error deleting role: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error deleting role: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error deleting role: %s", e, exc_info=True)
-        raise
+    return len(result.data) > 0 if result.data else False
 
 
+@handle_database_errors(
+    "check_role_exists",
+    custom_messages=create_error_messages("check_role_exists", "checking"))
 async def check_role_exists(role_id: str, organization_id: str) -> bool:
     """Check if role exists in organization."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("roles").select("id").eq(
-            "id", role_id
-        ).eq("organization_id", organization_id).execute()
+    supabase = await get_supabase_admin_client()
 
-        return len(result.data) > 0 if result.data else False
+    result = await supabase.table("roles").select("id").eq(
+        "id", role_id
+    ).eq("organization_id", organization_id).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error checking role existence: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error checking role existence: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error checking role existence: %s", e, exc_info=True)
-        raise
+    return len(result.data) > 0 if result.data else False
 
 
 # ============================================================================
 # ROLE LISTING AND SEARCH
 # ============================================================================
 
+@handle_database_errors(
+    "get_roles_list",
+    custom_messages=create_error_messages("get_roles_list", "getting"))
 async def get_roles_list(
     organization_id: str,
     search: Optional[str] = None,
@@ -206,70 +177,65 @@ async def get_roles_list(
     This function mimics the logic from build_roles_filter_query() in roles_utils.py
     to ensure consistent parameter handling and filtering across the codebase.
     """
-    supabase = get_supabase_admin_client()
-    try:
-        # Build the query using the same logic as build_roles_filter_query
-        # First get roles with basic filtering
-        query = supabase.table("roles").select(
-            "id, name, description, is_default, created_at, updated_at"
-        ).eq("organization_id", organization_id).neq("name", "Super Admin")
+    supabase = await get_supabase_admin_client()
 
-        # Apply search filter (mimicking the ILIKE logic from build_roles_filter_query)
-        if search:
-            query = query.ilike("name", f"%{search}%")
+    # Build the query using the same logic as build_roles_filter_query
+    # First get roles with basic filtering
+    query = supabase.table("roles").select(
+        "id, name, description, is_default, created_at, updated_at"
+    ).eq("organization_id", organization_id).neq("name", "Super Admin")
 
-        # Apply role type filter (mimicking the is_default logic from build_roles_filter_query)
-        if role_type:
-            is_default_value = role_type == "system"
-            query = query.eq("is_default", is_default_value)
+    # Apply search filter (mimicking the ILIKE logic from build_roles_filter_query)
+    if search:
+        query = query.ilike("name", f"%{search}%")
 
-        # Apply pagination and ordering (mimicking the LIMIT/OFFSET and ORDER BY logic)
-        result = await query.order("updated_at", desc=True).range(
-            offset, offset + limit - 1
+    # Apply role type filter (mimicking the is_default logic from build_roles_filter_query)
+    if role_type:
+        is_default_value = role_type == "system"
+        query = query.eq("is_default", is_default_value)
+
+    # Apply pagination and ordering (mimicking the LIMIT/OFFSET and ORDER BY logic)
+    result = await query.order("updated_at", desc=True).range(
+        offset, offset + limit - 1
+    ).execute()
+
+    roles = result.data if result.data else []
+
+    # For each role, get user count and permission count
+    # This mimics the complex CTE logic from the SQL query
+    for role in roles:
+        # Get user count
+        user_count_result = await supabase.table("organization_members").select(
+            "id", count="exact"
+        ).eq("role_id", role["id"]).eq("organization_id", organization_id).eq(
+            "status", "active"
         ).execute()
+        role["user_count"] = user_count_result.count if user_count_result.count else 0
 
-        roles = result.data if result.data else []
+        # Get permission count and categories
+        permission_result = await supabase.table("role_permissions").select(
+            "permissions(category)"
+        ).eq("role_id", role["id"]).eq("organization_id", organization_id).execute()
 
-        # For each role, get user count and permission count
-        # This mimics the complex CTE logic from the SQL query
-        for role in roles:
-            # Get user count
-            user_count_result = await supabase.table("organization_members").select(
-                "id", count="exact"
-            ).eq("role_id", role["id"]).eq("organization_id", organization_id).eq(
-                "status", "active"
-            ).execute()
-            role["user_count"] = user_count_result.count if user_count_result.count is not None else 0
+        permissions = [
+            item.get("permissions", {})
+            for item in permission_result.data if item.get("permissions")]
+        role["permission_count"] = len(permissions)
 
-            # Get permission count and categories
-            permission_result = await supabase.table("role_permissions").select(
-                "permissions(category)"
-            ).eq("role_id", role["id"]).eq("organization_id", organization_id).execute()
+        # Group permissions by category (mimicking the JSON_OBJECT_AGG logic)
+        categories = {}
+        for perm in permissions:
+            category = perm.get("category", "uncategorized")
+            categories[category] = categories.get(category, 0) + 1
 
-            permissions = [item.get("permissions", {}) for item in permission_result.data if item.get("permissions")]
-            role["permission_count"] = len(permissions)
+        role["permission_categories"] = categories
 
-            # Group permissions by category (mimicking the JSON_OBJECT_AGG logic)
-            categories = {}
-            for perm in permissions:
-                category = perm.get("category", "uncategorized")
-                categories[category] = categories.get(category, 0) + 1
-
-            role["permission_categories"] = categories
-
-        return roles
-
-    except APIError as e:
-        logger.error("Supabase API error getting roles list: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting roles list: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting roles list: %s", e, exc_info=True)
-        raise
+    return roles
 
 
+@handle_database_errors(
+    "get_roles_count",
+    custom_messages=create_error_messages("get_roles_count", "getting"))
 async def get_roles_count(
     organization_id: str,
     search: Optional[str] = None,
@@ -280,35 +246,25 @@ async def get_roles_count(
     This function mimics the logic from build_roles_count_query() in roles_utils.py
     to ensure consistent parameter handling and filtering across the codebase.
     """
-    supabase = get_supabase_admin_client()
-    try:
-        # Build the count query with filters (mimicking build_roles_count_query logic)
-        query = supabase.table("roles").select("id", count="exact").eq(
-            "organization_id", organization_id
-        ).neq("name", "Super Admin")
+    supabase = await get_supabase_admin_client()
 
-        # Apply search filter (mimicking the ILIKE logic from build_roles_count_query)
-        if search:
-            query = query.ilike("name", f"%{search}%")
+    # Build the count query with filters (mimicking build_roles_count_query logic)
+    query = supabase.table("roles").select("id", count="exact").eq(
+        "organization_id", organization_id
+    ).neq("name", "Super Admin")
 
-        # Apply role type filter (mimicking the is_default logic from build_roles_count_query)
-        if role_type:
-            is_default_value = role_type == "system"
-            query = query.eq("is_default", is_default_value)
+    # Apply search filter (mimicking the ILIKE logic from build_roles_count_query)
+    if search:
+        query = query.ilike("name", f"%{search}%")
 
-        result = await query.execute()
+    # Apply role type filter (mimicking the is_default logic from build_roles_count_query)
+    if role_type:
+        is_default_value = role_type == "system"
+        query = query.eq("is_default", is_default_value)
 
-        return result.count if result.count is not None else 0
+    result = await query.execute()
 
-    except APIError as e:
-        logger.error("Supabase API error getting roles count: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting roles count: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting roles count: %s", e, exc_info=True)
-        raise
+    return result.count if result.count is not None else 0
 
 
 
@@ -317,13 +273,7 @@ async def get_roles_count(
 
 
 
-
-
-
-
-
-
-    # supabase = get_supabase_admin_client()
+    # supabase = await get_supabase_admin_client()
     # try:
     #     # Build the count query with filters
     #     query = supabase.table("roles").select("id", count="exact").eq(
@@ -408,201 +358,153 @@ async def get_roles_count(
 # ROLE PERMISSION OPERATIONS
 # ============================================================================
 
+@handle_database_errors(
+    "assign_permissions_to_role",
+    custom_messages=create_error_messages("assign_permissions_to_role", "assigning"))
 async def assign_permissions_to_role(role_id: str, organization_id: str,
                                    permission_ids: List[str]) -> bool:
     """Assign permissions to a role."""
     if not permission_ids:
         return True
 
-    supabase = get_supabase_admin_client()
-    try:
-        # Remove existing permissions first
-        await remove_all_permissions_from_role(role_id, organization_id)
-        logger.debug("Removed all existing permissions from role")
+    supabase = await get_supabase_admin_client()
 
-        # Prepare role permission records
-        role_permissions = []
-        for permission_id in permission_ids:
-            role_permissions.append({
-                "organization_id": organization_id,
-                "role_id": role_id,
-                "permission_id": permission_id,
-                "created_at": "now()"
-            })
+    # Remove existing permissions first
+    await remove_all_permissions_from_role(role_id, organization_id)
+    logger.debug("Removed all existing permissions from role")
 
-        # Bulk insert new permissions
-        result = await supabase.table("role_permissions").insert(role_permissions).execute()
+    # Prepare role permission records
+    role_permissions = []
+    for permission_id in permission_ids:
+        role_permissions.append({
+            "organization_id": organization_id,
+            "role_id": role_id,
+            "permission_id": permission_id,
+            "created_at": "now()"
+        })
 
-        return len(result.data) > 0 if result.data else False
+    # Bulk insert new permissions
+    result = await supabase.table("role_permissions").insert(role_permissions).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error assigning permissions to role: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error assigning permissions to role: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error assigning permissions to role: %s", e, exc_info=True)
-        raise
+    return len(result.data) > 0 if result.data else False
 
 
+@handle_database_errors(
+    "remove_permissions_from_role",
+    custom_messages=create_error_messages("remove_permissions_from_role", "removing"))
 async def remove_permissions_from_role(role_id: str, organization_id: str,
                                      permission_ids: List[str]) -> bool:
     """Remove specific permissions from a role."""
     if not permission_ids:
         return True
 
-    supabase = get_supabase_admin_client()
-    try:
-        # Delete permissions using in_ filter
-        result = await supabase.table("role_permissions").delete().eq(
-            "role_id", role_id
-        ).eq("organization_id", organization_id).in_(
-            "permission_id", permission_ids
-        ).execute()
+    supabase = await get_supabase_admin_client()
 
-        return len(result.data) > 0 if result.data else False
+    # Delete permissions using in_ filter
+    result = await supabase.table("role_permissions").delete().eq(
+        "role_id", role_id
+    ).eq("organization_id", organization_id).in_(
+        "permission_id", permission_ids
+    ).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error removing permissions from role: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error removing permissions from role: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error removing permissions from role: %s", e, exc_info=True)
-        raise
+    return len(result.data) > 0 if result.data else False
 
 
+@handle_database_errors(
+    "remove_all_permissions_from_role",
+    custom_messages=create_error_messages("remove_all_permissions_from_role", "removing"))
 async def remove_all_permissions_from_role(role_id: str, organization_id: str) -> bool:
     """Remove all permissions from a role."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("role_permissions").delete().eq(
-            "role_id", role_id
-        ).eq("organization_id", organization_id).execute()
+    supabase = await get_supabase_admin_client()
 
-        return True  # Always return True as we don't need to check if records existed
+    result = await supabase.table("role_permissions").delete().eq(
+        "role_id", role_id
+    ).eq("organization_id", organization_id).execute()
+    logger.debug("Removed all permissions from role result: %s", result)
 
-    except APIError as e:
-        logger.error("Supabase API error removing all permissions from role: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error removing all permissions from role: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error removing all permissions from role: %s", e, exc_info=True)
-        raise
+    return True  # Always return True as we don't need to check if records existed
 
 
+@handle_database_errors(
+    "get_role_permissions",
+    custom_messages=create_error_messages("get_role_permissions", "getting"))
 async def get_role_permissions(role_id: str, organization_id: str) -> List[Dict[str, Any]]:
     """Get all permissions assigned to a role."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table(
-            "role_permissions"
-            ).select("permission_id"
-            ).eq("role_id", role_id
-            ).eq("organization_id", organization_id
-            ).execute()
+    supabase = await get_supabase_admin_client()
 
-        # Extract permissions from the nested structure
-        permissions = []
-        if result.data:
-            for item in result.data:
-                if item.get("permission_id"):
-                    permissions.append(item["permission_id"])
+    result = await supabase.table(
+        "role_permissions"
+        ).select("permission_id"
+        ).eq("role_id", role_id
+        ).eq("organization_id", organization_id
+        ).execute()
 
-        # # Sort by category and name
-        # permissions.sort(key=lambda x: (x.get("category") or "", x.get("name", "")))
+    # Extract permissions from the nested structure
+    permissions = []
+    if result.data:
+        for item in result.data:
+            if item.get("permission_id"):
+                permissions.append(item["permission_id"])
 
-        return permissions
+    # # Sort by category and name
+    # permissions.sort(key=lambda x: (x.get("category") or "", x.get("name", "")))
 
-    except APIError as e:
-        logger.error("Supabase API error getting role permissions: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting role permissions: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting role permissions: %s", e, exc_info=True)
-        raise
+    return permissions
 
 
+@handle_database_errors(
+    "check_permissions_exist",
+    custom_messages=create_error_messages("check_permissions_exist", "checking"))
 async def check_permissions_exist(permission_ids: List[str], organization_id: str) -> bool:
     """Check if all permission IDs exist in organization."""
     if not permission_ids:
         return True
 
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("permissions").select("id", count="exact").in_(
-            "id", permission_ids
-        ).eq("organization_id", organization_id).execute()
+    supabase = await get_supabase_admin_client()
 
-        return result.count == len(permission_ids) if result.count is not None else False
+    result = await supabase.table("permissions").select("id", count="exact").in_(
+        "id", permission_ids
+    ).eq("organization_id", organization_id).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error checking permissions exist: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error checking permissions exist: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error checking permissions exist: %s", e, exc_info=True)
-        raise
+    return result.count == len(permission_ids) if result.count is not None else False
 
 
 # ============================================================================
 # ROLE VALIDATION OPERATIONS
 # ============================================================================
 
+@handle_database_errors(
+    "check_role_name_unique",
+    custom_messages=create_error_messages("check_role_name_unique", "checking"))
 async def check_role_name_unique(name: str, organization_id: str,
                                exclude_role_id: Optional[str] = None) -> bool:
     """Check if role name is unique in organization."""
-    supabase = get_supabase_admin_client()
-    try:
-        query = supabase.table("roles").select("id").eq("name", name).eq(
-            "organization_id", organization_id
-        )
+    supabase = await get_supabase_admin_client()
 
-        if exclude_role_id:
-            query = query.neq("id", exclude_role_id)
+    query = supabase.table("roles").select("id").eq("name", name).eq(
+        "organization_id", organization_id
+    )
 
-        result = await query.execute()
+    if exclude_role_id:
+        query = query.neq("id", exclude_role_id)
 
-        return len(result.data) == 0 if result.data else True
+    result = await query.execute()
 
-    except APIError as e:
-        logger.error("Supabase API error checking role name uniqueness: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error checking role name uniqueness: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error checking role name uniqueness: %s", e, exc_info=True)
-        raise
+    return len(result.data) == 0 if result.data else True
 
 
+@handle_database_errors(
+    "check_role_usage",
+    custom_messages=create_error_messages("check_role_usage", "checking"))
 async def check_role_usage(role_id: str, organization_id: str) -> int:
     """Check how many users are using this role."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("organization_members").select(
-            "id", count="exact"
-        ).eq("role_id", role_id).eq("organization_id", organization_id).execute()
+    supabase = await get_supabase_admin_client()
 
-        return result.count if result.count is not None else 0
+    result = await supabase.table("organization_members").select(
+        "id", count="exact"
+    ).eq("role_id", role_id).eq("organization_id", organization_id).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error checking role usage: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error checking role usage: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error checking role usage: %s", e, exc_info=True)
-        raise
+    return result.count if result.count is not None else 0
 
 
 # ============================================================================
@@ -672,7 +574,9 @@ async def check_role_usage(role_id: str, organization_id: str) -> int:
 # ROLE BULK OPERATIONS
 # ============================================================================
 
-# async def bulk_create_roles(roles_data: List[Dict[str, Any]], organization_id: str) -> List[Dict[str, Any]]:
+# async def bulk_create_roles(
+#   roles_data: List[Dict[str, Any]],
+#   organization_id: str) -> List[Dict[str, Any]]:
 #     """Bulk create multiple roles."""
     # if not roles_data:
     #     return []
@@ -700,7 +604,9 @@ async def check_role_usage(role_id: str, organization_id: str) -> int:
     #         raise
 
 
-# async def bulk_update_roles(updates: List[Dict[str, Any]], organization_id: str) -> List[Dict[str, Any]]:
+# async def bulk_update_roles(
+#   updates: List[Dict[str, Any]],
+#   organization_id: str) -> List[Dict[str, Any]]:
 #     """Bulk update multiple roles."""
 #     if not updates:
 #         return []
@@ -754,7 +660,9 @@ async def check_role_usage(role_id: str, organization_id: str) -> int:
 # ROLE PERMISSION BULK OPERATIONS
 # ============================================================================
 
-# async def bulk_assign_permissions(assignments: List[Dict[str, Any]], organization_id: str) -> bool:
+# async def bulk_assign_permissions(
+#   assignments: List[Dict[str, Any]],
+#   organization_id: str) -> bool:
 #     """Bulk assign permissions to multiple roles."""
     # if not assignments:
     #     return True

@@ -4,10 +4,11 @@ This module contains all user-related admin operations.
 All Supabase Auth admin API operations for user management should be centralized here.
 """
 
-import sys
 import os
-from typing import Optional, Tuple, Any
+import sys
+from typing import Optional, Tuple
 from fastapi import HTTPException, status
+from supabase_auth.errors import AuthApiError
 from apps.user_service.app.dependencies.logger import get_logger
 from libs.shared_db.supabase_db.admin_operations.user import update_email_of_user
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
@@ -16,6 +17,8 @@ from libs.shared_db.postgres_db.user_service_operations.user_operations import (
 )
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_utils.email_utils import send_email
+from apps.user_service.app.schemas.users import CreateUserRequest
+from apps.user_service.app.dependencies.common_utils import UserContext
 
 logger = get_logger("user_utility_admin")
 
@@ -273,14 +276,14 @@ async def create_supabase_user(body, organization_id):
         ) from supabase_error
 
 
-async def sign_up_supabase_user(body, organization_id):
+async def sign_up_supabase_user(body):
     """
     Create user in Supabase Auth using auth.signUp for user-initiated registration.
     This is for user signup (like in signup API) and requires email confirmation.
 
     Args:
         body: Request body with user data
-        organization_id: Organization ID to associate with user
+organization_id: Organization ID to associate with user
 
     Returns:
         str: Created user ID
@@ -290,22 +293,22 @@ async def sign_up_supabase_user(body, organization_id):
     """
     try:
         supabase = await get_supabase_admin_client()
-        supabase_response = supabase.auth.sign_up(
+        supabase_response = await supabase.auth.sign_up(
             {
-                "email": body.email,
-                "password": body.password,
-                "options": {
-                    "data": {
-                        "organization_id": organization_id,
-                        "full_name": body.full_name,
-                        "phone": body.phone,
-                        "is_super_admin": True,
-                        "type": "organization_member",
-                    }
-                }
+                "email": body.user_data.email,
+                "password": body.user_data.password
+                # "options": {
+                #     "data": {
+                #         "organization_id": organization_id,
+                #         "full_name": body.full_name,
+                #         "phone": body.phone,
+                #         "is_super_admin": True,
+                #         "type": "organization_member",
+                #     }
+                # }
             }
         )
-
+        print(f"Supabase user signup response: {supabase_response}")
         if not supabase_response.user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -314,7 +317,7 @@ async def sign_up_supabase_user(body, organization_id):
 
         return supabase_response.user.id
 
-    except (ConnectionError, TimeoutError, ValueError) as supabase_error:
+    except (ConnectionError, TimeoutError, ValueError, AuthApiError) as supabase_error:
         print(f"Supabase user signup failed: {supabase_error}")
         if (
             "already_exists" in str(supabase_error).lower()
@@ -360,6 +363,105 @@ async def login_user(email: str, password: str) -> dict:
         log_exception()
         logger.error(error)
         raise
+
+
+async def invite_user_with_email(body: CreateUserRequest, user_context: UserContext) -> str:
+    """
+    Invite user with email using Supabase Auth Admin API.
+
+    Args:
+        body (CreateUserRequest): Request body with user data
+        user_context (UserContext): User context containing organization ID
+
+    Returns:
+        str: Created user ID
+
+    Raises:
+        HTTPException: For duplicate email or Supabase errors
+    """
+    try:
+        supabase = await get_supabase_admin_client()
+        response = await supabase.auth.admin.invite_user_by_email(
+            email=body.email,
+            options={
+                "data": {
+                    "organization_id": str(user_context.organization_id),
+                    "role_id": str(body.role_id),
+                    "full_name": body.full_name,
+                    "type": "organization_member",
+                }
+            },
+        )
+        return response.user.id
+        # logger.debug("Email: %s, User ID: %s",body.email,response.user.id)
+        # logger.debug("Supabase user invitation sent successfully - Request ID: %s, ",request_id)
+    except Exception as e:
+        error_message = str(e).lower()
+        if (
+            "already exists" in error_message
+            or "already registered" in error_message
+            or "user already exists" in error_message
+        ):
+            # logger.warning("User already exists during invitation - Request ID: %s, ",request_id)
+            # logger.warning("Email: %s, Organization ID: %s",body.email,user_context.organization_id)
+            raise HTTPException(
+                status_code=409,
+                detail="User with this email already exists in the organization",
+            ) from e
+
+        # logger.error("Supabase invitation error - Request ID: %s, ",request_id)
+        logger.error("Email: %s, Error: %s",body.email,str(e))
+        raise HTTPException(
+            status_code=409,
+            detail=str(e),
+        ) from e
+
+async def reset_the_password_email(email: str):
+    """
+    Reset password email using Supabase Auth Admin API.
+    """
+    try:
+        supabase = await get_supabase_admin_client()
+        return await supabase.auth.reset_password_email(email)
+
+    except (AttributeError, TypeError) as e:
+        logger.error("AttributeError while resetting password email: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal error while sending password reset email.",
+        ) from e
+    except ValueError as e:
+        logger.error("ValueError while resetting password email: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email address provided.",
+        ) from e
+    except AuthApiError as e:
+        logger.error("Supabase Auth API error while resetting password email: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to send password reset email due to authentication service error.",
+        ) from e
+    except Exception as e:
+        logger.error("Unexpected error while resetting password email: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error occurred while sending password reset email.",
+        ) from e
+
+async def update_password_with_token(token: str, new_password: str) -> dict:
+    """
+    Update password with token using Supabase Auth Admin API.
+    """
+    try:
+        supabase = await get_supabase_admin_client()
+        return await supabase.auth.admin.update_user_by_id(token, {"password": new_password})
+    except Exception as e:
+        logger.error("Unexpected error while updating password with token: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error occurred while updating password with token.",
+        ) from e
 
 def log_exception():
     """Log exception details"""

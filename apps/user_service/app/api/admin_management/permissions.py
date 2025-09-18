@@ -7,7 +7,7 @@ All endpoints include proper authentication, validation, and database operations
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 from pydantic import BaseModel
@@ -19,22 +19,16 @@ from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.dependencies.common_utils import (
     validate_uuid_format,
     handle_api_exceptions,
+    format_permissions_data,
 )
-# Database operations imports
-from libs.shared_db.postgres_db.user_service_operations.permission_operations import (
-    get_permission_details_by_id,
-    get_all_permissions,
-    create_permission,
-)
-
-from apps.user_service.app.dependencies.roles_utils import check_roles_manage_permission
 
 # Schema imports
 from apps.user_service.app.schemas.admin_access_management import (
     PermissionsResponse,
-    PermissionItem,
     CreatePermissionRequest,
 )
+
+from apps.user_service.app.dependencies.common_utils import check_permissions
 
 from apps.user_service.app.app_instance import limiter
 
@@ -44,11 +38,15 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 )
 
 # Local imports
-from libs.shared_db.postgres_db.db import get_async_db_conn
 from libs.shared_middleware.jwt_auth import (
     get_user_from_auth,
 )
-
+# Database operations imports
+from libs.shared_db.postgres_db.user_service_operations.permission_operations import (
+    get_permission_details_by_id,
+    get_all_permissions,
+    create_new_permission,
+)
 
 # Create router for permissions endpoints
 router = APIRouter(prefix="/permissions", tags=["Permissions Management"])
@@ -115,13 +113,11 @@ async def get_permissions(
     request.state.audit_risk_level = "low"
 
     # Extract and validate user context from JWT token
-    user_context = await check_roles_manage_permission(current_user)
+    user_context = await check_permissions(current_user, "settings.roles.manage")
     logger.debug("User context extracted and permissions validated - Request ID: %s, ",request_id)
     logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
-    permissions_data = await get_all_permissions(
-        user_context.organization_id
-    )
+    permissions_data = await get_all_permissions(user_context.organization_id)
     logger.debug("Permissions retrieved from database - Request ID: %s, ",request_id)
     logger.debug("Organization ID: %s, ",user_context.organization_id)
     logger.debug("Permissions count: %s",len(permissions_data) if permissions_data else 0)
@@ -135,19 +131,8 @@ async def get_permissions(
         )
 
     # Format permissions data efficiently
-    permissions = [
-        PermissionItem(
-            id=str(permission["id"]),
-            name=permission["name"],
-            code=permission["code"],
-            category=permission["category"],
-            description=permission["description"],
-            created_at=(
-                permission["created_at"].isoformat() if permission["created_at"] else ""
-            ),
-        )
-        for permission in permissions_data
-    ]
+    permissions = await format_permissions_data(permissions_data)
+
     logger.debug("Permissions data formatted - Request ID: %s, ",request_id)
     logger.debug("Formatted permissions count: %s",len(permissions))
 
@@ -219,7 +204,7 @@ async def get_permission_by_id(
     logger.debug("Permission ID: %s, ",permission_id)
 
     # Extract and validate user context from JWT token
-    user_context = await check_roles_manage_permission(current_user)
+    user_context = await check_permissions(current_user, "settings.roles.manage")
     logger.debug("User context extracted and permissions validated - Request ID: %s, ",request_id)
     logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
@@ -240,18 +225,8 @@ async def get_permission_by_id(
             detail="Permission not found",
         )
 
-    permissions = [
-        PermissionItem(
-            id=str(permission["id"]),
-            name=permission["name"],
-            code=permission["code"],
-            category=permission["category"],
-            description=permission["description"],
-            created_at=(
-                permission["created_at"].isoformat() if permission["created_at"] else ""
-            ),
-        )
-    ]
+    permissions = await format_permissions_data(permission)
+
     logger.debug("Permission data formatted - Request ID: %s, ",request_id)
     logger.debug("Permission ID: %s, Permission Name: %s",permission_id,permission['name'])
     logger.debug("Permission Code: %s",permission['code'])
@@ -315,16 +290,13 @@ async def create_permission(
     request.state.audit_risk_level = "medium"
 
     # Extract and validate user context from JWT token
-    user_context = await check_roles_manage_permission(current_user)
+    user_context = await check_permissions(current_user, "settings.roles.manage")
     logger.debug("User context extracted and permissions validated - Request ID: %s, ",request_id)
     logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
-    permission = await create_permission(
-        permission_data.name,
-        permission_data.code,
-        permission_data.category,
-        permission_data.description,
-        user_context.organization_id
+    permission = await create_new_permission(
+        permission_data=permission_data,
+        organization_id=user_context.organization_id
     )
     logger.debug("Permission created in database - Request ID: %s, ",request_id)
     logger.debug(
@@ -338,8 +310,7 @@ async def create_permission(
         logger.warning("Failed to create permission - Request ID: %s, ",request_id)
         logger.warning(
                 "Permission Name: %s, Permission Code: %s, ",
-                permission_data.name,
-                permission_data.code,
+                permission_data.name,permission_data.code
             )
         logger.warning("Organization ID: %s, ",user_context.organization_id)
         raise HTTPException(
@@ -347,18 +318,8 @@ async def create_permission(
             detail="Failed to create permission",
         )
 
-    permissions = [
-        PermissionItem(
-            id=str(permission["id"]),
-            name=permission["name"],
-            code=permission["code"],
-            category=permission["category"],
-            description=permission["description"],
-            created_at=(
-                permission["created_at"].isoformat() if permission["created_at"] else ""
-            ),
-        )
-    ]
+    permissions = await format_permissions_data(permission)
+
     logger.debug("Created permission data formatted - Request ID: %s, ",request_id)
     logger.debug("Permission ID: %s, Permission Name: %s, ",permission['id'],permission['name'])
     logger.debug("Permission Code: %s",permission['code'])
@@ -427,7 +388,7 @@ async def delete_permission(
     request.state.audit_risk_level = "high"
 
     # Set audit data for deletion (placeholder since this endpoint is not fully implemented)
-    current_timestamp = datetime.utcnow().isoformat()
+    current_timestamp = datetime.now(timezone.utc).isoformat()
     request.state.raw_audit_old_data = {
         "permission_id": str(permission_id),
         "deletion_timestamp": current_timestamp,

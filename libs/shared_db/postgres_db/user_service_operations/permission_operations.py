@@ -17,11 +17,10 @@ Operations Covered:
 """
 
 from typing import List, Dict, Any, Optional
-from postgrest import APIError
-from httpx import HTTPError, RequestError, TimeoutException
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import CreatePermissionRequest
+from .exception_handling import handle_database_errors, create_error_messages
 
 # Initialize logger
 logger = get_logger("permission_operations")
@@ -31,65 +30,53 @@ logger = get_logger("permission_operations")
 # PERMISSION CRUD OPERATIONS
 # ============================================================================
 
-async def create_permission(
+@handle_database_errors(
+    "create_new_permission",
+    custom_messages=create_error_messages("create_new_permission", "creating"))
+async def create_new_permission(
     permission_data: CreatePermissionRequest,
     organization_id: str
     ) -> Dict[str, Any]:
     """Create a new permission."""
-    supabase = get_supabase_admin_client()
-    try:
-        permission_record = {
-            "name": permission_data.name,
-            "code": permission_data.code,
-            "category": permission_data.category,
-            "description": permission_data.description,
-            "organization_id": organization_id,
-            "created_at": "now()"
-        }
+    supabase = await get_supabase_admin_client()
 
-        result = await supabase.table("permissions").insert(permission_record).execute()
+    permission_record = {
+        "name": permission_data.name,
+        "code": permission_data.code,
+        "category": permission_data.category,
+        "description": permission_data.description,
+        "organization_id": organization_id,
+        "created_at": "now()"
+    }
 
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return {}
+    result = await supabase.table("permissions").insert(permission_record).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error creating permission: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error creating permission: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error creating permission: %s", e, exc_info=True)
-        raise
+    if result.data and len(result.data) > 0:
+        return result.data[0]
+    return {}
 
 
-async def get_permission_details_by_id(permission_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
+@handle_database_errors(
+    "get_permission_details_by_id",
+    custom_messages=create_error_messages("get_permission_details_by_id", "getting"))
+async def get_permission_details_by_id(
+    permission_id: str,
+    organization_id: str) -> Optional[Dict[str, Any]]:
     """Get permission by ID and organization ID."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("permissions").select(
-            "id, name, code, category, description, created_at"
-        ).eq("id", permission_id).eq("organization_id", organization_id).execute()
+    supabase = await get_supabase_admin_client()
 
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return None
+    result = await supabase.table("permissions").select(
+        "id, name, code, category, description, created_at"
+    ).eq("id", permission_id).eq("organization_id", organization_id).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error getting permission by ID: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting permission by ID: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting permission by ID: %s", e, exc_info=True)
-        raise
+    if result.data and len(result.data) > 0:
+        return result.data[0]
+    return None
 
 
 # async def get_permission_by_code(code: str, organization_id: str) -> Optional[Dict[str, Any]]:
 #     """Get permission by code and organization ID."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("permissions").select(
 #             "id, name, code, category, description, created_at, updated_at"
@@ -113,7 +100,7 @@ async def get_permission_details_by_id(permission_id: str, organization_id: str)
 # async def update_permission(permission_id: str, organization_id: str,
 #                           update_data: Dict[str, Any]) -> Dict[str, Any]:
 #     """Update permission information."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         # Prepare update data
 #         update_payload = {}
@@ -150,7 +137,7 @@ async def get_permission_details_by_id(permission_id: str, organization_id: str)
 
 # async def delete_permission(permission_id: str, organization_id: str) -> bool:
 #     """Delete permission from organization."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("permissions").delete().eq(
 #             "id", permission_id
@@ -171,7 +158,7 @@ async def get_permission_details_by_id(permission_id: str, organization_id: str)
 
 # async def check_permission_exists(permission_id: str, organization_id: str) -> bool:
 #     """Check if permission exists in organization."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("permissions").select("id").eq(
 #             "id", permission_id
@@ -198,7 +185,7 @@ async def get_permission_details_by_id(permission_id: str, organization_id: str)
 #                              category: Optional[str] = None, limit: int = 20,
 #                              offset: int = 0) -> List[Dict[str, Any]]:
 #     """Get paginated list of permissions with optional search and filtering."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         # Build the query with filters
 #         query = supabase.table("permissions").select(
@@ -238,7 +225,7 @@ async def get_permission_details_by_id(permission_id: str, organization_id: str)
 # async def get_permissions_count(organization_id: str, search: Optional[str] = None,
 #                               category: Optional[str] = None) -> int:
 #     """Get total count of permissions matching search criteria."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         # Build the count query with filters
 #         query = supabase.table("permissions").select("id", count="exact").eq(
@@ -272,27 +259,20 @@ async def get_permission_details_by_id(permission_id: str, organization_id: str)
 #         raise
 
 
+@handle_database_errors(
+    "get_all_permissions",
+    custom_messages=create_error_messages("get_all_permissions", "getting"))
 async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
     """Get all permissions for organization."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("permissions").select(
-            "id, name, code, category, description, created_at"
-        ).eq("organization_id", organization_id).order("category", desc=False).order(
-            "name", desc=False
-        ).execute()
+    supabase = await get_supabase_admin_client()
 
-        return result.data if result.data else []
+    result = await supabase.table("permissions").select(
+        "id, name, code, category, description, created_at"
+    ).eq("organization_id", organization_id).order("category", desc=False).order(
+        "name", desc=False
+    ).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error getting all permissions: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting all permissions: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting all permissions: %s", e, exc_info=True)
-        raise
+    return result.data if result.data else []
 
 
 # # ============================================================================
@@ -301,7 +281,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 
 # async def validate_permissions_exist(permission_ids: List[str], organization_id: str) -> bool:
 #     """Validate if all permission IDs exist in organization."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("permissions").select("id", count="exact").in_(
 #             "id", permission_ids
@@ -323,7 +303,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 # async def check_permission_code_unique(code: str, organization_id: str,
 #                                      exclude_permission_id: Optional[str] = None) -> bool:
 #     """Check if permission code is unique in organization."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         query = supabase.table("permissions").select("id").eq("code", code).eq(
 #             "organization_id", organization_id
@@ -343,14 +323,16 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 #         logger.error("Network error checking permission code unique: %s", e, exc_info=True)
 #         raise
 #     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error checking permission code unique: %s", e, exc_info=True)
+#         logger.error(
+#               "Data validation error checking permission code unique: %s",
+#               e, exc_info=True)
 #         raise
 
 
 # async def check_permission_name_unique(name: str, organization_id: str,
 #                                      exclude_permission_id: Optional[str] = None) -> bool:
 #     """Check if permission name is unique in organization."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         query = supabase.table("permissions").select("id").eq("name", name).eq(
 #             "organization_id", organization_id
@@ -370,7 +352,9 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 #         logger.error("Network error checking permission name unique: %s", e, exc_info=True)
 #         raise
 #     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error checking permission name unique: %s", e, exc_info=True)
+#         logger.error(
+#               "Data validation error checking permission name unique: %s",
+#               e, exc_info=True)
 #         raise
 
 
@@ -380,7 +364,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 
 # async def get_permission_categories(organization_id: str) -> List[str]:
 #     """Get all unique permission categories in organization."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("permissions").select("category").eq(
 #             "organization_id", organization_id
@@ -402,9 +386,9 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 #         raise
 
 
-# async def get_permissions_by_category(category: str, organization_id: str) -> List[Dict[str, Any]]:
+# async def get_permissions_by_category(category: str,organization_id: str) -> List[Dict[str, Any]]:
 #     """Get all permissions in a specific category."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("permissions").select(
 #             "id, name, code, category, description, created_at, updated_at"
@@ -421,7 +405,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 #         logger.error("Network error getting permissions by category: %s", e, exc_info=True)
 #         raise
 #     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error getting permissions by category: %s", e, exc_info=True)
+#         logger.error("Data validation error getting permissions by category: %s",e,exc_info=True)
 #         raise
 
 
@@ -445,9 +429,11 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 # # PERMISSION ASSIGNMENT OPERATIONS
 # # ============================================================================
 
-# async def get_permission_assignments(permission_id: str, organization_id: str) -> List[Dict[str, Any]]:
+# async def get_permission_assignments(
+#   permission_id: str,
+#   organization_id: str) -> List[Dict[str, Any]]:
 #     """Get all roles that have this permission assigned."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("role_permissions").select(
 #             "role_id, roles(id, name, description)"
@@ -472,9 +458,11 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 #         raise
 
 
-# async def get_role_permission_assignments(role_id: str, organization_id: str) -> List[Dict[str, Any]]:
+# async def get_role_permission_assignments(
+#   role_id: str,
+#   organization_id: str) -> List[Dict[str, Any]]:
 #     """Get all permissions assigned to a role."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("role_permissions").select(
 #             "permission_id, permissions(id, name, code, category, description)"
@@ -489,20 +477,22 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 #         return assignments
 
 #     except APIError as e:
-#         logger.error("Supabase API error getting role permission assignments: %s", e, exc_info=True)
+#         logger.error("Supabase API error getting role permission assignments: %s",e,exc_info=True)
 #         raise
 #     except (HTTPError, RequestError, TimeoutException) as e:
 #         logger.error("Network error getting role permission assignments: %s", e, exc_info=True)
 #         raise
 #     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error getting role permission assignments: %s", e, exc_info=True)
+        # logger.error(
+        #     "Data validation error getting role permission assignments: %s",
+        #     e, exc_info=True)
 #         raise
 
 
 # async def check_permission_assigned_to_role(permission_id: str, role_id: str,
 #                                           organization_id: str) -> bool:
 #     """Check if permission is assigned to role."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("role_permissions").select("id").eq(
 #             "permission_id", permission_id
@@ -511,13 +501,15 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 #         return len(result.data) > 0 if result.data else False
 
 #     except APIError as e:
-#         logger.error("Supabase API error checking permission assigned to role: %s", e, exc_info=True)
+#         logger.error("Supabase API error checking permission assigned to role:%s",e,exc_info=True)
 #         raise
 #     except (HTTPError, RequestError, TimeoutException) as e:
 #         logger.error("Network error checking permission assigned to role: %s", e, exc_info=True)
 #         raise
 #     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error checking permission assigned to role: %s", e, exc_info=True)
+#         logger.error(
+#               "Data validation error checking permission assigned to role: %s",
+#               e, exc_info=True)
 #         raise
 
 
@@ -527,7 +519,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 
 # async def get_permission_statistics(organization_id: str) -> Dict[str, Any]:
 #     """Get permission statistics for organization."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         # Get total permissions
 #         total_result = await supabase.table("permissions").select(
@@ -543,7 +535,8 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 
 #         categories = set()
 #         if categories_result.data:
-#             categories = set(item["category"] for item in categories_result.data if item["category"])
+#             categories = set(item["category"]
+#                              for item in categories_result.data if item["category"])
 
 #         return {
 #             "total_permissions": total_permissions,
@@ -564,7 +557,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 
 # async def get_permission_usage_stats(permission_id: str, organization_id: str) -> Dict[str, Any]:
 #     """Get usage statistics for a specific permission."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         # Get role assignments count
 #         assignments_result = await supabase.table("role_permissions").select(
@@ -596,7 +589,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 # async def bulk_create_permissions(permissions_data: List[Dict[str, Any]],
 #                                 organization_id: str) -> List[Dict[str, Any]]:
 #     """Bulk create multiple permissions."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         # Prepare permission records
 #         permission_records = []
@@ -629,7 +622,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 # async def bulk_update_permissions(updates: List[Dict[str, Any]],
 #                                 organization_id: str) -> List[Dict[str, Any]]:
 #     """Bulk update multiple permissions."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         results = []
 #         for update_data in updates:
@@ -652,7 +645,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 
 # async def bulk_delete_permissions(permission_ids: List[str], organization_id: str) -> int:
 #     """Bulk delete multiple permissions."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("permissions").delete().in_(
 #             "id", permission_ids
@@ -691,7 +684,7 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 
 # async def check_default_permissions_exist(organization_id: str) -> bool:
 #     """Check if default permissions already exist for organization."""
-#     supabase = get_supabase_admin_client()
+#     supabase = await get_supabase_admin_client()
 #     try:
 #         result = await supabase.table("permissions").select("id", count="exact").eq(
 #             "organization_id", organization_id
@@ -700,11 +693,13 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
 #         return result.count > 0 if result.count is not None else False
 
 #     except APIError as e:
-#         logger.error("Supabase API error checking default permissions exist: %s", e, exc_info=True)
+#         logger.error("Supabase API error checking default permissions exist: %s",e,exc_info=True)
 #         raise
 #     except (HTTPError, RequestError, TimeoutException) as e:
 #         logger.error("Network error checking default permissions exist: %s", e, exc_info=True)
 #         raise
 #     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error checking default permissions exist: %s", e, exc_info=True)
+#         logger.error(
+#               "Data validation error checking default permissions exist: %s",
+#               e, exc_info=True)
 #         raise

@@ -15,6 +15,8 @@ from fastapi import APIRouter, HTTPException, status, Depends, Body, Query, Requ
 # Logger import
 from apps.user_service.app.dependencies.logger import get_logger
 
+from apps.user_service.app.app_instance import limiter
+
 # Local imports - app dependencies and schemas
 from apps.user_service.app.dependencies.common_utils import (
     extract_user_context,
@@ -23,28 +25,12 @@ from apps.user_service.app.dependencies.common_utils import (
     format_iso_datetime,
     validate_pagination_params,
     validate_uuid_format,
+    check_permissions,
 )
 from apps.user_service.app.dependencies.organisation_utils import (
     validate_organisation_status,
     validate_organisation_name_filter,
-    build_organisation_filter_message,
-    create_super_admin_role,
-    create_default_permissions_for_organisation,
-    assign_all_permissions_to_role,
-)
-
-# Database operations imports
-from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
-    get_list_of_organisations,
-    get_organisations_count,
-    get_organisation_details_by_id,
-    create_new_organisation,
-    update_organisation_details,
-    check_organisation_slug_unique,
-    add_member_to_organisation,
-    create_super_admin_role,
-    create_default_permissions_for_organisation,
-    assign_all_permissions_to_role,
+    build_organisation_filter_message
 )
 
 # Schema imports
@@ -53,20 +39,24 @@ from apps.user_service.app.schemas.organisations import (
     OrganisationListResponse,
     OrganisationResponse,
     OrganisationDetailResponse,
-    CreateOrganisationWithUserRequest,
     CreateOrganisationWithUserResponse,
     OrganizationAdminUpdate,
+    NewOrganisationBody
 )
-
-
-from apps.user_service.app.app_instance import limiter
+from apps.user_service.app.schemas.auth import CompanyData, AccountType
 
 # Third-party imports
-
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import create_supabase_user
-from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
-
+from libs.shared_utils.organisation_utils import create_organisation_with_super_admin
+# from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
+# Database operations imports
+from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
+    get_list_of_organisations,
+    get_organisations_count,
+    get_organisation_details_by_id,
+    update_organisation_details,
+    check_organisation_slug_unique
+)
 
 # Create router for organisation endpoints
 router = APIRouter(prefix="/organisation", tags=["Organisation Management"])
@@ -158,6 +148,58 @@ def _process_organisations_data(organizations_data, count_result: dict | int) ->
     else:
         total_count = 0
     return organizations, total_count
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+
+def _generate_organization_slug(name: str, account_type: str) -> str:
+    """
+    Generate organization slug from name and account type.
+
+    Args:
+        name (str): Organization name
+        account_type (str): Account type (personal/business)
+
+    Returns:
+        str: Generated slug
+    """
+    # Clean and format name
+    clean_name = name.lower().strip()
+    # Replace spaces and special characters with hyphens
+    clean_name = "".join(c if c.isalnum() else "-" for c in clean_name)
+    # Remove multiple consecutive hyphens
+    clean_name = "-".join(filter(None, clean_name.split("-")))
+
+    # Add account type prefix
+    prefix = "personal" if account_type == AccountType.PERSONAL else "business"
+
+    # Generate unique suffix
+    unique_suffix = str(uuid.uuid4())[:8]
+
+    return f"{prefix}-{clean_name}-{unique_suffix}"
+
+
+def _determine_organization_name(acc_type: AccountType, company_data: CompanyData) -> str:
+    """
+    Determine organization name based on account type.
+
+    Args:
+        acc_type (AccountType): Account type
+        company_data (CompanyData): Company data
+
+    Returns:
+        str: Organization name
+    """
+    if acc_type == AccountType.PERSONAL:
+        return f"{company_data.first_name} {company_data.last_name}"
+    return (
+        company_data.company_name
+        if company_data
+        else "Unknown Company"
+    )
+
 
 
 async def _validate_and_process_query_params(query_params: OrganisationQueryParams):
@@ -367,18 +409,14 @@ async def get_organisation_by_id(
     logger.debug("Target Organization ID: %s",organisation_id)
 
     # Extract and validate user context from JWT token
-    user_context = extract_user_context(current_user)
-    logger.debug("User context extracted ofr Org - Request ID: %s, ",request_id)
-    logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
-
     # Check permission using utility function
-    await require_permission(
-        permission_code="organization.appscrip.manage",
-        user_context=user_context,
-        action_description="access organization details",
-    )
-    logger.debug("User permissions validated for organization access - Request ID: %s, ",request_id)
-    logger.debug(" Organization ID: %s",organisation_id)
+    await check_permissions(
+        current_user, "organization.appscrip.manage","access organization details")
+    # logger.debug("User context extracted ofr Org - Request ID: %s, ",request_id)
+    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
+
+    # logger.debug("User permissions validated for organization access - Request ID: %s",request_id)
+    # logger.debug(" Organization ID: %s",organisation_id)
 
     # Get organization details using database operations
     organization_data = await get_organisation_details_by_id(organisation_id)
@@ -505,7 +543,7 @@ async def get_organisation_by_id(
 async def create_organisation(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
-    body: CreateOrganisationWithUserRequest = Body(...),
+    body: NewOrganisationBody = Body(...),
 ):
     """
     Create a new organisation with initial Super Admin user (Requires: organization.appscrip.manage)
@@ -529,108 +567,99 @@ async def create_organisation(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
     logger.info("POST /organisation request started - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("New Organization Name: %s, New Organization Slug: %s, ",body.name,body.slug)
-    logger.info("Admin Email: %s",body.email)
+    # logger.debug("User ID: %s, ",current_user.get('user_id'))
+    # logger.debug("Organization ID: %s, ",current_user.get('organization_id'))
+    # logger.debug("New Organization Name: %s, New Organization Slug: %s, ",body.company_data.company_name,slug)
+    # logger.debug("Admin Email: %s",user_context.token_email)
 
     # Extract and validate user context from JWT token
     user_context = extract_user_context(current_user)
     logger.debug("User context extracted - Request ID: %s, ",request_id)
     logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
-    # Check permission using utility function
-    # await require_permission(
-    #     permission_code="organization.appscrip.manage",
-    #     user_context=user_context,
-    #     db_conn=db_conn,
-    #     action_description="create new organizations",
-    # )
-
-    # Generate UUID for new organization
-    organization_id = str(uuid.uuid4())
-    logger.debug("Organization ID generated - Request ID: %s, ",request_id)
-    logger.debug("New Organization ID: %s",organization_id)
-    print(f"Generated organization_id: {organization_id}")
-
-    # Validate slug uniqueness using database operations
-    is_unique = await check_organisation_slug_unique(body.slug)
-    if not is_unique:
+    if user_context.user_id is None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Organisation slug already exists"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User ID is required"
         )
-    logger.debug("Organization slug uniqueness validated - Request ID: %s, ",request_id)
-    logger.debug("Organization Slug: %s",body.slug)
 
-    # Create user in Supabase Auth
-    user_id = await create_supabase_user(body, organization_id)
-    logger.debug("Supabase user created - Request ID: %s, ",request_id)
-    logger.debug("User ID: %s, Email: %s",user_id,body.email)
-    print(f"Created Supabase user: {user_id}")
+    # # Generate UUID for new organization
+    # organization_id = str(uuid.uuid4())
+    # logger.debug("Organization ID generated - Request ID: %s, ",request_id)
+    # logger.debug("New Organization ID: %s",organization_id)
+    # print(f"Generated organization_id: {organization_id}")
+
+    # # Validate slug uniqueness using database operations
+    # is_unique = await check_organisation_slug_unique(body.slug)
+    # if not is_unique:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_409_CONFLICT,
+    #         detail="Organisation slug already exists"
+    #     )
+    # logger.debug("Organization slug uniqueness validated - Request ID: %s, ",request_id)
+    # logger.debug("Organization Slug: %s",body.slug)
+
+
+    # Generate organization details
+    organization_id = str(uuid.uuid4())
+    organization_name = _determine_organization_name(AccountType.BUSINESS, body.company_data)
+    slug = _generate_organization_slug(
+        organization_name, AccountType.BUSINESS.value
+    )
+
+    print(f"Generated organization_id: {organization_id}")
+    print(f"Organization name: {organization_name}")
+    print(f"Organization slug: {slug}")
+
+    # Validate slug uniqueness
+    await check_organisation_slug_unique(slug)
+
+
+    # # Create user in Supabase Auth
+    # user_id = await create_supabase_user(body, organization_id)
+    # logger.debug("Supabase user created - Request ID: %s, ",request_id)
+    # logger.debug("User ID: %s, Email: %s",user_id,body.email)
+    # print(f"Created Supabase user: {user_id}")
 
     # Create organization using database operations
     try:
         # Create organization
         org_data = {
-            "id": organization_id,
-            "name": body.name,
-            "slug": body.slug,
-            "domain": body.domain,
-            "logo_url": body.logo_url,
-            "plan_type": body.plan_type,
-            "status": "active"
-        }
-
-        org_result = await create_new_organisation(org_data)
-        logger.debug("Organization created - Request ID: %s, ",request_id)
-        logger.debug("Organization ID: %s, ",org_result['id'])
-        print(f"Created organization: {org_result['id']}")
-
-        # Create Super Admin role
-        super_admin_role_result = await create_super_admin_role(organization_id)
-        super_admin_role_id = super_admin_role_result['id']
-        logger.debug("Super Admin role created - Request ID: %s, ",request_id)
-        logger.debug("Role ID: %s",super_admin_role_id)
-
-        # Create default permissions
-        permission_ids = await create_default_permissions_for_organisation(organization_id)
-        logger.debug("Default permissions created - Request ID: %s, ",request_id)
-        logger.debug("Permission count: %s",len(permission_ids))
-
-        # Assign all permissions to Super Admin role
-        await assign_all_permissions_to_role(super_admin_role_id, organization_id, permission_ids)
-        logger.debug("Permissions assigned to role - Request ID: %s, ",request_id)
-
-        # Create organization member
-        member_result = await add_member_to_organisation(organization_id, {
-            "user_id": user_id,
-            "email": body.email,
-            "full_name": body.full_name,
-            "phone": body.phone,
-            "timezone": body.timezone,
-            "role_id": super_admin_role_id,
+            "organization_id": organization_id,
+            "slug": slug,
+            "name": body.company_data.company_name,
+            "domain": body.company_data.company_website,
+            "industry": body.company_data.industry,
+            "company_size": body.company_data.company_size,
+            "description": body.company_data.description,
+            "referral_source": body.company_data.referral_source,
+            "max_users": body.company_data.max_users,
+            "logo_url": body.company_data.logo_url,
+            "plan_type": body.plan_type.value,
             "status": "active",
-        })
-        logger.debug("Organization member created - Request ID: %s, ",request_id)
-        logger.debug("Member ID: %s, User ID: %s",member_result['id'],user_id)
-        print(f"Created organization member: {member_result['id']}")
-
+            "user_id": user_context.user_id,
+            "email": user_context.email,
+            "first_name": body.user_data.first_name,
+            "last_name": body.user_data.last_name,
+            "phone": body.user_data.phone,
+            "timezone": body.user_data.timezone,
+        }
+        await create_organisation_with_super_admin(org_data)
     except (ConnectionError, TimeoutError, ValueError) as db_error:
         logger.error("Database transaction failed - Request ID: %s, ",request_id)
         logger.error("Error: %s",str(db_error))
         print(f"Database transaction failed: {db_error}")
-        # Try to delete the Supabase user if database transaction fails
-        try:
-            result = await delete_auth_user(user_id)
-            if result is not None:
-                logger.debug("Supabase user cleanup completed - Request ID: %s, ",request_id)
-                logger.debug("User ID: %s",user_id)
-                print(f"Cleaned up Supabase user: {user_id}")
-        except (ConnectionError, TimeoutError, ValueError) as cleanup_error:
-            logger.error("Failed to cleanup Supabase user - Request ID: %s, ",request_id)
-            logger.error("User ID: %s, Error: %s",user_id,str(cleanup_error))
-            print(f"Failed to cleanup Supabase user: {cleanup_error}")
+        # # Try to delete the Supabase user if database transaction fails
+        # try:
+        #     result = await delete_auth_user(user_context.user_id)
+        #     if result is not None:
+        #         logger.debug("Supabase user cleanup completed - Request ID: %s, ",request_id)
+        #         logger.debug("User ID: %s",user_context.user_id)
+        #         print(f"Cleaned up Supabase user: {user_context.user_id}")
+        # except (ConnectionError, TimeoutError, ValueError) as cleanup_error:
+        #     logger.error("Failed to cleanup Supabase user - Request ID: %s, ",request_id)
+        #     logger.error("User ID: %s, Error: %s",user_context.user_id,str(cleanup_error))
+        #     print(f"Failed to cleanup Supabase user: {cleanup_error}")
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -638,8 +667,8 @@ async def create_organisation(
         ) from db_error
 
     logger.info("POST /organisation request completed successfully - Request ID: %s, ",request_id)
-    logger.info("Organization ID: %s, Organization Name: %s, ",organization_id,body.name)
-    logger.info("Organization Slug: %s, User ID: %s, Admin Email: %s, ",body.slug,user_id,body.email)
+    logger.info("Organization ID: %s, Organization Name: %s, ",organization_id,body.company_data.company_name)
+    logger.info("Organization Slug: %s, User ID: %s, Admin Email: %s",slug,user_context.user_id,user_context.email)
     logger.info("Status Code: 201")
 
     return CreateOrganisationWithUserResponse(
@@ -647,94 +676,16 @@ async def create_organisation(
         message="Organisation and user created successfully",
         data={
             "organization_id": organization_id,
-            "user_id": user_id,
-            "organization_name": body.name,
-            "user_email": body.email,
+            "user_id": user_context.user_id,
+            "organization_name": organization_name,
+            "user_email": user_context.email,
             "role_name": "Super Admin",
-            "slug": body.slug,
-            "plan_type": body.plan_type,
-            "max_users": body.max_users,
+            "slug": slug,
+            "plan_type": body.plan_type.value,
+            "max_users": body.company_data.max_users,
         },
     )
 
-
-# def _build_organization_update_query(
-#     body: OrganizationAdminUpdate,  # OrganizationAdminUpdate or OrganizationUpdate
-#     organization_id: str,
-# ) -> Tuple[str, List]:
-#     """
-#     Build a dynamic UPDATE statement for public.organizations.
-
-#     • Only includes fields present in `body` (exclude_unset) and not empty/None.
-#     • Always sets updated_at = NOW().
-#     • Returns a (query, params) tuple ready for asyncpg.execute/fetchrow.
-
-#     Parameters
-#     ----------
-#     body : OrganizationAdminUpdate | OrganizationUpdate
-#         Validated Pydantic model with optional fields.
-#     organization_id : str
-#         Primary-key of the row to update.
-
-#     Returns
-#     -------
-#     Tuple[str, List]
-#         SQL text and ordered parameter list.
-#         If nothing to update, ("" , []) is returned.
-#     """
-
-#     # 1️⃣ Collect only keys the client actually sent
-#     payload = body.dict(exclude_unset=True, exclude_none=True)
-
-#     # 2️⃣ Strip out empty strings so "" doesn't overwrite existing data
-#     payload = {
-#         k: v for k, v in payload.items() if not (isinstance(v, str) and v.strip() == "")
-#     }
-
-#     if not payload:  # nothing to change
-#         return "", []
-
-#     update_fields: List[str] = []
-#     update_params: List = []
-#     param_count = 0
-
-#     # 3️⃣ Build SET clauses in insertion order – safe against SQL injection
-#     for column, value in payload.items():
-#         param_count += 1
-#         update_fields.append(f"{column} = ${param_count}")
-#         update_params.append(value)
-
-#     # 4️⃣ Audit column (no bind-var needed)
-#     update_fields.append("updated_at = NOW()")
-
-#     # 5️⃣ WHERE … id = $N
-#     param_count += 1
-#     update_params.append(organization_id)
-
-#     update_query = f"""
-#         UPDATE public.organizations
-#            SET {', '.join(update_fields)}
-#          WHERE id = ${param_count}
-#          RETURNING id, name, slug, created_at;
-#     """
-
-#     return update_query, update_params
-
-
-# async def _update_organization(db_conn, body, organization_id):
-#     """
-#     Update organization record.
-#     """
-
-#     update_query, update_params = _build_organization_update_query(
-#         body, organization_id
-#     )
-#     if not update_query:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Nothing to update - no valid fields supplied.",
-#         )
-#     return await db_conn.fetchrow(update_query, *update_params)
 
 
 @handle_api_exceptions("update organisation")
@@ -766,7 +717,7 @@ async def update_organisation(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("PUT /organisation/%s request started - Request ID: %s, ",organisation_id,request_id)
+    logger.info("PUT /organisation/%s request started - Request ID: %s",organisation_id,request_id)
     logger.info("User ID: %s, ",current_user.get('user_id'))
     logger.info("Organization ID: %s, ",current_user.get('organization_id'))
     logger.info("Target Organization ID: %s",organisation_id)
@@ -777,9 +728,10 @@ async def update_organisation(
     logger.debug("Target Organization ID: %s",organisation_id)
 
     # Extract and validate user context from JWT token
-    user_context = extract_user_context(current_user)
-    logger.debug("User context extracted - Request ID: %s, ",request_id)
-    logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
+    # Check permission using utility function
+    await check_permissions(current_user, "organization.appscrip.manage","update organization")
+    # logger.debug("User context extracted - Request ID: %s, ",request_id)
+    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     # Get organization details using database operations
     organization_data = await get_organisation_details_by_id(organisation_id)
@@ -795,14 +747,8 @@ async def update_organisation(
             detail="Organization not found",
         )
 
-    # Check permission using utility function
-    await require_permission(
-        permission_code="organization.appscrip.manage",
-        user_context=user_context,
-        action_description="update organizations",
-    )
-    logger.debug("User permissions validated for organization update - Request ID: %s, ",request_id)
-    logger.debug("Target Organization ID: %s",organisation_id)
+    # logger.debug("User permissions validated for organization update - Request ID: %s",request_id)
+    # logger.debug("Target Organization ID: %s",organisation_id)
 
     # Update organization using database operations
     update_data = body.model_dump(exclude_unset=True, exclude_none=True)
@@ -847,32 +793,37 @@ async def delete_organisation(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("DELETE /organisation/%s request started - Request ID: %s, ",organisation_id,request_id)
+    logger.info(
+        "DELETE /organisation/%s request started - Request ID: %s, ",
+        organisation_id,request_id
+    )
     logger.info("User ID: %s, ",current_user.get('user_id'))
     logger.info("Organization ID: %s, ",current_user.get('organization_id'))
     logger.info("Target Organization ID: %s",organisation_id)
 
     # Validate organization ID format using utility function
     validate_uuid_format(organisation_id, "organisation ID")
-    logger.debug("Organization ID format validated - Request ID: %s, ",request_id)
+    logger.debug("Organization ID format validated - Request ID: %s",request_id)
     logger.debug("Target Organization ID: %s",organisation_id)
+
 
     # Extract and validate user context from JWT token
-    user_context = extract_user_context(current_user)
-    logger.debug("User context extracted - Request ID: %s, ",request_id)
-    logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
-
     # Check permission using utility function
-    await require_permission(
-        permission_code="organization.appscrip.manage",
-        user_context=user_context,
-        action_description="delete organizations",
-    )
-    logger.debug("User permissions validated for organization deletion - Request ID: %s, ",request_id)
-    logger.debug("Target Organization ID: %s",organisation_id)
+    await check_permissions(current_user, "organization.appscrip.manage","delete organization")
+    # user_context = extract_user_context(current_user)
+    # logger.debug("User context extracted - Request ID: %s",request_id)
+    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
+
+    # await require_permission(
+    #     permission_code="organization.appscrip.manage",
+    #     user_context=user_context,
+    #     action_description="delete organizations",
+    # )
+    # logger.debug("User permissions validated for organization deletion- Request ID:%s",request_id)
+    # logger.debug("Target Organization ID: %s",organisation_id)
 
     logger.info("DELETE /organisation/%s request completed successfully - ",organisation_id)
-    logger.info("Request ID: %s, ",request_id)
+    logger.info("Request ID: %s",request_id)
     logger.info("Target Organization ID: %s, Status Code: 200",organisation_id)
 
     return OrganisationResponse(

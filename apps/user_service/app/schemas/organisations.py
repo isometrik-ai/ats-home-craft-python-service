@@ -14,6 +14,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
+from apps.user_service.app.schemas.auth import CompanyData, PlanType, User
 
 
 class OrganisationInfo(BaseModel):
@@ -297,7 +298,6 @@ class OrganisationDetailResponse(BaseModel):
                     "status": "active",
                     "max_users": 100,
                     "timezone": "UTC",
-                    "member_count": 25,
                     "user_role": "Administrator",
                 }
             }
@@ -305,68 +305,75 @@ class OrganisationDetailResponse(BaseModel):
     )
 
 
-class CreateOrganisationWithUserRequest(BaseModel):
-    """Request model for creating a new organisation with user signup
+        # email (EmailStr): User's email address for signup (required)
+        # password (str): User's password for signup (required)
+# class CreateOrganisationWithUser(BaseModel):
+#     """Request model for creating a new organisation with user after signup
 
-    This schema is used when creating an organization along with the initial user account.
+#     This schema is used when creating an organization.
 
-    Attributes:
-        email (EmailStr): User's email address for signup (required)
-        password (str): User's password for signup (required)
-        full_name (str): User's full name (required)
-        name (str): Organisation's name (required)
-        slug (str): URL-friendly slug for the organisation (required)
-        domain (Optional[str]): Organisation's domain name
-        logo_url (Optional[str]): URL to organisation's logo
-        plan_type (str): Type of plan (starter, professional, enterprise)
-        max_users (int): Maximum number of users allowed
-        timezone (str): Organisation's timezone preference
-        phone (Optional[str]): User's phone number
-    """
+#     Attributes:
+#         user_id (str): User's ID (required)
+#         full_name (str): User's full name (required)
+#         name (str): Organisation's name (required)
+#         slug (str): URL-friendly slug for the organisation (required)
+#         domain (Optional[str]): Organisation's domain name
+#         logo_url (Optional[str]): URL to organisation's logo
+#         plan_type (str): Type of plan (starter, professional, enterprise)
+#         max_users (int): Maximum number of users allowed
+#         timezone (str): Organisation's timezone preference
+#         phone (Optional[str]): User's phone number
+#     """
 
-    email: EmailStr = Field(..., description="User's email address for signup")
-    password: str = Field(..., min_length=8, description="User's password for signup")
-    full_name: str = Field(
-        ..., min_length=2, max_length=255, description="User's full name"
-    )
-    name: str = Field(
-        ..., min_length=2, max_length=255, description="Organisation's name"
-    )
-    slug: str = Field(
-        ...,
-        min_length=2,
-        max_length=100,
-        description="URL-friendly slug for the organisation",
-    )
-    domain: Optional[str] = Field(None, description="Organisation's domain name")
-    logo_url: Optional[str] = Field(None, description="URL to organisation's logo")
-    plan_type: str = Field(
-        default="starter",
-        description="Type of plan (starter, professional, enterprise)",
-    )
-    max_users: int = Field(default=10, description="Maximum number of users allowed")
-    timezone: str = Field(
-        default="UTC", description="Organisation's timezone preference"
-    )
-    phone: Optional[str] = Field(None, description="User's phone number")
+#     # email: EmailStr = Field(..., description="User's email address for signup")
+#     # password: str = Field(..., min_length=8, description="User's password for signup")
+#     full_name: str = Field(
+#         ..., min_length=2, max_length=255, description="User's full name"
+#     )
+#     name: str = Field(
+#         ..., min_length=2, max_length=255, description="Organisation's name"
+#     )
+#     slug: str = Field(
+#         ...,
+#         min_length=2,
+#         max_length=100,
+#         description="URL-friendly slug for the organisation",
+#     )
+#     domain: Optional[str] = Field(None, description="Organisation's domain name")
+#     logo_url: Optional[str] = Field(None, description="URL to organisation's logo")
+#     plan_type: str = Field(
+#         default="starter",
+#         description="Type of plan (starter, professional, enterprise)",
+#     )
+#     max_users: int = Field(default=10, description="Maximum number of users allowed")
+#     timezone: str = Field(
+#         default="UTC", description="Organisation's timezone preference"
+#     )
+#     phone: Optional[str] = Field(None, description="User's phone number")
 
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "email": "admin@acme.com",
-                "password": "SecurePassword123!",
-                "full_name": "John Doe",
-                "name": "Acme Corporation",
-                "slug": "acme-corp",
-                "domain": "acme.com",
-                "logo_url": "https://example.com/logo.png",
-                "plan_type": "professional",
-                "max_users": 100,
-                "timezone": "UTC",
-                "phone": "+1234567890",
-            }
-        }
-    )
+#     model_config = ConfigDict(
+#         json_schema_extra={
+#             "example": {
+#                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
+#                 # "email": "admin@acme.com",
+#                 # "password": "SecurePassword123!",
+#                 "full_name": "John Doe",
+#                 "name": "Acme Corporation",
+#                 "slug": "acme-corp",
+#                 "domain": "acme.com",
+#                 "logo_url": "https://example.com/logo.png",
+#                 "plan_type": "professional",
+#                 "max_users": 100,
+#                 "timezone": "UTC",
+#                 "phone": "+1234567890",
+#             }
+#         }
+#     )
+
+class NewOrganisationBody(BaseModel):
+    user_data: Optional[User] = None
+    company_data: Optional[CompanyData] = None
+    plan_type: PlanType = PlanType.STARTER
 
 
 class CreateOrganisationWithUserResponse(BaseModel):

@@ -45,7 +45,9 @@ class SupabaseClientCache:
     async def get_admin_client(self) -> AsyncClient:
         """Get or create a cached Supabase admin client instance."""
         if self._supabase_admin_client is None:
-            self._supabase_admin_client = await create_async_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+            self._supabase_admin_client = await create_async_client(
+                SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+            )
             print("Supabase admin client created and cached")
         return self._supabase_admin_client
 

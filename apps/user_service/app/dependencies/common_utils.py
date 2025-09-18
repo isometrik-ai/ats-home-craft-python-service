@@ -21,11 +21,12 @@ Common Patterns Covered:
 import time
 import uuid
 import json
-from typing import Optional, List, Dict, Any, Callable, Union
+from typing import Optional, List, Callable, Union, Dict, Any
 from functools import wraps
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
+from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
 
 from libs.shared_db.postgres_db.user_service_operations.user_operations import get_user_profile_by_id
@@ -40,9 +41,9 @@ class UserContext:
     """User context extracted and validated from JWT token."""
 
     user_id: str
-    organization_id: str
     email: str
-    user_type: str
+    organization_id: str | None = None
+    user_type: str | None = None
 
 
 @dataclass
@@ -69,6 +70,23 @@ class PerformanceTimer:
         print(f"Total {self.operation_name} time: {elapsed:.2f}ms")
         return elapsed
 
+
+# ============================================================================
+# PERMISSION UTILITIES
+# ============================================================================
+
+async def format_permissions_data(permissions_data: List[Dict[str, Any]]) -> List[PermissionItem]:
+    """
+    Format permissions data into PermissionItem objects.
+    """
+    return [PermissionItem(
+        id=str(permission["id"]),
+        name=permission["name"],
+        code=permission["code"],
+        category=permission["category"],
+        description=permission["description"],
+        created_at=format_iso_datetime(permission["created_at"]) or ""
+    ) for permission in permissions_data]
 
 # ============================================================================
 # USER CONTEXT EXTRACTION
@@ -100,9 +118,9 @@ def extract_user_context(current_user: dict) -> UserContext:
     """
     user_id = current_user.get("sub")
     user_metadata = current_user.get("user_metadata", {})
-    organization_id = user_metadata.get("organization_id")
-    token_email = current_user.get("email")
-    user_type = user_metadata.get("type", "")  # Extract otype from JWT
+    organization_id = user_metadata.get("organization_id",None)
+    email = current_user.get("email")
+    user_type = user_metadata.get("type", None)  # Extract otype from JWT
 
     # Validation: Ensure required fields are present
     if not user_id:
@@ -111,34 +129,34 @@ def extract_user_context(current_user: dict) -> UserContext:
             detail="Invalid token: user ID not found",
         )
 
-    if not organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid token: organization ID not found",
-        )
+    # if not organization_id:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_400_BAD_REQUEST,
+    #         detail="Invalid token: organization ID not found",
+    #     )
 
-    if not token_email:
+    if not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid token: email not found",
         )
 
-    if not user_type:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid token: user type not found",
-        )
+    # if not user_type:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_400_BAD_REQUEST,
+    #         detail="Invalid token: user type not found",
+    #     )
 
     # Validate user type is one of the expected values
-    valid_user_types = ["organization_member", "client", "candidate"]
-    if user_type not in valid_user_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid token: user type '{user_type}' is not supported. "
-                   f"Expected one of: {', '.join(valid_user_types)}",
-        )
+    # valid_user_types = ["organization_member", "client", "candidate"]
+    # if user_type not in valid_user_types:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_400_BAD_REQUEST,
+    #         detail=f"Invalid token: user type '{user_type}' is not supported. "
+    #                f"Expected one of: {', '.join(valid_user_types)}",
+    #     )
 
-    return UserContext(user_id, organization_id, token_email, user_type)
+    return UserContext(user_id=user_id, email=email, user_type=user_type)
 
 
 # ============================================================================
@@ -201,6 +219,42 @@ async def require_permission(
 
 
 # ============================================================================
+# PERMISSION CHECKING
+# ============================================================================
+
+
+# async def check_permissions(
+#     current_user, action_description="access role details"
+# ):
+#     """
+#     Extracts user context and checks if the user has 'settings.roles.manage' permission.
+#     """
+#     user_context = extract_user_context(current_user)
+#     await require_permission(
+#         permission_code="settings.roles.manage",
+#         user_context=user_context,
+#         action_description=action_description,
+#     )
+#     return user_context
+
+
+async def check_permissions(
+    current_user, permission_codes: List[str]|str, action_description="access role details"
+):
+    """
+    Extracts user context and checks if the user has 'settings.roles.manage' permission.
+    """
+    user_context = extract_user_context(current_user)
+    await require_permission(
+        # permission_code=["settings.roles.manage", "settings.users.manage"],
+        permission_code=permission_codes,
+        user_context=user_context,
+        action_description=action_description,
+    )
+    return user_context
+
+
+# ============================================================================
 # UUID VALIDATION
 # ============================================================================
 
@@ -227,31 +281,6 @@ def validate_uuid_format(value: str, field_name: str = "ID") -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid {field_name} format",
         ) from exc
-
-
-def validate_uuid_list(uuid_list: List[str], field_name: str = "ID") -> None:
-    """
-    Validate a list of UUIDs and raise HTTPException if any are invalid.
-
-    Args:
-        uuid_list (List[str]): List of UUID strings to validate
-        field_name (str): Field name for error message (default: "ID")
-
-    Raises:
-        HTTPException: 400 for invalid UUID format
-
-    Usage:
-        validate_uuid_list(permission_ids, "permission ID")
-    """
-    for uuid_str in uuid_list:
-        try:
-            uuid.UUID(uuid_str)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid {field_name} format: {uuid_str}",
-            ) from exc
-
 
 # ============================================================================
 # PAGINATION VALIDATION
@@ -346,16 +375,7 @@ def handle_api_exceptions(operation_name: str):
 
 def format_iso_datetime(dt) -> Optional[str]:
     """
-    Format datetime to ISO string, handling None values.
-
-    Args:
-        dt: Datetime object or None
-
-    Returns:
-        Optional[str]: ISO formatted string or None
-
-    Usage:
-        created_at = format_iso_datetime(role["created_at"])
+    Format datetime or ISO-string to ISO string, handling None values.
     """
     return dt.isoformat() if dt else None
 
@@ -384,33 +404,6 @@ def safe_json_loads(json_str, default=None):
     except (json.JSONDecodeError, TypeError):
         return default
 
-
-def build_filter_message(filters: Dict[str, Any]) -> str:
-    """
-    Build a filter description message for API responses.
-
-    Args:
-        filters (Dict[str, Any]): Dictionary of applied filters
-
-    Returns:
-        str: Formatted filter message
-
-    Usage:
-        filter_msg = build_filter_message({"search": "admin", "type": "system"})
-        # Returns: " with filters: search='admin', type=system"
-    """
-    if not filters:
-        return ""
-
-    filter_parts = []
-    for key, value in filters.items():
-        if value is not None:
-            if isinstance(value, str):
-                filter_parts.append(f"{key}='{value}'")
-            else:
-                filter_parts.append(f"{key}={value}")
-
-    return f" with filters: {', '.join(filter_parts)}" if filter_parts else ""
 
 
 # ============================================================================

@@ -12,15 +12,49 @@ from fastapi import APIRouter, HTTPException, status, Depends, Request, Body
 # Logger import
 from apps.user_service.app.dependencies.logger import get_logger
 
+from apps.user_service.app.schemas.admin_access_management import UserQueryParams
+from apps.user_service.app.app_instance import limiter
+
 from apps.user_service.app.dependencies.common_utils import (
-    extract_user_context,
-    require_permission,
     validate_pagination_params,
     get_user_in_organization,
     set_audit_old_data_from_user,
+    check_permissions,
 )
 from apps.user_service.app.dependencies.user_utils import (
     create_user_profile_data,
+)
+
+# Schema imports
+from apps.user_service.app.schemas.users import (
+    UserResponse,
+    CreateUserRequest,
+    UpdateUserRequest,
+    UpdateUserResponse,
+    UserListResponse,
+)
+
+# Audit logging imports
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
+    audit_api_call,
+)
+
+# Import update user routes
+from apps.user_service.app.api.admin_management.users.update_user import (
+    router as update_user_router
+)
+
+# Import user profile routes
+from apps.user_service.app.api.admin_management.users.user_profile import (
+    router as user_profile_router
+)
+
+
+# Local imports
+from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
+from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
+    invite_user_with_email
 )
 
 # Database operations imports
@@ -36,35 +70,6 @@ from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     check_phone_exists_for_other_user,
     transform_users
 )
-
-# Schema imports
-from apps.user_service.app.schemas.users import (
-    UserResponse,
-    CreateUserRequest,
-    UpdateUserRequest,
-    UpdateUserResponse,
-    UserListResponse,
-)
-
-from apps.user_service.app.schemas.admin_access_management import UserQueryParams
-from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
-from apps.user_service.app.app_instance import limiter
-
-# Audit logging imports
-from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
-    audit_api_call,
-)
-
-
-# Local imports
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
-from libs.shared_middleware.jwt_auth import get_user_from_auth
-
-# Import update user routes
-from .update_user import router as update_user_router
-
-# Import user profile routes
-from .user_profile import router as user_profile_router
 
 # Create router for users endpoints
 router = APIRouter(prefix="/users", tags=["Users Management"])
@@ -107,9 +112,6 @@ async def get_users_list(
     logger.info("Page: %s, ",query_params.page)
     logger.info("Page Size: %s",query_params.page_size)
 
-
-    user_context = extract_user_context(current_user)
-
     # Set audit context for user list access
     request.state.audit_table = "organization_members"
     request.state.audit_description = (
@@ -124,16 +126,13 @@ async def get_users_list(
         query_params.page, query_params.page_size
     )
     logger.debug("Pagination params validated - Request ID: %s, ", request_id,)
-    logger.debug("Page: %s, Page Size: %s, Offset: %s", request_id, page, page_size, offset)
+    logger.debug("Page: %s, Page Size: %s, Offset: %s", page, page_size, offset)
 
     # Permission check
-    await require_permission(
-        permission_code="settings.users.manage",
-        user_context=user_context,
-        action_description="access roles",
-    )
-    logger.debug("User permissions validated for user list access - Request ID: %s, ",request_id)
-    logger.debug("Organization ID: %s, ",user_context.organization_id)
+    user_context = await check_permissions(current_user, "settings.users.manage")
+
+    # logger.debug("User permissions validated for user list access - Request ID: %s, ",request_id)
+    # logger.debug("Organization ID: %s, ",user_context.organization_id)
 
     # --- Build queries dynamically ---
     # base_query, count_query, query_args, limit_offset_args = build_user_query(
@@ -150,16 +149,14 @@ async def get_users_list(
         limit=page_size,
         offset=offset
     )
-    logger.debug(
-        ("Retrieved %s users from database - Request ID: %s, ",len(users_data),request_id)
-    )
+    logger.debug("Retrieved %s users from database - Request ID: %s, ",len(users_data),request_id)
 
     # Get total count using database operations
     total_count = await get_users_total_count(
         organization_id=user_context.organization_id,
         search=query_params.search
     )
-    logger.debug(("Total users count: %s - Request ID: %s, ",total_count,request_id))
+    logger.debug("Total users count: %s - Request ID: %s, ",total_count,request_id)
 
     # --- Fetch users and count ---
     # users_data = await db_conn.fetch(base_query, *query_args, *limit_offset_args)
@@ -167,7 +164,7 @@ async def get_users_list(
     # --- Transform results ---
     users = await transform_users(users_data, user_context.organization_id)
     logger.debug("Users data transformed successfully - Request ID: %s, ",request_id)
-    logger.debug("Transformed users count: %s, ",len(users))
+    logger.debug("Transformed users count: %s",len(users))
 
     # Set audit data for user list access
     request.state.raw_audit_new_data = {
@@ -232,9 +229,6 @@ async def create_user(
     logger.info("User ID: %s, ",current_user.get('user_id'))
     logger.info("Organization ID: %s, ",current_user.get('organization_id'))
 
-
-    user_context = extract_user_context(current_user)
-
     # Set audit context for user creation
     request.state.audit_table = "organization_members"
     request.state.audit_description = (
@@ -242,11 +236,7 @@ async def create_user(
     )
     request.state.audit_risk_level = "medium"
 
-    await require_permission(
-        permission_code="settings.users.manage",
-        user_context=user_context,
-        action_description="access roles",
-    )
+    user_context = await check_permissions(current_user, "settings.users.manage")
 
     # Check if user already exists in the organization
     exists = await check_user_exists(body.email, user_context.organization_id)
@@ -334,7 +324,6 @@ async def update_user(
     logger.info("Organization ID: %s, ",current_user.get('organization_id'))
     logger.info("Target User ID: %s",user_id)
 
-    user_ctx = extract_user_context(current_user)
 
     # Set audit context for user update
     request.state.audit_table = "organization_members"
@@ -342,21 +331,15 @@ async def update_user(
     request.state.audit_description = f"Admin updating user: {user_id}"
     request.state.audit_risk_level = "medium"
 
-    await require_permission(
-        permission_code="settings.users.manage",
-        user_context=user_ctx,
-        action_description="access roles",
-    )
+    user_ctx = await check_permissions(current_user, "settings.users.manage")
 
     if body.phone:
         duplicate = await check_phone_exists_for_other_user(
             body.phone, user_ctx.organization_id, user_id
         )
         if duplicate:
-            logger.warning(
-                ("Phone number already exists for another user - Request ID: %s, ",request_id),
-                ("Phone: %s, Organization ID: %s",body.phone,user_ctx.organization_id)
-            )
+            logger.warning("Phone number already exists for other user - Request ID: %s",request_id)
+            logger.warning("Phone: %s, Organization ID: %s",body.phone,user_ctx.organization_id)
             raise HTTPException(
                 status_code=400,
                 detail="Phone number already exists for another user in the organization",
@@ -467,7 +450,7 @@ async def update_user(
     table_name="organization_members",
     category="USER_DELETION",
 )
-async def delete_user(
+async def delete_user_from_system(
     user_id: str,
     request: Request,
     current_user: dict = Depends(get_user_from_auth)
@@ -482,7 +465,6 @@ async def delete_user(
     logger.info("Organization ID: %s, ",current_user.get('organization_id'))
     logger.info("Target User ID: %s",user_id)
 
-    user_context = extract_user_context(current_user)
 
     # Set audit context for user deletion
     request.state.audit_table = "organization_members"
@@ -490,11 +472,7 @@ async def delete_user(
     request.state.audit_description = f"Admin deleting user: {user_id}"
     request.state.audit_risk_level = "high"
 
-    await require_permission(
-        permission_code="settings.users.manage",
-        user_context=user_context,
-        action_description="access roles",
-    )
+    user_context = await check_permissions(current_user, "settings.users.manage")
 
     # Get current user data for audit before deletion
     current_user_data = await get_user_in_organization(
@@ -568,8 +546,7 @@ async def delete_user(
 async def invite_user(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
-    supabase=Depends(get_supabase_admin_client),
-    body: CreateUserRequest = Body(...),
+    body: CreateUserRequest = Body(...)
 ):
     """
     Invite a user by email, send magic link, and create pending org member.
@@ -581,7 +558,6 @@ async def invite_user(
     logger.info("Organization ID: %s, ",current_user.get('organization_id'))
     logger.info("Email: %s, Role ID: %s",body.email,body.role_id)
 
-    user_context = extract_user_context(current_user)
 
     # Set audit context for user invitation
     request.state.audit_table = "organization_members"
@@ -590,11 +566,7 @@ async def invite_user(
     )
     request.state.audit_risk_level = "medium"
 
-    await require_permission(
-        permission_code="settings.users.manage",
-        user_context=user_context,
-        action_description="access roles",
-    )
+    user_context = await check_permissions(current_user, "settings.users.manage")
 
     if body.phone:
         duplicate = await check_phone_exists_for_other_user(
@@ -602,51 +574,14 @@ async def invite_user(
         )
         if duplicate:
             logger.warning("Phone number already exists for another user during invitation - ")
-            logger.warning(
-                ("Request ID: %s, ",request_id),
-                ("Phone: %s, Organization ID: %s",body.phone,user_context.organization_id)
-            )
+            logger.warning("Phone: %s, Organization ID: %s",body.phone,user_context.organization_id)
+            logger.debug("Request ID: %s, ",request_id)
             raise HTTPException(
                 status_code=400,
                 detail="Phone number already exists for another user in the organization",
             )
 
-    try:
-        response = supabase.auth.admin.invite_user_by_email(
-            email=body.email,
-            options={
-                "data": {
-                    "organization_id": str(user_context.organization_id),
-                    "role_id": str(body.role_id),
-                    "full_name": body.full_name,
-                    "type": "organization_member",
-                }
-            },
-        )
-        user_id = response.user.id
-        logger.debug("Supabase user invitation sent successfully - Request ID: %s, ",request_id)
-        logger.debug("Email: %s, User ID: %s",body.email,user_id)
-    except Exception as e:
-        error_message = str(e).lower()
-        if (
-            "already exists" in error_message
-            or "already registered" in error_message
-            or "user already exists" in error_message
-        ):
-            logger.warning("User already exists during invitation - Request ID: %s, ",request_id)
-            logger.warning("Email: %s, Organization ID: %s",body.email,user_context.organization_id)
-            raise HTTPException(
-                status_code=409,
-                detail="User with this email already exists in the organization",
-            ) from e
-
-        logger.error("Supabase invitation error - Request ID: %s, ",request_id)
-        logger.error("Email: %s, Error: %s",body.email,str(e))
-        raise HTTPException(
-            status_code=409,
-            detail=str(e),
-        ) from e
-
+    user_id = await invite_user_with_email(body, user_context)
     # Create user using database operations
     user_data = {
         "user_id": user_id,

@@ -19,9 +19,8 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass
-from postgrest import APIError
-from httpx import HTTPError, RequestError, TimeoutException
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from .exception_handling import handle_database_errors, create_error_messages
 
 logger = logging.getLogger(__name__)
 
@@ -44,236 +43,191 @@ class AuditLogFilter:
 # AUDIT LOG CRUD OPERATIONS
 # ============================================================================
 
+@handle_database_errors(
+    "create_audit_log",
+    custom_messages=create_error_messages("create_audit_log", "creating"))
 async def create_audit_log(audit_data: Dict[str, Any]) -> Dict[str, Any]:
     """Create a new audit log entry."""
-    supabase = get_supabase_admin_client()
-    try:
-        audit_record = {
-            "organization_id": audit_data["organization_id"],
-            "user_id": audit_data["user_id"],
-            "user_email": audit_data["user_email"],
-            "user_role": audit_data["user_role"],
-            "action_type": audit_data["action_type"],
-            "data_classification": audit_data["data_classification"],
-            "table_name": audit_data["table_name"],
-            "record_id": audit_data["record_id"],
-            "old_values": json.dumps(audit_data["old_values"]) if audit_data.get("old_values") else None,
-            "new_values": json.dumps(audit_data["new_values"]) if audit_data.get("new_values") else None,
-            "changed_fields": audit_data.get("changed_fields"),
-            "compliance_tags": audit_data.get("compliance_tags"),
-            "risk_level": audit_data["risk_level"],
-            "ip_address": audit_data["ip_address"],
-            "timestamp": audit_data["timestamp"],
-            "hash_signature": audit_data["hash_signature"],
-            "previous_hash": audit_data.get("previous_hash"),
-            "description": audit_data["description"],
-            "retention_date": audit_data.get("retention_date"),
-            "status_code": audit_data.get("status_code"),
-            "category": audit_data.get("category")
-        }
+    supabase = await get_supabase_admin_client()
 
-        result = await supabase.table("audit_logs").insert(audit_record).execute()
+    audit_record = {
+        "organization_id": audit_data["organization_id"],
+        "user_id": audit_data["user_id"],
+        "user_email": audit_data["user_email"],
+        "user_role": audit_data["user_role"],
+        "action_type": audit_data["action_type"],
+        "data_classification": audit_data["data_classification"],
+        "table_name": audit_data["table_name"],
+        "record_id": audit_data["record_id"],
+        "old_values": json.dumps(audit_data.get("old_values",None)),
+        "new_values": json.dumps(audit_data.get("new_values",None)),
+        "changed_fields": audit_data.get("changed_fields"),
+        "compliance_tags": audit_data.get("compliance_tags"),
+        "risk_level": audit_data["risk_level"],
+        "ip_address": audit_data["ip_address"],
+        "timestamp": audit_data["timestamp"],
+        "hash_signature": audit_data["hash_signature"],
+        "previous_hash": audit_data.get("previous_hash"),
+        "description": audit_data["description"],
+        "retention_date": audit_data.get("retention_date"),
+        "status_code": audit_data.get("status_code"),
+        "category": audit_data.get("category")
+    }
 
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return {}
+    result = await supabase.table("audit_logs").insert(audit_record).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error creating audit log: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error creating audit log: %s", e, exc_info=True)
-        raise
-    except (json.JSONDecodeError, UnicodeError) as e:
-        logger.error("Serialization error creating audit log: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error creating audit log: %s", e, exc_info=True)
-        raise
+    if result.data and len(result.data) > 0:
+        return result.data[0]
+    return {}
 
 
+@handle_database_errors(
+    "get_audit_log_by_id",
+    custom_messages=create_error_messages("get_audit_log_by_id", "getting"))
 async def get_audit_log_by_id(audit_log_id: str) -> Optional[Dict[str, Any]]:
     """Get audit log by ID."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("audit_logs").select(
-            "id, organization_id, user_id, user_email, user_role, "
-            "action_type, data_classification, table_name, record_id, "
-            "old_values, new_values, changed_fields, compliance_tags, "
-            "risk_level, ip_address, description, timestamp, "
-            "hash_signature, previous_hash, retention_date, "
-            "status_code, category"
-        ).eq("id", audit_log_id).limit(1).execute()
+    supabase = await get_supabase_admin_client()
 
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return None
+    result = await supabase.table("audit_logs").select(
+        "id, organization_id, user_id, user_email, user_role, "
+        "action_type, data_classification, table_name, record_id, "
+        "old_values, new_values, changed_fields, compliance_tags, "
+        "risk_level, ip_address, description, timestamp, "
+        "hash_signature, previous_hash, retention_date, "
+        "status_code, category"
+    ).eq("id", audit_log_id).limit(1).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error getting audit log by ID: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting audit log by ID: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting audit log by ID: %s", e, exc_info=True)
-        raise
+    if result.data and len(result.data) > 0:
+        return result.data[0]
+    return None
 
 
+@handle_database_errors(
+    "delete_all_audit_logs",
+    custom_messages=create_error_messages("delete_all_audit_logs", "deleting"))
 async def delete_all_audit_logs() -> int:
     """Delete all audit logs from database."""
-    supabase = get_supabase_admin_client()
-    try:
-        # First get count for return value
-        count_result = await supabase.table("audit_logs").select("id", count="exact").execute()
-        total_count = count_result.count if count_result.count is not None else 0
+    supabase = await get_supabase_admin_client()
 
-        # Delete all audit logs
-        await supabase.table("audit_logs").delete().neq("id", "").execute()
+    # First get count for return value
+    count_result = await supabase.table("audit_logs").select("id", count="exact").execute()
+    total_count = count_result.count if count_result.count is not None else 0
 
-        return total_count
+    # Delete all audit logs
+    await supabase.table("audit_logs").delete().neq("id", "").execute()
 
-    except APIError as e:
-        logger.error("Supabase API error deleting audit logs: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error deleting audit logs: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error deleting audit logs: %s", e, exc_info=True)
-        raise
+    return total_count
 
 
 # ============================================================================
 # AUDIT LOG LISTING AND SEARCH
 # ============================================================================
 
+@handle_database_errors(
+    "get_audit_logs_list",
+    custom_messages=create_error_messages("get_audit_logs_list", "getting"))
 async def get_audit_logs_list(filter_params: AuditLogFilter) -> List[Dict[str, Any]]:
     """Get paginated list of audit logs with optional search and filtering."""
-    supabase = get_supabase_admin_client()
-    try:
-        # Build the query with filters
-        query = supabase.table("audit_logs").select(
-            "id, organization_id, user_id, user_email, user_role, "
-            "action_type, data_classification, table_name, record_id, "
-            "old_values, new_values, changed_fields, compliance_tags, "
-            "risk_level, ip_address, description, timestamp, "
-            "status_code, category"
+    supabase = await get_supabase_admin_client()
+
+    # Build the query with filters
+    query = supabase.table("audit_logs").select(
+        "id, organization_id, user_id, user_email, user_role, "
+        "action_type, data_classification, table_name, record_id, "
+        "old_values, new_values, changed_fields, compliance_tags, "
+        "risk_level, ip_address, description, timestamp, "
+        "status_code, category"
+    )
+
+    # Apply filters
+    if filter_params.organization_id:
+        query = query.eq("organization_id", filter_params.organization_id)
+
+    if filter_params.action_type:
+        query = query.eq("action_type", filter_params.action_type)
+
+    if filter_params.table_name:
+        query = query.eq("table_name", filter_params.table_name)
+
+    if filter_params.user_id:
+        query = query.eq("user_id", filter_params.user_id)
+
+    if filter_params.start_date:
+        query = query.gte("timestamp", filter_params.start_date.isoformat())
+
+    if filter_params.end_date:
+        query = query.lte("timestamp", filter_params.end_date.isoformat())
+
+    if filter_params.search:
+        query = query.or_(
+            f"description.ilike.%{filter_params.search}%,"
+            f"action_type.ilike.%{filter_params.search}%,"
+            f"table_name.ilike.%{filter_params.search}%"
         )
 
-        # Apply filters
-        if filter_params.organization_id:
-            query = query.eq("organization_id", filter_params.organization_id)
+    # Apply pagination and ordering
+    result = await query.order("timestamp", desc=True).range(
+        filter_params.offset, filter_params.offset + filter_params.limit - 1
+    ).execute()
 
-        if filter_params.action_type:
-            query = query.eq("action_type", filter_params.action_type)
-
-        if filter_params.table_name:
-            query = query.eq("table_name", filter_params.table_name)
-
-        if filter_params.user_id:
-            query = query.eq("user_id", filter_params.user_id)
-
-        if filter_params.start_date:
-            query = query.gte("timestamp", filter_params.start_date.isoformat())
-
-        if filter_params.end_date:
-            query = query.lte("timestamp", filter_params.end_date.isoformat())
-
-        if filter_params.search:
-            query = query.or_(
-                f"description.ilike.%{filter_params.search}%,"
-                f"action_type.ilike.%{filter_params.search}%,"
-                f"table_name.ilike.%{filter_params.search}%"
-            )
-
-        # Apply pagination and ordering
-        result = await query.order("timestamp", desc=True).range(
-            filter_params.offset, filter_params.offset + filter_params.limit - 1
-        ).execute()
-
-        return result.data if result.data else []
-
-    except APIError as e:
-        logger.error("Supabase API error getting audit logs list: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting audit logs list: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting audit logs list: %s", e, exc_info=True)
-        raise
+    return result.data if result.data else []
 
 
+@handle_database_errors(
+    "get_audit_logs_count",
+    custom_messages=create_error_messages("get_audit_logs_count", "getting"))
 async def get_audit_logs_count(filter_params: AuditLogFilter) -> int:
     """Get total count of audit logs matching search criteria."""
-    supabase = get_supabase_admin_client()
-    try:
-        # Build the count query with filters
-        query = supabase.table("audit_logs").select("id", count="exact")
+    supabase = await get_supabase_admin_client()
 
-        # Apply filters
-        if filter_params.organization_id:
-            query = query.eq("organization_id", filter_params.organization_id)
+    # Build the count query with filters
+    query = supabase.table("audit_logs").select("id", count="exact")
 
-        if filter_params.action_type:
-            query = query.eq("action_type", filter_params.action_type)
+    # Apply filters
+    if filter_params.organization_id:
+        query = query.eq("organization_id", filter_params.organization_id)
 
-        if filter_params.table_name:
-            query = query.eq("table_name", filter_params.table_name)
+    if filter_params.action_type:
+        query = query.eq("action_type", filter_params.action_type)
 
-        if filter_params.user_id:
-            query = query.eq("user_id", filter_params.user_id)
+    if filter_params.table_name:
+        query = query.eq("table_name", filter_params.table_name)
 
-        if filter_params.start_date:
-            query = query.gte("timestamp", filter_params.start_date.isoformat())
+    if filter_params.user_id:
+        query = query.eq("user_id", filter_params.user_id)
 
-        if filter_params.end_date:
-            query = query.lte("timestamp", filter_params.end_date.isoformat())
+    if filter_params.start_date:
+        query = query.gte("timestamp", filter_params.start_date.isoformat())
 
-        if filter_params.search:
-            query = query.or_(
-                f"description.ilike.%{filter_params.search}%,"
-                f"action_type.ilike.%{filter_params.search}%,"
-                f"table_name.ilike.%{filter_params.search}%"
-            )
+    if filter_params.end_date:
+        query = query.lte("timestamp", filter_params.end_date.isoformat())
 
-        result = await query.execute()
+    if filter_params.search:
+        query = query.or_(
+            f"description.ilike.%{filter_params.search}%,"
+            f"action_type.ilike.%{filter_params.search}%,"
+            f"table_name.ilike.%{filter_params.search}%"
+        )
 
-        return result.count if result.count is not None else 0
+    result = await query.execute()
 
-    except APIError as e:
-        logger.error("Supabase API error getting audit logs count: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting audit logs count: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting audit logs count: %s", e, exc_info=True)
-        raise
+    return result.count if result.count is not None else 0
 
 
+@handle_database_errors(
+    "get_last_audit_log_hash",
+    custom_messages=create_error_messages("get_last_audit_log_hash", "getting"))
 async def get_last_audit_log_hash(organization_id: str) -> Optional[str]:
     """Get the last audit log hash signature for an organization."""
-    supabase = get_supabase_admin_client()
-    try:
-        result = await supabase.table("audit_logs").select("hash_signature").eq(
-            "organization_id", organization_id
-        ).order("timestamp", desc=True).order("id", desc=True).limit(1).execute()
+    supabase = await get_supabase_admin_client()
 
-        if result.data and len(result.data) > 0:
-            return result.data[0]["hash_signature"]
-        return None
+    result = await supabase.table("audit_logs").select("hash_signature").eq(
+        "organization_id", organization_id
+    ).order("timestamp", desc=True).order("id", desc=True).limit(1).execute()
 
-    except APIError as e:
-        logger.error("Supabase API error getting last audit log hash: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting last audit log hash: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting last audit log hash: %s", e, exc_info=True)
-        raise
+    if result.data and len(result.data) > 0:
+        return result.data[0]["hash_signature"]
+    return None
 
 
 # ============================================================================
@@ -289,55 +243,45 @@ async def get_last_audit_log_hash(organization_id: str) -> Optional[str]:
 # AUDIT LOG BATCH OPERATIONS
 # ============================================================================
 
+@handle_database_errors(
+    "bulk_create_audit_logs",
+    custom_messages=create_error_messages("bulk_create_audit_logs", "bulk creating"))
 async def bulk_create_audit_logs(audit_logs_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Bulk create multiple audit log entries."""
     if not audit_logs_data:
         return []
 
-    supabase = get_supabase_admin_client()
-    try:
-        # Prepare all audit records
-        audit_records = []
-        for audit_data in audit_logs_data:
-            audit_record = {
-                "organization_id": audit_data["organization_id"],
-                "user_id": audit_data["user_id"],
-                "user_email": audit_data["user_email"],
-                "user_role": audit_data["user_role"],
-                "action_type": audit_data["action_type"],
-                "data_classification": audit_data["data_classification"],
-                "table_name": audit_data["table_name"],
-                "record_id": audit_data["record_id"],
-                "old_values": json.dumps(audit_data["old_values"]) if audit_data.get("old_values") else None,
-                "new_values": json.dumps(audit_data["new_values"]) if audit_data.get("new_values") else None,
-                "changed_fields": audit_data.get("changed_fields"),
-                "compliance_tags": audit_data.get("compliance_tags"),
-                "risk_level": audit_data["risk_level"],
-                "ip_address": audit_data["ip_address"],
-                "timestamp": audit_data["timestamp"],
-                "hash_signature": audit_data["hash_signature"],
-                "previous_hash": audit_data.get("previous_hash"),
-                "description": audit_data["description"],
-                "retention_date": audit_data.get("retention_date"),
-                "status_code": audit_data.get("status_code"),
-                "category": audit_data.get("category")
-            }
-            audit_records.append(audit_record)
+    supabase = await get_supabase_admin_client()
 
-        # Bulk insert all records
-        result = await supabase.table("audit_logs").insert(audit_records).execute()
+    # Prepare all audit records
+    audit_records = []
+    for audit_data in audit_logs_data:
+        audit_record = {
+            "organization_id": audit_data["organization_id"],
+            "user_id": audit_data["user_id"],
+            "user_email": audit_data["user_email"],
+            "user_role": audit_data["user_role"],
+            "action_type": audit_data["action_type"],
+            "data_classification": audit_data["data_classification"],
+            "table_name": audit_data["table_name"],
+            "record_id": audit_data["record_id"],
+            "old_values": json.dumps(audit_data.get("old_values",None)),
+            "new_values": json.dumps(audit_data.get("new_values",None)),
+            "changed_fields": audit_data.get("changed_fields"),
+            "compliance_tags": audit_data.get("compliance_tags"),
+            "risk_level": audit_data["risk_level"],
+            "ip_address": audit_data["ip_address"],
+            "timestamp": audit_data["timestamp"].isoformat(),
+            "hash_signature": audit_data["hash_signature"],
+            "previous_hash": audit_data.get("previous_hash"),
+            "description": audit_data["description"],
+            "retention_date": audit_data.get("retention_date").isoformat(),
+            "status_code": audit_data.get("status_code"),
+            "category": audit_data.get("category")
+        }
+        audit_records.append(audit_record)
 
-        return result.data if result.data else []
-
-    except APIError as e:
-        logger.error("Supabase API error bulk creating audit logs: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error bulk creating audit logs: %s", e, exc_info=True)
-        raise
-    except (json.JSONDecodeError, UnicodeError) as e:
-        logger.error("Serialization error bulk creating audit logs: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error bulk creating audit logs: %s", e, exc_info=True)
-        raise
+    # Bulk insert all records
+    result = await supabase.table("audit_logs").insert(audit_records).execute()
+    print(f"Bulk create audit logs result: {result}")
+    return result.data if result.data else []

@@ -5,8 +5,9 @@ This module provides CRUD operations for role management.
 All endpoints include proper authentication, validation, and database operations.
 
 """
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
+import asyncio
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 from pydantic import BaseModel
@@ -15,18 +16,15 @@ from pydantic import BaseModel
 from apps.user_service.app.dependencies.logger import get_logger
 # Utility imports
 from apps.user_service.app.dependencies.common_utils import (
-    extract_user_context,
-    require_permission,
     format_iso_datetime,
     safe_json_loads,
     validate_uuid_format,
-    validate_uuid_list,
-    ROLE_TYPES
+    check_permissions,
+    ROLE_TYPES,
+    format_permissions_data,
 )
 from apps.user_service.app.dependencies.roles_utils import (
     build_role_filter_message,
-    check_roles_manage_permission,
-    check_roles_manage_multiple_permission,
 )
 
 # Schema imports
@@ -36,7 +34,6 @@ from apps.user_service.app.schemas.admin_access_management import (
     RoleQueryParams,
     RoleDetailResponse,
     RoleDetailItem,
-    PermissionItem,
     CreateRoleRequest,
     CreateRoleResponse,
     UpdateRoleRequest,
@@ -61,7 +58,6 @@ from libs.shared_db.postgres_db.user_service_operations.role_operations import (
     delete_role,
     check_role_exists,
     assign_permissions_to_role,
-    remove_all_permissions_from_role,
     check_role_usage,
     check_permissions_exist,
     check_role_name_unique,
@@ -157,7 +153,7 @@ async def get_roles(
         )
 
     # Extract and validate user context from JWT token
-    user_context = await check_roles_manage_multiple_permission(current_user)
+    user_context = await check_permissions(current_user, "settings.roles.manage")
     logger.debug(
         "User permissions validated for organization: %s - Request ID: %s",
         user_context.organization_id,request_id
@@ -238,7 +234,7 @@ async def get_roles(
 #     table_name="roles",
 #     category="ROLE",
 # )
-async def get_role_by_id(
+async def get_role_from_id(
     role_id: str,
     request: Request,
     current_user: dict = Depends(get_user_from_auth)
@@ -271,7 +267,8 @@ async def get_role_by_id(
     )
 
     # Extract and validate user context from JWT token
-    user_context = await check_roles_manage_permission(current_user)
+    user_context = await check_permissions(
+        current_user, ["settings.roles.manage", "settings.users.manage"])
     logger.debug(
         "User permissions validated for organization: %s",user_context.organization_id,
         extra={"request_id": request_id},
@@ -300,17 +297,7 @@ async def get_role_by_id(
     )
 
     # Format permissions data using utility functions
-    permissions = [
-        PermissionItem(
-            id=str(permission["id"]),
-            name=permission["name"],
-            code=permission["code"],
-            category=permission["category"],
-            description=permission["description"],
-            created_at=format_iso_datetime(permission["created_at"]) or "",
-        )
-        for permission in permissions_data
-    ]
+    permissions = await format_permissions_data(permissions_data)
 
     # Format role data using utility functions
     role_detail = RoleDetailItem(
@@ -354,7 +341,7 @@ async def get_role_by_id(
     table_name="roles",
     category="ROLE",
 )
-async def create_role(
+async def create_new_role(
     role_data: CreateRoleRequest,
     request: Request,
     current_user: dict = Depends(get_user_from_auth)
@@ -410,21 +397,19 @@ async def create_role(
 
     # Validate permission IDs format using utility function
     if role_data.permission_ids:
-        validate_uuid_list(role_data.permission_ids, "permission ID")
+        await asyncio.gather(
+            *[validate_uuid_format(uuid_str, "permission ID")
+            for uuid_str in role_data.permission_ids],
+            return_exceptions=True)
         logger.debug(
             "Permission IDs validation passed: %s \n permissions - Request ID: %s",
             len(role_data.permission_ids),request_id
         )
 
     # Extract and validate user context from JWT token
-    user_context = extract_user_context(current_user)
-
     # Check permission using utility function
-    await require_permission(
-        permission_code="settings.roles.manage",
-        user_context=user_context,
-        action_description="create roles",
-    )
+    user_context = await check_permissions(current_user, "settings.roles.manage")
+
     logger.debug(
         "User permissions validated for role creation - Request ID: %s",request_id
     )
@@ -567,7 +552,7 @@ def _build_update_response_message(role_data: UpdateRoleRequest):
     table_name="roles",
     category="ROLE",
 )
-async def update_role(
+async def update_role_data(
     role_id: str,
     role_data: UpdateRoleRequest,
     request: Request,
@@ -613,16 +598,10 @@ async def update_role(
 
     # Validate role_id format using utility function
     validate_uuid_format(role_id, "role ID")
-    logger.debug(
-        "Role ID format validation passed: %s - Request ID: %s",role_id,request_id
-    )
 
     # Extract and validate user context from JWT token
-    user_context = await check_roles_manage_permission(current_user)
-    logger.debug(
-        "User permissions validated for organization: %s - Request ID: %s",
-        user_context.organization_id,request_id
-    )
+    user_context = await check_permissions(
+        current_user, ["settings.roles.manage", "settings.users.manage"])
 
     # Check if role exists in organization using centralized operation
     role_exists = await check_role_exists(role_id, user_context.organization_id)
@@ -648,7 +627,6 @@ async def update_role(
 
     # Set audit context for role update
     request.state.audit_table = "roles"
-    request.state.audit_requested_id = role_id
     request.state.audit_description = f"Updated role: {existing_role['name']}"
     request.state.audit_risk_level = "medium"
 
@@ -664,18 +642,22 @@ async def update_role(
 
     # Validate permission IDs if provided using centralized operation
     if role_data.permission_ids is not None and len(role_data.permission_ids) > 0:
-        validate_uuid_list(role_data.permission_ids, "permission ID")
+        await asyncio.gather(
+            *[validate_uuid_format(uuid_str, "permission ID")
+            for uuid_str in role_data.permission_ids],
+            return_exceptions=True)
         permissions_exist = await check_permissions_exist(
             permission_ids=role_data.permission_ids,
             organization_id=user_context.organization_id,
         )
         if not permissions_exist:
-            logger.warning("Invalid permission IDs provided - Request ID: %s, ",request_id)
             logger.warning(
+                "Invalid permission IDs provided - Request ID: %s, "
+                "Status Code: %s"
                 "Permission IDs: %s, Organization ID: %s, ",
+                request_id,status.HTTP_400_BAD_REQUEST,
                 role_data.permission_ids,user_context.organization_id
             )
-            logger.warning("Status Code: %s",status.HTTP_400_BAD_REQUEST)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="One or more permission IDs are invalid",
@@ -709,13 +691,13 @@ async def update_role(
         )
 
     # Prepare update data for centralized operation
-    update_data = {}
-    if role_data.name is not None:
-        update_data["name"] = role_data.name
-    if role_data.description is not None:
-        update_data["description"] = role_data.description
-    if role_data.is_default is not None:
-        update_data["is_default"] = role_data.is_default
+    update_data = {
+        key: value for key, value in {
+            "name": role_data.name,
+            "description": role_data.description,
+            "is_default": role_data.is_default
+        }.items() if value is not None
+    }
 
     # Update the role using centralized operation
     if update_data:
@@ -725,22 +707,20 @@ async def update_role(
         logger.debug("No role fields to update - Request ID: %s",request_id)
 
     # Handle permissions update if provided using centralized operations
-    if role_data.permission_ids is not None:
-        logger.debug("Updating permissions for role - Request ID: %s",request_id)
-
-        # Add new permissions if any are provided using centralized operation
-        if len(role_data.permission_ids) > 0:
-            await assign_permissions_to_role(
-                role_id=role_id,
-                organization_id=user_context.organization_id,
-                permission_ids=role_data.permission_ids,
-            )
-            logger.debug(
-                "Assigned %s new permissions to role - Request ID: %s",
-                len(role_data.permission_ids),request_id
-            )
-        else:
-            logger.debug("No new permissions to assign - Request ID: %s",request_id)
+    # Add new permissions if any are provided using centralized operation
+    logger.debug("Updating permissions for role - Request ID: %s",request_id)
+    if role_data.permission_ids is not None and len(role_data.permission_ids) > 0:
+        await assign_permissions_to_role(
+            role_id=role_id,
+            organization_id=user_context.organization_id,
+            permission_ids=role_data.permission_ids,
+        )
+        logger.debug(
+            "Assigned %s new permissions to role - Request ID: %s",
+            len(role_data.permission_ids),request_id
+        )
+    else:
+        logger.debug("No new permissions to assign - Request ID: %s",request_id)
 
     # Build response message based on what was updated
     message = _build_update_response_message(role_data)
@@ -798,7 +778,7 @@ async def update_role(
     table_name="roles",
     category="ROLE",
 )
-async def delete_role(
+async def delete_role_data(
     role_id: str,
     request: Request,
     current_user: dict = Depends(get_user_from_auth)
@@ -829,7 +809,7 @@ async def delete_role(
     logger.debug("Role ID format validation passed: %s - Request ID: %s",role_id,request_id)
 
     # Extract and validate user context from JWT token
-    user_context = await check_roles_manage_permission(current_user)
+    user_context = await check_permissions(current_user, "settings.roles.manage")
     logger.debug(
         "User permissions validated for organization: %s - Request ID: %s",
         user_context.organization_id,request_id
@@ -916,7 +896,7 @@ async def delete_role(
         "is_default": existing_role["is_default"],
         "permission_ids": [],
         "organization_id": user_context.organization_id,
-        "deletion_timestamp": datetime.utcnow().isoformat(),
+        "deletion_timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     logger.info(

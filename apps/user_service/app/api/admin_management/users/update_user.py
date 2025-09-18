@@ -7,34 +7,21 @@ All endpoints include proper authentication, validation, and database operations
 
 from datetime import datetime
 import uuid
-from typing import Tuple, Any
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request, Body
 
 # Logger import
 from apps.user_service.app.dependencies.logger import get_logger
 
+from apps.user_service.app.app_instance import limiter
+
+# Common utils imports
 from apps.user_service.app.dependencies.common_utils import (
     handle_api_exceptions,
     validate_uuid_format,
-    extract_user_context,
-    require_permission,
+    check_permissions,
     get_user_in_organization,
-    set_audit_old_data_from_user,
-)
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
-    update_supabase_user_email
-)
-# Database operations imports
-from libs.shared_db.postgres_db.user_service_operations.user_operations import (
-    update_user_email,
-    suspend_user,
-    revoke_suspended_user,
-)
-
-from libs.shared_db.supabase_db.admin_operations.user import (
-    ban_the_user,
-    unban_the_user,
+    set_audit_old_data_from_user
 )
 
 # Schema imports
@@ -46,16 +33,27 @@ from apps.user_service.app.schemas.users import (
     ErrorResponse,
 )
 
-from apps.user_service.app.app_instance import limiter
-
 # Audit logging imports
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 
+from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
+    update_supabase_user_email
+)
+
+# Database operations imports
+from libs.shared_db.postgres_db.user_service_operations.user_operations import (
+    suspend_user,
+    revoke_suspended_user,
+)
+
+from libs.shared_db.supabase_db.admin_operations.user import (
+    ban_the_user,
+    unban_the_user,
+)
+
 # Local imports
-from libs.shared_db.postgres_db.db import get_async_db_conn
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 
 # Create router for user update endpoints
@@ -64,18 +62,6 @@ router = APIRouter(prefix="", tags=["User Update Operations"])
 # Initialize logger for user update module
 logger = get_logger("user-update-api")
 logger.info("User Update API module loaded")
-
-
-def get_common_dependencies(
-    current_user: dict = Depends(get_user_from_auth),
-    db_conn: Any = Depends(get_async_db_conn)
-) -> Tuple[dict, Any]:
-    """Get common dependencies used across API endpoints.
-
-    Returns:
-        Tuple containing (current_user, db_conn)
-    """
-    return current_user, db_conn
 
 
 @handle_api_exceptions("update user email")
@@ -100,8 +86,7 @@ async def update_user_email(
     user_id: str,
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
-    body: UpdateUserEmailRequest = Body(...),
-    supabase=Depends(get_supabase_admin_client),
+    body: UpdateUserEmailRequest = Body(...)
 ):
     """
     Update user email
@@ -117,9 +102,9 @@ async def update_user_email(
     logger.debug("User ID format validated - Request ID: %s, ",request_id)
     logger.debug("Target User ID: %s",user_id)
 
-    user_context = extract_user_context(current_user)
-    logger.debug("User context extracted - Request ID: %s, ",request_id)
-    logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
+    user_context = await check_permissions(current_user, "settings.users.manage", 'delete roles')
+    # logger.debug("User context extracted - Request ID: %s, ",request_id)
+    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     # Set audit context for user email update
     request.state.audit_risk_level = "medium"
@@ -131,13 +116,8 @@ async def update_user_email(
     logger.debug("Audit context set for email update - Request ID: %s, ",request_id)
     logger.debug("Target User ID: %s, New Email: %s",user_id,body.email)
 
-    await require_permission(
-        permission_code="settings.users.manage",
-        user_context=user_context,
-        action_description="delete roles",
-    )
-    logger.debug("User permissions validated for email update - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
+    # logger.debug("User permissions validated for email update - Request ID: %s, ",request_id)
+    # logger.debug("Target User ID: %s",user_id)
 
     # Get current user data for audit before email update
     current_user_data = await get_user_in_organization(
@@ -223,9 +203,9 @@ async def ban_user(
     logger.debug("User ID format validated - Request ID: %s, ",request_id)
     logger.debug("Target User ID: %s",user_id)
 
-    user_context = extract_user_context(current_user)
-    logger.debug("User context extracted - Request ID: %s, ",request_id)
-    logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
+    user_context = await check_permissions(current_user, "settings.users.manage", 'delete roles')
+    # logger.debug("User context extracted - Request ID: %s, ",request_id)
+    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     # Set audit context for user banning
     request.state.audit_risk_level = "high"
@@ -235,13 +215,13 @@ async def ban_user(
     logger.debug("Audit context set for user banning - Request ID: %s, ",request_id)
     logger.debug("Target User ID: %s",user_id)
 
-    await require_permission(
-        permission_code="settings.users.manage",
-        user_context=user_context,
-        action_description="delete roles",
-    )
-    logger.debug("User permissions validated for user banning - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
+    # await require_permission(
+    #     permission_code="settings.users.manage",
+    #     user_context=user_context,
+    #     action_description="delete roles",
+    # )
+    # logger.debug("User permissions validated for user banning - Request ID: %s, ",request_id)
+    # logger.debug("Target User ID: %s",user_id)
 
     if user_id == user_context.user_id:
         logger.warning("User attempted to ban themselves - Request ID: %s, ",request_id)
@@ -352,9 +332,9 @@ async def unban_user(
     logger.debug("Target User ID: %s",user_id)
 
     # Extract and validate user context from JWT token
-    user_context = extract_user_context(current_user)
-    logger.debug("User context extracted - Request ID: %s, ",request_id)
-    logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
+    user_context = await check_permissions(current_user, "settings.users.manage", 'delete roles')
+    # logger.debug("User context extracted - Request ID: %s, ",request_id)
+    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     # Set audit context for user unbanning
     request.state.audit_table = "organization_members"
@@ -364,14 +344,14 @@ async def unban_user(
     logger.debug("Audit context set for user unbanning - Request ID: %s, ",request_id)
     logger.debug("Target User ID: %s",user_id)
 
-    # Check permission using utility function
-    await require_permission(
-        permission_code="settings.users.manage",
-        user_context=user_context,
-        action_description="delete roles",
-    )
-    logger.debug("User permissions validated for user unbanning - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
+    # # Check permission using utility function
+    # await require_permission(
+    #     permission_code="settings.users.manage",
+    #     user_context=user_context,
+    #     action_description="delete roles",
+    # )
+    # logger.debug("User permissions validated for user unbanning - Request ID: %s, ",request_id)
+    # logger.debug("Target User ID: %s",user_id)
 
     if user_id == user_context.user_id:
         logger.warning("User attempted to unban themselves - Request ID: %s, ",request_id)

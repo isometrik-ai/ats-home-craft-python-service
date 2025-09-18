@@ -17,7 +17,6 @@ Date: 2024-12-19
 """
 
 import logging
-import logging.config
 import os
 import sys
 from datetime import datetime, timezone, timedelta
@@ -144,8 +143,8 @@ def setup_logging(
     # Add handler to logger
     logger.addHandler(console_handler)
 
-    # Prevent propagation to root logger
-    logger.propagate = False
+    # Change propagation to allow child loggers
+    logger.propagate = True
 
     return logger
 
@@ -153,17 +152,27 @@ def setup_logging(
 def get_logger(name: str = None) -> logging.Logger:
     """
     Get a logger instance with the specified name.
-
-    Args:
-        name: Logger name (optional, defaults to 'user-service')
-
-    Returns:
-        logging.Logger: Logger instance
+    If a name is provided, return a logger with that name
+    configured to use the same handlers and level as 'user-service'.
+    Otherwise, return the main 'user-service' logger.
     """
-    # Always return the main configured logger for now
-    # This ensures all loggers use the same configuration
+    # Retrieve the primary application logger
+    service_logger = logging.getLogger("user-service")
+    # If no specific name, return the service logger
+    if not name:
+        return service_logger
 
-    return logging.getLogger(name) if name else logging.getLogger("user-service")
+    # Create or retrieve a child logger
+    child = logging.getLogger(name)
+    # Ensure child has same level
+    child.setLevel(service_logger.level)
+    # Attach same handlers as service logger
+    for handler in service_logger.handlers:
+        if handler not in child.handlers:
+            child.addHandler(handler)
+    # Prevent propagation to root to avoid duplicate logs
+    child.propagate = False
+    return child
 
 
 def set_request_id(request_id: str):

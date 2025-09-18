@@ -28,15 +28,6 @@ from apps.user_service.app.dependencies.audit_logs.audit_logs_utils import (
     build_audit_logs_filter_message,
 )
 
-# Database operations imports
-from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
-    get_audit_logs_list,
-    get_audit_logs_count,
-    get_audit_log_by_id,
-    delete_all_audit_logs,
-    AuditLogFilter,
-)
-
 # Schema imports
 from apps.user_service.app.schemas.audit_logs import (
     AuditLogsResponse,
@@ -52,10 +43,18 @@ from apps.user_service.app.schemas.common import (
 
 from apps.user_service.app.app_instance import limiter
 
-
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 
+
+# Database operations imports
+from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
+    get_audit_logs_list,
+    get_audit_logs_count,
+    get_audit_log_by_id,
+    delete_all_audit_logs,
+    AuditLogFilter,
+)
 
 # Create router for audit logs endpoints
 router = APIRouter(prefix="/audit-logs", tags=["Audit Logs Management"])
@@ -205,7 +204,7 @@ async def get_audit_logs(
 #     table_name="audit_logs",
 #     category="audit_management",
 # )
-async def get_audit_log_by_id(
+async def get_audit_log_from_id(
     audit_log_id: str,
     request: Request,
     # current_user: dict = Depends(get_user_from_auth),
@@ -314,7 +313,7 @@ async def get_audit_log_by_id(
 #     category="audit_management",
 # )
 # pylint: disable=unused-argument  # Required by @limiter.limit
-async def delete_all_audit_logs(
+async def delete_all_audit_logs_data(
     request: Request,
     # current_user: dict = Depends(get_user_from_auth),
 ):
