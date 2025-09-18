@@ -16,8 +16,10 @@ from apps.user_service.app.dependencies.audit_logs.audit_logger import (
     audit_logger,
     AuditEventData,
 )
+from apps.user_service.app.dependencies.logger import get_logger
 
-logger = logging.getLogger(__name__)
+# Use the shared application logger
+logger = get_logger()
 
 
 def audit_api_call(
@@ -208,7 +210,7 @@ async def maybe_log_audit_on_error(
                 "method": request.method,
                 "status_code": status_code,
                 "record_id": record_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "user_agent": request.headers.get("user-agent"),
                 "ip": request.client.host,
                 "query_params": query_params,

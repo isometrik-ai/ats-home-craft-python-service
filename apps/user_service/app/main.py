@@ -54,8 +54,8 @@ patch_all()
 
 
 # Update the app's metadata
-app.title = "XQtiv API"
-app.description = "API for XQtiv"
+app.title = "House Of Apps AI"
+app.description = "API For House Of Apps AI"
 app.version = "1.0.0"
 
 

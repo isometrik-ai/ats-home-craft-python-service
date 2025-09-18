@@ -35,7 +35,14 @@ from dataclasses import dataclass
 from fastapi import Request
 import asyncpg
 
-logger = logging.getLogger(__name__)
+from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
+    get_last_audit_log_hash,
+    bulk_create_audit_logs
+)
+
+from apps.user_service.app.dependencies.logger import get_logger
+
+logger = get_logger()
 
 
 @dataclass
@@ -68,24 +75,21 @@ class AuditLogger:
         self._processing_task = None
         self._last_hash = None
         self._shutdown_event = asyncio.Event()
-        self._db_pool = None
 
         # Processing configuration
         self._batch_size = 10
         self._batch_timeout = 3.0
         self._max_retries = 3
 
-    async def start_processing(self, db_pool):
+    async def start_processing(self):
         """
-        Start the audit processing task with the provided database pool.
+        Start the audit processing task.
 
-        Args:
-            db_pool: Database connection pool for audit log storage
+        Note: Database operations are now handled by centralized operations.
         """
         if self._processing_task is None:
-            self._db_pool = db_pool
             self._processing_task = asyncio.create_task(
-                self._process_audit_queue(db_pool)
+                self._process_audit_queue()
             )
             print("Audit processing started")
 
@@ -213,7 +217,7 @@ class AuditLogger:
         print(f"{prefix} ({error_type}): {error}")
         logger.error(f"{prefix} ({error_type}): %s", error, exc_info=True)
 
-    async def _process_audit_queue(self, db_pool):
+    async def _process_audit_queue(self):
         """Process audit events from queue in batches."""
         batch = []
         consecutive_empty_batches = 0
@@ -229,7 +233,7 @@ class AuditLogger:
 
                 consecutive_empty_batches = 0
                 print("PROCESSING AUDIT LOGS")
-                await self._write_audit_batch_with_retry(db_pool, batch)
+                await self._write_audit_batch_with_retry(batch)
                 batch.clear()
                 await asyncio.sleep(5)
 
@@ -248,7 +252,7 @@ class AuditLogger:
         # Process remaining events
         if batch:
             try:
-                await self._write_audit_batch_with_retry(db_pool, batch)
+                await self._write_audit_batch_with_retry(batch)
             except (
                 asyncpg.PostgresError, ConnectionError,
                 OSError, RuntimeError, IOError,
@@ -268,11 +272,11 @@ class AuditLogger:
             exc_info=True,
         )
 
-    async def _write_audit_batch_with_retry(self, db_pool, events: List[Dict]):
+    async def _write_audit_batch_with_retry(self, events: List[Dict]):
         """Write audit batch with retries on failure."""
         for attempt in range(self._max_retries):
             try:
-                await self._write_audit_batch(db_pool, events)
+                await self._write_audit_batch(events)
                 return
             except (asyncpg.PostgresError, ConnectionError) as e:
                 self._handle_write_error(e, attempt, "database")
@@ -301,24 +305,20 @@ class AuditLogger:
                 f"after {self._max_retries} attempts"
             )
 
-    async def _get_last_hash_from_db(self, db_pool) -> Optional[str]:
+    async def _get_last_hash_from_db(self, organization_id: str = None) -> Optional[str]:
         """
         Fetch the last hash from the database to maintain audit chain integrity.
+
+        Args:
+            organization_id: Organization ID to filter by (optional)
 
         Returns:
             Optional[str]: The last hash from the database, or None if no audit logs exist
         """
         try:
-            async with db_pool.acquire() as conn:
-                query = """
-                    SELECT hash_signature
-                    FROM public.audit_logs
-                    ORDER BY timestamp DESC, id DESC
-                    LIMIT 1
-                """
-
-                result = await conn.fetchrow(query)
-                return result["hash_signature"] if result else None
+            # Use provided organization_id or fallback to "default"
+            org_id = organization_id or "default"
+            return await get_last_audit_log_hash(org_id)
         except (asyncpg.PostgresError, ConnectionError) as e:
             print(f"Error fetching last hash from database: {e}")
             logger.error("Database error fetching last hash: %s", e, exc_info=True)
@@ -332,91 +332,69 @@ class AuditLogger:
             logger.error("Data access error fetching last hash: %s", e, exc_info=True)
             return None
 
-    async def _write_audit_batch(self, db_pool, events: List[Dict]):
+    async def _write_audit_batch(self, events: List[Dict]):
         if not events:
             return
 
-        async with db_pool.acquire() as conn:
-            try:
-                # Get the last hash from database if we don't have it cached
-                if self._last_hash is None:
-                    self._last_hash = await self._get_last_hash_from_db(db_pool)
+        try:
+            # Get the last hash from database if we don't have it cached
+            if self._last_hash is None:
+                # Use organization_id from the first event if available
+                org_id = events[0].get("organization_id") if events else None
+                self._last_hash = await self._get_last_hash_from_db(org_id)
 
-                insert_query = """
-                    INSERT INTO audit_logs (
-                        organization_id, user_id, user_email, user_role,
-                        action_type, data_classification, table_name, record_id,
-                        old_values, new_values, changed_fields,
-                        compliance_tags, risk_level,
-                        ip_address,
-                        timestamp, hash_signature, previous_hash,
-                        description, retention_date, status_code, category
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-                              $9, $10, $11, $12, $13, $14,
-                              $15, $16, $17, $18, $19, $20, $21)
-                """
+            # Prepare batch data for centralized operations
+            batch_data = []
+            for event in events:
+                hash_signature = self._generate_hash(event)
+                retention_date = self._calculate_retention_date(
+                    event["timestamp"], event["data_classification"]
+                )
 
-                batch_data = []
-                for event in events:
-                    hash_signature = self._generate_hash(event)
-                    retention_date = self._calculate_retention_date(
-                        event["timestamp"], event["data_classification"]
-                    )
+                batch_data.append({
+                    "organization_id": event["organization_id"],
+                    "user_id": event["user_id"],
+                    "user_email": event["user_email"],
+                    "user_role": event["user_role"],
+                    "action_type": event["action_type"],
+                    "data_classification": event["data_classification"],
+                    "table_name": event["table_name"],
+                    "record_id": event["record_id"],
+                    "old_values": event["old_values"],
+                    "new_values": event["new_values"],
+                    "changed_fields": event.get("changed_fields"),
+                    "compliance_tags": event.get("compliance_tags"),
+                    "risk_level": event["risk_level"],
+                    "ip_address": event["ip_address"],
+                    "timestamp": event["timestamp"],
+                    "hash_signature": hash_signature,
+                    "previous_hash": self._last_hash,
+                    "description": event["description"],
+                    "retention_date": retention_date,
+                    "status_code": event.get("status_code"),
+                    "category": event.get("category"),
+                })
 
-                    batch_data.append(
-                        (
-                            event["organization_id"],
-                            event["user_id"],
-                            event["user_email"],
-                            event["user_role"],
-                            event["action_type"],
-                            event["data_classification"],
-                            event["table_name"],
-                            event["record_id"],
-                            (
-                                json.dumps(event["old_values"], default=str)
-                                if event["old_values"]
-                                else None
-                            ),
-                            (
-                                json.dumps(event["new_values"], default=str)
-                                if event["new_values"]
-                                else None
-                            ),
-                            (
-                                event["changed_fields"]
-                                if event["changed_fields"]
-                                else None
-                            ),
-                            (
-                                event["compliance_tags"]
-                                if event["compliance_tags"]
-                                else None
-                            ),
-                            event["risk_level"],
-                            event["ip_address"],
-                            event["timestamp"],
-                            hash_signature,
-                            self._last_hash,
-                            event["description"],
-                            retention_date,
-                            event.get("status_code"),
-                            event.get("category"),
-                        )
-                    )
-                    self._last_hash = hash_signature
+                # Update last hash for next event
+                self._last_hash = hash_signature
 
-                await conn.executemany(insert_query, batch_data)
-                print(f"Successfully wrote {len(events)} audit events")
-                print(f"AUDIT LOGS: Successfully wrote {len(events)} audit events")
-            except (asyncpg.PostgresError, ConnectionError) as e:
-                print(f"Database write error: {e}")
-                logger.error("Database write error: %s", e, exc_info=True)
-                raise
-            except Exception as e:
-                print(f"Unexpected database write error: {e}")
-                logger.error("Unexpected database write error: %s", e, exc_info=True)
-                raise
+            # Use centralized bulk create operation
+            await bulk_create_audit_logs(batch_data)
+            print(f"Successfully wrote {len(events)} audit events")
+            print(f"AUDIT LOGS: Successfully wrote {len(events)} audit events")
+
+        except (asyncpg.PostgresError, ConnectionError) as e:
+            print(f"Database write error: {e}")
+            logger.error("Database write error: %s", e, exc_info=True)
+            raise
+        except (json.JSONDecodeError, UnicodeError) as e:
+            print(f"Serialization error: {e}")
+            logger.error("Serialization error: %s", e, exc_info=True)
+            raise
+        except (LookupError, AttributeError) as e:
+            print(f"Data access error: {e}")
+            logger.error("Data access error: %s", e, exc_info=True)
+            raise
 
     def _generate_hash(self, event: Dict) -> str:
         hash_data = (
