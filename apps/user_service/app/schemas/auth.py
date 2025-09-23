@@ -132,6 +132,8 @@ class UserInfo(BaseModel):
     id: str
     email: str
     full_name: str
+    first_name: str
+    last_name: str
 
 
 class OrganizationInfo(BaseModel):
