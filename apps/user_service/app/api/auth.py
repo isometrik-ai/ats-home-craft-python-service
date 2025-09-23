@@ -69,6 +69,9 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     log_exception,
 )
 
+# Email utilities
+from libs.shared_utils.email_utils import send_password_reset_confirmation_email
+
 # Modify sys.path to support monorepo imports
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, base_path)
@@ -251,6 +254,8 @@ async def login(request: Request, data: AuthLogin):
                 id=result.user.id,
                 email=result.user.email,
                 full_name=result.user.user_metadata.get("full_name", ""),
+                first_name=result.user.user_metadata.get("first_name", ""),
+                last_name=result.user.user_metadata.get("last_name", ""),
             ),
         )
     except Exception as error:
@@ -424,6 +429,23 @@ async def reset_password(
         logger.info(f"update_password_with_token result: {result}")
         if result.user:
             logger.info("Password updated successfully")
+            
+            # Send confirmation email to user
+            user_email = user.get('email', '')
+            user_name = user.get('user_metadata', {}).get('full_name', '') or user.get('email', '').split('@')[0]
+            
+            try:
+                email_sent = send_password_reset_confirmation_email(user_email, user_name)
+                if email_sent:
+                    logger.info("Password reset confirmation email sent successfully to %s", user_email)
+                else:
+                    logger.warning("Failed to send password reset confirmation email to %s", user_email)
+                    # Note: We don't fail the entire operation if email fails
+                    # The password reset was successful, only the email notification failed
+            except Exception as email_error:
+                logger.error("Error sending password reset confirmation email: %s", str(email_error))
+                # Note: We don't fail the entire operation if email fails
+            
             return ResetPasswordResponse(
                 status_code=status.HTTP_200_OK,
                 message="Password reset successfully. You can now login with your new password."
