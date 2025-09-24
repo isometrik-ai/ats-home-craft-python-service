@@ -39,7 +39,7 @@ def send_email(email: str, subject: str, message: str, html: str = None) -> bool
 
         if html:
             payload["html"] = html
-
+        print(f"Sending email to {email} with subject {subject} and message {message}")
         response = requests.post(
             f"{SUPABASE_URL}/functions/v1/custom-email",
             headers={
