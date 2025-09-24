@@ -536,7 +536,7 @@ class TestOrganisationValidation:
 
         with pytest.raises(HTTPException) as exc_info:
             validate_organisation_status(invalid_status)
-        
+
         assert exc_info.value.status_code == 422
         assert "Status must be one of:" in exc_info.value.detail
 
@@ -559,14 +559,14 @@ class TestOrganisationValidation:
         # Test empty string
         with pytest.raises(HTTPException) as exc_info:
             validate_organisation_name_filter("")
-        
+
         assert exc_info.value.status_code == 422
         assert "Name filter cannot be empty" in exc_info.value.detail
 
         # Test None
         with pytest.raises(HTTPException) as exc_info:
             validate_organisation_name_filter(None)
-        
+
         assert exc_info.value.status_code == 422
         assert "Name filter cannot be empty" in exc_info.value.detail
 
@@ -575,7 +575,7 @@ class TestOrganisationValidation:
         # Test whitespace-only string (gets stripped to empty)
         with pytest.raises(HTTPException) as exc_info:
             validate_organisation_name_filter("   ")
-        
+
         assert exc_info.value.status_code == 422
         assert "Name filter must be between 1 and 255 characters" in exc_info.value.detail
 
@@ -583,7 +583,7 @@ class TestOrganisationValidation:
         """Test organisation name filter validation with too short name."""
         with pytest.raises(HTTPException) as exc_info:
             validate_organisation_name_filter("")
-        
+
         assert exc_info.value.status_code == 422
         assert "Name filter cannot be empty" in exc_info.value.detail
 
@@ -593,49 +593,49 @@ class TestOrganisationValidation:
 
         with pytest.raises(HTTPException) as exc_info:
             validate_organisation_name_filter(long_name)
-        
+
         assert exc_info.value.status_code == 422
         assert "Name filter must be between 1 and 255 characters" in exc_info.value.detail
 
     def test_build_organisation_filter_message_no_filters(self):
         """Test building organisation filter message with no filters."""
         result = build_organisation_filter_message()
-        
+
         assert result == "All organizations retrieved successfully with filters: page_size=20"
 
     def test_build_organisation_filter_message_with_name(self):
         """Test building organisation filter message with name filter."""
         result = build_organisation_filter_message(name="Test Org")
-        
+
         assert result == "All organizations retrieved successfully with filters: name='Test Org', page_size=20"
 
     def test_build_organisation_filter_message_with_status(self):
         """Test building organisation filter message with status filter."""
         result = build_organisation_filter_message(org_status="active")
-        
+
         assert result == "All organizations retrieved successfully with filters: status='active', page_size=20"
 
     def test_build_organisation_filter_message_with_page(self):
         """Test building organisation filter message with page filter."""
         result = build_organisation_filter_message(page=2)
-        
+
         assert result == "All organizations retrieved successfully with filters: page=2, page_size=20"
 
     def test_build_organisation_filter_message_with_custom_page_size(self):
         """Test building organisation filter message with custom page size."""
         result = build_organisation_filter_message(page_size=50)
-        
+
         assert result == "All organizations retrieved successfully with filters: page_size=50"
 
     def test_build_organisation_filter_message_with_all_filters(self):
         """Test building organisation filter message with all filters."""
         result = build_organisation_filter_message(
             name="Test Org",
-            org_status="active", 
+            org_status="active",
             page=3,
             page_size=25
         )
-        
+
         expected = "All organizations retrieved successfully with filters: name='Test Org', status='active', page=3, page_size=25"
         assert result == expected
 

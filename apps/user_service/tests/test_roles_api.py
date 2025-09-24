@@ -427,7 +427,7 @@ class TestPermissionDenied:
     def test_get_roles_permission_denied(self, app_without_permission_override):
         """Test roles list with insufficient permissions."""
         client = TestClient(app_without_permission_override)
-        
+
         # Patch at the module level where it's imported
         with patch("apps.user_service.app.api.admin_management.roles.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Insufficient permissions"))), \
              patch("apps.user_service.app.api.admin_management.roles.get_roles_list", AsyncMock(return_value=[])), \
@@ -439,7 +439,7 @@ class TestPermissionDenied:
     def test_create_role_permission_denied(self, app_without_permission_override):
         """Test role creation with insufficient permissions."""
         client = TestClient(app_without_permission_override)
-        
+
         payload = {"name": "TestRole", "description": "", "role_type": "custom", "permission_ids": []}
         with patch("apps.user_service.app.api.admin_management.roles.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Insufficient permissions"))), \
              patch("apps.user_service.app.api.admin_management.roles.check_permissions_exist", AsyncMock(return_value=True)), \
@@ -452,7 +452,7 @@ class TestPermissionDenied:
     def test_update_role_permission_denied(self, app_without_permission_override):
         """Test role update with insufficient permissions."""
         client = TestClient(app_without_permission_override)
-        
+
         role_id = str(uuid.uuid4())
         payload = {"name": "Updated", "description": "Updated"}
         with patch("apps.user_service.app.api.admin_management.roles.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Insufficient permissions"))), \
@@ -466,7 +466,7 @@ class TestPermissionDenied:
     def test_delete_role_permission_denied(self, app_without_permission_override):
         """Test role deletion with insufficient permissions."""
         client = TestClient(app_without_permission_override)
-        
+
         role_id = str(uuid.uuid4())
         with patch("apps.user_service.app.api.admin_management.roles.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Insufficient permissions"))), \
              patch("apps.user_service.app.api.admin_management.roles.check_role_exists", AsyncMock(return_value=True)), \
@@ -479,23 +479,23 @@ class TestPermissionDenied:
 
 class TestRoleResponse:
     """Test cases for RoleResponse class."""
-    
+
     def test_role_response_to_dict(self):
         """Test RoleResponse to_dict method."""
         from apps.user_service.app.api.admin_management.roles import RoleResponse
-        
+
         response = RoleResponse(message="Test message")
         result = response.to_dict()
-        
+
         assert result == {"message": "Test message", "status": "success"}
-        
+
     def test_role_response_custom_status(self):
         """Test RoleResponse with custom status."""
         from apps.user_service.app.api.admin_management.roles import RoleResponse
-        
+
         response = RoleResponse(message="Test message", status="custom_status")
         result = response.to_dict()
-        
+
         assert result == {"message": "Test message", "status": "custom_status"}
 
 

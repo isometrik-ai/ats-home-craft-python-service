@@ -999,7 +999,7 @@ class TestEmailUtils:
     def test_send_email_success(self):
         """Test successful email sending."""
         from libs.shared_utils.email_utils import send_email
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -1007,7 +1007,7 @@ class TestEmailUtils:
             mock_post.return_value = mock_response
 
             result = send_email("test@example.com", "Test Subject", "Test message")
-            
+
             assert result is True
             mock_post.assert_called_once()
             call_args = mock_post.call_args
@@ -1018,7 +1018,7 @@ class TestEmailUtils:
     def test_send_email_with_html(self):
         """Test email sending with HTML content."""
         from libs.shared_utils.email_utils import send_email
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -1026,12 +1026,12 @@ class TestEmailUtils:
             mock_post.return_value = mock_response
 
             result = send_email(
-                "test@example.com", 
-                "Test Subject", 
-                "Test message", 
+                "test@example.com",
+                "Test Subject",
+                "Test message",
                 html="<h1>Test HTML</h1>"
             )
-            
+
             assert result is True
             call_args = mock_post.call_args
             assert call_args[1]["json"]["html"] == "<h1>Test HTML</h1>"
@@ -1039,7 +1039,7 @@ class TestEmailUtils:
     def test_send_email_failure(self):
         """Test email sending failure."""
         from libs.shared_utils.email_utils import send_email
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 400
@@ -1047,61 +1047,61 @@ class TestEmailUtils:
             mock_post.return_value = mock_response
 
             result = send_email("test@example.com", "Test Subject", "Test message")
-            
+
             assert result is False
 
     def test_send_email_network_error(self):
         """Test email sending with network error."""
         from libs.shared_utils.email_utils import send_email
         import requests
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_post.side_effect = requests.RequestException("Network error")
 
             result = send_email("test@example.com", "Test Subject", "Test message")
-            
+
             assert result is False
 
     def test_send_email_timeout_error(self):
         """Test email sending with timeout error."""
         from libs.shared_utils.email_utils import send_email
         import requests
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_post.side_effect = requests.Timeout("Request timeout")
 
             result = send_email("test@example.com", "Test Subject", "Test message")
-            
+
             assert result is False
 
     def test_send_email_connection_error(self):
         """Test email sending with connection error."""
         from libs.shared_utils.email_utils import send_email
         import requests
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_post.side_effect = requests.ConnectionError("Connection failed")
 
             result = send_email("test@example.com", "Test Subject", "Test message")
-            
+
             assert result is False
 
     def test_send_email_http_error(self):
         """Test email sending with HTTP error."""
         from libs.shared_utils.email_utils import send_email
         import requests
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_post.side_effect = requests.HTTPError("HTTP error")
 
             result = send_email("test@example.com", "Test Subject", "Test message")
-            
+
             assert result is False
 
     def test_send_email_headers_verification(self):
         """Test that correct headers are sent with email request."""
         from libs.shared_utils.email_utils import send_email
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -1109,10 +1109,10 @@ class TestEmailUtils:
             mock_post.return_value = mock_response
 
             send_email("test@example.com", "Test Subject", "Test message")
-            
+
             call_args = mock_post.call_args
             headers = call_args[1]["headers"]
-            
+
             assert "apikey" in headers
             assert "Authorization" in headers
             assert "Content-Type" in headers
@@ -1123,7 +1123,7 @@ class TestEmailUtils:
         """Test that correct URL is used for email sending."""
         from libs.shared_utils.email_utils import send_email
         from libs.shared_utils.email_utils import SUPABASE_URL
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -1131,7 +1131,7 @@ class TestEmailUtils:
             mock_post.return_value = mock_response
 
             send_email("test@example.com", "Test Subject", "Test message")
-            
+
             call_args = mock_post.call_args
             expected_url = f"{SUPABASE_URL}/functions/v1/custom-email"
             assert call_args[0][0] == expected_url
@@ -1139,7 +1139,7 @@ class TestEmailUtils:
     def test_send_email_timeout_verification(self):
         """Test that correct timeout is set for email request."""
         from libs.shared_utils.email_utils import send_email
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -1147,14 +1147,14 @@ class TestEmailUtils:
             mock_post.return_value = mock_response
 
             send_email("test@example.com", "Test Subject", "Test message")
-            
+
             call_args = mock_post.call_args
             assert call_args[1]["timeout"] == 10
 
     def test_send_email_payload_structure(self):
         """Test that email payload has correct structure."""
         from libs.shared_utils.email_utils import send_email
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -1162,10 +1162,10 @@ class TestEmailUtils:
             mock_post.return_value = mock_response
 
             send_email("test@example.com", "Test Subject", "Test message")
-            
+
             call_args = mock_post.call_args
             payload = call_args[1]["json"]
-            
+
             assert "to" in payload
             assert "subject" in payload
             assert "message" in payload
@@ -1177,7 +1177,7 @@ class TestEmailUtils:
     def test_send_email_payload_with_html(self):
         """Test that email payload includes HTML when provided."""
         from libs.shared_utils.email_utils import send_email
-        
+
         with patch("libs.shared_utils.email_utils.requests.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -1185,10 +1185,10 @@ class TestEmailUtils:
             mock_post.return_value = mock_response
 
             send_email("test@example.com", "Test Subject", "Test message", html="<p>HTML content</p>")
-            
+
             call_args = mock_post.call_args
             payload = call_args[1]["json"]
-            
+
             assert "html" in payload
             assert payload["html"] == "<p>HTML content</p>"
 
@@ -1199,77 +1199,77 @@ class TestSendPasswordResetConfirmationEmail:
     def test_send_password_reset_confirmation_email_success(self):
         """Test successful password reset confirmation email - covers lines 195-196."""
         from libs.shared_utils.email_utils import send_password_reset_confirmation_email
-        
+
         email = "test@example.com"
         user_name = "Test User"
-        
+
         with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email, \
              patch("libs.shared_utils.email_utils.logger") as mock_logger:
-            
+
             result = send_password_reset_confirmation_email(email, user_name)
-            
+
             assert result is True
             mock_send_email.assert_called_once()
-            
+
             # Verify the email was sent with correct parameters
             call_args = mock_send_email.call_args
             assert call_args[0][0] == email  # email
             assert call_args[0][1] == "Password Changed Successfully"  # subject
             assert "password for your House of App AI account was successfully updated" in call_args[0][2]  # message
             assert "Password Changed" in call_args[0][3]  # html_message
-            
+
             # Verify success logging - covers line 195
             mock_logger.info.assert_called_with("Password reset confirmation email sent successfully to %s", email)
 
     def test_send_password_reset_confirmation_email_failure(self):
         """Test password reset confirmation email failure - covers line 198."""
         from libs.shared_utils.email_utils import send_password_reset_confirmation_email
-        
+
         email = "test@example.com"
         user_name = "Test User"
-        
+
         with patch("libs.shared_utils.email_utils.send_email", return_value=False) as mock_send_email, \
              patch("libs.shared_utils.email_utils.logger") as mock_logger:
-            
+
             result = send_password_reset_confirmation_email(email, user_name)
-            
+
             assert result is False
             mock_send_email.assert_called_once()
-            
+
             # Verify error logging - covers line 198
             mock_logger.error.assert_called_with("Failed to send password reset confirmation email to %s", email)
 
     def test_send_password_reset_confirmation_email_exception(self):
         """Test password reset confirmation email with exception - covers lines 201-203."""
         from libs.shared_utils.email_utils import send_password_reset_confirmation_email
-        
+
         email = "test@example.com"
         user_name = "Test User"
-        
+
         with patch("libs.shared_utils.email_utils.send_email", side_effect=Exception("SMTP Error")) as mock_send_email, \
              patch("libs.shared_utils.email_utils.logger") as mock_logger:
-            
+
             result = send_password_reset_confirmation_email(email, user_name)
-            
+
             assert result is False
             mock_send_email.assert_called_once()
-            
+
             # Verify exception logging - covers lines 202-203
             mock_logger.error.assert_called_with("Error sending password reset confirmation email: %s", "SMTP Error")
 
     def test_send_password_reset_confirmation_email_without_user_name(self):
         """Test password reset confirmation email without user name."""
         from libs.shared_utils.email_utils import send_password_reset_confirmation_email
-        
+
         email = "test@example.com"
-        
+
         with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-            
+
             result = send_password_reset_confirmation_email(email)
-            
+
             assert result is True
             mock_send_email.assert_called_once()
-            
+
             # Verify the email content includes "User" as fallback greeting
             call_args = mock_send_email.call_args
             message_content = call_args[0][2]  # message
@@ -1280,29 +1280,29 @@ class TestSendPasswordResetConfirmationEmail:
     def test_send_password_reset_confirmation_email_content_validation(self):
         """Test password reset confirmation email content validation."""
         from libs.shared_utils.email_utils import send_password_reset_confirmation_email
-        
+
         email = "test@example.com"
         user_name = "John Doe"
-        
+
         with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-            
+
             result = send_password_reset_confirmation_email(email, user_name)
-            
+
             assert result is True
-            
+
             # Verify email content
             call_args = mock_send_email.call_args
             subject = call_args[0][1]
             message = call_args[0][2]
             html_message = call_args[0][3]
-            
+
             # Check subject
             assert subject == "Password Changed Successfully"
-            
+
             # Check plain text message
             assert "password for your House of App AI account was successfully updated" in message
             assert user_name in message
-            
+
             # Check HTML message
             assert "Password Changed" in html_message
             assert user_name in html_message

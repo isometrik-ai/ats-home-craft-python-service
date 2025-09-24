@@ -210,11 +210,10 @@ class ForgotPasswordResponse(BaseModel):
 # Last Updated: 2024-12-19
 # """
 
+from enum import Enum
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, model_validator
 from fastapi import HTTPException, status
-from enum import Enum
-
 
 # ============================================================================
 # ENUMS

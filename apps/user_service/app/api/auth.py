@@ -339,7 +339,7 @@ async def reset_password(
             except Exception as email_error:
                 logger.error("Error sending password reset confirmation email: %s", str(email_error))
                 # Note: We don't fail the entire operation if email fails
-            
+
             return ResetPasswordResponse(
                 status_code=status.HTTP_200_OK,
                 message="Password reset successfully. You can now login with your new password."

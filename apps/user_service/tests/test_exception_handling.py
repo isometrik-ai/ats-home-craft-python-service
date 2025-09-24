@@ -780,7 +780,7 @@ class TestExecuteSafeQueryMissing:
         """Test insert operation without data - should raise validation error."""
         with pytest.raises(DatabaseOperationError) as exc_info:
             await execute_safe_query("test_table", "insert")
-        
+
         assert "Data is required for insert operation" in str(exc_info.value)
 
     @pytest.mark.asyncio
@@ -788,7 +788,7 @@ class TestExecuteSafeQueryMissing:
         """Test update operation without data - should raise validation error."""
         with pytest.raises(DatabaseOperationError) as exc_info:
             await execute_safe_query("test_table", "update")
-        
+
         assert "Data is required for update operation" in str(exc_info.value)
 
     @pytest.mark.asyncio
@@ -800,7 +800,7 @@ class TestExecuteSafeQueryMissing:
             mock_query = AsyncMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": 1, "name": "updated"}]
-            
+
             mock_client.table.return_value = mock_table
             mock_table.update.return_value = mock_query
             mock_query.execute.return_value = mock_result
@@ -824,7 +824,7 @@ class TestExecuteSafeQueryMissing:
             mock_query = AsyncMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": 1, "name": "deleted"}]
-            
+
             mock_client.table.return_value = mock_table
             mock_table.delete.return_value = mock_query
             mock_query.execute.return_value = mock_result
@@ -839,7 +839,7 @@ class TestExecuteSafeQueryMissing:
         """Test unsupported operation - should raise validation error."""
         with pytest.raises(DatabaseOperationError) as exc_info:
             await execute_safe_query("test_table", "unsupported")
-        
+
         assert "Unsupported operation: unsupported" in str(exc_info.value)
 
     @pytest.mark.asyncio
@@ -847,7 +847,7 @@ class TestExecuteSafeQueryMissing:
         """Test insert operation with empty data - should raise validation error."""
         with pytest.raises(DatabaseOperationError) as exc_info:
             await execute_safe_query("test_table", "insert", data=None)
-        
+
         assert "Data is required for insert operation" in str(exc_info.value)
 
     @pytest.mark.asyncio
@@ -855,7 +855,7 @@ class TestExecuteSafeQueryMissing:
         """Test update operation with empty data - should raise validation error."""
         with pytest.raises(DatabaseOperationError) as exc_info:
             await execute_safe_query("test_table", "update", data={})
-        
+
         assert "Data is required for update operation" in str(exc_info.value)
 
     @pytest.mark.asyncio
@@ -865,10 +865,10 @@ class TestExecuteSafeQueryMissing:
             mock_client = AsyncMock()
             mock_table = AsyncMock()
             mock_query = AsyncMock()
-            
+
             mock_client.table.return_value = mock_table
             mock_table.select.return_value = mock_query
-            
+
             error = APIError({"message": "API Error", "code": "500"})
             error.status_code = 500
             mock_query.execute.side_effect = error
@@ -886,10 +886,10 @@ class TestExecuteSafeQueryMissing:
             mock_client = AsyncMock()
             mock_table = AsyncMock()
             mock_query = AsyncMock()
-            
+
             mock_client.table.return_value = mock_table
             mock_table.select.return_value = mock_query
-            
+
             mock_query.execute.side_effect = HTTPError("Network Error")
             mock_get_client.return_value = mock_client
 
@@ -905,10 +905,10 @@ class TestExecuteSafeQueryMissing:
             mock_client = AsyncMock()
             mock_table = AsyncMock()
             mock_query = AsyncMock()
-            
+
             mock_client.table.return_value = mock_table
             mock_table.select.return_value = mock_query
-            
+
             mock_query.execute.side_effect = Exception("Unexpected Error")
             mock_get_client.return_value = mock_client
 
@@ -929,7 +929,7 @@ class TestMissingCoverageBatch1:
             mock_query = AsyncMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": 1, "name": "test", "organization_id": "org123"}]
-            
+
             mock_client.table.return_value = mock_table
             mock_table.insert.return_value = mock_query
             mock_query.execute.return_value = mock_result
@@ -955,7 +955,7 @@ class TestMissingCoverageBatch1:
             mock_query = AsyncMock()
             mock_result = MagicMock()
             mock_result.count = 5
-            
+
             mock_client.table.return_value = mock_table
             mock_table.select.return_value = mock_query
             mock_query.in_.return_value = mock_query
@@ -981,7 +981,7 @@ class TestMissingCoverageBatch1:
             mock_query = AsyncMock()
             mock_result = MagicMock()
             mock_result.count = 3
-            
+
             mock_client.table.return_value = mock_table
             mock_table.select.return_value = mock_query
             mock_query.eq.return_value = mock_query
@@ -1004,7 +1004,7 @@ class TestMissingCoverageBatch1:
             mock_limit_query = AsyncMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": 1}]
-            
+
             mock_client.table.return_value = mock_table
             mock_table.select.return_value = mock_query
             mock_query.in_.return_value = mock_query
@@ -1030,7 +1030,7 @@ class TestMissingCoverageBatch1:
             mock_limit_query = AsyncMock()
             mock_result = MagicMock()
             mock_result.data = []
-            
+
             mock_client.table.return_value = mock_table
             mock_table.select.return_value = mock_query
             mock_query.eq.return_value = mock_query
@@ -1063,7 +1063,7 @@ class TestMissingCoverageBatch2:
             with pytest.raises(SupabaseAPIError) as exc_info:
                 async with database_operation("test_operation") as supabase:
                     pass
-            
+
             assert "Supabase API error in test_operation" in str(exc_info.value)
             assert exc_info.value.status_code == 500
     @pytest.mark.asyncio
@@ -1076,7 +1076,7 @@ class TestMissingCoverageBatch2:
             with pytest.raises(NetworkError) as exc_info:
                 async with database_operation("test_operation") as supabase:
                     pass
-            
+
             assert "Network error in test_operation" in str(exc_info.value)
 
 
@@ -1091,7 +1091,7 @@ class TestMissingCoverageBatch3:
 
         with pytest.raises(SerializationError) as exc_info:
             await safe_supabase_operation(mock_operation, "test_operation")
-        
+
         # Fix: Check the actual error message format
         assert "Invalid JSON: line 1 column 1 (char 0)" in str(exc_info.value)
         assert exc_info.value.data_type == "JSON"
@@ -1104,7 +1104,7 @@ class TestMissingCoverageBatch3:
 
         with pytest.raises(SerializationError) as exc_info:
             await safe_supabase_operation(mock_operation, "test_operation")
-        
+
         # Fix: Check the actual error message format
         assert "Unicode decode error" in str(exc_info.value)
         assert exc_info.value.data_type == "Unicode"
@@ -1117,7 +1117,7 @@ class TestMissingCoverageBatch3:
 
         with pytest.raises(DataValidationError) as exc_info:
             await safe_supabase_operation(mock_operation, "test_operation")
-        
+
         # Fix: Check the actual error message format
         assert "'missing_key'" in str(exc_info.value)
         assert exc_info.value.field == "missing_key"
@@ -1130,7 +1130,7 @@ class TestMissingCoverageBatch3:
 
         with pytest.raises(DataValidationError) as exc_info:
             await safe_supabase_operation(mock_operation, "test_operation")
-        
+
         # Fix: Check the actual error message format
         assert "Type error" in str(exc_info.value)
 
@@ -1142,7 +1142,7 @@ class TestMissingCoverageBatch3:
 
         with pytest.raises(DataValidationError) as exc_info:
             await safe_supabase_operation(mock_operation, "test_operation")
-        
+
         # Fix: Check the actual error message format
         assert "Value error" in str(exc_info.value)
 
@@ -1171,7 +1171,7 @@ class TestMissingCoverageBatch4:
             ("verify_data", "checking"),
             ("unknown_operation", "processing")
         ]
-        
+
         for operation_name, expected_action in test_cases:
             messages = create_error_messages(operation_name)
             assert f"{expected_action} {operation_name}" in messages['api_error']

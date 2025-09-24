@@ -49,7 +49,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_permission(permission_data, organization_id)
-            
+
             assert result == mock_created_permission
             mock_supabase.table.assert_called_once_with("permissions")
 
@@ -72,7 +72,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_permission(permission_data, organization_id)
-            
+
             assert result == {}
 
     @pytest.mark.asyncio
@@ -104,7 +104,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_permission(permission_data, organization_id)
-            
+
             assert result == mock_created_permission
             assert result["description"] == ""
 
@@ -132,7 +132,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_permission_details_by_id(permission_id, organization_id)
-            
+
             assert result == mock_permission
             mock_supabase.table.assert_called_once_with("permissions")
 
@@ -150,7 +150,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_permission_details_by_id(permission_id, organization_id)
-            
+
             assert result is None
 
     @pytest.mark.asyncio
@@ -178,7 +178,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_permission_details_by_id(permission_id, organization_id)
-            
+
             assert result == mock_permission
             assert result["role_count"] == 3
 
@@ -186,7 +186,7 @@ class TestPermissionOperations:
     async def test_get_all_permissions_success(self):
         """Test successful retrieval of all permissions."""
         organization_id = str(uuid.uuid4())
-        
+
         mock_permissions = [
             {
                 "id": str(uuid.uuid4()),
@@ -225,7 +225,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)
-            
+
             assert len(result) == 3
             assert result == mock_permissions
             mock_supabase.table.assert_called_once_with("permissions")
@@ -243,14 +243,14 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)
-            
+
             assert result == []
 
     @pytest.mark.asyncio
     async def test_get_all_permissions_with_categories(self):
         """Test retrieval of all permissions with different categories."""
         organization_id = str(uuid.uuid4())
-        
+
         mock_permissions = [
             {
                 "id": str(uuid.uuid4()),
@@ -289,7 +289,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)
-            
+
             assert len(result) == 3
             # Check that permissions are sorted by category and name
             categories = [perm["category"] for perm in result]
@@ -299,7 +299,7 @@ class TestPermissionOperations:
     async def test_get_all_permissions_with_role_counts(self):
         """Test retrieval of all permissions with role count information."""
         organization_id = str(uuid.uuid4())
-        
+
         mock_permissions = [
             {
                 "id": str(uuid.uuid4()),
@@ -331,7 +331,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)
-            
+
             assert len(result) == 2
             assert result[0]["role_count"] == 5
             assert result[1]["role_count"] == 2
@@ -365,7 +365,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_permission(permission_data, organization_id)
-            
+
             assert result == mock_created_permission
             assert result["name"] == "Special & Permission"
             assert result["code"] == "special.permission@test"
@@ -396,7 +396,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_permission_details_by_id(permission_id, organization_id)
-            
+
             assert result == mock_permission
             assert len(result["description"]) > 100
 
@@ -404,7 +404,7 @@ class TestPermissionOperations:
     async def test_get_all_permissions_with_unicode_characters(self):
         """Test retrieval of all permissions with unicode characters."""
         organization_id = str(uuid.uuid4())
-        
+
         mock_permissions = [
             {
                 "id": str(uuid.uuid4()),
@@ -434,7 +434,7 @@ class TestPermissionOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)
-            
+
             assert len(result) == 2
             assert result[0]["name"] == "用户管理"
             assert result[1]["name"] == "システム管理"

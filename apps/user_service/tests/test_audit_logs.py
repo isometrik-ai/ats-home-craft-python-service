@@ -8,12 +8,12 @@ This module contains comprehensive tests for:
 - Audit utility functions
 """
 
-import pytest
-import pytest_asyncio
 import uuid
 import json
 import asyncio
 from datetime import datetime, timezone
+import pytest
+import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.testclient import TestClient
@@ -426,7 +426,7 @@ class TestAuditLogger:
     async def test_log_audit_event_data_validation_error(self, mock_request):
         """Test log_audit_event with data validation errors."""
         logger = AuditLogger()
-        
+
         # Create invalid event data that will cause validation errors
         invalid_event_data = AuditEventData(
             user_context={},  # Missing required fields
@@ -441,7 +441,7 @@ class TestAuditLogger:
             risk_level="low",
             description="Test event"
         )
-        
+
         # Mock _create_audit_event_dict to raise ValueError
         with patch.object(logger, '_create_audit_event_dict', side_effect=ValueError("Invalid data")):
             await logger.log_audit_event(invalid_event_data, mock_request)
@@ -451,7 +451,7 @@ class TestAuditLogger:
     async def test_log_audit_event_type_error(self, mock_request):
         """Test log_audit_event with TypeError."""
         logger = AuditLogger()
-        
+
         # Mock _create_audit_event_dict to raise TypeError
         with patch.object(logger, '_create_audit_event_dict', side_effect=TypeError("Type error")):
             await logger.log_audit_event(None, mock_request)
@@ -461,7 +461,7 @@ class TestAuditLogger:
     async def test_log_audit_event_key_error(self, mock_request):
         """Test log_audit_event with KeyError."""
         logger = AuditLogger()
-        
+
         # Mock _create_audit_event_dict to raise KeyError
         with patch.object(logger, '_create_audit_event_dict', side_effect=KeyError("Missing key")):
             await logger.log_audit_event(None, mock_request)
@@ -471,7 +471,7 @@ class TestAuditLogger:
     async def test_log_audit_event_attribute_error(self, mock_request):
         """Test log_audit_event with AttributeError."""
         logger = AuditLogger()
-        
+
         # Mock _create_audit_event_dict to raise AttributeError
         with patch.object(logger, '_create_audit_event_dict', side_effect=AttributeError("Attribute error")):
             await logger.log_audit_event(None, mock_request)
@@ -481,7 +481,7 @@ class TestAuditLogger:
     async def test_log_audit_event_runtime_error(self, mock_request):
         """Test log_audit_event with RuntimeError."""
         logger = AuditLogger()
-        
+
         # Mock _create_audit_event_dict to raise RuntimeError
         with patch.object(logger, '_create_audit_event_dict', side_effect=RuntimeError("Runtime error")):
             await logger.log_audit_event(None, mock_request)
@@ -491,7 +491,7 @@ class TestAuditLogger:
     async def test_log_audit_event_io_error(self, mock_request):
         """Test log_audit_event with IOError."""
         logger = AuditLogger()
-        
+
         # Mock _create_audit_event_dict to raise IOError
         with patch.object(logger, '_create_audit_event_dict', side_effect=IOError("IO error")):
             await logger.log_audit_event(None, mock_request)
@@ -502,10 +502,10 @@ class TestAuditLogger:
         """Test log_audit_event when queue is full and timeout occurs."""
         logger = AuditLogger()
         logger._queue = asyncio.Queue(maxsize=1)  # Small queue for testing
-        
+
         # Fill the queue
         await logger._queue.put({"dummy": "event"})
-        
+
         # Mock event creation
         mock_event = {"test": "data"}
         with patch.object(logger, '_create_audit_event_dict', return_value=mock_event):
@@ -519,17 +519,17 @@ class TestAuditLogger:
     async def test_shutdown_timeout(self):
         """Test shutdown with timeout scenario."""
         logger = AuditLogger()
-        
+
         # Create a mock processing task that never completes
         mock_task = MagicMock()
         mock_task.done.return_value = False
         mock_task.cancel = MagicMock()
         logger._processing_task = mock_task
-        
+
         # Mock asyncio.wait_for to raise TimeoutError
         with patch('asyncio.wait_for', side_effect=asyncio.TimeoutError()):
             await logger.shutdown()
-            
+
             # Verify shutdown event was set
             assert logger._shutdown_event.is_set()
             # Verify task was cancelled
@@ -539,7 +539,7 @@ class TestAuditLogger:
     async def test_get_last_hash_from_db_database_error(self):
         """Test _get_last_hash_from_db with database error."""
         logger = AuditLogger()
-        
+
         # Mock get_last_audit_log_hash to raise DatabaseOperationError
         with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.get_last_audit_log_hash',
                   AsyncMock(side_effect=DatabaseOperationError("Database error"))):
@@ -550,7 +550,7 @@ class TestAuditLogger:
     async def test_get_last_hash_from_db_json_error(self):
         """Test _get_last_hash_from_db with JSON decode error."""
         logger = AuditLogger()
-        
+
         # Mock get_last_audit_log_hash to raise JSONDecodeError
         with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.get_last_audit_log_hash',
                   AsyncMock(side_effect=json.JSONDecodeError("Invalid JSON", "doc", 0))):
@@ -561,7 +561,7 @@ class TestAuditLogger:
     async def test_get_last_hash_from_db_unicode_error(self):
         """Test _get_last_hash_from_db with Unicode error."""
         logger = AuditLogger()
-        
+
         # Mock get_last_audit_log_hash to raise UnicodeError
         with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.get_last_audit_log_hash',
                   AsyncMock(side_effect=UnicodeError("Unicode error"))):
@@ -572,7 +572,7 @@ class TestAuditLogger:
     async def test_get_last_hash_from_db_lookup_error(self):
         """Test _get_last_hash_from_db with LookupError."""
         logger = AuditLogger()
-        
+
         # Mock get_last_audit_log_hash to raise LookupError
         with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.get_last_audit_log_hash',
                   AsyncMock(side_effect=LookupError("Lookup error"))):
@@ -583,7 +583,7 @@ class TestAuditLogger:
     async def test_get_last_hash_from_db_attribute_error(self):
         """Test _get_last_hash_from_db with AttributeError."""
         logger = AuditLogger()
-        
+
         # Mock get_last_audit_log_hash to raise AttributeError
         with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.get_last_audit_log_hash',
                   AsyncMock(side_effect=AttributeError("Attribute error"))):
@@ -594,7 +594,7 @@ class TestAuditLogger:
     async def test_write_audit_batch_empty_events(self):
         """Test _write_audit_batch with empty events list."""
         logger = AuditLogger()
-        
+
         # Should return early without doing anything
         await logger._write_audit_batch([])
 
@@ -622,12 +622,12 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock get_last_hash_from_db to return a hash
         with patch.object(logger, '_get_last_hash_from_db', AsyncMock(return_value="prev_hash")), \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.bulk_create_audit_logs',
                   AsyncMock(side_effect=DatabaseOperationError("Database error"))):
-            
+
             with pytest.raises(DatabaseOperationError):
                 await logger._write_audit_batch(events)
 
@@ -655,12 +655,12 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock get_last_hash_from_db to return a hash
         with patch.object(logger, '_get_last_hash_from_db', AsyncMock(return_value="prev_hash")), \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.bulk_create_audit_logs',
                   AsyncMock(side_effect=json.JSONDecodeError("Invalid JSON", "doc", 0))):
-            
+
             with pytest.raises(json.JSONDecodeError):
                 await logger._write_audit_batch(events)
 
@@ -688,12 +688,12 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock get_last_hash_from_db to return a hash
         with patch.object(logger, '_get_last_hash_from_db', AsyncMock(return_value="prev_hash")), \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.bulk_create_audit_logs',
                   AsyncMock(side_effect=UnicodeError("Unicode error"))):
-            
+
             with pytest.raises(UnicodeError):
                 await logger._write_audit_batch(events)
 
@@ -721,12 +721,12 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock get_last_hash_from_db to return a hash
         with patch.object(logger, '_get_last_hash_from_db', AsyncMock(return_value="prev_hash")), \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.bulk_create_audit_logs',
                   AsyncMock(side_effect=LookupError("Lookup error"))):
-            
+
             with pytest.raises(LookupError):
                 await logger._write_audit_batch(events)
 
@@ -754,12 +754,12 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock get_last_hash_from_db to return a hash
         with patch.object(logger, '_get_last_hash_from_db', AsyncMock(return_value="prev_hash")), \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.bulk_create_audit_logs',
                   AsyncMock(side_effect=AttributeError("Attribute error"))):
-            
+
             with pytest.raises(AttributeError):
                 await logger._write_audit_batch(events)
 
@@ -787,11 +787,11 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock _write_audit_batch to raise OSError on all attempts
         with patch.object(logger, '_write_audit_batch', AsyncMock(side_effect=OSError("OS error"))), \
              patch('asyncio.sleep', AsyncMock()):  # Mock sleep to speed up test
-            
+
             await logger._write_audit_batch_with_retry(events)
             # Should complete without raising (after max retries)
 
@@ -819,11 +819,11 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock _write_audit_batch to raise RuntimeError on all attempts
         with patch.object(logger, '_write_audit_batch', AsyncMock(side_effect=RuntimeError("Runtime error"))), \
              patch('asyncio.sleep', AsyncMock()):  # Mock sleep to speed up test
-            
+
             await logger._write_audit_batch_with_retry(events)
             # Should complete without raising (after max retries)
 
@@ -851,11 +851,11 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock _write_audit_batch to raise JSONDecodeError on all attempts
         with patch.object(logger, '_write_audit_batch', AsyncMock(side_effect=json.JSONDecodeError("Invalid JSON", "doc", 0))), \
              patch('asyncio.sleep', AsyncMock()):  # Mock sleep to speed up test
-            
+
             await logger._write_audit_batch_with_retry(events)
             # Should complete without raising (after max retries)
 
@@ -883,11 +883,11 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock _write_audit_batch to raise UnicodeError on all attempts
         with patch.object(logger, '_write_audit_batch', AsyncMock(side_effect=UnicodeError("Unicode error"))), \
              patch('asyncio.sleep', AsyncMock()):  # Mock sleep to speed up test
-            
+
             await logger._write_audit_batch_with_retry(events)
             # Should complete without raising (after max retries)
 
@@ -915,11 +915,11 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock _write_audit_batch to raise LookupError on all attempts
         with patch.object(logger, '_write_audit_batch', AsyncMock(side_effect=LookupError("Lookup error"))), \
              patch('asyncio.sleep', AsyncMock()):  # Mock sleep to speed up test
-            
+
             await logger._write_audit_batch_with_retry(events)
             # Should complete without raising (after max retries)
 
@@ -947,11 +947,11 @@ class TestAuditLogger:
             "status_code": 200,
             "category": "user_management"
         }]
-        
+
         # Mock _write_audit_batch to raise AttributeError on all attempts
         with patch.object(logger, '_write_audit_batch', AsyncMock(side_effect=AttributeError("Attribute error"))), \
              patch('asyncio.sleep', AsyncMock()):  # Mock sleep to speed up test
-            
+
             await logger._write_audit_batch_with_retry(events)
             # Should complete without raising (after max retries)
 
@@ -959,10 +959,10 @@ class TestAuditLogger:
     async def test_collect_batch_events_timeout(self):
         """Test _collect_batch_events with timeout."""
         logger = AuditLogger()
-        
+
         # Test with timeout when queue is empty
         batch, got_events = await logger._collect_batch_events(timeout=0.01)
-        
+
         assert got_events is False
         assert len(batch) == 0
 
@@ -971,14 +971,14 @@ class TestAuditLogger:
         """Test _collect_batch_events with partial batch (less than batch_size)."""
         logger = AuditLogger()
         test_events = [{"id": 1}, {"id": 2}]  # Less than batch_size (10)
-        
+
         # Add events to queue
         for event in test_events:
             await logger._queue.put(event)
-        
+
         # Collect batch
         batch, got_events = await logger._collect_batch_events(timeout=0.1)
-        
+
         assert got_events is True
         assert len(batch) == 2
         assert all(event in test_events for event in batch)
@@ -988,14 +988,14 @@ class TestAuditLogger:
         """Test _collect_batch_events with exact batch size."""
         logger = AuditLogger()
         test_events = [{"id": i} for i in range(10)]  # Exactly batch_size (10)
-        
+
         # Add events to queue
         for event in test_events:
             await logger._queue.put(event)
-        
+
         # Collect batch
         batch, got_events = await logger._collect_batch_events(timeout=0.1)
-        
+
         assert got_events is True
         assert len(batch) == 10
         assert all(event in test_events for event in batch)
@@ -1005,14 +1005,14 @@ class TestAuditLogger:
         """Test _collect_batch_events with more than batch size."""
         logger = AuditLogger()
         test_events = [{"id": i} for i in range(15)]  # More than batch_size (10)
-        
+
         # Add events to queue
         for event in test_events:
             await logger._queue.put(event)
-        
+
         # Collect batch
         batch, got_events = await logger._collect_batch_events(timeout=0.1)
-        
+
         assert got_events is True
         assert len(batch) == 10  # Should only collect up to batch_size
         assert all(event in test_events for event in batch)
@@ -1021,7 +1021,7 @@ class TestAuditLogger:
     async def test_process_audit_queue_cancelled_error(self):
         """Test _process_audit_queue with CancelledError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to raise CancelledError
         with patch.object(logger, '_collect_batch_events', AsyncMock(side_effect=asyncio.CancelledError())):
             # This should break the loop gracefully
@@ -1031,7 +1031,7 @@ class TestAuditLogger:
     async def test_process_audit_queue_timeout_error(self):
         """Test _process_audit_queue with TimeoutError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to raise TimeoutError
         with patch.object(logger, '_collect_batch_events', AsyncMock(side_effect=asyncio.TimeoutError())):
             # This should break the loop gracefully
@@ -1041,14 +1041,14 @@ class TestAuditLogger:
     async def test_process_audit_queue_database_error(self):
         """Test _process_audit_queue with DatabaseOperationError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to return events
         mock_batch = [{"test": "event"}]
         with patch.object(logger, '_collect_batch_events', AsyncMock(return_value=(mock_batch, True))), \
              patch.object(logger, '_write_audit_batch_with_retry', AsyncMock(side_effect=DatabaseOperationError("Database error"))), \
              patch.object(logger, '_handle_batch_error', MagicMock()), \
              patch('asyncio.sleep', AsyncMock()):
-            
+
             # Set shutdown event to break the loop after one iteration
             logger._shutdown_event.set()
             await logger._process_audit_queue()
@@ -1057,14 +1057,14 @@ class TestAuditLogger:
     async def test_process_audit_queue_os_error(self):
         """Test _process_audit_queue with OSError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to return events
         mock_batch = [{"test": "event"}]
         with patch.object(logger, '_collect_batch_events', AsyncMock(return_value=(mock_batch, True))), \
              patch.object(logger, '_write_audit_batch_with_retry', AsyncMock(side_effect=OSError("OS error"))), \
              patch.object(logger, '_handle_batch_error', MagicMock()), \
              patch('asyncio.sleep', AsyncMock()):
-            
+
             # Set shutdown event to break the loop after one iteration
             logger._shutdown_event.set()
             await logger._process_audit_queue()
@@ -1073,14 +1073,14 @@ class TestAuditLogger:
     async def test_process_audit_queue_runtime_error(self):
         """Test _process_audit_queue with RuntimeError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to return events
         mock_batch = [{"test": "event"}]
         with patch.object(logger, '_collect_batch_events', AsyncMock(return_value=(mock_batch, True))), \
              patch.object(logger, '_write_audit_batch_with_retry', AsyncMock(side_effect=RuntimeError("Runtime error"))), \
              patch.object(logger, '_handle_batch_error', MagicMock()), \
              patch('asyncio.sleep', AsyncMock()):
-            
+
             # Set shutdown event to break the loop after one iteration
             logger._shutdown_event.set()
             await logger._process_audit_queue()
@@ -1089,14 +1089,14 @@ class TestAuditLogger:
     async def test_process_audit_queue_io_error(self):
         """Test _process_audit_queue with IOError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to return events
         mock_batch = [{"test": "event"}]
         with patch.object(logger, '_collect_batch_events', AsyncMock(return_value=(mock_batch, True))), \
              patch.object(logger, '_write_audit_batch_with_retry', AsyncMock(side_effect=IOError("IO error"))), \
              patch.object(logger, '_handle_batch_error', MagicMock()), \
              patch('asyncio.sleep', AsyncMock()):
-            
+
             # Set shutdown event to break the loop after one iteration
             logger._shutdown_event.set()
             await logger._process_audit_queue()
@@ -1105,14 +1105,14 @@ class TestAuditLogger:
     async def test_process_audit_queue_json_error(self):
         """Test _process_audit_queue with JSONDecodeError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to return events
         mock_batch = [{"test": "event"}]
         with patch.object(logger, '_collect_batch_events', AsyncMock(return_value=(mock_batch, True))), \
              patch.object(logger, '_write_audit_batch_with_retry', AsyncMock(side_effect=json.JSONDecodeError("Invalid JSON", "doc", 0))), \
              patch.object(logger, '_handle_batch_error', MagicMock()), \
              patch('asyncio.sleep', AsyncMock()):
-            
+
             # Set shutdown event to break the loop after one iteration
             logger._shutdown_event.set()
             await logger._process_audit_queue()
@@ -1121,14 +1121,14 @@ class TestAuditLogger:
     async def test_process_audit_queue_unicode_error(self):
         """Test _process_audit_queue with UnicodeError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to return events
         mock_batch = [{"test": "event"}]
         with patch.object(logger, '_collect_batch_events', AsyncMock(return_value=(mock_batch, True))), \
              patch.object(logger, '_write_audit_batch_with_retry', AsyncMock(side_effect=UnicodeError("Unicode error"))), \
              patch.object(logger, '_handle_batch_error', MagicMock()), \
              patch('asyncio.sleep', AsyncMock()):
-            
+
             # Set shutdown event to break the loop after one iteration
             logger._shutdown_event.set()
             await logger._process_audit_queue()
@@ -1137,14 +1137,14 @@ class TestAuditLogger:
     async def test_process_audit_queue_attribute_error(self):
         """Test _process_audit_queue with AttributeError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to return events
         mock_batch = [{"test": "event"}]
         with patch.object(logger, '_collect_batch_events', AsyncMock(return_value=(mock_batch, True))), \
              patch.object(logger, '_write_audit_batch_with_retry', AsyncMock(side_effect=AttributeError("Attribute error"))), \
              patch.object(logger, '_handle_batch_error', MagicMock()), \
              patch('asyncio.sleep', AsyncMock()):
-            
+
             # Set shutdown event to break the loop after one iteration
             logger._shutdown_event.set()
             await logger._process_audit_queue()
@@ -1153,14 +1153,14 @@ class TestAuditLogger:
     async def test_process_audit_queue_lookup_error(self):
         """Test _process_audit_queue with LookupError."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to return events
         mock_batch = [{"test": "event"}]
         with patch.object(logger, '_collect_batch_events', AsyncMock(return_value=(mock_batch, True))), \
              patch.object(logger, '_write_audit_batch_with_retry', AsyncMock(side_effect=LookupError("Lookup error"))), \
              patch.object(logger, '_handle_batch_error', MagicMock()), \
              patch('asyncio.sleep', AsyncMock()):
-            
+
             # Set shutdown event to break the loop after one iteration
             logger._shutdown_event.set()
             await logger._process_audit_queue()
@@ -1169,14 +1169,14 @@ class TestAuditLogger:
     async def test_process_audit_queue_final_batch_error(self):
         """Test _process_audit_queue with final batch error."""
         logger = AuditLogger()
-        
+
         # Mock _collect_batch_events to return events
         mock_batch = [{"test": "event"}]
         with patch.object(logger, '_collect_batch_events', AsyncMock(return_value=(mock_batch, True))), \
              patch.object(logger, '_write_audit_batch_with_retry', AsyncMock(side_effect=DatabaseOperationError("Database error"))), \
              patch.object(logger, '_handle_batch_error', MagicMock()), \
              patch('asyncio.sleep', AsyncMock()):
-            
+
             # Set shutdown event to break the loop after one iteration
             logger._shutdown_event.set()
             await logger._process_audit_queue()
@@ -1184,84 +1184,84 @@ class TestAuditLogger:
     def test_handle_batch_error_database(self):
         """Test _handle_batch_error with DatabaseOperationError."""
         logger = AuditLogger()
-        
+
         # Mock print and logger.error
         with patch('builtins.print') as mock_print, \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
-            
+
             error = DatabaseOperationError("Database error")
             logger._handle_batch_error(error)
-            
+
             mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_batch_error_system(self):
         """Test _handle_batch_error with system errors."""
         logger = AuditLogger()
-        
+
         # Mock print and logger.error
         with patch('builtins.print') as mock_print, \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
-            
+
             error = OSError("OS error")
             logger._handle_batch_error(error)
-            
+
             mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_batch_error_serialization(self):
         """Test _handle_batch_error with serialization errors."""
         logger = AuditLogger()
-        
+
         # Mock print and logger.error
         with patch('builtins.print') as mock_print, \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
-            
+
             error = json.JSONDecodeError("Invalid JSON", "doc", 0)
             logger._handle_batch_error(error)
-            
+
             mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_batch_error_data_access(self):
         """Test _handle_batch_error with data access errors."""
         logger = AuditLogger()
-        
+
         # Mock print and logger.error
         with patch('builtins.print') as mock_print, \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
-            
+
             error = AttributeError("Attribute error")
             logger._handle_batch_error(error)
-            
+
             mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_batch_error_final(self):
         """Test _handle_batch_error with is_final=True."""
         logger = AuditLogger()
-        
+
         # Mock print and logger.error
         with patch('builtins.print') as mock_print, \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
-            
+
             error = DatabaseOperationError("Database error")
             logger._handle_batch_error(error, is_final=True)
-            
+
             mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_write_error(self):
         """Test _handle_write_error."""
         logger = AuditLogger()
-        
+
         # Mock print and logger.error
         with patch('builtins.print') as mock_print, \
              patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
-            
+
             error = DatabaseOperationError("Database error")
             logger._handle_write_error(error, 0, "database")
-            
+
             mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
@@ -1269,7 +1269,7 @@ class TestAuditLogger:
     async def test_create_audit_event_dict_comprehensive(self, mock_request):
         """Test _create_audit_event_dict with comprehensive data."""
         logger = AuditLogger()
-        
+
         # Create comprehensive event data
         event_data = AuditEventData(
             user_context={
@@ -1291,9 +1291,9 @@ class TestAuditLogger:
             status_code=201,
             category="user_management"
         )
-        
+
         result = logger._create_audit_event_dict(event_data, mock_request)
-        
+
         assert result["organization_id"] == "org123"
         assert result["user_id"] == "user123"
         assert result["user_email"] == "test@example.com"
@@ -1317,7 +1317,7 @@ class TestAuditLogger:
     async def test_create_audit_event_dict_minimal(self, mock_request):
         """Test _create_audit_event_dict with minimal data."""
         logger = AuditLogger()
-        
+
         # Create minimal event data
         event_data = AuditEventData(
             user_context={},  # Empty context
@@ -1332,9 +1332,9 @@ class TestAuditLogger:
             risk_level="low",
             description="Minimal event"
         )
-        
+
         result = logger._create_audit_event_dict(event_data, mock_request)
-        
+
         assert result["organization_id"] is None
         assert result["user_id"] is None
         assert result["user_email"] == "unknown"
@@ -1675,10 +1675,10 @@ class TestAuditLogsAPI:
     def test_audit_log_response_to_dict(self):
         """Test AuditLogResponse.to_dict() method - covers line 74."""
         from apps.user_service.app.api.audit_logs.audit_logs import AuditLogResponse
-        
+
         response = AuditLogResponse(message="Test message", status="success")
         result = response.to_dict()
-        
+
         assert result == {"message": "Test message", "status": "success"}
 
     def test_get_audit_log_by_id_success(self, client):
@@ -1687,7 +1687,7 @@ class TestAuditLogsAPI:
         with patch("apps.user_service.app.api.audit_logs.audit_logs.get_audit_log_by_id", AsyncMock(return_value={
             "id": valid_uuid,
             "organization_id": "o",
-            "user_id": "u", 
+            "user_id": "u",
             "user_email": "e@e.com",
             "user_role": "Admin",
             "action_type": "CREATE",
@@ -1772,11 +1772,11 @@ class TestAuditLogsAPI:
     def test_audit_logs_list_with_complex_data(self, client):
         """Test audit logs list with complex JSON data."""
         from datetime import datetime
-        
+
         complex_data = {
             "id": "123e4567-e89b-12d3-a456-426614174002",
             "organization_id": "org-123",
-            "user_id": "user-456", 
+            "user_id": "user-456",
             "user_email": "test@example.com",
             "user_role": "Admin",
             "action_type": "UPDATE",
@@ -1794,7 +1794,7 @@ class TestAuditLogsAPI:
             "status_code": 200,
             "category": "user_management"
         }
-        
+
         with patch("apps.user_service.app.api.audit_logs.audit_logs.get_audit_logs_list", AsyncMock(return_value=[complex_data])), \
              patch("apps.user_service.app.api.audit_logs.audit_logs.get_audit_logs_count", AsyncMock(return_value=1)):
             res = client.get("/v1/admin/audit-logs")
@@ -1808,12 +1808,12 @@ class TestAuditLogsAPI:
     def test_get_audit_log_by_id_with_complex_data(self, client):
         """Test get audit log by ID with complex data including JSON fields."""
         from datetime import datetime
-        
+
         valid_uuid = "123e4567-e89b-12d3-a456-426614174003"
         complex_data = {
             "id": valid_uuid,
             "organization_id": "org-456",
-            "user_id": "user-789", 
+            "user_id": "user-789",
             "user_email": "admin@example.com",
             "user_role": "SuperAdmin",
             "action_type": "DELETE",
@@ -1834,7 +1834,7 @@ class TestAuditLogsAPI:
             "status_code": 204,
             "category": "data_management"
         }
-        
+
         with patch("apps.user_service.app.api.audit_logs.audit_logs.get_audit_log_by_id", AsyncMock(return_value=complex_data)):
             res = client.get(f"/v1/admin/audit-logs/{valid_uuid}")
             assert res.status_code == 200
@@ -1851,7 +1851,7 @@ class TestAuditLogsAPI:
         data_with_none_timestamp = {
             "id": valid_uuid,
             "organization_id": "org-789",
-            "user_id": "user-123", 
+            "user_id": "user-123",
             "user_email": "test@example.com",
             "user_role": "User",
             "action_type": "READ",
@@ -1872,7 +1872,7 @@ class TestAuditLogsAPI:
             "status_code": 200,
             "category": "data_access"
         }
-        
+
         with patch("apps.user_service.app.api.audit_logs.audit_logs.get_audit_log_by_id", AsyncMock(return_value=data_with_none_timestamp)):
             res = client.get(f"/v1/admin/audit-logs/{valid_uuid}")
             assert res.status_code == 200
@@ -1891,17 +1891,17 @@ class TestAuditLogsAPI:
     def test_audit_log_response_default_status(self):
         """Test AuditLogResponse with default status."""
         from apps.user_service.app.api.audit_logs.audit_logs import AuditLogResponse
-        
+
         response = AuditLogResponse(message="Test message")
         result = response.to_dict()
-        
+
         assert result == {"message": "Test message", "status": "success"}
 
     def test_audit_log_response_custom_status(self):
         """Test AuditLogResponse with custom status."""
         from apps.user_service.app.api.audit_logs.audit_logs import AuditLogResponse
-        
+
         response = AuditLogResponse(message="Error occurred", status="error")
         result = response.to_dict()
-        
+
         assert result == {"message": "Error occurred", "status": "error"}

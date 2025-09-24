@@ -33,7 +33,7 @@ class TestUserOperations:
         """Test successful user profile retrieval by ID."""
         user_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
-        
+
         mock_profile = {
             "id": "profile_id",
             "user_id": user_id,
@@ -66,7 +66,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_user_profile_by_id(user_id, organization_id)
-            
+
             assert result == mock_profile
             mock_supabase.table.assert_called_once_with("organization_members")
 
@@ -84,7 +84,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_user_profile_by_id(user_id, organization_id)
-            
+
             assert result is None
 
     @pytest.mark.asyncio
@@ -92,7 +92,7 @@ class TestUserOperations:
         """Test successful user permissions retrieval."""
         user_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
-        
+
         mock_permissions = [
             {"id": "perm1", "name": "read_users", "code": "users.read", "category": "users", "description": "Read users"},
             {"id": "perm2", "name": "write_users", "code": "users.write", "category": "users", "description": "Write users"}
@@ -100,25 +100,25 @@ class TestUserOperations:
 
         with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
-            
+
             # Mock user role query
             mock_user_result = MagicMock()
             mock_user_result.data = [{"role_id": "role123"}]
-            
+
             # Mock permissions query
             mock_permissions_result = MagicMock()
             mock_permissions_result.data = [
                 {"permissions": mock_permissions[0]},
                 {"permissions": mock_permissions[1]}
             ]
-            
+
             # Set up side_effect to return different results for different calls
             mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(side_effect=[mock_user_result, mock_permissions_result])
-            
+
             mock_get_client.return_value = mock_supabase
 
             result = await get_user_permissions(user_id, organization_id)
-            
+
             assert len(result) == 2
             assert result[0] == mock_permissions[0]
             assert result[1] == mock_permissions[1]
@@ -137,7 +137,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_user_permissions(user_id, organization_id)
-            
+
             assert result == []
 
     @pytest.mark.asyncio
@@ -174,7 +174,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_user(user_data)
-            
+
             assert result == mock_created_user
             mock_supabase.table.assert_called_once_with("organization_members")
 
@@ -196,7 +196,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_user(user_data)
-            
+
             assert result == {}
 
     @pytest.mark.asyncio
@@ -228,7 +228,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await update_user_info(user_id, organization_id, update_data)
-            
+
             assert result == mock_updated_user
 
     @pytest.mark.asyncio
@@ -239,7 +239,7 @@ class TestUserOperations:
         update_data = {}
 
         result = await update_user_info(user_id, organization_id, update_data)
-        
+
         assert result == {}
 
     @pytest.mark.asyncio
@@ -269,7 +269,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await update_user_info(user_id, organization_id, update_data)
-            
+
             assert result == mock_updated_user
 
     @pytest.mark.asyncio
@@ -286,7 +286,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await delete_user(user_id, organization_id)
-            
+
             assert result is True
 
     @pytest.mark.asyncio
@@ -303,7 +303,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await delete_user(user_id, organization_id)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
@@ -320,7 +320,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await check_user_exists(email, organization_id)
-            
+
             assert result is True
 
     @pytest.mark.asyncio
@@ -337,7 +337,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await check_user_exists(email, organization_id)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
@@ -355,7 +355,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await check_phone_exists_for_other_user(phone, organization_id, user_id)
-            
+
             assert result is True
 
     @pytest.mark.asyncio
@@ -373,7 +373,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await check_phone_exists_for_other_user(phone, organization_id, user_id)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
@@ -390,14 +390,14 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await check_phone_exists_for_other_user(phone, organization_id)
-            
+
             assert result is True
 
     @pytest.mark.asyncio
     async def test_get_users_details_list_success(self):
         """Test successful users list retrieval."""
         organization_id = str(uuid.uuid4())
-        
+
         mock_users = [
             {
                 "id": "user1",
@@ -435,7 +435,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_users_details_list(organization_id, limit=20, offset=0)
-            
+
             assert len(result) == 2
             assert result == mock_users
 
@@ -444,7 +444,7 @@ class TestUserOperations:
         """Test users list retrieval with search filter."""
         organization_id = str(uuid.uuid4())
         search = "test"
-        
+
         mock_users = [
             {
                 "id": "user1",
@@ -469,7 +469,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_users_details_list(organization_id, search=search, limit=20, offset=0)
-            
+
             assert len(result) == 1
             assert result == mock_users
 
@@ -486,7 +486,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_users_details_list(organization_id)
-            
+
             assert result == []
 
     @pytest.mark.asyncio
@@ -502,7 +502,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_users_total_count(organization_id)
-            
+
             assert result == 25
 
     @pytest.mark.asyncio
@@ -519,7 +519,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_users_total_count(organization_id, search=search)
-            
+
             assert result == 5
 
     @pytest.mark.asyncio
@@ -535,7 +535,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_users_total_count(organization_id)
-            
+
             assert result == 0
 
     @pytest.mark.asyncio
@@ -552,7 +552,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             await update_user_activity(user_id, organization_id)
-            
+
             mock_supabase.table.assert_called_once_with("organization_members")
 
     @pytest.mark.asyncio
@@ -569,7 +569,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await suspend_user(user_id, organization_id)
-            
+
             assert result is True
 
     @pytest.mark.asyncio
@@ -586,7 +586,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await suspend_user(user_id, organization_id)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
@@ -603,7 +603,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await revoke_suspended_user(user_id, organization_id)
-            
+
             assert result is True
 
     @pytest.mark.asyncio
@@ -620,7 +620,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await revoke_suspended_user(user_id, organization_id)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
@@ -638,7 +638,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await update_user_email(user_id, organization_id, new_email)
-            
+
             assert result is True
 
     @pytest.mark.asyncio
@@ -656,14 +656,14 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await update_user_email(user_id, organization_id, new_email)
-            
+
             assert result is False
 
     @pytest.mark.asyncio
     async def test_get_auth_user_by_email_success(self):
         """Test successful auth user retrieval by email."""
         email = "test@example.com"
-        
+
         mock_auth_user = MagicMock()
         mock_auth_user.email = email
         mock_auth_user.id = "auth_user_id"
@@ -674,14 +674,14 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_auth_user_by_email(email)
-            
+
             assert result == mock_auth_user
 
     @pytest.mark.asyncio
     async def test_get_auth_user_by_email_not_found(self):
         """Test auth user retrieval when user not found."""
         email = "test@example.com"
-        
+
         mock_auth_user = MagicMock()
         mock_auth_user.email = "other@example.com"
         mock_auth_user.id = "auth_user_id"
@@ -692,14 +692,14 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_auth_user_by_email(email)
-            
+
             assert result is None
 
     @pytest.mark.asyncio
     async def test_get_organization_member_status_by_email_success(self):
         """Test successful organization member status retrieval by email."""
         email = "test@example.com"
-        
+
         with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
@@ -708,7 +708,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_organization_member_status_by_email(email)
-            
+
             assert result == "active"
 
     @pytest.mark.asyncio
@@ -724,14 +724,14 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await get_organization_member_status_by_email(email)
-            
+
             assert result is None
 
     @pytest.mark.asyncio
     async def test_transform_users_success(self):
         """Test successful user data transformation."""
         organization_id = str(uuid.uuid4())
-        
+
         users_data = [
             {
                 "user_id": str(uuid.uuid4()),
@@ -756,7 +756,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await transform_users(users_data, organization_id)
-            
+
             assert len(result) == 1
             assert result[0].user_id == users_data[0]["user_id"]
             assert result[0].email == users_data[0]["email"]
@@ -770,14 +770,14 @@ class TestUserOperations:
         users_data = []
 
         result = await transform_users(users_data, organization_id)
-        
+
         assert result == []
 
     @pytest.mark.asyncio
     async def test_transform_users_no_permissions_count(self):
         """Test user data transformation when permissions count is None."""
         organization_id = str(uuid.uuid4())
-        
+
         users_data = [
             {
                 "user_id": str(uuid.uuid4()),
@@ -802,7 +802,7 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await transform_users(users_data, organization_id)
-            
+
             assert len(result) == 1
             assert result[0].permissions_count == 0
 
@@ -810,7 +810,7 @@ class TestUserOperations:
     async def test_transform_users_no_joined_at(self):
         """Test user data transformation when joined_at is None."""
         organization_id = str(uuid.uuid4())
-        
+
         users_data = [
             {
                 "user_id": str(uuid.uuid4()),
@@ -835,6 +835,6 @@ class TestUserOperations:
             mock_get_client.return_value = mock_supabase
 
             result = await transform_users(users_data, organization_id)
-            
+
             assert len(result) == 1
             assert result[0].joined_at is not None  # Should be set to current datetime

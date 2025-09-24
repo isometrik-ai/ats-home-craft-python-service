@@ -213,30 +213,30 @@ async def test_rate_limit_exceeded_handler():
     """Test rate limit exceeded handler - covers fastapi_app.py"""
     from slowapi.errors import RateLimitExceeded
     from fastapi.responses import JSONResponse
-    
+
     # Import the app to get access to the exception handler
     with patch('ddtrace.patch_all'), \
          patch('dotenv.load_dotenv'), \
          patch('apps.user_service.app.dependencies.logger.setup_logging') as mock_logger:
-        
+
         mock_logger.return_value = MagicMock()
-        
+
         from apps.user_service.app.main import app
-        
+
         # Get the rate limit exceeded handler from the app
         handler = app.exception_handlers.get(RateLimitExceeded)
         assert handler is not None, "RateLimitExceeded handler not found"
-        
+
         # Test the handler function directly
         mock_request = MagicMock()
         # Create a mock RateLimitExceeded exception
         mock_exception = MagicMock(spec=RateLimitExceeded)
         mock_exception.status_code = 429
         mock_exception.detail = "Rate limit exceeded"
-        
+
         # Call the handler
         response = await handler(mock_request, mock_exception)
-        
+
         # Verify the response
         assert isinstance(response, JSONResponse)
         assert response.status_code == 429

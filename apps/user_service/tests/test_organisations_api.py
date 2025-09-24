@@ -44,26 +44,26 @@ class TestOrganisationList:
         """Test successful organisation list retrieval."""
         mock_organisations = [
             {
-                "organization_id": "org-1", "name": "Org 1", "slug": "org-1", 
-                "domain": "example1.com", "logo_url": None, "plan_type": "free", 
-                "status": "active", "max_users": 10, "timezone": "UTC", 
-                "created_at": datetime(2024, 1, 1, 0, 0, 0), "updated_at": datetime(2024, 1, 1, 0, 0, 0), 
+                "organization_id": "org-1", "name": "Org 1", "slug": "org-1",
+                "domain": "example1.com", "logo_url": None, "plan_type": "free",
+                "status": "active", "max_users": 10, "timezone": "UTC",
+                "created_at": datetime(2024, 1, 1, 0, 0, 0), "updated_at": datetime(2024, 1, 1, 0, 0, 0),
                 "member_count": 5
             },
             {
-                "organization_id": "org-2", "name": "Org 2", "slug": "org-2", 
-                "domain": "example2.com", "logo_url": None, "plan_type": "premium", 
-                "status": "active", "max_users": 50, "timezone": "EST", 
-                "created_at": datetime(2024, 1, 2, 0, 0, 0), "updated_at": datetime(2024, 1, 2, 0, 0, 0), 
+                "organization_id": "org-2", "name": "Org 2", "slug": "org-2",
+                "domain": "example2.com", "logo_url": None, "plan_type": "premium",
+                "status": "active", "max_users": 50, "timezone": "EST",
+                "created_at": datetime(2024, 1, 2, 0, 0, 0), "updated_at": datetime(2024, 1, 2, 0, 0, 0),
                 "member_count": 12
             }
         ]
-        
+
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
              patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=2)):
-            
+
             response = client.get("/v1/admin/organisation/list")
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["total_count"] == 2
@@ -75,9 +75,9 @@ class TestOrganisationList:
         """Test organisation list when no organisations exist."""
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=[])), \
              patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=0)):
-            
+
             response = client.get("/v1/admin/organisation/list")
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["total_count"] == 0
@@ -87,19 +87,19 @@ class TestOrganisationList:
         """Test organisation list with query parameters."""
         mock_organisations = [
             {
-                "organization_id": "org-1", "name": "Test Org", "slug": "test-org", 
-                "domain": "test.com", "logo_url": None, "plan_type": "free", 
-                "status": "active", "max_users": 10, "timezone": "UTC", 
-                "created_at": datetime(2024, 1, 1, 0, 0, 0), "updated_at": datetime(2024, 1, 1, 0, 0, 0), 
+                "organization_id": "org-1", "name": "Test Org", "slug": "test-org",
+                "domain": "test.com", "logo_url": None, "plan_type": "free",
+                "status": "active", "max_users": 10, "timezone": "UTC",
+                "created_at": datetime(2024, 1, 1, 0, 0, 0), "updated_at": datetime(2024, 1, 1, 0, 0, 0),
                 "member_count": 5
             }
         ]
-        
+
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
              patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=1)):
-            
+
             response = client.get("/v1/admin/organisation/list?name=Test&status=active&page=1&page_size=10")
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["total_count"] == 1
@@ -113,16 +113,16 @@ class TestOrganisationDetails:
         """Test successful organisation details retrieval."""
         valid_id = str(uuid.uuid4())
         mock_organisation = {
-            "organization_id": valid_id, "name": "Test Org", "slug": "test-org", 
-            "domain": "example.com", "logo_url": None, "plan_type": "free", 
-            "status": "active", "max_users": 10, "timezone": "UTC", 
-            "created_at": datetime(2024, 1, 1, 0, 0, 0), "updated_at": datetime(2024, 1, 1, 0, 0, 0), 
+            "organization_id": valid_id, "name": "Test Org", "slug": "test-org",
+            "domain": "example.com", "logo_url": None, "plan_type": "free",
+            "status": "active", "max_users": 10, "timezone": "UTC",
+            "created_at": datetime(2024, 1, 1, 0, 0, 0), "updated_at": datetime(2024, 1, 1, 0, 0, 0),
             "member_count": 5
         }
-        
+
         with patch("apps.user_service.app.api.admin_management.organisation.get_organisation_details_by_id", AsyncMock(return_value=mock_organisation)):
             response = client.get(f"/v1/admin/organisation/{valid_id}")
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["data"]["organization_id"] == valid_id
@@ -131,18 +131,18 @@ class TestOrganisationDetails:
     def test_organisation_details_not_found(self, client):
         """Test organisation details when organisation doesn't exist."""
         valid_id = str(uuid.uuid4())
-        
+
         with patch("apps.user_service.app.api.admin_management.organisation.get_organisation_details_by_id", AsyncMock(return_value=None)):
             response = client.get(f"/v1/admin/organisation/{valid_id}")
-            
+
             assert response.status_code == 404
 
     def test_organisation_details_invalid_uuid(self, client):
         """Test organisation details with invalid UUID format."""
         invalid_id = "invalid-uuid"
-        
+
         response = client.get(f"/v1/admin/organisation/{invalid_id}")
-        
+
         assert response.status_code == 400
 
 
@@ -166,7 +166,7 @@ class TestCreateOrganisation:
             },
             "plan_type": "starter"
         }
-        
+
         mock_result = {
             "organization": {
                 "organization_id": str(uuid.uuid4()),
@@ -192,7 +192,7 @@ class TestCreateOrganisation:
             },
             "super_admin_role_id": str(uuid.uuid4())
         }
-        
+
         with patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(return_value=mock_result)), \
              patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
@@ -200,18 +200,18 @@ class TestCreateOrganisation:
             mock_query = MagicMock()
             mock_result_obj = MagicMock()
             mock_result_obj.data = []  # Empty result means slug is unique
-            
+
             # Mock the entire query chain
             mock_table.select.return_value = mock_query
             mock_query.eq.return_value = mock_query
             mock_query.neq.return_value = mock_query
             mock_query.execute = AsyncMock(return_value=mock_result_obj)
-            
+
             mock_supabase.table = AsyncMock(return_value=mock_table)
             mock_get_client.return_value = mock_supabase
-            
+
             response = client.post("/v1/admin/organisation/", json=request_data)
-            
+
             # The function expects company_data to exist, so this should work
             assert response.status_code == 201
             data = response.json()
@@ -229,9 +229,9 @@ class TestCreateOrganisation:
             },
             "plan_type": "starter"
         }
-        
+
         response = client.post("/v1/admin/organisation/", json=request_data)
-        
+
         assert response.status_code == 422
 
     def test_create_organisation_missing_company_data(self, client):
@@ -245,7 +245,7 @@ class TestCreateOrganisation:
             },
             "plan_type": "starter"
         }
-        
+
         # This should return 500 due to AttributeError in the function
         # The function tries to access body.company_data.company_name when company_data is None
         with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
@@ -292,9 +292,9 @@ class TestCreateOrganisation:
             },
             "plan_type": "starter"
         }
-        
+
         response = client.post("/v1/admin/organisation/", json=request_data)
-        
+
         assert response.status_code == 422
 
     def test_create_organisation_invalid_company_data(self, client):
@@ -313,9 +313,9 @@ class TestCreateOrganisation:
             },
             "plan_type": "starter"
         }
-        
+
         response = client.post("/v1/admin/organisation/", json=request_data)
-        
+
         assert response.status_code == 422
 
     def test_create_organisation_permission_denied(self, client):
@@ -335,7 +335,7 @@ class TestCreateOrganisation:
             },
             "plan_type": "starter"
         }
-        
+
         # The create organisation endpoint doesn't have permission checks
         # So this test should actually succeed (201) since there's no permission validation
         with patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(return_value={"organization": {}, "user": {}, "super_admin_role_id": "test"})), \
@@ -345,18 +345,18 @@ class TestCreateOrganisation:
             mock_query = MagicMock()
             mock_result_obj = MagicMock()
             mock_result_obj.data = []  # Empty result means slug is unique
-            
+
             # Mock the entire query chain
             mock_table.select.return_value = mock_query
             mock_query.eq.return_value = mock_query
             mock_query.neq.return_value = mock_query
             mock_query.execute = AsyncMock(return_value=mock_result_obj)
-            
+
             mock_supabase.table = AsyncMock(return_value=mock_table)
             mock_get_client.return_value = mock_supabase
-            
+
             response = client.post("/v1/admin/organisation/", json=request_data)
-            
+
             assert response.status_code == 201
 
 
@@ -372,7 +372,7 @@ class TestUpdateOrganisation:
             "timezone": "EST",
             "max_users": 25
         }
-        
+
         mock_organisation_data = {
             "organization_id": organisation_id,
             "name": "Original Organization",
@@ -387,7 +387,7 @@ class TestUpdateOrganisation:
             "updated_at": datetime(2024, 1, 1, 0, 0, 0),
             "member_count": 5
         }
-        
+
         mock_result = {
             "organization_id": organisation_id,
             "name": "Updated Organization",
@@ -402,11 +402,11 @@ class TestUpdateOrganisation:
             "updated_at": "2024-01-01T00:00:00Z",
             "member_count": 5
         }
-        
+
         with patch("apps.user_service.app.api.admin_management.organisation.get_organisation_details_by_id", AsyncMock(return_value=mock_organisation_data)), \
              patch("apps.user_service.app.api.admin_management.organisation.update_organisation_details", AsyncMock(return_value=mock_result)):
             response = client.put(f"/v1/admin/organisation/{organisation_id}", json=request_data)
-            
+
             assert response.status_code == 200
             data = response.json()
             assert "update organisation" in data["message"].lower()
@@ -420,10 +420,10 @@ class TestUpdateOrganisation:
             "name": "Updated Organization",
             "domain": "updated.com"
         }
-        
+
         with patch("apps.user_service.app.api.admin_management.organisation.get_organisation_details_by_id", AsyncMock(return_value=None)):
             response = client.put(f"/v1/admin/organisation/{organisation_id}", json=request_data)
-            
+
             assert response.status_code == 404
 
     def test_update_organisation_invalid_uuid(self, client):
@@ -432,9 +432,9 @@ class TestUpdateOrganisation:
         request_data = {
             "name": "Updated Organization"
         }
-        
+
         response = client.put(f"/v1/admin/organisation/{invalid_id}", json=request_data)
-        
+
         assert response.status_code == 400
 
     def test_update_organisation_permission_denied(self, client):
@@ -443,10 +443,10 @@ class TestUpdateOrganisation:
         request_data = {
             "name": "Updated Organization"
         }
-        
+
         with patch("apps.user_service.app.api.admin_management.organisation.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Insufficient permissions"))):
             response = client.put(f"/v1/admin/organisation/{organisation_id}", json=request_data)
-            
+
             assert response.status_code == 403
 
     def test_update_organisation_invalid_data(self, client):
@@ -456,9 +456,9 @@ class TestUpdateOrganisation:
             "max_users": -1,  # Invalid negative value
             "timezone": "invalid-timezone"
         }
-        
+
         response = client.put(f"/v1/admin/organisation/{organisation_id}", json=request_data)
-        
+
         assert response.status_code == 422
 
 
@@ -468,9 +468,9 @@ class TestDeleteOrganisation:
     def test_delete_organisation_success(self, client):
         """Test successful organisation deletion."""
         organisation_id = str(uuid.uuid4())
-        
+
         response = client.delete(f"/v1/admin/organisation/{organisation_id}")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert "delete organisation" in data["message"].lower()
@@ -479,9 +479,9 @@ class TestDeleteOrganisation:
     def test_delete_organisation_not_found(self, client):
         """Test organisation deletion when organisation doesn't exist."""
         organisation_id = str(uuid.uuid4())
-        
+
         response = client.delete(f"/v1/admin/organisation/{organisation_id}")
-        
+
         # The delete endpoint always returns 200 with success message
         assert response.status_code == 200
         data = response.json()
@@ -490,26 +490,26 @@ class TestDeleteOrganisation:
     def test_delete_organisation_invalid_uuid(self, client):
         """Test organisation deletion with invalid UUID format."""
         invalid_id = "invalid-uuid"
-        
+
         response = client.delete(f"/v1/admin/organisation/{invalid_id}")
-        
+
         assert response.status_code == 400
 
     def test_delete_organisation_permission_denied(self, client):
         """Test organisation deletion with insufficient permissions."""
         organisation_id = str(uuid.uuid4())
-        
+
         with patch("apps.user_service.app.api.admin_management.organisation.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Insufficient permissions"))):
             response = client.delete(f"/v1/admin/organisation/{organisation_id}")
-            
+
             assert response.status_code == 403
 
     def test_delete_organisation_database_error(self, client):
         """Test organisation deletion with database error."""
         organisation_id = str(uuid.uuid4())
-        
+
         response = client.delete(f"/v1/admin/organisation/{organisation_id}")
-        
+
         # The delete endpoint doesn't actually interact with database, so it always succeeds
         assert response.status_code == 200
         data = response.json()

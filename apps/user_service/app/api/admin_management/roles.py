@@ -401,12 +401,12 @@ async def create_new_role(
             *[validate_uuid_format(uuid_str, "permission ID")
             for uuid_str in role_data.permission_ids],
             return_exceptions=True)
-        
+
         # Check if any validation failed
         for result in validation_results:
             if isinstance(result, Exception):
                 raise result
-                
+
         logger.debug(
             "Permission IDs validation passed: %s \n permissions - Request ID: %s",
             len(role_data.permission_ids),request_id
@@ -652,12 +652,12 @@ async def update_role_data(
             *[validate_uuid_format(uuid_str, "permission ID")
             for uuid_str in role_data.permission_ids],
             return_exceptions=True)
-        
+
         # Check if any validation failed
         for result in validation_results:
             if isinstance(result, Exception):
                 raise result
-                
+
         permissions_exist = await check_permissions_exist(
             permission_ids=role_data.permission_ids,
             organization_id=user_context.organization_id,

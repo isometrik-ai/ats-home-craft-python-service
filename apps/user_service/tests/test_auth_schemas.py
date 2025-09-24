@@ -30,7 +30,7 @@ from apps.user_service.app.schemas.auth import (
     PracticeArea,
     Specialization,
     PreferredIntegration,
-    
+
     # Basic Models
     SessionFilter,
     AuthLogin,
@@ -47,7 +47,7 @@ from apps.user_service.app.schemas.auth import (
     ResetPasswordResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
-    
+
     # Complex Models
     User,
     TeamSetup,
@@ -632,7 +632,7 @@ class TestComplexModels:
             contact_name="John Doe",
             contact_email="john@test.com"
         )
-        
+
         enterprise_features = EnterpriseFeatures(
             expected_number_of_users=150,
             preferred_go_live_date="12/31/2024",
@@ -643,7 +643,7 @@ class TestComplexModels:
             custom_reporting=[CustomReporting.EXECUTIVE_DASHBOARD],
             primary_contact_information=primary_contact
         )
-        
+
         assert enterprise_features.expected_number_of_users == 150
         assert enterprise_features.preferred_go_live_date == "12/31/2024"
         assert enterprise_features.support_service_options == [SupportServiceOption.DEDICATED_SUPPORT_24_7]
@@ -729,7 +729,7 @@ class TestEdgeCases:
             your_role=YourRole.PARTNER,
             expected_members=ExpectedMembers.TWO_TO_FIVE
         )
-        
+
         compliance_security = ComplianceSecurity(
             required_compliance_standards=[ComplianceStandard.HIPAA],
             data_retention_period="7 years",
@@ -737,12 +737,12 @@ class TestEdgeCases:
             encryption_requirements=[EncryptionRequirement.AES_256_ENCRYPTION],
             compliance_officer_email="compliance@test.com"
         )
-        
+
         primary_contact = PrimaryContactInformation(
             contact_name="John Doe",
             contact_email="john@test.com"
         )
-        
+
         enterprise_features = EnterpriseFeatures(
             expected_number_of_users=100,
             support_service_options=[SupportServiceOption.DEDICATED_SUPPORT_24_7],
@@ -751,7 +751,7 @@ class TestEdgeCases:
             custom_reporting=[CustomReporting.EXECUTIVE_DASHBOARD],
             primary_contact_information=primary_contact
         )
-        
+
         company_data = CompanyData(
             company_name="Full Test Company",
             company_website="https://example.com",
@@ -771,7 +771,7 @@ class TestEdgeCases:
             compliance_security=compliance_security,
             enterprise_features=enterprise_features
         )
-        
+
         assert company_data.company_name == "Full Test Company"
         assert company_data.company_website == "https://example.com"
         assert company_data.industry == "Legal Services"
@@ -840,7 +840,7 @@ class TestEdgeCases:
             contact_name="John Doe",
             contact_email="john@test.com"
         )
-        
+
         # Test minimum user count (ge=100)
         enterprise_features = EnterpriseFeatures(
             expected_number_of_users=100,  # Exactly 100
