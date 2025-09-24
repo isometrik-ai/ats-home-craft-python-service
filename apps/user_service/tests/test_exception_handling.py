@@ -778,18 +778,26 @@ class TestExecuteSafeQueryMissing:
     @pytest.mark.asyncio
     async def test_execute_safe_query_insert_without_data(self):
         """Test insert operation without data - should raise validation error."""
-        with pytest.raises(DatabaseOperationError) as exc_info:
-            await execute_safe_query("test_table", "insert")
+        with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
+            mock_client = AsyncMock()
+            mock_get_client.return_value = mock_client
+            
+            with pytest.raises(DatabaseOperationError) as exc_info:
+                await execute_safe_query("test_table", "insert")
 
-        assert "Data is required for insert operation" in str(exc_info.value)
+            assert "Data is required for insert operation" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_execute_safe_query_update_without_data(self):
         """Test update operation without data - should raise validation error."""
-        with pytest.raises(DatabaseOperationError) as exc_info:
-            await execute_safe_query("test_table", "update")
+        with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
+            mock_client = AsyncMock()
+            mock_get_client.return_value = mock_client
+            
+            with pytest.raises(DatabaseOperationError) as exc_info:
+                await execute_safe_query("test_table", "update")
 
-        assert "Data is required for update operation" in str(exc_info.value)
+            assert "Data is required for update operation" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_execute_safe_query_update_success(self):
@@ -837,26 +845,38 @@ class TestExecuteSafeQueryMissing:
     @pytest.mark.asyncio
     async def test_execute_safe_query_unsupported_operation(self):
         """Test unsupported operation - should raise validation error."""
-        with pytest.raises(DatabaseOperationError) as exc_info:
-            await execute_safe_query("test_table", "unsupported")
+        with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
+            mock_client = AsyncMock()
+            mock_get_client.return_value = mock_client
+            
+            with pytest.raises(DatabaseOperationError) as exc_info:
+                await execute_safe_query("test_table", "unsupported")
 
-        assert "Unsupported operation: unsupported" in str(exc_info.value)
+            assert "Unsupported operation: unsupported" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_execute_safe_query_insert_with_empty_data(self):
         """Test insert operation with empty data - should raise validation error."""
-        with pytest.raises(DatabaseOperationError) as exc_info:
-            await execute_safe_query("test_table", "insert", data=None)
+        with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
+            mock_client = AsyncMock()
+            mock_get_client.return_value = mock_client
+            
+            with pytest.raises(DatabaseOperationError) as exc_info:
+                await execute_safe_query("test_table", "insert", data=None)
 
-        assert "Data is required for insert operation" in str(exc_info.value)
+            assert "Data is required for insert operation" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_execute_safe_query_update_with_empty_data(self):
         """Test update operation with empty data - should raise validation error."""
-        with pytest.raises(DatabaseOperationError) as exc_info:
-            await execute_safe_query("test_table", "update", data={})
+        with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
+            mock_client = AsyncMock()
+            mock_get_client.return_value = mock_client
+            
+            with pytest.raises(DatabaseOperationError) as exc_info:
+                await execute_safe_query("test_table", "update", data={})
 
-        assert "Data is required for update operation" in str(exc_info.value)
+            assert "Data is required for update operation" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_execute_safe_query_with_api_error(self):
