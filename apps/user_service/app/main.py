@@ -18,7 +18,7 @@ import os
 import sys
 
 # Third-party imports
-from ddtrace import patch_all
+import ddtrace.auto  # This replaces patch_all()
 from ddtrace.trace import tracer
 from ddtrace.contrib.asgi import TraceMiddleware
 from dotenv import load_dotenv
@@ -49,8 +49,7 @@ load_dotenv(os.path.join(monorepo_root, ".env"))
 app_logger = setup_logging(log_level="INFO")
 app_logger.info("Application logging initialized")
 
-# Patch supported libraries (httpx, sqlalchemy, etc.)
-patch_all()
+# ddtrace.auto is imported above and automatically patches supported libraries
 
 
 # Update the app's metadata

@@ -168,9 +168,9 @@ def _generate_organization_slug(name: str, account_type: str) -> str:
     # Clean and format name
     clean_name = name.lower().strip()
     # Replace spaces and special characters with hyphens
-    clean_name = "".join(c if c.isalnum() else "-" for c in clean_name)
+    clean_name2 = "".join(c if c.isalnum() else "-" for c in clean_name)
     # Remove multiple consecutive hyphens
-    clean_name = "-".join(filter(None, clean_name.split("-")))
+    clean_name3 = "-".join(filter(None, clean_name2.split("-")))
 
     # Add account type prefix
     prefix = "personal" if account_type == AccountType.PERSONAL else "business"
@@ -178,7 +178,7 @@ def _generate_organization_slug(name: str, account_type: str) -> str:
     # Generate unique suffix
     unique_suffix = str(uuid.uuid4())[:8]
 
-    return f"{prefix}-{clean_name}-{unique_suffix}"
+    return f"{prefix}-{clean_name3}-{unique_suffix}"
 
 
 def _determine_organization_name(acc_type: AccountType, company_data: CompanyData) -> str:
@@ -404,7 +404,7 @@ async def get_organisation_by_id(
     logger.info("Target Organization ID: %s",organisation_id)
 
     # Validate organization ID format using utility function
-    validate_uuid_format(organisation_id, "organization ID")
+    await validate_uuid_format(organisation_id, "organization ID")
     logger.debug("Organization ID format validated - Request ID: %s, ",request_id)
     logger.debug("Target Organization ID: %s",organisation_id)
 
@@ -451,85 +451,6 @@ async def get_organisation_by_id(
         message="Organization retrieved successfully",
         data=org_info,
     )
-
-
-# async def _create_organization_member(
-#     db_conn, user_id, organization_id, super_admin_role_id, body
-# ):
-#     """
-#     Create organization member record.
-
-#     Args:
-#         db_conn: Database connection
-#         user_id: User ID
-#         organization_id: Organization ID
-#         super_admin_role_id: Super Admin role ID
-#         body: Request body with member data
-
-#     Returns:
-#         dict: Created member record
-#     """
-
-#     return await db_conn.fetchrow(
-#         MEMBER_INSERT_QUERY,
-#         user_id,
-#         organization_id,
-#         super_admin_role_id,
-#         body.email,
-#         body.full_name,
-#         body.phone,
-#         body.timezone,
-#     )
-
-
-# async def _create_organization_with_permissions(db_conn, body, organization_id):
-#     """
-#     Create organization with roles and permissions in database transaction.
-
-
-#     """
-#     # Create organization
-#     org_insert_query = """
-#         INSERT INTO public.organizations (
-#             id, name, slug, domain, logo_url, plan_type, max_users, timezone,
-#             status, created_at, updated_at
-#         ) VALUES (
-#             $1, $2, $3, $4, $5, $6, $7, $8, 'active', NOW(), NOW()
-#         ) RETURNING id, name, slug, created_at;
-#     """
-#     org_result = await db_conn.fetchrow(
-#         org_insert_query,
-#         organization_id,
-#         body.name,
-#         body.slug,
-#         body.domain,
-#         body.logo_url,
-#         body.plan_type,
-#         body.max_users,
-#         body.timezone,
-#     )
-
-#     # Create Super Admin role
-#     super_admin_role_id = await create_super_admin_role(
-#         organisation_id=organization_id,
-#         db_conn=db_conn,
-#     )
-
-#     # Create default permissions
-#     permission_ids = await create_default_permissions_for_organisation(
-#         organisation_id=organization_id,
-#         db_conn=db_conn,
-#     )
-
-#     # Assign all permissions to Super Admin role
-#     await assign_all_permissions_to_role(
-#         role_id=super_admin_role_id,
-#         organisation_id=organization_id,
-#         permission_ids=permission_ids,
-#         db_conn=db_conn,
-#     )
-
-#     return org_result, super_admin_role_id
 
 
 @handle_api_exceptions("create organisation")
@@ -612,8 +533,12 @@ async def create_organisation(
     print(f"Organization slug: {slug}")
 
     # Validate slug uniqueness
-    await check_organisation_slug_unique(slug)
-
+    result = await check_organisation_slug_unique(slug)
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Organisation slug already exists"
+        )
 
     # # Create user in Supabase Auth
     # user_id = await create_supabase_user(body, organization_id)
@@ -723,7 +648,7 @@ async def update_organisation(
     logger.info("Target Organization ID: %s",organisation_id)
 
     # Validate organization ID format using utility function
-    validate_uuid_format(organisation_id, "organisation ID")
+    await validate_uuid_format(organisation_id, "organisation ID")
     logger.debug("Organization ID format validated - Request ID: %s, ",request_id)
     logger.debug("Target Organization ID: %s",organisation_id)
 
@@ -802,7 +727,7 @@ async def delete_organisation(
     logger.info("Target Organization ID: %s",organisation_id)
 
     # Validate organization ID format using utility function
-    validate_uuid_format(organisation_id, "organisation ID")
+    await validate_uuid_format(organisation_id, "organisation ID")
     logger.debug("Organization ID format validated - Request ID: %s",request_id)
     logger.debug("Target Organization ID: %s",organisation_id)
 
