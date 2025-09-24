@@ -371,6 +371,16 @@ class OrganisationDetailResponse(BaseModel):
 #     )
 
 class NewOrganisationBody(BaseModel):
+    """Request body for creating a new organisation along with an initial user.
+
+    This model is used when a new organisation is being registered and an initial user
+    (such as the owner or admin) is created at the same time.
+
+    Attributes:
+        user_data (Optional[User]): Information about the initial user to be created.
+        company_data (Optional[CompanyData]): Information about the organisation/company.
+        plan_type (PlanType): The subscription plan type for the organisation (default: starter).
+    """
     user_data: Optional[User] = None
     company_data: Optional[CompanyData] = None
     plan_type: PlanType = PlanType.STARTER

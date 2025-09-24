@@ -240,7 +240,7 @@ async def get_audit_log_from_id(
 
     # Validate audit_log_id format using utility function
     request.state.audit_requested_id = audit_log_id
-    validate_uuid_format(audit_log_id, "audit log ID")
+    await validate_uuid_format(audit_log_id, "audit log ID")
 
     # Extract and validate user context from JWT token
     # user_context = extract_user_context(current_user)

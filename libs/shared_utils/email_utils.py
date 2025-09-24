@@ -75,9 +75,9 @@ def send_password_reset_confirmation_email(email: str, user_name: str = None) ->
         # Create personalized greeting - use full name if available, otherwise use "User"
         greeting = user_name.strip() if user_name and user_name.strip() else "User"
         current_year = datetime.now().year
-        
+
         subject = "Password Changed Successfully"
-        
+
         # Plain text message
         message = f"""Hello {greeting},
 
@@ -190,14 +190,14 @@ The House of App AI Team</p>
 
         # Send the email with HTML content
         email_sent = send_email(email, subject, message, html_message)
-        
+
         if email_sent:
             logger.info("Password reset confirmation email sent successfully to %s", email)
             return True
         else:
             logger.error("Failed to send password reset confirmation email to %s", email)
             return False
-            
+
     except Exception as error:
         logger.error("Error sending password reset confirmation email: %s", str(error))
         return False

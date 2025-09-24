@@ -261,7 +261,7 @@ async def get_role_from_id(
     )
     # Validate role_id format using utility function
     request.state.audit_requested_id = role_id
-    validate_uuid_format(role_id, "role ID")
+    await validate_uuid_format(role_id, "role ID")
     logger.debug(
         "Role ID format validation passed: %s - Request ID: %s",role_id,request_id
     )
@@ -397,10 +397,16 @@ async def create_new_role(
 
     # Validate permission IDs format using utility function
     if role_data.permission_ids:
-        await asyncio.gather(
+        validation_results = await asyncio.gather(
             *[validate_uuid_format(uuid_str, "permission ID")
             for uuid_str in role_data.permission_ids],
             return_exceptions=True)
+
+        # Check if any validation failed
+        for result in validation_results:
+            if isinstance(result, Exception):
+                raise result
+
         logger.debug(
             "Permission IDs validation passed: %s \n permissions - Request ID: %s",
             len(role_data.permission_ids),request_id
@@ -597,7 +603,7 @@ async def update_role_data(
     request.state.audit_requested_id = role_id
 
     # Validate role_id format using utility function
-    validate_uuid_format(role_id, "role ID")
+    await validate_uuid_format(role_id, "role ID")
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(
@@ -642,10 +648,16 @@ async def update_role_data(
 
     # Validate permission IDs if provided using centralized operation
     if role_data.permission_ids is not None and len(role_data.permission_ids) > 0:
-        await asyncio.gather(
+        validation_results = await asyncio.gather(
             *[validate_uuid_format(uuid_str, "permission ID")
             for uuid_str in role_data.permission_ids],
             return_exceptions=True)
+
+        # Check if any validation failed
+        for result in validation_results:
+            if isinstance(result, Exception):
+                raise result
+
         permissions_exist = await check_permissions_exist(
             permission_ids=role_data.permission_ids,
             organization_id=user_context.organization_id,
@@ -805,7 +817,7 @@ async def delete_role_data(
     request.state.audit_requested_id = role_id
 
     # Validate role_id format using utility function
-    validate_uuid_format(role_id, "role ID")
+    await validate_uuid_format(role_id, "role ID")
     logger.debug("Role ID format validation passed: %s - Request ID: %s",role_id,request_id)
 
     # Extract and validate user context from JWT token

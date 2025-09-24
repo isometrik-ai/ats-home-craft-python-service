@@ -398,15 +398,15 @@ async def execute_safe_query(
     if operation == "insert":
         if not data:
             raise DataValidationError("Data is required for insert operation")
-        result = await supabase.table(table_name).insert(data).execute()
+        result = await (await supabase.table(table_name)).insert(data).execute()
         return {"data": result.data, "count": len(result.data) if result.data else 0}
 
     elif operation == "select":
-        query = supabase.table(table_name)
-        query = query.select("*")
+        query = await supabase.table(table_name)
+        query = await query.select("*")
 
         if organization_id:
-            query = query.eq("organization_id", organization_id)
+            query = await query.eq("organization_id", organization_id)
 
         result = await query.execute()
         return {"data": result.data, "count": len(result.data) if result.data else 0}
@@ -416,13 +416,15 @@ async def execute_safe_query(
             raise DataValidationError("Data is required for update operation")
 
 
-        query = supabase.table(table_name).update(data)
+        query = await supabase.table(table_name)
+        query = await query.update(data)
 
         result = await query.execute()
         return {"data": result.data, "count": len(result.data) if result.data else 0}
 
     elif operation == "delete":
-        query = supabase.table(table_name).delete()
+        query = await supabase.table(table_name)
+        query = await query.delete()
         result = await query.execute()
         return {"data": result.data, "count": len(result.data) if result.data else 0}
 
@@ -456,7 +458,7 @@ async def bulk_insert_safe(
             record["organization_id"] = organization_id
 
     supabase = await get_supabase_admin_client()
-    result = await supabase.table(table_name).insert(records).execute()
+    result = await (await (await supabase.table(table_name)).insert(records)).execute()
 
     return {"data": result.data, "count": len(result.data) if result.data else 0}
 
@@ -480,17 +482,18 @@ async def count_records_safe(
     """
     supabase = await get_supabase_admin_client()
 
-    query = supabase.table(table_name).select("id", count="exact")
+    query = await supabase.table(table_name)
+    query = await query.select("id", count="exact")
 
     if filters:
         for key, value in filters.items():
             if isinstance(value, list):
-                query = query.in_(key, value)
+                query = await query.in_(key, value)
             else:
-                query = query.eq(key, value)
+                query = await query.eq(key, value)
 
     if organization_id:
-        query = query.eq("organization_id", organization_id)
+        query = await query.eq("organization_id", organization_id)
 
     result = await query.execute()
     return result.count if result.count is not None else 0
@@ -515,18 +518,19 @@ async def check_record_exists_safe(
     """
     supabase = await get_supabase_admin_client()
 
-    query = supabase.table(table_name).select("id")
+    query = await supabase.table(table_name)
+    query = await query.select("id")
 
     for key, value in filters.items():
         if isinstance(value, list):
-            query = query.in_(key, value)
+            query = await query.in_(key, value)
         else:
-            query = query.eq(key, value)
+            query = await query.eq(key, value)
 
     if organization_id:
-        query = query.eq("organization_id", organization_id)
+        query = await query.eq("organization_id", organization_id)
 
-    result = await query.limit(1).execute()
+    result = await (await query.limit(1)).execute()
     return len(result.data) > 0 if result.data else False
 
 

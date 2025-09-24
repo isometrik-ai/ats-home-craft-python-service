@@ -48,6 +48,9 @@ from libs.shared_db.postgres_db.user_service_operations.permission_operations im
     create_new_permission,
 )
 
+# Import DatabaseOperationError for manual error handling
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
+
 # Create router for permissions endpoints
 router = APIRouter(prefix="/permissions", tags=["Permissions Management"])
 
@@ -117,10 +120,17 @@ async def get_permissions(
     logger.debug("User context extracted and permissions validated - Request ID: %s, ",request_id)
     logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
-    permissions_data = await get_all_permissions(user_context.organization_id)
-    logger.debug("Permissions retrieved from database - Request ID: %s, ",request_id)
-    logger.debug("Organization ID: %s, ",user_context.organization_id)
-    logger.debug("Permissions count: %s",len(permissions_data) if permissions_data else 0)
+    try:
+        permissions_data = await get_all_permissions(user_context.organization_id)
+        logger.debug("Permissions retrieved from database - Request ID: %s, ",request_id)
+        logger.debug("Organization ID: %s, ",user_context.organization_id)
+        logger.debug("Permissions count: %s",len(permissions_data) if permissions_data else 0)
+    except DatabaseOperationError as e:
+        logger.error("Database error retrieving permissions - Request ID: %s, Error: %s", request_id, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error during get permissions: {str(e)}",
+        ) from e
 
     if not permissions_data:
         logger.warning("No permissions found - Request ID: %s, ",request_id)
@@ -199,7 +209,7 @@ async def get_permission_by_id(
     request.state.audit_risk_level = "low"
 
     # Validate role_id format using utility function
-    validate_uuid_format(permission_id, "permission ID")
+    await validate_uuid_format(permission_id, "permission ID")
     logger.debug("Permission ID format validated - Request ID: %s, ",request_id)
     logger.debug("Permission ID: %s, ",permission_id)
 
@@ -208,11 +218,18 @@ async def get_permission_by_id(
     logger.debug("User context extracted and permissions validated - Request ID: %s, ",request_id)
     logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
-    permission = await get_permission_details_by_id(
-        permission_id, user_context.organization_id
-    )
-    logger.debug("Permission retrieved from database - Request ID: %s, ",request_id)
-    logger.debug("Permission ID: %s, Permission found: %s",permission_id,permission is not None)
+    try:
+        permission = await get_permission_details_by_id(
+            permission_id, user_context.organization_id
+        )
+        logger.debug("Permission retrieved from database - Request ID: %s, ",request_id)
+        logger.debug("Permission ID: %s, Permission found: %s",permission_id,permission is not None)
+    except DatabaseOperationError as e:
+        logger.error("Database error retrieving permission - Request ID: %s, Error: %s", request_id, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error during get permission by ID: {str(e)}",
+        ) from e
 
     if not permission:
         logger.warning("Permission not found - Request ID: %s, ",request_id)
@@ -252,6 +269,7 @@ async def get_permission_by_id(
     )
 
 
+@handle_api_exceptions("create permission")
 @router.post(
     "", response_model=PermissionsResponse, status_code=status.HTTP_201_CREATED
 )
@@ -294,16 +312,23 @@ async def create_permission(
     logger.debug("User context extracted and permissions validated - Request ID: %s, ",request_id)
     logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
-    permission = await create_new_permission(
-        permission_data=permission_data,
-        organization_id=user_context.organization_id
-    )
-    logger.debug("Permission created in database - Request ID: %s, ",request_id)
-    logger.debug(
-        "Permission Name: %s, Permission Code: %s, ",
-        permission_data.name,permission_data.code
-    )
-    logger.debug("Permission created: %s",permission is not None)
+    try:
+        permission = await create_new_permission(
+            permission_data=permission_data,
+            organization_id=user_context.organization_id
+        )
+        logger.debug("Permission created in database - Request ID: %s, ",request_id)
+        logger.debug(
+            "Permission Name: %s, Permission Code: %s, ",
+            permission_data.name,permission_data.code
+        )
+        logger.debug("Permission created: %s",permission is not None)
+    except DatabaseOperationError as e:
+        logger.error("Database error creating permission - Request ID: %s, Error: %s", request_id, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error during create permission: {str(e)}",
+        ) from e
 
 
     if not permission:
@@ -333,7 +358,7 @@ async def create_permission(
         "permission_description": permission["description"],
         "organization_id": user_context.organization_id,
         "created_at": (
-            permission["created_at"].isoformat() if permission["created_at"] else None
+            permission["created_at"] if permission["created_at"] else None
         ),
     }
 

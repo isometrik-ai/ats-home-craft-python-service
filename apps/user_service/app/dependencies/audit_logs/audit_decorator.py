@@ -51,13 +51,17 @@ def audit_api_call(
         }
 
         @wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(**kwargs):
+            # Extract request from kwargs
             request: Request = kwargs.get("request")
             if not request:
                 raise ValueError("Request must be passed as a keyword argument")
 
+            # Attach metadata to request state
             request.state.audit_metadata = func.audit_metadata
-            result = await func(*args, **kwargs)
+
+            # Call the wrapped function with kwargs only
+            result = await func(**kwargs)
 
             # Extract and validate user context
             user_context = getattr(request.state, "audit_user_context", {})

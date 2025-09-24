@@ -20,6 +20,7 @@ from apps.user_service.app.dependencies.common_utils import (
     get_user_in_organization,
     set_audit_old_data_from_user,
     check_permissions,
+    handle_api_exceptions,
 )
 from apps.user_service.app.dependencies.user_utils import (
     create_user_profile_data,
@@ -543,6 +544,7 @@ async def delete_user_from_system(
     table_name="organization_members",
     category="USER_INVITATION",
 )
+@handle_api_exceptions("invite user")
 async def invite_user(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),

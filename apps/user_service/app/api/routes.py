@@ -8,9 +8,6 @@ for different API endpoints.
 # type: ignore
 # pants: no-infer-dep
 
-import os
-import sys
-
 from fastapi import APIRouter
 
 # Import admin management routers
@@ -28,7 +25,6 @@ from apps.user_service.app.api.admin_management.sessions.sessions import (
 from apps.user_service.app.api.admin_management.permissions import (
     router as permissions_router,
 )
-from apps.user_service.app.api.admin_management.router import router as admin_management_router
 from apps.user_service.app.api.audit_logs.audit_logs import router as audit_logs_router
 
 
@@ -42,7 +38,6 @@ router.include_router(users_router, prefix="/admin")
 router.include_router(roles_router, prefix="/admin")
 router.include_router(sessions_router, prefix="/admin")
 router.include_router(permissions_router, prefix="/admin")
-router.include_router(admin_management_router, prefix="/admin")
 router.include_router(audit_logs_router, prefix="/admin")
 
 

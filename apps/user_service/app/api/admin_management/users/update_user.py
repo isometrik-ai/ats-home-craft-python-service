@@ -64,7 +64,6 @@ logger = get_logger("user-update-api")
 logger.info("User Update API module loaded")
 
 
-@handle_api_exceptions("update user email")
 @router.put(
     "/{user_id}/email",
     response_model=UserResponse,
@@ -82,6 +81,7 @@ logger.info("User Update API module loaded")
     table_name="organization_members",
     category="USER_EMAIL_UPDATE",
 )
+@handle_api_exceptions("update user email")
 async def update_user_email(
     user_id: str,
     request: Request,
@@ -98,7 +98,7 @@ async def update_user_email(
     logger.info("Organization ID: %s, ",current_user.get('organization_id'))
     logger.info("Target User ID: %s, New Email: %s",user_id,body.email)
 
-    validate_uuid_format(user_id, "role ID")
+    await validate_uuid_format(user_id, "role ID")
     logger.debug("User ID format validated - Request ID: %s, ",request_id)
     logger.debug("Target User ID: %s",user_id)
 
@@ -176,6 +176,7 @@ async def update_user_email(
     table_name="organization_members",
     category="USER_BAN",
 )
+@handle_api_exceptions("ban user")
 async def ban_user(
     user_id: str,
     request: Request,
@@ -199,7 +200,7 @@ async def ban_user(
     logger.info("Organization ID: %s, ",current_user.get('organization_id'))
     logger.info("Target User ID: %s",user_id)
 
-    validate_uuid_format(user_id, "User ID")
+    await validate_uuid_format(user_id, "User ID")
     logger.debug("User ID format validated - Request ID: %s, ",request_id)
     logger.debug("Target User ID: %s",user_id)
 
@@ -306,6 +307,7 @@ async def ban_user(
     table_name="organization_members",
     category="USER_UNBAN",
 )
+@handle_api_exceptions("unban user")
 async def unban_user(
     user_id: str,
     request: Request,
@@ -327,7 +329,7 @@ async def unban_user(
     logger.info("Target User ID: %s",user_id)
 
     # Validate user access
-    validate_uuid_format(user_id, "User ID")
+    await validate_uuid_format(user_id, "User ID")
     logger.debug("User ID format validated - Request ID: %s, ",request_id)
     logger.debug("Target User ID: %s",user_id)
 

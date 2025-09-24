@@ -30,6 +30,7 @@ from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
 
 from libs.shared_db.postgres_db.user_service_operations.user_operations import get_user_profile_by_id
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
 
 # ============================================================================
 # DATA CLASSES
@@ -223,21 +224,6 @@ async def require_permission(
 # ============================================================================
 
 
-# async def check_permissions(
-#     current_user, action_description="access role details"
-# ):
-#     """
-#     Extracts user context and checks if the user has 'settings.roles.manage' permission.
-#     """
-#     user_context = extract_user_context(current_user)
-#     await require_permission(
-#         permission_code="settings.roles.manage",
-#         user_context=user_context,
-#         action_description=action_description,
-#     )
-#     return user_context
-
-
 async def check_permissions(
     current_user, permission_codes: List[str]|str, action_description="access role details"
 ):
@@ -259,7 +245,7 @@ async def check_permissions(
 # ============================================================================
 
 
-def validate_uuid_format(value: str, field_name: str = "ID") -> None:
+async def validate_uuid_format(value: str, field_name: str = "ID") -> None:
     """
     Validate UUID format and raise HTTPException if invalid.
 
@@ -271,8 +257,8 @@ def validate_uuid_format(value: str, field_name: str = "ID") -> None:
         HTTPException: 400 for invalid UUID format
 
     Usage:
-        validate_uuid_format(role_id, "role ID")
-        validate_uuid_format(user_id, "user ID")
+        await validate_uuid_format(role_id, "role ID")
+        await validate_uuid_format(user_id, "user ID")
     """
     try:
         uuid.UUID(value)
@@ -355,6 +341,13 @@ def handle_api_exceptions(operation_name: str):
             except HTTPException:
                 # Re-raise HTTP exceptions as-is (preserves status codes)
                 raise
+            except DatabaseOperationError as error:
+                # Convert database operation errors to HTTP exceptions
+                print(f"Database error in {operation_name}: {error}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Database error during {operation_name}: {str(error)}",
+                ) from error
             except Exception as error:
                 # Handle any other unexpected errors
                 print(f"Error in {operation_name}: {error}")

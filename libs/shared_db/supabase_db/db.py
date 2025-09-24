@@ -13,7 +13,7 @@ from typing import Optional
 from supabase import create_async_client, AsyncClient
 
 # Local application imports
-from ..common import setup_import_paths_and_env
+from libs.shared_db.common import setup_import_paths_and_env
 
 # Setup import paths and environment
 setup_import_paths_and_env()
