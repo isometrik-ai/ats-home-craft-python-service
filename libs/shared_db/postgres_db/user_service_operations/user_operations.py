@@ -17,7 +17,6 @@ Operations Covered:
 """
 
 from datetime import datetime
-from fastapi import HTTPException
 from typing import List, Dict, Any, Optional
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from apps.user_service.app.dependencies.logger import get_logger
@@ -50,61 +49,6 @@ async def get_user_profile_by_id(user_id: str, organization_id: str) -> Optional
     return None
 
 
-# async def get_user_profile_by_email(email: str, organization_id: str) -> Optional[Dict[str, Any]]:
-#     """Get user profile by email and organization ID."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         result = await supabase.table("organization_members").select(
-#             "id, user_id, email, full_name, phone, timezone, role_id, status, "
-#             "created_at, updated_at, last_active_at, roles(id, name, description)"
-#         ).eq("email", email).eq("organization_id", organization_id).execute()
-
-#         if result.data and len(result.data) > 0:
-#             return result.data[0]
-#         return None
-
-#     except APIError as e:
-#         logger.error("Supabase API error getting user profile by email: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error getting user profile by email: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error getting user profile by email: %s", e, exc_info=True)
-#         raise
-
-
-# async def get_organization_member_profile(
-#     user_id: str,
-#     organization_id: str) -> Optional[Dict[str, Any]]:
-#     """Get organization member profile with role information."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         result = await supabase.table("organization_members").select(
-#             "id, user_id, email, full_name, phone, timezone, role_id, status, "
-#             "created_at, updated_at, last_active_at, "
-#             "roles(id, name, description, is_default)"
-#         ).eq("user_id", user_id).eq("organization_id", organization_id).execute()
-
-#         if result.data and len(result.data) > 0:
-#             return result.data[0]
-#         return None
-
-#     except APIError as e:
-        # logger.error(
-        #     "Supabase API error getting organization member profile: %s",
-        #     e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error getting organization member profile: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-        # logger.error(
-        #     "Data validation error getting organization member profile: %s",
-        #     e, exc_info=True)
-#         raise
-
-
 @handle_database_errors(
     "get_user_permissions",
     custom_messages=create_error_messages("get_user_permissions", "getting"))
@@ -134,31 +78,6 @@ async def get_user_permissions(user_id: str, organization_id: str) -> List[Dict[
                 permissions.append(item["permissions"])
 
     return permissions
-
-
-# async def get_user_role_info(user_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
-#     """Get user's role information."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         result = await supabase.table("organization_members").select(
-#             "role_id, roles(id, name, description, is_default, created_at, updated_at)"
-#         ).eq("user_id", user_id).eq("organization_id", organization_id).execute()
-
-#         if result.data and len(result.data) > 0:
-#             member_data = result.data[0]
-#             if member_data.get("roles"):
-#                 return member_data["roles"]
-#         return None
-
-#     except APIError as e:
-#         logger.error("Supabase API error getting user role info: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error getting user role info: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error getting user role info: %s", e, exc_info=True)
-#         raise
 
 
 # ============================================================================
@@ -336,42 +255,6 @@ async def get_users_total_count(organization_id: str, search: Optional[str] = No
     return result.count if result.count is not None else 0
 
 
-# async def get_users_with_roles(organization_id: str, search: Optional[str] = None,
-#                               limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
-#     """Get users with their role information."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         # Build the query with joins and filters
-#         query = supabase.table("organization_members").select(
-#             "id, user_id, email, full_name, phone, timezone, role_id, status, "
-#             "created_at, updated_at, last_active_at, "
-#             "roles(id, name, description, is_default)"
-#         ).eq("organization_id", organization_id)
-
-#         # Apply search filter
-#         if search:
-#             query = query.or_(
-#                 f"email.ilike.%{search}%,"
-#                 f"full_name.ilike.%{search}%,"
-#                 f"phone.ilike.%{search}%"
-#             )
-
-#         # Apply pagination and ordering
-#         result = await query.order("created_at", desc=True).range(
-#             offset, offset + limit - 1
-#         ).execute()
-
-#         return result.data if result.data else []
-
-#     except APIError as e:
-#         logger.error("Supabase API error getting users with roles: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error getting users with roles: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error getting users with roles: %s", e, exc_info=True)
-#         raise
 
 
 # # ============================================================================
@@ -391,34 +274,6 @@ async def update_user_activity(user_id: str, organization_id: str) -> None:
     }).eq("user_id", user_id
     ).eq("organization_id", organization_id
     ).eq("status", "active").execute()
-
-
-# async def get_user_activity_stats(user_id: str, organization_id: str) -> Dict[str, Any]:
-#     """Get user activity statistics."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         result = await supabase.table("organization_members").select(
-#             "last_active_at, created_at, updated_at"
-#         ).eq("user_id", user_id).eq("organization_id", organization_id).execute()
-
-#         if result.data and len(result.data) > 0:
-#             user_data = result.data[0]
-#             return {
-#                 "last_active_at": user_data.get("last_active_at"),
-#                 "created_at": user_data.get("created_at"),
-#                 "updated_at": user_data.get("updated_at")
-#             }
-#         return {}
-
-#     except APIError as e:
-#         logger.error("Supabase API error getting user activity stats: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error getting user activity stats: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error getting user activity stats: %s", e, exc_info=True)
-#         raise
 
 
 # # ============================================================================
@@ -444,7 +299,7 @@ async def suspend_user(user_id: str, organization_id: str) -> bool:
         "user_id", user_id
     ).eq("organization_id", organization_id).execute()
 
-    return len(result.data.user_id) > 0 if result.data else False
+    return len(result.data) > 0 if result.data else False
 
 @handle_database_errors(
     "revoke_suspended_user",
@@ -465,29 +320,7 @@ async def revoke_suspended_user(user_id: str, organization_id: str) -> bool:
         "user_id", user_id
     ).eq("organization_id", organization_id).execute()
 
-    return len(result.data.user_id) > 0 if result.data else False
-
-
-# async def update_user_status(user_id: str, organization_id: str, status: str) -> bool:
-#     """Update user status (active, banned, invited, etc.)."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         result = await supabase.table("organization_members").update({
-#             "status": status,
-#             "updated_at": "now()"
-#         }).eq("user_id", user_id).eq("organization_id", organization_id).execute()
-
-#         return len(result.data) > 0 if result.data else False
-
-#     except APIError as e:
-#         logger.error("Supabase API error updating user status: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error updating user status: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error updating user status: %s", e, exc_info=True)
-#         raise
+    return len(result.data) > 0 if result.data else False
 
 
 # # ============================================================================
@@ -509,156 +342,14 @@ async def update_user_email(user_id: str, organization_id: str, new_email: str) 
     return len(result.data) > 0 if result.data else False
 
 
-# async def check_email_exists(
-#     email: str,
-#     organization_id: str,
-#     exclude_user_id: Optional[str] = None) -> bool:
-#     """Check if email exists in organization, optionally excluding a user."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         query = supabase.table("organization_members").select("id").eq(
-#             "email", email
-#         ).eq("organization_id", organization_id)
-
-#         if exclude_user_id:
-#             query = query.neq("user_id", exclude_user_id)
-
-#         result = await query.execute()
-
-#         return len(result.data) > 0 if result.data else False
-
-#     except APIError as e:
-#         logger.error("Supabase API error checking email exists: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error checking email exists: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error checking email exists: %s", e, exc_info=True)
-#         raise
-
-
 # # ============================================================================
 # # USER VALIDATION OPERATIONS
 # # ============================================================================
-
-# async def validate_user_access(user_id: str, organization_id: str) -> bool:
-#     """Validate if user has access to organization."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         result = await supabase.table("organization_members").select("id").eq(
-#             "user_id", user_id
-#         ).eq("organization_id", organization_id).eq("status", "active").execute()
-
-#         return len(result.data) > 0 if result.data else False
-
-#     except APIError as e:
-#         logger.error("Supabase API error validating user access: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error validating user access: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error validating user access: %s", e, exc_info=True)
-#         raise
-
-
-# async def get_user_organization_info(user_id: str) -> Optional[Dict[str, Any]]:
-#     """Get user's organization information."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         result = await supabase.table("organization_members").select(
-#             "organization_id, organizations(id, name, slug, domain, logo_url, plan_type, status)"
-#         ).eq("user_id", user_id).execute()
-
-#         if result.data and len(result.data) > 0:
-#             member_data = result.data[0]
-#             if member_data.get("organizations"):
-#                 return member_data["organizations"]
-#         return None
-
-#     except APIError as e:
-#         logger.error("Supabase API error getting user organization info: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error getting user organization info: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error getting user organization info: %s", e, exc_info=True)
-#         raise
 
 
 # # ============================================================================
 # # BULK USER OPERATIONS
 # # ============================================================================
-
-# async def bulk_update_users(
-#     updates: List[Dict[str, Any]],
-#     organization_id: str
-# ) -> List[Dict[str, Any]]:
-#     """Bulk update multiple users."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         results = []
-#         for update_data in updates:
-#             user_id = update_data.pop("user_id")
-#             result = await update_user(user_id, organization_id, update_data)
-#             if result:
-#                 results.append(result)
-#         return results
-
-#     except APIError as e:
-#         logger.error("Supabase API error bulk updating users: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error bulk updating users: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error bulk updating users: %s", e, exc_info=True)
-#         raise
-
-
-# async def bulk_delete_users(user_ids: List[str], organization_id: str) -> int:
-#     """Bulk delete multiple users."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         result = await supabase.table("organization_members").delete().in_(
-#             "user_id", user_ids
-#         ).eq("organization_id", organization_id).execute()
-
-#         return len(result.data) if result.data else 0
-
-#     except APIError as e:
-#         logger.error("Supabase API error bulk deleting users: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error bulk deleting users: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error bulk deleting users: %s", e, exc_info=True)
-#         raise
-
-
-# async def get_users_by_role(role_id: str, organization_id: str) -> List[Dict[str, Any]]:
-#     """Get all users with a specific role."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         result = await supabase.table("organization_members").select(
-#             "id, user_id, email, full_name, phone, timezone, role_id, status, "
-#             "created_at, updated_at, last_active_at"
-#         ).eq("role_id", role_id).eq("organization_id", organization_id).execute()
-
-#         return result.data if result.data else []
-
-#     except APIError as e:
-#         logger.error("Supabase API error getting users by role: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error getting users by role: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error getting users by role: %s", e, exc_info=True)
-#         raise
 
 
 # ============================================================================
@@ -672,9 +363,7 @@ async def get_auth_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     """Get user from auth.users table by email."""
     supabase = await get_supabase_admin_client()
 
-    result = await supabase.auth.admin.list_users(
-        page=1
-    )
+    result = await supabase.auth.admin.list_users()
 
     for user in result:
         if user.email == email:

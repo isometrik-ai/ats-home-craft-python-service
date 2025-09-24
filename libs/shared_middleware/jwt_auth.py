@@ -14,7 +14,6 @@ permission management, using environment variables for configuration.
 """
 
 
-
 import os  # Standard library import first
 from typing import List, Tuple, Optional
 
@@ -24,10 +23,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request, HTTPException, status, responses
 
 from libs.shared_db.supabase_db.db import get_supabase_client
-from libs.shared_models import is_allowed_user_status
 
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
-
 
 # Centralized error handlers
 def raise_auth_error(request: Request, description: str, detail: str) -> None:
@@ -75,24 +72,6 @@ def extract_user_data(
     return user_id, organization_id, user_email, session_id
 
 
-def validate_email_match(
-    request: Request,
-    db_email: str,
-    user_email: str,
-    user_role: str,
-    error_context: str,
-) -> None:
-    """Validate email match between database and JWT token."""
-    if (db_email and user_email and
-        db_email.strip().lower() != user_email.strip().lower()):
-        request.state.audit_user_context["user_role"] = user_role
-        raise_forbidden_error(
-            request,
-            f"JWT email does not match {error_context}",
-            f"Email mismatch between token and {error_context}.",
-        )
-
-
 def setup_audit_context(
     request: Request,
     user_id: str,
@@ -110,178 +89,6 @@ def setup_audit_context(
         "organization_id": organization_id,
         "session_id": session_id,
     }
-
-
-async def validate_organization_member(
-    request: Request,
-    user_id: str,
-    organization_id: str,
-    user_email: str,
-) -> str:
-    """Validate organization member and return role name."""
-    try:
-        # Get global Supabase client
-        supabase = await get_supabase_client()
-
-        # Query organization members with role information using Supabase SDK
-        response = await supabase.table("organization_members").select(
-            "status, email, roles(name)"
-        ).eq("user_id", user_id).eq("organization_id", organization_id).execute()
-
-        if not response.data or len(response.data) == 0:
-            raise_forbidden_error(
-                request,
-                "User is not a member of the organization",
-                "User is not a member of this organization.",
-            )
-
-        row = response.data[0]
-        user_status = row.get("status")
-        db_email = row.get("email")
-        role_name = row.get("roles", {}).get("name") if row.get("roles") else None
-
-        if not is_allowed_user_status(user_status):
-            raise_forbidden_error(
-                request,
-                f"Membership status is '{user_status}'",
-                "Your account is suspended or inactive.",
-            )
-
-        validate_email_match(
-            request,
-            db_email,
-            user_email,
-            role_name or "unknown",
-            "organization membership",
-        )
-        return role_name or "unknown"
-
-    except Exception as error:
-        print(f"Error validating organization member: {error}")
-        raise_forbidden_error(
-            request,
-            "Failed to validate organization membership",
-            "Unable to verify organization membership.",
-        )
-
-
-async def validate_client_member(
-    request: Request,
-    user_id: str,
-    organization_id: str,
-    user_email: str,
-) -> str:
-    """Validate client member and return role name."""
-    try:
-        # Get global Supabase client
-        supabase = await get_supabase_client()
-
-        # Query client members using Supabase SDK
-        response = await supabase.table("client_members").select(
-            "email"
-        ).eq("id", user_id).eq("organization_id", organization_id).execute()
-
-        if not response.data or len(response.data) == 0:
-            raise_forbidden_error(
-                request,
-                "Client user not found in organization",
-                "User is not a client member of this organization.",
-            )
-
-        row = response.data[0]
-        db_email = row.get("email")
-
-        validate_email_match(request, db_email, user_email, "client", "client membership")
-        return "client"
-
-    except Exception as error:
-        print(f"Error validating client member: {error}")
-        raise_forbidden_error(
-            request,
-            "Failed to validate client membership",
-            "Unable to verify client membership.",
-        )
-
-
-async def validate_candidate(
-    request: Request,
-    user_id: str,
-    organization_id: str,
-    user_email: str,
-) -> str:
-    """Validate candidate and return role name."""
-    try:
-        # Get global Supabase client
-        supabase = await get_supabase_client()
-
-        # Query candidates using Supabase SDK
-        response = await supabase.table("candidates").select(
-            "email, is_active"
-        ).eq("candidate_id", user_id).eq("organization_id", organization_id).execute()
-
-        if not response.data or len(response.data) == 0:
-            raise_forbidden_error(
-                request,
-                "Candidate user not found in organization",
-                "User is not a candidate of this organization.",
-            )
-
-        row = response.data[0]
-        db_email = row.get("email")
-        is_active = row.get("is_active")
-
-        if not is_active:
-            raise_forbidden_error(
-                request,
-                "Candidate account is inactive",
-                "Your candidate account is inactive.",
-            )
-
-        validate_email_match(request, db_email, user_email, "candidate", "candidate profile")
-        return "candidate"
-
-    except Exception as error:
-        print(f"Error validating candidate: {error}")
-        raise_forbidden_error(
-            request,
-            "Failed to validate candidate status",
-            "Unable to verify candidate status.",
-        )
-
-
-async def check_user_access(permission_code, user_id, organisation_id):
-    """Check if a user has the specified role permission using Supabase RPC.
-
-    Args:
-        permission_code (str): role's permission code
-        (e.g., "USERS_READ", "ROLES_READ", etc)
-        user_id (str): The ID of the user to check permissions for
-        organisation_id (str): The ID of the Organisation to check permissions for
-
-    Returns:
-        bool: The response data from Supabase RPC call containing
-        permission check result (True if user has permission, False otherwise)
-
-    Note:
-        This function calls the Supabase RPC function
-        'check_permission' to verify if the user has the
-        specified permission in the database.
-    """
-
-    supabase: AsyncClient = await get_supabase_client()
-
-    # Call the check_permission function using Supabase client
-    # Note: The function signature is check_permission(user_id, organization_id, permission_code)
-    response = await supabase.rpc(
-        "check_permission",
-        {
-            "user_id": user_id,
-            "organization_id": organisation_id,
-            "permission_code": permission_code,
-        },
-    ).execute()
-
-    return response.data
 
 
 async def check_user_access_async(
@@ -311,14 +118,15 @@ async def check_user_access_async(
         supabase : AsyncClient = await get_supabase_client()
 
         # Use Supabase RPC function for permission checking
-        response = await supabase.rpc(
+        rpc_result = await supabase.rpc(
             "check_permission",
             {
                 "user_id": user_id,
                 "organization_id": organisation_id,
                 "permission_code": permission_code,
             }
-        ).execute()
+        )
+        response = rpc_result.execute()
 
         return response.data if response.data is not None else False
 
@@ -410,23 +218,6 @@ async def get_user_from_auth(
     return user
 
 
-# def get_user_from_auth(request: Request) -> dict:
-#     """
-#     Dependency that ensures `JWTAuthMiddleware` has already decoded a token
-#     and stored it in request.state.user.
-#     """
-#     user = getattr(request.state, "user", None)
-#     if not user:
-#         # either no Authorization header or invalid/expired token
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Not authenticated",
-#             headers={"WWW-Authenticate": "Bearer"},
-#         )
-
-
-#     return user
-
 async def get_user_from_token(token: str) -> dict:
     """
     Get user from token
@@ -447,14 +238,13 @@ async def get_user_from_token(token: str) -> dict:
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Token expired"}
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired"
         )
     except jwt.InvalidTokenError as exception:
         print("JWT DECODE ERROR:", str(exception))
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"}
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
         )
-
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):

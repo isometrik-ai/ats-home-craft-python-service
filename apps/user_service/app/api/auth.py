@@ -10,19 +10,18 @@ Last Updated: 2024-12-19
 """
 
 # Standard library imports
+import re
 import os
 import sys
 import uuid
 import json
-from datetime import datetime
 
 # Third-party imports
 from fastapi import APIRouter, HTTPException, status, Body, Request
 
 # Internal utility imports
 from apps.user_service.app.dependencies.common_utils import (
-    extract_user_context,
-    handle_api_exceptions,
+    handle_api_exceptions
 )
 
 # Logger import
@@ -35,8 +34,6 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 
 # Schema imports
 from apps.user_service.app.schemas.auth import (
-    AccountType,
-    PlanType,
     AuthLogin,
     SignupRequest,
     SignupResponse,
@@ -47,7 +44,7 @@ from apps.user_service.app.schemas.auth import (
     ResetPasswordRequest,
     ResetPasswordResponse,
     ForgotPasswordRequest,
-    ForgotPasswordResponse,
+    ForgotPasswordResponse
 )
 
 # App instance
@@ -55,6 +52,9 @@ from apps.user_service.app.app_instance import limiter
 
 # Shared library imports
 from libs.shared_middleware.jwt_auth import get_user_from_token
+
+# Email utilities
+from libs.shared_utils.email_utils import send_password_reset_confirmation_email
 
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_auth_user_by_email,
@@ -68,9 +68,6 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     update_password_with_token,
     log_exception,
 )
-
-# Email utilities
-from libs.shared_utils.email_utils import send_password_reset_confirmation_email
 
 # Modify sys.path to support monorepo imports
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -88,120 +85,10 @@ logger = get_logger("auth-api")
 logger.info("Auth API module loaded")
 
 
-
-def _get_max_users_for_plan(plan_type: str) -> int:
-    """
-    Get maximum users allowed for plan type.
-
-    Args:
-        plan_type (str): Plan type
-
-    Returns:
-        int: Maximum users allowed
-    """
-    plan_limits = {
-        PlanType.STARTER.value: 5,
-        PlanType.PROFESSIONAL.value: 25,
-        PlanType.ENTERPRISE.value: 100,
-    }
-    return plan_limits.get(plan_type, 5)
-
-
-# def _convert_signup_to_organisation_request(
-#     signup_data: SignupRequest
-# ) -> CreateOrganisationWithUserRequest:
-#     """
-#     Convert SignupRequest to CreateOrganisationWithUserRequest format.
-
-#     Args:
-#         signup_data (SignupRequest): Signup request data
-
-#     Returns:
-#         CreateOrganisationWithUserRequest: Converted organization request data
-#     """
-#     # Determine organization name based on account type
-#     # if signup_data.account_type == AccountType.PERSONAL:
-#     #     organization_name = f"{signup_data.user_data.first_name} {signup_data.user_data.last_name}"
-#     # else:
-#     #     organization_name = (
-#     #         signup_data.company_data.company_name
-#     #         if signup_data.company_data
-#     #         else "Unknown Company"
-#     #     )
-
-#     # # Generate organization slug
-#     # slug = _generate_organization_slug(organization_name, signup_data.account_type.value)
-
-#     # # Get max users for plan
-#     # max_users = _get_max_users_for_plan(signup_data.plan_type.value)
-
-#     # # Build full name
-#     # full_name = f"{signup_data.user_data.first_name} {signup_data.user_data.last_name}"
-
-#     # # Extract company data if available
-#     # domain = None
-#     # if signup_data.company_data and signup_data.company_data.company_website:
-#     #     domain = signup_data.company_data.company_website
-
-#     return CreateOrganisationWithUserRequest(
-#         email=signup_data.user_data.email,
-#         password=signup_data.user_data.password,
-#         # full_name=full_name,
-#         # name=organization_name,
-#         # slug=slug,
-#         # domain=domain,
-#         # logo_url=None,  # No logo for signup
-#         # plan_type=signup_data.plan_type.value,
-#         # max_users=max_users,
-#         # timezone=signup_data.user_data.timezone,
-#         # phone=signup_data.user_data.phone,
-#     )
-
 # ============================================================================
 # SIGNUP HELPER FUNCTIONS
 # ============================================================================
 
-def _prepare_signup_audit_data(
-    organization_id: str,
-    organization_name: str,
-    slug: str,
-    user_id: str,
-    signup_data: SignupRequest
-) -> dict:
-    """Prepare audit data for successful signup."""
-    audit_data = {
-        "organization_id": organization_id,
-        "organization_name": organization_name,
-        "organization_slug": slug,
-        "user_id": user_id,
-        "user_email": signup_data.user_data.email,
-        "user_full_name": f"{signup_data.user_data.first_name} {signup_data.user_data.last_name}",
-        "account_type": signup_data.account_type.value,
-        "plan_type": signup_data.plan_type.value,
-        "status": "trial",
-        "max_users": _get_max_users_for_plan(signup_data.plan_type.value),
-        "signup_timestamp": datetime.now().isoformat(),
-        "signup_method": "email_password",
-        "super_admin_role_created": True,
-        "default_permissions_created": True,
-        "audit_user_context": {
-            "organization_id": organization_id,
-            "user_id": user_id,
-            "user_email": signup_data.user_data.email
-        },
-        "company_website": None,
-        "company_industry": None,
-        "company_size": None
-    }
-
-    if signup_data.company_data:
-        audit_data.update({
-            "company_website": signup_data.company_data.company_website,
-            "company_industry": signup_data.company_data.industry,
-            "company_size": signup_data.company_data.company_size,
-        })
-
-    return audit_data
 
 def _prepare_signup_response_data(
     # organization_id: str,
@@ -223,6 +110,27 @@ def _prepare_signup_response_data(
         # "role_name": "Super Admin",
         # "max_users": _get_max_users_for_plan(signup_data.plan_type.value),
     }
+
+def _is_password_strong(password: str) -> bool:
+    """
+    Check if password is strong.
+    Checks This Conditions:
+    1. At least 6 characters
+    2. At least one uppercase letter
+    3. At least one lowercase letter
+    4. At least one number
+    5. At least one special character
+
+    Args:
+        password (str): Password to check
+
+    Returns:
+        bool: True if password is strong, False otherwise
+    """
+    password_pattern = re.compile(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{6,}$')
+
+    return bool(password_pattern.match(password))
+
 
 # ============================================================================
 # API ENDPOINTS
@@ -253,9 +161,9 @@ async def login(request: Request, data: AuthLogin):
             user=UserInfo(
                 id=result.user.id,
                 email=result.user.email,
-                full_name=result.user.user_metadata.get("full_name", ""),
-                first_name=result.user.user_metadata.get("first_name", ""),
-                last_name=result.user.user_metadata.get("last_name", ""),
+                # full_name=result.user.user_metadata.get("full_name", ""),
+                first_name=result.user.user_metadata.get("first_name", None),
+                last_name=result.user.user_metadata.get("last_name", None),
             ),
         )
     except Exception as error:
@@ -264,28 +172,6 @@ async def login(request: Request, data: AuthLogin):
                 status_code=401, detail="Invalid login credentials"
             ) from error
         raise HTTPException(status_code=500, detail="Authentication failed") from error
-
-
-async def _init_audit_context(request: Request, signup_data: SignupRequest, request_id: str):
-    """Initialize audit context for signup request."""
-    request.state.audit_table = "organizations"
-    request.state.audit_description = (
-        "New user signup: %s with account type: %s",
-        signup_data.user_data.email,
-        signup_data.account_type.value
-    )
-    request.state.audit_risk_level = "medium"
-    request.state.audit_user_context = {
-        "organization_id": None,
-        "user_id": None,
-        "user_email": signup_data.user_data.email,
-        "user_type": "signup_user"
-    }
-
-    logger.info("POST /auth/signup request started - Request ID: %s, ", request_id)
-    logger.info("Email: %s, ", signup_data.user_data.email)
-    logger.info("Account Type: %s, ", signup_data.account_type.value)
-    logger.info("Plan Type: %s", signup_data.plan_type.value)
 
 
 @router.post(
@@ -425,15 +311,23 @@ async def reset_password(
                 detail="User not found"
             )
 
+        if not _is_password_strong(data.new_password):
+            raise HTTPException(
+                status_code=400,
+                detail="Password must be at least 6 characters long and "
+                "contain at least one uppercase letter, one lowercase letter, "
+                "one number, and one special character."
+            )
+
         result = await update_password_with_token(user['sub'], data.new_password)
         logger.info(f"update_password_with_token result: {result}")
         if result.user:
             logger.info("Password updated successfully")
-            
+
             # Send confirmation email to user
             user_email = user.get('email', '')
             user_name = user.get('user_metadata', {}).get('full_name', '') or user.get('email', '').split('@')[0]
-            
+
             try:
                 email_sent = send_password_reset_confirmation_email(user_email, user_name)
                 if email_sent:
@@ -445,7 +339,7 @@ async def reset_password(
             except Exception as email_error:
                 logger.error("Error sending password reset confirmation email: %s", str(email_error))
                 # Note: We don't fail the entire operation if email fails
-            
+
             return ResetPasswordResponse(
                 status_code=status.HTTP_200_OK,
                 message="Password reset successfully. You can now login with your new password."
@@ -456,140 +350,6 @@ async def reset_password(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to update password. Please try again."
             )
-
-        # except jwt.ExpiredSignatureError as jwt_error:
-        #     logger.error(f"JWT token expired: {jwt_error}")
-        #     raise HTTPException(
-        #         status_code=status.HTTP_400_BAD_REQUEST,
-        #         detail="Reset token has expired. Please request a new password reset."
-        #     ) from jwt_error
-        # except jwt.InvalidTokenError as jwt_error:
-        #     logger.error(f"Invalid JWT token: {jwt_error}")
-        #     logger.info("JWT verification failed, trying alternative approach...")
-
-        # Method 2: Use Supabase's verify_otp method for password reset
-            # try:
-            #     logger.info("Attempting Supabase verify_otp method...")
-            #     supabase_client = get_supabase_client()
-
-            #     # First verify the token to get user info
-            #     logger.info("Calling verify_otp with token...")
-            #     result = supabase_client.auth.verify_otp({
-            #         "token": data.token,
-            #         "type": "recovery"
-            #     })
-
-            #     logger.info(f"verify_otp result: {result}")
-
-            #     if result.user:
-            #         # Now update the password using admin client
-            #         user_id = result.user.id
-            #         logger.info(f"Token verified, updating password for user: {user_id}")
-
-            #         admin_result = supabase_admin.auth.admin.update_user_by_id(
-            #             user_id,
-            #             {"password": data.new_password}
-            #         )
-
-            #         if admin_result.user:
-            #             logger.info("Password updated successfully via verify_otp + admin")
-            #             return ResetPasswordResponse(
-            #                 status_code=status.HTTP_200_OK,
-            #                 message="Password reset successfully. You can now login with your new password."
-            #             )
-            #         else:
-            #             logger.error("Admin password update failed after verify_otp")
-            #             raise HTTPException(
-            #                 status_code=status.HTTP_400_BAD_REQUEST,
-            #                 detail="Failed to update password. Please try again."
-            #             )
-            #     else:
-            #         logger.error("verify_otp failed - no user in result")
-            #         raise HTTPException(
-            #             status_code=status.HTTP_400_BAD_REQUEST,
-            #             detail="Invalid or expired reset token. Please request a new password reset."
-            #         )
-
-            # except Exception as verify_error:
-            #     logger.error(f"verify_otp failed: {verify_error}")
-            #     logger.info("verify_otp failed, trying admin API approach...")
-
-            #     # Method 3: Try to extract user info from token and use admin API
-            #     try:
-            #         # Try to decode without verification to get user info
-            #         logger.info("Attempting to decode token without verification...")
-            #         unverified_token = jwt.decode(
-            #             data.token,
-            #             options={"verify_signature": False}
-            #         )
-            #         logger.info(f"Unverified token content: {unverified_token}")
-
-            #         user_id = unverified_token.get("sub")
-            #         email = unverified_token.get("email")
-
-            #         if user_id:
-            #             logger.info(f"Found user ID in unverified token: {user_id}")
-
-            #             # Update password using admin client
-            #             logger.info(f"Updating password for user ID: {user_id}")
-            #             result = supabase_admin.auth.admin.update_user_by_id(
-            #                 user_id,
-            #                 {"password": data.new_password}
-            #             )
-            #             logger.info(f"Password update result: {result}")
-
-            #             if result.user:
-            #                 logger.info("Password updated successfully via admin API")
-            #                 return ResetPasswordResponse(
-            #                     status_code=status.HTTP_200_OK,
-            #                     message="Password reset successfully. You can now login with your new password."
-            #                 )
-            #             else:
-            #                 logger.error("Admin API password update failed")
-            #                 raise HTTPException(
-            #                     status_code=status.HTTP_400_BAD_REQUEST,
-            #                     detail="Failed to update password. Please try again."
-            #                 )
-            #         elif email:
-            #             # Try using email with verify_otp
-            #             logger.info(f"Found email in token, trying verify_otp with email: {email}")
-            #             try:
-            #                 result = supabase_client.auth.verify_otp({
-            #                     "token": data.token,
-            #                     "type": "recovery"
-            #                 })
-
-            #                 if result.user:
-            #                     # Update password using admin client
-            #                     admin_result = supabase_admin.auth.admin.update_user_by_id(
-            #                         result.user.id,
-            #                         {"password": data.new_password}
-            #                     )
-
-            #                     if admin_result.user:
-            #                         logger.info("Password updated successfully via email verify_otp")
-            #                         return ResetPasswordResponse(
-            #                             status_code=status.HTTP_200_OK,
-            #                             message="Password reset successfully. You can now login with your new password."
-            #                         )
-            #             except (ValueError, TypeError, ConnectionError) as email_verify_error:
-            #                 raise HTTPException(
-            #                     status_code=status.HTTP_400_BAD_REQUEST,
-            #                     detail="Invalid reset token. Please request a new password reset."
-            #                 ) from email_verify_error
-            #         else:
-            #             logger.error("No user ID or email found in unverified token")
-            #             raise HTTPException(
-            #                 status_code=status.HTTP_400_BAD_REQUEST,
-            #                 detail="Invalid reset token. Please request a new password reset."
-            #             )
-
-            #     except Exception as decode_error:
-            #         logger.error(f"Token decoding failed: {decode_error}")
-            #         raise HTTPException(
-            #             status_code=status.HTTP_400_BAD_REQUEST,
-            #             detail="Invalid or expired reset token. Please request a new password reset."
-            #         ) from verify_error
 
     except Exception as error:
         log_exception()
@@ -664,60 +424,17 @@ async def signup(
     """
     # Generate request ID and initialize audit context
     request_id = str(uuid.uuid4())
-    # await _init_audit_context(request, signup_data, request_id)
 
-    # # Generate organization details
-    # organization_id = str(uuid.uuid4())
-    # organization_name = _determine_organization_name(signup_data)
-    # slug = _generate_organization_slug(
-    #     organization_name, signup_data.account_type.value
-    # )
+    if not _is_password_strong(signup_data.user_data.password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 6 characters long and "
+            "contain at least one uppercase letter, one lowercase letter, "
+            "one number, and one special character."
+        )
 
-    # print(f"Generated organization_id: {organization_id}")
-    # print(f"Organization name: {organization_name}")
-    # print(f"Organization slug: {slug}")
-
-    # # Validate slug uniqueness
-    # await check_organisation_slug_unique(slug)
-
-    # Convert signup data to organization request format
-    # org_request = _convert_signup_to_organisation_request(signup_data)
-
-    # Create user in Supabase Auth using signUp (user-initiated registration)
     user_id = await sign_up_supabase_user(signup_data)
     print(f"Created Supabase user: {user_id}")
-
-    # Update audit user context with the created user_id
-    # request.state.audit_user_context.update({
-    #     "user_id": user_id,
-    #     "organization_id": None
-    # })
-
-    # # Create organization using database operations (reusing create_organisation logic)
-    # org_data = {
-    #     "id": organization_id,
-    #     "name": org_request.name,
-    #     "slug": org_request.slug,
-    #     "domain": org_request.domain,
-    #     "logo_url": org_request.logo_url,
-    #     "plan_type": org_request.plan_type,
-    #     "status": "active",  # Signup organizations start as trial
-    #     "user_id": user_id,
-    #     "email": org_request.email,
-    #     "full_name": org_request.full_name,
-    #     "phone": org_request.phone,
-    #     "timezone": org_request.timezone
-    # }
-    # await create_organisation_with_super_admin(org_data)
-
-    # Set audit data for successful user signup
-    # request.state.raw_audit_new_data = _prepare_signup_audit_data(
-    #     organization_id=None,
-    #     organization_name=org_request.name,
-    #     slug=org_request.slug,
-    #     user_id=user_id,
-    #     signup_data=signup_data
-    # )
 
     logger.info(
         "POST /auth/signup request completed successfully - Request ID: %s, ",
@@ -731,10 +448,8 @@ async def signup(
         message="Account created successfully! Please check your email for verification.",
         data=_prepare_signup_response_data(
             user_id=user_id,
-            # organization_name=org_request.name,
-            # slug=org_request.slug,
             signup_data=signup_data
-        ),
+        )
     )
 
 

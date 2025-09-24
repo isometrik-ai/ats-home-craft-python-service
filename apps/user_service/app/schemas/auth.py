@@ -131,9 +131,9 @@ class UserInfo(BaseModel):
 
     id: str
     email: str
-    full_name: str
-    first_name: str
-    last_name: str
+    # full_name: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 
 class OrganizationInfo(BaseModel):
@@ -210,11 +210,10 @@ class ForgotPasswordResponse(BaseModel):
 # Last Updated: 2024-12-19
 # """
 
+from enum import Enum
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, model_validator
 from fastapi import HTTPException, status
-from enum import Enum
-
 
 # ============================================================================
 # ENUMS
@@ -448,7 +447,7 @@ class CompanyData(BaseModel):
     @model_validator(mode='after')
     def validate_enterprise_features_and_practice_areas(self):
         """Validate enterprise features and practice areas based on firm size."""
-        
+
         # Solo Practitioner validations
         if self.company_size == FirmSize.SOLO_PRACTITIONER:
             # These fields should not be provided for Solo Practitioner
@@ -482,7 +481,7 @@ class CompanyData(BaseModel):
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail='enterprise_features is not applicable for Solo Practitioner'
                 )
-        
+
         # Small Firm (2-10 attorneys) validations
         elif self.company_size == FirmSize.SMALL_FIRM:
             # These fields should not be provided for Small Firm
@@ -496,7 +495,7 @@ class CompanyData(BaseModel):
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail='compliance_security is not applicable for Small Firm (2-10 attorneys)'
                 )
-        
+
         # Mid-Size/Large Firm (11-100 attorneys) validations
         elif self.company_size == FirmSize.MID_SIZE_LARGE_FIRM:
             # These fields should not be provided for Mid-Size/Large Firm
@@ -505,7 +504,7 @@ class CompanyData(BaseModel):
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail='enterprise_features is not applicable for Mid-Size/Large Firm (11-100 attorneys)'
                 )
-        
+
         # Enterprise Firm validations
         elif self.company_size == FirmSize.ENTERPRISE_FIRM:
             # Enterprise features are required for Enterprise Firm
@@ -514,7 +513,7 @@ class CompanyData(BaseModel):
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail='enterprise_features are required for Enterprise Firm (100+ attorneys)'
                 )
-        
+
         # Validate secondary practice areas don't overlap with primary ones
         if self.secondary_practice_areas is not None:
             overlap = set(self.primary_practice_areas) & set(self.secondary_practice_areas)
@@ -523,7 +522,7 @@ class CompanyData(BaseModel):
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f'Secondary practice areas cannot overlap with primary ones: {list(overlap)}'
                 )
-        
+
         return self
 
 

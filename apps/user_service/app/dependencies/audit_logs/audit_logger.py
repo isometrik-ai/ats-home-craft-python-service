@@ -33,7 +33,7 @@ import logging
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from fastapi import Request
-import asyncpg
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
 
 from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
     get_last_audit_log_hash,
@@ -204,7 +204,7 @@ class AuditLogger:
     def _handle_batch_error(self, error: Exception, is_final: bool = False):
         """Handle errors during batch processing."""
         error_type = "unknown"
-        if isinstance(error, (asyncpg.PostgresError, ConnectionError)):
+        if isinstance(error, DatabaseOperationError):
             error_type = "database"
         elif isinstance(error, (OSError, RuntimeError, IOError)):
             error_type = "system"
@@ -241,7 +241,7 @@ class AuditLogger:
                 print(f"Audit processing interrupted: {e}")
                 break
             except (
-                asyncpg.PostgresError, ConnectionError,
+                DatabaseOperationError,
                 OSError, RuntimeError, IOError,
                 json.JSONDecodeError, UnicodeError,
                 AttributeError, LookupError
@@ -254,7 +254,7 @@ class AuditLogger:
             try:
                 await self._write_audit_batch_with_retry(batch)
             except (
-                asyncpg.PostgresError, ConnectionError,
+                DatabaseOperationError,
                 OSError, RuntimeError, IOError,
                 json.JSONDecodeError, UnicodeError,
                 AttributeError, LookupError
@@ -278,7 +278,7 @@ class AuditLogger:
             try:
                 await self._write_audit_batch(events)
                 return
-            except (asyncpg.PostgresError, ConnectionError) as e:
+            except DatabaseOperationError as e:
                 self._handle_write_error(e, attempt, "database")
                 if attempt == self._max_retries - 1:
                     break
@@ -319,7 +319,7 @@ class AuditLogger:
             # Use provided organization_id or fallback to "default"
             org_id = organization_id or "default"
             return await get_last_audit_log_hash(org_id)
-        except (asyncpg.PostgresError, ConnectionError) as e:
+        except DatabaseOperationError as e:
             print(f"Error fetching last hash from database: {e}")
             logger.error("Database error fetching last hash: %s", e, exc_info=True)
             return None
@@ -383,7 +383,7 @@ class AuditLogger:
             print(f"Successfully wrote {len(events)} audit events")
             print(f"AUDIT LOGS: Successfully wrote {len(events)} audit events")
 
-        except (asyncpg.PostgresError, ConnectionError) as e:
+        except DatabaseOperationError as e:
             print(f"Database write error: {e}")
             logger.error("Database write error: %s", e, exc_info=True)
             raise

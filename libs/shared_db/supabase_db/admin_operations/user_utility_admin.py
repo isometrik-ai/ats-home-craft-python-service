@@ -59,7 +59,7 @@ async def update_supabase_user_email(
 
         # Send magic link email notification
         logger.info("Sending magic link email notification to user %s", user_id)
-        email_sent = send_admin_update_email(user_data)
+        email_sent = await send_admin_update_email(user_data)
 
         if email_sent:
             logger.info("Magic link email sent successfully to %s", email)
@@ -181,7 +181,7 @@ def create_admin_update_email_content(user: dict, magic_link: str) -> Tuple[str,
     return subject, html_message.strip()
 
 
-def send_admin_update_email(user: dict) -> bool:
+async def send_admin_update_email(user: dict) -> bool:
     """
     Send admin update notification email with magic link.
 
@@ -193,7 +193,7 @@ def send_admin_update_email(user: dict) -> bool:
     """
     try:
         # Generate magic link using Supabase Auth Admin API
-        magic_link = generate_magic_link(user.get("email"))
+        magic_link = await generate_magic_link(user.get("email"))
         logger.debug("Generated magic link for email update: %s", magic_link)
 
         if magic_link is None:
