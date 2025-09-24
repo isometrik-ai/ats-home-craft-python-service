@@ -1,10 +1,10 @@
 services:
   apps:
-    image: appscrip007/python-service:xqtiv      # 👈 tells Compose how to tag the built image
+    image: appscrip007/legalai-fast-api:latest      # 👈 tells Compose how to tag the built image
     build:
       context: .
       dockerfile: ./Dockerfile
-    container_name: python-service
+    container_name: legalai-service
     restart: unless-stopped
     environment:
       # Python configuration
@@ -32,7 +32,7 @@ services:
 
       # Datadog configuration (from Bitbucket secrets)
       - DD_ENV=${DD_ENV:-production}
-      - DD_SERVICE=${DD_SERVICE:-xqtiv-service-python}
+      - DD_SERVICE=${DD_SERVICE:-legalai-service-python}
       - DD_VERSION=${DD_VERSION:-1.0.0}
 
       # Application configuration
@@ -52,7 +52,7 @@ services:
       options:
         max-size: '10m'
         max-file: '3'
-        labels: 'app=xqtiv-service-python'
+        labels: 'app=legalai-service-python'
         env: 'production'
     deploy:
       resources:
