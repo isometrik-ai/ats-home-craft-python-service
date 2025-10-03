@@ -667,7 +667,14 @@ async def oauth_connect(provider: str):
     """
     Generate OAuth URL for frontend redirect.
     """
-    return await supabase_user_oauth(provider)
+    try:
+        return await supabase_user_oauth(provider)
+    except Exception as e:
+        logger.error("Error in oauth_connect: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate {provider} OAuth URL"
+        )
 
 # @router.get("/link-callback", status_code=status.HTTP_200_OK)
 # async def link_callback(request: Request):

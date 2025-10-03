@@ -6,9 +6,11 @@ Tests auth.py endpoints with proper AsyncMock usage.
 """
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock, MagicMock
 import asyncio
+from libs.shared_middleware.jwt_auth import get_user_from_auth
 
 @pytest.fixture
 def auth_client():
@@ -589,7 +591,7 @@ def test_get_oauth_link_url_endpoint_success(auth_client):
     with patch('libs.shared_middleware.jwt_auth.get_user_from_auth',
                return_value={"sub": "test-user-id", "email": "test@example.com",
                            "app_metadata": {"providers": ["email"]}}), \
-         patch('libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_oauth_link_url',
+         patch('apps.user_service.app.api.auth.get_oauth_link_url',
                AsyncMock(return_value={"oauth_url": "https://oauth.google.com/auth", "message": "Success"})):
 
         response = auth_client.get("/auth/link-user-oauth-url/google")
@@ -598,17 +600,25 @@ def test_get_oauth_link_url_endpoint_success(auth_client):
         assert "oauth_url" in data
 
 
-def test_get_oauth_link_url_endpoint_already_linked(auth_client):
+def test_get_oauth_link_url_endpoint_already_linked():
     """Test OAuth link URL generation when provider already linked - covers auth.py error handling"""
-    with patch('libs.shared_middleware.jwt_auth.get_user_from_auth',
-               return_value={"sub": "test-user-id", "email": "test@example.com",
-                           "app_metadata": {"providers": ["email", "google"]}}):
+    from apps.user_service.app.api.auth import router as auth_router
 
-        response = auth_client.get("/auth/link-user-oauth-url/google")
-        # The actual function doesn't check for already linked providers, it just generates URL
-        assert response.status_code == 200
+    app = FastAPI()
+    app.include_router(auth_router)
+
+    # Override the auth dependency for this specific test
+    def mock_get_user_from_auth():
+        return {"sub": "test-user-id", "email": "test@example.com",
+                "app_metadata": {"providers": ["email", "google"]}}
+
+    app.dependency_overrides[get_user_from_auth] = mock_get_user_from_auth
+
+    with TestClient(app) as client:
+        response = client.get("/auth/link-user-oauth-url/google")
+        assert response.status_code == 400
         data = response.json()
-        assert "oauth_url" in data
+        assert "google account is already linked to this user" in data["detail"]
 
 
 def test_get_oauth_link_url_endpoint_error(auth_client):
@@ -627,7 +637,7 @@ def test_get_oauth_link_url_endpoint_error(auth_client):
 
 def test_oauth_connect_endpoint_success(auth_client):
     """Test OAuth connect endpoint - covers auth.py OAuth functionality"""
-    with patch('libs.shared_db.supabase_db.admin_operations.user_utility_admin.supabase_user_oauth',
+    with patch('apps.user_service.app.api.auth.supabase_user_oauth',
                AsyncMock(return_value={"url": "https://oauth.google.com/auth"})):
 
         response = auth_client.get("/auth/oauth-connect/google")
@@ -638,12 +648,14 @@ def test_oauth_connect_endpoint_success(auth_client):
 
 def test_oauth_connect_endpoint_error(auth_client):
     """Test OAuth connect endpoint error handling - covers auth.py error handling"""
-    with patch('libs.shared_db.supabase_db.admin_operations.user_utility_admin.supabase_user_oauth',
+    with patch('apps.user_service.app.api.auth.supabase_user_oauth',
                AsyncMock(side_effect=Exception("OAuth error"))):
 
         response = auth_client.get("/auth/oauth-connect/google")
-        # The actual function doesn't handle exceptions, it just returns the result
-        assert response.status_code == 200
+        # The actual function now handles exceptions and returns a 500 error
+        assert response.status_code == 500
+        data = response.json()
+        assert "Failed to generate google OAuth URL" in data["detail"]
 
 
 def test_oauth_callback_endpoint_success(auth_client):
@@ -706,7 +718,7 @@ async def test_oauth_endpoints_async(async_auth_client):
     )
 
     # Test get_oauth_link_url_endpoint
-    with patch('libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_oauth_link_url',
+    with patch('apps.user_service.app.api.auth.get_oauth_link_url',
                AsyncMock(return_value={"oauth_url": "https://oauth.google.com/auth", "message": "Success"})):
         mock_request = MagicMock(spec=Request)
         result = await get_oauth_link_url_endpoint("google", {"sub": "test-user-id", "email": "test@example.com",
@@ -714,7 +726,7 @@ async def test_oauth_endpoints_async(async_auth_client):
         assert "oauth_url" in result
 
     # Test oauth_connect
-    with patch('libs.shared_db.supabase_db.admin_operations.user_utility_admin.supabase_user_oauth',
+    with patch('apps.user_service.app.api.auth.supabase_user_oauth',
                AsyncMock(return_value={"url": "https://oauth.google.com/auth"})):
         result = await oauth_connect("google")
         assert "url" in result
