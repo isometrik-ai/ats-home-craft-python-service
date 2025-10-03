@@ -108,7 +108,6 @@ async def get_audit_logs(
     Args:
         request (Request): The FastAPI request object
         current_user (dict): Decoded JWT token containing user information
-        db_conn: AsyncPG database connection (truly async)
         query_params (AuditLogsQueryParams): Query parameters object containing
             search, pagination options
 
@@ -179,7 +178,7 @@ async def get_audit_logs(
     )
 
     return AuditLogsResponse(
-        status_code=status.HTTP_200_OK,
+        # status_code=status.HTTP_200_OK,
         message=message,
         audit_logs=audit_logs,
         total_count=total_count,
@@ -290,7 +289,7 @@ async def get_audit_log_from_id(
     )
 
     return AuditLogDetailResponse(
-        status_code=status.HTTP_200_OK,
+        # status_code=status.HTTP_200_OK,
         message="Audit log details retrieved successfully",
         audit_log=audit_log_detail,
     )
@@ -338,7 +337,6 @@ async def delete_all_audit_logs_data(
     Args:
         request (Request): The FastAPI request object
         current_user (dict): Decoded JWT token containing user information
-        db_conn: AsyncPG database connection (truly async)
 
     Returns:
         DeleteAuditLogsResponse: Success message with count of deleted audit logs
@@ -369,7 +367,7 @@ async def delete_all_audit_logs_data(
     deleted_count = await delete_all_audit_logs()
 
     return DeleteAuditLogsResponse(
-        status_code=status.HTTP_200_OK,
+        # status_code=status.HTTP_200_OK,
         message="All audit logs deleted successfully",
         deleted_count=deleted_count,
     )

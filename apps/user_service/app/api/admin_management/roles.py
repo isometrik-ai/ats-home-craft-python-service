@@ -246,7 +246,6 @@ async def get_role_from_id(
         role_id (str): UUID of the role to retrieve
         request (Request): The FastAPI request object
         current_user (dict): Decoded JWT token containing user information
-        db_conn: AsyncPG database connection (truly async)
 
     Returns:
         RoleDetailResponse: Detailed role information with associated permissions

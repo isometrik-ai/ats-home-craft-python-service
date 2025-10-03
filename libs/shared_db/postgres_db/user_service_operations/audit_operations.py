@@ -275,11 +275,13 @@ async def bulk_create_audit_logs(audit_logs_data: List[Dict[str, Any]]) -> List[
             "hash_signature": audit_data["hash_signature"],
             "previous_hash": audit_data.get("previous_hash"),
             "description": audit_data["description"],
-            "retention_date": audit_data.get("retention_date").isoformat() if audit_data.get("retention_date") else None,
             "status_code": audit_data.get("status_code"),
             "category": audit_data.get("category")
         }
+        if audit_data.get("retention_date"):
+            audit_record["retention_date"] = audit_data.get("retention_date").isoformat()
         audit_records.append(audit_record)
+
 
     # Bulk insert all records
     result = await supabase.table("audit_logs").insert(audit_records).execute()

@@ -1,3 +1,5 @@
+# pylint: disable=all
+
 """Comprehensive tests for exception handling module.
 
 This module tests all functions in libs/shared_db/postgres_db/user_service_operations/exception_handling.py
@@ -781,7 +783,7 @@ class TestExecuteSafeQueryMissing:
         with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
-            
+
             with pytest.raises(DatabaseOperationError) as exc_info:
                 await execute_safe_query("test_table", "insert")
 
@@ -793,7 +795,7 @@ class TestExecuteSafeQueryMissing:
         with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
-            
+
             with pytest.raises(DatabaseOperationError) as exc_info:
                 await execute_safe_query("test_table", "update")
 
@@ -848,7 +850,7 @@ class TestExecuteSafeQueryMissing:
         with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
-            
+
             with pytest.raises(DatabaseOperationError) as exc_info:
                 await execute_safe_query("test_table", "unsupported")
 
@@ -860,7 +862,7 @@ class TestExecuteSafeQueryMissing:
         with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
-            
+
             with pytest.raises(DatabaseOperationError) as exc_info:
                 await execute_safe_query("test_table", "insert", data=None)
 
@@ -872,7 +874,7 @@ class TestExecuteSafeQueryMissing:
         with patch('libs.shared_db.postgres_db.user_service_operations.exception_handling.get_supabase_admin_client') as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
-            
+
             with pytest.raises(DatabaseOperationError) as exc_info:
                 await execute_safe_query("test_table", "update", data={})
 

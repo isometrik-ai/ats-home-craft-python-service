@@ -33,8 +33,6 @@ from apps.user_service.app.schemas.admin_access_management import (
     UpdateSessionResponse
 )
 
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
-
 from apps.user_service.app.schemas.auth import SessionFilter
 
 from apps.user_service.app.app_instance import limiter
@@ -44,6 +42,9 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
+    DatabaseOperationError
+)
 from libs.shared_db.postgres_db.user_service_operations.session_operations import (
     create_session,
     get_session_by_id,
@@ -243,7 +244,6 @@ async def start_session(
     Args:
         request (Request): The FastAPI request object (contains headers with session data)
         current_user (dict): Decoded JWT token containing user information
-        db_conn: AsyncPG database connection (truly async)
 
     Returns:
         CreateSessionResponse: Created session information with all details
@@ -470,14 +470,18 @@ async def update_session_logout(
         # Extract and validate user context from JWT token
         user_context = extract_user_context(current_user)
         logger.debug("User context extracted - Request ID: %s, ",request_id)
-        logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
+        logger.debug(
+            "Email: %s, Organization ID: %s",
+            user_context.email,user_context.organization_id
+        )
     except HTTPException as e:
         if "Session ID not found" in str(e.detail):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Session ID not found in token"
-            )
-        raise
+            e.detail = "Session ID not found in token"
+            raise
+            # raise HTTPException(
+            #     status_code=status.HTTP_400_BAD_REQUEST,
+            #     detail="Session ID not found in token"
+            # )
 
     # Check permission using utility function
     # await require_permission(
@@ -629,7 +633,6 @@ async def get_sessions(
     Args:
         request (Request): The FastAPI request object
         current_user (dict): Decoded JWT token containing user information
-        db_conn: AsyncPG database connection (truly async)
         query_params (SessionQueryParams): Query parameters object containing
             search, pagination, and filter options
 

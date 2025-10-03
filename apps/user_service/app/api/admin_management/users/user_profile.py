@@ -212,7 +212,7 @@ async def get_user_profile(
     logger.info(" Status Code: %s",status.HTTP_200_OK)
 
     return UserProfileResponse(
-        status_code=status.HTTP_200_OK,
+        # status_code=status.HTTP_200_OK,
         message="User profile retrieved successfully",
         data=profile_data,
     )
@@ -369,7 +369,7 @@ async def get_user_by_id(
     logger.info("Permissions: %s, Status Code: %s",len(permissions),status.HTTP_200_OK)
 
     return UserProfileResponse(
-        status_code=200,
+        # status_code=200,
         message="User profile retrieved successfully",
         data=profile_data,
     )

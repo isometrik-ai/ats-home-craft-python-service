@@ -48,7 +48,8 @@ def extract_request_context(request: Request) -> dict:
     # pylint: disable=protected-access
     if hasattr(request.state, "_cached_body"):
         try:
-            body_str = request.state._cached_body.decode("utf-8")  # Let it raise UnicodeError if invalid
+            # Let it raise UnicodeError if invalid
+            body_str = request.state._cached_body.decode("utf-8")
             context["body_preview"] = (
                 body_str[:200] + "..." if len(body_str) > 200 else body_str
             )

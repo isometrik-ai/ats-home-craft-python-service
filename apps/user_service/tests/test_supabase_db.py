@@ -1,3 +1,4 @@
+# pylint: disable=all
 """
 Test module for Supabase database connection management.
 
@@ -9,8 +10,6 @@ This module contains comprehensive tests for:
 """
 
 import pytest
-import pytest_asyncio
-import os
 from unittest.mock import AsyncMock, MagicMock, patch, call
 from supabase import AsyncClient
 
@@ -18,7 +17,6 @@ from libs.shared_db.supabase_db.db import (
     SupabaseClientCache,
     get_supabase_client,
     get_supabase_admin_client,
-    _cache,
     SUPABASE_URL,
     SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY

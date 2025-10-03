@@ -1,3 +1,5 @@
+# pylint: disable=all
+
 """
 Test module for audit logging functionality.
 
@@ -15,7 +17,7 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import Request, HTTPException
 from fastapi.testclient import TestClient
 
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call

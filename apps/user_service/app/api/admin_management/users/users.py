@@ -40,15 +40,15 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 
-# Import update user routes
-from apps.user_service.app.api.admin_management.users.update_user import (
-    router as update_user_router
-)
+# # Import update user routes
+# from apps.user_service.app.api.admin_management.users.update_user import (
+#     router as update_user_router
+# )
 
-# Import user profile routes
-from apps.user_service.app.api.admin_management.users.user_profile import (
-    router as user_profile_router
-)
+# # Import user profile routes
+# from apps.user_service.app.api.admin_management.users.user_profile import (
+#     router as user_profile_router
+# )
 
 
 # Local imports
@@ -193,7 +193,7 @@ async def get_users_list(
     )
 
     return UserListResponse(
-        status_code=200,
+        # status_code=200,
         message="Users retrieved successfully",
         data=users,
         total_count=total_count,
@@ -430,7 +430,7 @@ async def update_user(
     logger.info("Status Code: 200")
 
     return UpdateUserResponse(
-        status_code=200,
+        # status_code=200,
         message="User updated successfully",
         data=profile_data,
     )
@@ -625,7 +625,7 @@ async def invite_user(
         status="success",
     )
 
-# Include update user routes (more specific routes)
-router.include_router(update_user_router)
-# Include user profile routes last (to avoid conflicts with main routes)
-router.include_router(user_profile_router)
+# # Include update user routes (more specific routes)
+# router.include_router(update_user_router)
+# # Include user profile routes last (to avoid conflicts with main routes)
+# router.include_router(user_profile_router)

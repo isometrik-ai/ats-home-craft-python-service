@@ -49,7 +49,9 @@ from libs.shared_db.postgres_db.user_service_operations.permission_operations im
 )
 
 # Import DatabaseOperationError for manual error handling
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
+    DatabaseOperationError
+)
 
 # Create router for permissions endpoints
 router = APIRouter(prefix="/permissions", tags=["Permissions Management"])
@@ -98,7 +100,6 @@ async def get_permissions(
     Args:
         request (Request): The FastAPI request object
         current_user (dict): Decoded JWT token containing user information
-        db_conn: AsyncPG database connection (truly async)
 
     Returns:
         PermissionsResponse: List of permissions with id, name,
@@ -126,7 +127,9 @@ async def get_permissions(
         logger.debug("Organization ID: %s, ",user_context.organization_id)
         logger.debug("Permissions count: %s",len(permissions_data) if permissions_data else 0)
     except DatabaseOperationError as e:
-        logger.error("Database error retrieving permissions - Request ID: %s, Error: %s", request_id, str(e))
+        logger.error(
+            "Database error retrieving permissions - Request ID: %s, Error: %s",
+            request_id, str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error during get permissions: {str(e)}",
@@ -225,7 +228,9 @@ async def get_permission_by_id(
         logger.debug("Permission retrieved from database - Request ID: %s, ",request_id)
         logger.debug("Permission ID: %s, Permission found: %s",permission_id,permission is not None)
     except DatabaseOperationError as e:
-        logger.error("Database error retrieving permission - Request ID: %s, Error: %s", request_id, str(e))
+        logger.error(
+            "Database error retrieving permission - Request ID: %s, Error: %s",
+            request_id, str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error during get permission by ID: {str(e)}",
@@ -324,7 +329,9 @@ async def create_permission(
         )
         logger.debug("Permission created: %s",permission is not None)
     except DatabaseOperationError as e:
-        logger.error("Database error creating permission - Request ID: %s, Error: %s", request_id, str(e))
+        logger.error(
+            "Database error creating permission - Request ID: %s, Error: %s",
+            request_id, str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error during create permission: {str(e)}",

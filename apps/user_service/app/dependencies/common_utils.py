@@ -29,8 +29,12 @@ from fastapi import HTTPException, status
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
 
-from libs.shared_db.postgres_db.user_service_operations.user_operations import get_user_profile_by_id
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
+from libs.shared_db.postgres_db.user_service_operations.user_operations import (
+    get_user_profile_by_id
+)
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
+    DatabaseOperationError
+)
 
 # ============================================================================
 # DATA CLASSES
@@ -157,7 +161,11 @@ def extract_user_context(current_user: dict) -> UserContext:
     #                f"Expected one of: {', '.join(valid_user_types)}",
     #     )
 
-    return UserContext(user_id=user_id, email=email, user_type=user_type)
+    return UserContext(
+        user_id=user_id,
+        email=email,
+        organization_id=organization_id,
+        user_type=user_type)
 
 
 # ============================================================================
@@ -170,6 +178,7 @@ async def require_permission(
     user_context: UserContext,
     action_description: str = "perform this action",
     with_timing: bool = True,
+    organization_id: str = None
 ) -> None:
     """
     Check user permission with performance timing and detailed error handling.
@@ -202,7 +211,7 @@ async def require_permission(
     has_permission = await check_user_access_async(
         permission_code=permission_codes,
         user_id=user_context.user_id,
-        organisation_id=user_context.organization_id
+        organisation_id=organization_id
     )
 
     if with_timing:
@@ -225,7 +234,10 @@ async def require_permission(
 
 
 async def check_permissions(
-    current_user, permission_codes: List[str]|str, action_description="access role details"
+    current_user,
+    permission_codes: List[str]|str,
+    action_description="access role details",
+    organization_id: str = None
 ):
     """
     Extracts user context and checks if the user has 'settings.roles.manage' permission.
@@ -236,6 +248,7 @@ async def check_permissions(
         permission_code=permission_codes,
         user_context=user_context,
         action_description=action_description,
+        organization_id=organization_id
     )
     return user_context
 
@@ -347,6 +360,13 @@ def handle_api_exceptions(operation_name: str):
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Database error during {operation_name}: {str(error)}",
+                ) from error
+            except ValueError as error:
+                # Convert ValueError to HTTP exceptions
+                print(f"Value error in {operation_name}: {error}")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Value error during {operation_name}: {str(error)}",
                 ) from error
             except Exception as error:
                 # Handle any other unexpected errors

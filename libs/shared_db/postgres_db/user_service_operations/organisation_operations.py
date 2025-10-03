@@ -18,6 +18,7 @@ Operations Covered:
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
+from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_metadata_of_user
 from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
@@ -58,8 +59,8 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "created_by_id":organisation_data.get("user_id")
     }
 
-    table = await supabase.table("organizations")
-    insert_query = await table.insert(org_record)
+    table = supabase.table("organizations")
+    insert_query = table.insert(org_record)
     result = await insert_query.execute()
 
     if result.data and len(result.data) > 0:
@@ -81,13 +82,13 @@ async def get_organisation_details_by_id(organisation_id: str) -> Optional[Dict[
     supabase = await get_supabase_admin_client()
 
     # Fetch organisation with embedded members (only fields needed to compute count)
-    table = await supabase.table("organizations")
-    select_query = await table.select(
+    table = supabase.table("organizations")
+    select_query = table.select(
         "id, name, slug, domain, logo_url, plan_type, status, max_users, timezone, settings, "
         "created_at, updated_at, organization_members(status)"
     )
-    eq_query = await select_query.eq("id", organisation_id)
-    limit_query = await eq_query.limit(1)
+    eq_query = select_query.eq("id", organisation_id)
+    limit_query = eq_query.limit(1)
     result = await limit_query.execute()
 
     if not result.data or len(result.data) == 0:
@@ -114,7 +115,7 @@ async def get_organisation_by_slug(slug: str) -> Optional[Dict[str, Any]]:
     """Get organisation by slug."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     result = await table.select(
         "id, name, slug, domain, logo_url, plan_type, status, account_type, "
         "created_at, updated_at"
@@ -155,7 +156,7 @@ async def update_organisation_details(
     payload["updated_at"] = "now()"
 
     # 4️⃣ Execute update with Supabase SDK (mimicking the WHERE id = $N logic)
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     result = await table.update(payload).eq(
         "id", organisation_id
     ).execute()
@@ -172,7 +173,7 @@ async def delete_organisation(organisation_id: str) -> bool:
     """Delete organisation."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     result = await table.delete().eq(
         "id", organisation_id
     ).execute()
@@ -187,9 +188,9 @@ async def check_organisation_exists(organisation_id: str) -> bool:
     """Check if organisation exists."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
-    select_query = await table.select("id")
-    query = await select_query.eq("id", organisation_id)
+    table = supabase.table("organizations")
+    select_query = table.select("id")
+    query = select_query.eq("id", organisation_id)
     result = await query.execute()
 
     return len(result.data) > 0 if result.data else False
@@ -212,10 +213,10 @@ async def get_list_of_organisations(search: Optional[str] = None, status: Option
     supabase = await get_supabase_admin_client()
 
     # Get the table object first
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
 
     # Build the query using the same logic as build_organisations_filter_query
-    select_query = await table.select(
+    select_query = table.select(
         "id, name, slug, domain, logo_url, plan_type, status, account_type, "
         "created_at, updated_at, organization_members(id)"
     )
@@ -223,7 +224,7 @@ async def get_list_of_organisations(search: Optional[str] = None, status: Option
     # Apply search filter (mimicking the ILIKE logic from build_organisations_filter_query)
     # This handles the same search logic: name, slug, domain with case-insensitive partial matching
     if search:
-        or_query = await select_query.or_(
+        or_query = select_query.or_(
             f"name.ilike.%{search}%,"
             f"slug.ilike.%{search}%,"
             f"domain.ilike.%{search}%"
@@ -234,12 +235,12 @@ async def get_list_of_organisations(search: Optional[str] = None, status: Option
 
     # Apply status filter (mimicking the exact match logic from build_organisations_filter_query)
     if status:
-        status_query = await query.eq("status", status)
+        status_query = query.eq("status", status)
         query = status_query
 
     # Apply pagination and ordering (mimicking the LIMIT/OFFSET and ORDER BY logic)
-    order_query = await query.order("created_at", desc=True)
-    range_query = await order_query.range(offset, offset + limit - 1)
+    order_query = query.order("created_at", desc=True)
+    range_query = order_query.range(offset, offset + limit - 1)
     result = await range_query.execute()
 
     # Process results to add member count
@@ -267,13 +268,13 @@ async def get_organisations_count(search: Optional[str], status: Optional[str]) 
     supabase = await get_supabase_admin_client()
 
     # Build the count query with filters (mimicking build_organisations_count_query logic)
-    table = await supabase.table("organizations")
-    select_query = await table.select("id", count="exact")
+    table = supabase.table("organizations")
+    select_query = table.select("id", count="exact")
 
     # Apply search filter (mimicking the ILIKE logic from build_organisations_count_query)
     # This handles the same search logic: name, slug, domain with case-insensitive partial matching
     if search:
-        or_query = await select_query.or_(
+        or_query = select_query.or_(
             f"name.ilike.%{search}%,"
             f"slug.ilike.%{search}%,"
             f"domain.ilike.%{search}%"
@@ -284,7 +285,7 @@ async def get_organisations_count(search: Optional[str], status: Optional[str]) 
 
     # Apply status filter (mimicking the exact match logic from build_organisations_count_query)
     if status:
-        status_query = await query.eq("status", status)
+        status_query = query.eq("status", status)
         query = status_query
 
     result = await query.execute()
@@ -301,8 +302,8 @@ async def get_organisations_with_members(search: Optional[str] = None, status: O
     supabase = await get_supabase_admin_client()
 
     # Build the query with joins and filters
-    table = await supabase.table("organizations")
-    select_query = await table.select(
+    table = supabase.table("organizations")
+    select_query = table.select(
         "id, name, slug, domain, logo_url, plan_type, status, account_type, "
         "created_at, updated_at, "
         "organization_members(id)"
@@ -310,7 +311,7 @@ async def get_organisations_with_members(search: Optional[str] = None, status: O
 
     # Apply search filter
     if search:
-        or_query = await select_query.or_(
+        or_query = select_query.or_(
             f"name.ilike.%{search}%,"
             f"slug.ilike.%{search}%,"
             f"domain.ilike.%{search}%"
@@ -321,12 +322,12 @@ async def get_organisations_with_members(search: Optional[str] = None, status: O
 
     # Apply status filter
     if status:
-        status_query = await query.eq("status", status)
+        status_query = query.eq("status", status)
         query = status_query
 
     # Apply pagination and ordering
-    order_query = await query.order("created_at", desc=True)
-    range_query = await order_query.range(offset, offset + limit - 1)
+    order_query = query.order("created_at", desc=True)
+    range_query = order_query.range(offset, offset + limit - 1)
     result = await range_query.execute()
 
     # Process results to add member count
@@ -364,7 +365,7 @@ async def check_organisation_slug_unique(slug: str, exclude_org_id: Optional[str
     """
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     query = table.select("id").eq("slug", slug)
 
     if exclude_org_id:
@@ -382,7 +383,7 @@ async def check_organisation_name_unique(name: str, exclude_org_id: Optional[str
     """Check if organisation name is unique."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     query = table.select("id").eq("name", name)
 
     if exclude_org_id:
@@ -412,7 +413,7 @@ async def get_organisation_members(organisation_id: str, search: Optional[str] =
     supabase = await get_supabase_admin_client()
 
     # Build the query with filters
-    table = await supabase.table("organization_members")
+    table = supabase.table("organization_members")
     query = table.select(
         "id, user_id, email, full_name, phone, timezone, role_id, status, "
         "created_at, updated_at, last_active_at, "
@@ -444,7 +445,7 @@ async def get_organisation_members_count(organisation_id: str, search: Optional[
     supabase = await get_supabase_admin_client()
 
     # Build the count query with filters
-    table = await supabase.table("organization_members")
+    table = supabase.table("organization_members")
     query = table.select("id", count="exact").eq(
         "organization_id", organisation_id
     )
@@ -475,10 +476,6 @@ async def add_member_to_organisation(
     member_record = {
         "user_id": member_data["user_id"],
         "email": member_data["email"],
-        "first_name": member_data["first_name"],
-        "last_name": member_data["last_name"],
-        "phone": member_data.get("phone"),
-        "timezone": member_data.get("timezone", "UTC"),
         "role_id": member_data.get("role_id"),
         "status": member_data.get("status", "active"),
         "organization_id": organisation_id,
@@ -487,9 +484,19 @@ async def add_member_to_organisation(
         "joined_at": "now()"
     }
 
-    table = await supabase.table("organization_members")
+    data = await get_user_by_id(member_data["user_id"])
+    member_record["first_name"] =data.user.user_metadata.get("first_name",member_data["first_name"])
+    member_record["last_name"] = data.user.user_metadata.get("last_name",member_data["last_name"])
+    member_record["phone"] = data.user.user_metadata.get("phone",member_data["phone"])
+    member_record["timezone"] = data.user.user_metadata.get("timezone",member_data["timezone"])
+
+    table = supabase.table("organization_members")
     query = table.insert(member_record)
     result = await query.execute()
+
+    await update_metadata_of_user(member_data["user_id"],{
+        "organization_id": organisation_id
+    })
 
     return len(result.data) > 0 if result.data else False
 
@@ -501,7 +508,7 @@ async def remove_member_from_organisation(organisation_id: str, user_id: str) ->
     """Remove a member from organisation."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organization_members")
+    table = supabase.table("organization_members")
     query = table.delete().eq("user_id", user_id).eq("organization_id", organisation_id)
     result = await query.execute()
 
@@ -515,7 +522,7 @@ async def update_member_role(organisation_id: str, user_id: str, role_id: str) -
     """Update member's role in organisation."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organization_members")
+    table = supabase.table("organization_members")
     query = table.update({
         "role_id": role_id,
         "updated_at": "now()"
@@ -536,7 +543,7 @@ async def get_organisation_settings(organisation_id: str) -> Dict[str, Any]:
     """Get organisation settings."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     query = table.select("settings").eq("id", organisation_id)
     result = await query.execute()
 
@@ -552,7 +559,7 @@ async def update_organisation_settings(organisation_id: str, settings: Dict[str,
     """Update organisation settings."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     query = table.update({
         "settings": settings,
         "updated_at": "now()"
@@ -569,7 +576,7 @@ async def get_organisation_preferences(organisation_id: str) -> Dict[str, Any]:
     """Get organisation preferences."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     query = table.select("preferences").eq("id", organisation_id)
     result = await query.execute()
 
@@ -585,7 +592,7 @@ async def update_organisation_preferences(organisation_id: str,preferences: Dict
     """Update organisation preferences."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     query = table.update({
         "preferences": preferences,
         "updated_at": "now()"
@@ -616,22 +623,24 @@ async def get_organisation_statistics(organisation_id: str) -> Dict[str, Any]:
     supabase = await get_supabase_admin_client()
 
     # Get member count
-    members_table = await supabase.table("organization_members")
+    members_table = supabase.table("organization_members")
     members_query = members_table.select("id", count="exact").eq("organization_id", organisation_id)
     members_result = await members_query.execute()
 
     member_count = members_result.count if members_result.count is not None else 0
 
     # Get role count
-    roles_table = await supabase.table("roles")
+    roles_table = supabase.table("roles")
     roles_query = roles_table.select("id", count="exact").eq("organization_id", organisation_id)
     roles_result = await roles_query.execute()
 
     role_count = roles_result.count if roles_result.count is not None else 0
 
     # Get permission count
-    permissions_table = await supabase.table("permissions")
-    permissions_query = permissions_table.select("id", count="exact").eq("organization_id", organisation_id)
+    permissions_table = supabase.table("permissions")
+    permissions_query = permissions_table.select(
+        "id", count="exact"
+        ).eq("organization_id", organisation_id)
     permissions_result = await permissions_query.execute()
 
     permission_count = permissions_result.count if permissions_result.count is not None else 0
@@ -651,20 +660,26 @@ async def get_organisation_member_stats(organisation_id: str) -> Dict[str, Any]:
     supabase = await get_supabase_admin_client()
 
     # Get total members
-    members_table = await supabase.table("organization_members")
+    members_table = supabase.table("organization_members")
     total_query = members_table.select("id", count="exact").eq("organization_id", organisation_id)
     total_result = await total_query.execute()
 
     total_members = total_result.count if total_result.count is not None else 0
 
     # Get active members
-    active_query = members_table.select("id", count="exact").eq("organization_id", organisation_id).eq("status", "active")
+    active_query = members_table.select(
+        "id", count="exact").eq(
+        "organization_id", organisation_id).eq(
+        "status", "active")
     active_result = await active_query.execute()
 
     active_members = active_result.count if active_result.count is not None else 0
 
     # Get banned members
-    banned_query = members_table.select("id", count="exact").eq("organization_id", organisation_id).eq("status", "banned")
+    banned_query = members_table.select(
+        "id", count="exact").eq(
+        "organization_id", organisation_id).eq(
+        "status", "banned")
     banned_result = await banned_query.execute()
 
     banned_members = banned_result.count if banned_result.count is not None else 0
@@ -686,7 +701,7 @@ async def get_organisation_activity_stats(organisation_id: str) -> Dict[str, Any
     # Get recent activity (last 30 days)
     thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
 
-    table = await supabase.table("organization_members")
+    table = supabase.table("organization_members")
     query = table.select("id", count="exact").eq("organization_id", organisation_id).gte(
         "last_active_at", thirty_days_ago
     )
@@ -737,7 +752,7 @@ async def bulk_delete_organisations(organisation_ids: List[str]) -> int:
     """Bulk delete multiple organisations."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     query = table.delete().in_("id", organisation_ids)
     result = await query.execute()
 
@@ -770,7 +785,7 @@ async def bulk_add_members(
             "updated_at": "now()"
         })
 
-    table = await supabase.table("organization_members")
+    table = supabase.table("organization_members")
     query = table.insert(member_records)
     result = await query.execute()
 
@@ -802,8 +817,8 @@ async def create_default_permissions_for_organisation(organisation_id: str) -> L
         })
 
     # Insert permissions with conflict handling
-    table = await supabase.table("permissions")
-    upsert_query = await table.upsert(permission_records, on_conflict="organization_id,code")
+    table = supabase.table("permissions")
+    upsert_query = table.upsert(permission_records, on_conflict="organization_id,code")
     result = await upsert_query.execute()
 
     if result.data:
@@ -827,8 +842,8 @@ async def create_super_admin_role(organisation_id: str) -> Dict[str, Any]:
         "updated_at": "now()"
     }
 
-    table = await supabase.table("roles")
-    query = await table.insert(role_record)
+    table = supabase.table("roles")
+    query = table.insert(role_record)
     result = await query.execute()
 
     if result.data and len(result.data) > 0:
@@ -844,9 +859,9 @@ async def assign_all_permissions_to_role(role_id: str, organisation_id: str) -> 
     supabase = await get_supabase_admin_client()
 
     # First, get all permissions for the organisation
-    permissions_table = await supabase.table("permissions")
-    select_query = await permissions_table.select("id")
-    permissions_query = await select_query.eq("organization_id", organisation_id)
+    permissions_table = supabase.table("permissions")
+    select_query = permissions_table.select("id")
+    permissions_query = select_query.eq("organization_id", organisation_id)
     permissions_result = await permissions_query.execute()
 
     if not permissions_result.data:
@@ -863,8 +878,8 @@ async def assign_all_permissions_to_role(role_id: str, organisation_id: str) -> 
         })
 
     # Insert role-permission assignments with conflict handling
-    role_permissions_table = await supabase.table("role_permissions")
-    upsert_query = await role_permissions_table.upsert(
+    role_permissions_table = supabase.table("role_permissions")
+    upsert_query = role_permissions_table.upsert(
         role_permission_records,
         on_conflict="organization_id,role_id,permission_id"
     )
@@ -880,11 +895,11 @@ async def get_organisation_permissions(organisation_id: str) -> List[Dict[str, A
     """Get all permissions for an organisation."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("permissions")
-    select_query = await table.select(
+    table = supabase.table("permissions")
+    select_query = table.select(
         "id, name, code, category, description, created_at, updated_at"
     )
-    query = await select_query.eq("organization_id", organisation_id)
+    query = select_query.eq("organization_id", organisation_id)
     result = await query.execute()
 
     return result.data if result.data else []
@@ -902,21 +917,21 @@ async def cleanup_organisation_data(organisation_id: str) -> Dict[str, int]:
     supabase = await get_supabase_admin_client()
 
     # Delete organization members
-    members_table = await supabase.table("organization_members")
+    members_table = supabase.table("organization_members")
     members_query = members_table.delete().eq("organization_id", organisation_id)
     members_result = await members_query.execute()
 
     members_deleted = len(members_result.data) if members_result.data else 0
 
     # Delete roles
-    roles_table = await supabase.table("roles")
+    roles_table = supabase.table("roles")
     roles_query = roles_table.delete().eq("organization_id", organisation_id)
     roles_result = await roles_query.execute()
 
     roles_deleted = len(roles_result.data) if roles_result.data else 0
 
     # Delete permissions
-    permissions_table = await supabase.table("permissions")
+    permissions_table = supabase.table("permissions")
     permissions_query = permissions_table.delete().eq("organization_id", organisation_id)
     permissions_result = await permissions_query.execute()
 
@@ -936,7 +951,7 @@ async def archive_organisation(organisation_id: str) -> bool:
     """Archive an organisation (soft delete)."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     query = table.update({
         "status": "archived",
         "updated_at": "now()"
@@ -953,7 +968,7 @@ async def restore_organisation(organisation_id: str) -> bool:
     """Restore an archived organisation."""
     supabase = await get_supabase_admin_client()
 
-    table = await supabase.table("organizations")
+    table = supabase.table("organizations")
     query = table.update({
         "status": "active",
         "updated_at": "now()"
@@ -975,11 +990,11 @@ async def get_organisation_health_status(organisation_id: str) -> Dict[str, Any]
     supabase = await get_supabase_admin_client()
 
     # Get organization status
-    table = await supabase.table("organizations")
-    select_query = await table.select(
+    table = supabase.table("organizations")
+    select_query = table.select(
         "status, created_at, updated_at"
     )
-    query = await select_query.eq("id", organisation_id)
+    query = select_query.eq("id", organisation_id)
     org_result = await query.execute()
 
     if not org_result.data or len(org_result.data) == 0:
@@ -1006,17 +1021,17 @@ async def get_organisation_usage_stats(organisation_id: str) -> Dict[str, Any]:
     supabase = await get_supabase_admin_client()
 
     # Get member count
-    members_table = await supabase.table("organization_members")
-    members_select = await members_table.select("id", count="exact")
-    members_query = await members_select.eq("organization_id", organisation_id)
+    members_table = supabase.table("organization_members")
+    members_select = members_table.select("id", count="exact")
+    members_query = members_select.eq("organization_id", organisation_id)
     members_result = await members_query.execute()
 
     member_count = members_result.count if members_result.count is not None else 0
 
     # Get role count
-    roles_table = await supabase.table("roles")
-    roles_select = await roles_table.select("id", count="exact")
-    roles_query = await roles_select.eq("organization_id", organisation_id)
+    roles_table = supabase.table("roles")
+    roles_select = roles_table.select("id", count="exact")
+    roles_query = roles_select.eq("organization_id", organisation_id)
     roles_result = await roles_query.execute()
 
     role_count = roles_result.count if roles_result.count is not None else 0
@@ -1040,11 +1055,11 @@ async def get_organisation_compliance_status(organisation_id: str) -> Dict[str, 
     supabase = await get_supabase_admin_client()
 
     # Get organization status
-    table = await supabase.table("organizations")
-    select_query = await table.select(
+    table = supabase.table("organizations")
+    select_query = table.select(
         "status, plan_type, created_at"
     )
-    query = await select_query.eq("id", organisation_id)
+    query = select_query.eq("id", organisation_id)
     org_result = await query.execute()
 
     if not org_result.data or len(org_result.data) == 0:
