@@ -89,6 +89,14 @@ def extract_session_id_from_token(current_user: dict) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Session ID not found in token",
         )
+    
+    # Validate that session_id is not None or empty string
+    if session_id is None or session_id == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session ID is null or empty in token",
+        )
+    
     return session_id
 
 
@@ -304,6 +312,7 @@ async def start_session(
     # Prepare session data for centralized operation
     session_data["session_id"] = session_id
     session_data["user_id"] = user_context.user_id
+    session_data["user_email"] = user_context.email
 
     try:
         # Create the session using centralized operation
@@ -370,8 +379,8 @@ def _format_session_item(session_data: dict) -> SessionItem:
         user_agent=session_data["user_agent"],
         device_fingerprint=session_data["device_fingerprint"],
         risk_score=session_data["risk_score"],
-        login_timestamp=format_iso_datetime(session_data["login_timestamp"]) or "",
-        logout_timestamp=format_iso_datetime(session_data["logout_timestamp"]),
+        login_timestamp=session_data["login_timestamp"] if isinstance(session_data["login_timestamp"], str) else format_iso_datetime(session_data["login_timestamp"]) or "",
+        logout_timestamp=session_data["logout_timestamp"] if isinstance(session_data["logout_timestamp"], str) else format_iso_datetime(session_data["logout_timestamp"]),
         session_status=session_data["session_status"],
         login_method=session_data["login_method"],
         accessed_phi=session_data["accessed_phi"],
@@ -486,7 +495,8 @@ async def update_session_logout(
         "session_id": session_id,
         "session_status": existing_session["session_status"],
         "logout_timestamp": (
-            existing_session["logout_timestamp"].isoformat()
+            existing_session["logout_timestamp"] if isinstance(existing_session["logout_timestamp"], str)
+            else existing_session["logout_timestamp"].isoformat()
             if existing_session["logout_timestamp"]
             else None
         ),
@@ -542,8 +552,8 @@ async def update_session_logout(
         user_agent=updated_session["user_agent"],
         device_fingerprint=updated_session["device_fingerprint"],
         risk_score=updated_session["risk_score"],
-        login_timestamp=format_iso_datetime(updated_session["login_timestamp"]) or "",
-        logout_timestamp=format_iso_datetime(updated_session["logout_timestamp"]),
+        login_timestamp=updated_session["login_timestamp"] if isinstance(updated_session["login_timestamp"], str) else format_iso_datetime(updated_session["login_timestamp"]) or "",
+        logout_timestamp=updated_session["logout_timestamp"] if isinstance(updated_session["logout_timestamp"], str) else format_iso_datetime(updated_session["logout_timestamp"]),
         session_status=updated_session["session_status"],
         login_method=updated_session["login_method"],
         accessed_phi=updated_session["accessed_phi"],

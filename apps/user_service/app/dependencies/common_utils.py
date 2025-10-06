@@ -123,9 +123,9 @@ def extract_user_context(current_user: dict) -> UserContext:
     """
     user_id = current_user.get("sub")
     user_metadata = current_user.get("user_metadata", {})
-    organization_id = user_metadata.get("organization_id",None)
+    organization_id = user_metadata.get("organization_id", None)
     email = current_user.get("email")
-    user_type = user_metadata.get("type", None)  # Extract otype from JWT
+    user_type = user_metadata.get("type", None)  # Extract type from JWT
 
     # Validation: Ensure required fields are present
     if not user_id:

@@ -163,7 +163,7 @@ async def get_audit_logs(
             risk_level=audit_log["risk_level"],
             ip_address=str(IPv4Address(audit_log["ip_address"])),
             description=audit_log["description"],
-            timestamp=format_iso_datetime(audit_log["timestamp"]) or "",
+            timestamp=audit_log["timestamp"] if isinstance(audit_log["timestamp"], str) else format_iso_datetime(audit_log["timestamp"]) or "",
             status_code=audit_log.get("status_code"),
             category=audit_log.get("category"),
         )
@@ -280,10 +280,10 @@ async def get_audit_log_from_id(
         risk_level=audit_log_data["risk_level"],
         ip_address=str(IPv4Address(audit_log_data["ip_address"])),
         description=audit_log_data["description"],
-        timestamp=format_iso_datetime(audit_log_data["timestamp"]) or "",
+        timestamp=audit_log_data["timestamp"] if isinstance(audit_log_data["timestamp"], str) else format_iso_datetime(audit_log_data["timestamp"]) or "",
         hash_signature=audit_log_data["hash_signature"],
         previous_hash=audit_log_data["previous_hash"],
-        retention_date=format_iso_datetime(audit_log_data["retention_date"]) or None,
+        retention_date=audit_log_data["retention_date"] if isinstance(audit_log_data["retention_date"], str) else format_iso_datetime(audit_log_data["retention_date"]) or None,
         status_code=audit_log_data.get("status_code"),
         category=audit_log_data.get("category"),
     )
