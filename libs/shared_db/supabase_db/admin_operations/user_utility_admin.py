@@ -4,8 +4,6 @@ This module contains all user-related admin operations.
 All Supabase Auth admin API operations for user management should be centralized here.
 """
 
-import os
-import sys
 import urllib.parse
 from typing import Optional, Tuple, get_args
 
@@ -65,12 +63,9 @@ async def update_supabase_user_email(
         }
 
         # Send magic link email notification
-        logger.info("Sending magic link email notification to user %s", user_id)
         email_sent = await send_admin_update_email(user_data)
 
-        if email_sent:
-            logger.info("Magic link email sent successfully to %s", email)
-        else:
+        if not email_sent:
             logger.warning("Failed to send magic link email to %s", email)
             # Note: We don't fail the entire operation if email fails
             # The email update was successful, only the notification failed
@@ -102,16 +97,9 @@ async def generate_magic_link(email: str) -> Optional[str]:
             }
         )
 
-        logger.debug("Magic link generation response: %s", response)
-
         if response and hasattr(response, "properties") and response.properties:
             magic_link = response.properties.action_link
-            logger.debug("Generated magic link: %s", magic_link)
             if magic_link:
-                logger.info(
-                    "Magic link generated successfully using Supabase client for %s",
-                    email,
-                )
                 return magic_link
 
         logger.error("Magic link not found in Supabase client response")
@@ -201,7 +189,6 @@ async def send_admin_update_email(user: dict) -> bool:
     try:
         # Generate magic link using Supabase Auth Admin API
         magic_link = await generate_magic_link(user.get("email"))
-        logger.debug("Generated magic link for email update: %s", magic_link)
 
         if magic_link is None:
             logger.error("Failed to generate magic link for %s", user.get("email"))
@@ -219,7 +206,6 @@ async def send_admin_update_email(user: dict) -> bool:
         )
 
         if email_sent:
-            logger.info("Admin update email sent successfully to %s", user.get("email"))
             return True
 
         logger.error("Failed to send admin update email to %s", user.get("email"))
@@ -399,8 +385,7 @@ async def invite_user_with_email(body: CreateUserRequest, user_context: UserCont
             },
         )
         return response.user.id
-        # logger.debug("Email: %s, User ID: %s",body.email,response.user.id)
-        # logger.debug("Supabase user invitation sent successfully - Request ID: %s, ",request_id)
+
     except Exception as e:
         error_message = str(e).lower()
         if (

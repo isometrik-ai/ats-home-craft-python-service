@@ -131,32 +131,25 @@ async def update_password_with_link_identity(user_id: str, password: str) -> boo
     try:
         supabase_admin = await get_supabase_admin_client()
 
-        logger.info("User ID: %s", user_id)
-        logger.info("Password: %s", password)
 
         # First, get the user to check their current providers and email
         user_data = await supabase_admin.auth.admin.get_user_by_id(user_id)
         current_providers = user_data.user.app_metadata.get("providers", [])
         user_email = user_data.user.email
 
-        logger.info("Current providers: %s", current_providers)
-        logger.info("User email: %s", user_email)
 
         # Check if user already has email provider
         if "email" in current_providers:
-            logger.info("User already has email provider, updating password")
             result = await supabase_admin.auth.admin.update_user_by_id(
                 user_id,
                 {
                     "password": password
                 }
             )
-            logger.info("Password updated successfully")
             return result.user is not None
 
         # For OAuth-only users, add email/password identity using updateUser
         # This creates a new identity for the existing user without creating a new user
-        logger.info("Adding email/password identity to existing OAuth user")
 
         # Use updateUser to add email/password authentication
         # This will create an email identity linked to the existing user
@@ -174,7 +167,6 @@ async def update_password_with_link_identity(user_id: str, password: str) -> boo
             }
         )
 
-        logger.info("Email/password identity added successfully: %s", result)
         return result is not None
 
     except AuthApiError as e:

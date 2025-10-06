@@ -41,8 +41,6 @@ async def get_session_by_id_admin(code: str):
     """
     try:
         supabase = await get_supabase_admin_client()
-        logger.info("CODE_CHALLENGE: %s", CODE_CHALLENGE)
-        logger.info("CODE_VERIFIER: %s", CODE_VERIFIER)
         result = await supabase.auth.exchange_code_for_session(
             {
                 "auth_code": code,

@@ -136,13 +136,7 @@ class CacheRequestBodyMiddleware(BaseHTTPMiddleware):
                     "Request body cached successfully - Request ID: %s, "
                     "Method: %s, URL: %s, Body Size: %s bytes"
                 )
-                exception_logger.debug(
-                    log_msg,
-                    request_id,
-                    request.method,
-                    str(request.url),
-                    len(body_bytes),
-                )
+
             except (OSError, ValueError) as e:
                 # pylint: disable=protected-access
                 request.state._cached_body = b""
@@ -234,11 +228,6 @@ async def unified_exception_handler(request: Request, exc: Exception):
     if route and hasattr(route.endpoint, "__audit_api_call_params__"):
         audit_params = route.endpoint.__audit_api_call_params__
         request.state.audit_metadata = audit_params
-        exception_logger.debug(
-            "Audit metadata extracted from route - Request ID: %s, Params: %s",
-            request_id,
-            str(audit_params),
-        )
 
     # Handle HTTP Exceptions (4xx, 5xx)
     if isinstance(exc, (FastAPIHTTPException, StarletteHTTPException)):
@@ -311,7 +300,6 @@ async def unified_exception_handler(request: Request, exc: Exception):
 
     # Also log to the audit logger for backward compatibility
     logger.error("Error in %s: %s", operation_name, error_message)
-    logger.debug(full_traceback)
 
     await _handle_audit_logging(request, error_message, 500, "unexpected error")
     print("JSONResponse 500")

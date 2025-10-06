@@ -137,31 +137,23 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> Dict
         print(f"Creating organization: {org_data}")
         org_result = await create_new_organisation(org_data)
         print(f"Created organization: {org_result['id']}")
-        # logger.debug("Organization created - Request ID: %s, ",org_data["request_id"])
-        # logger.debug("Organization ID: %s, ",org_result['id'])
 
         # Create Super Admin role
         super_admin_role_result = await create_super_admin_role(org_data["organization_id"])
         super_admin_role_id = super_admin_role_result['id']
         print(f"Created Super Admin role: {super_admin_role_id}")
-        # logger.debug("Super Admin role created - Request ID: %s, ",org_data["request_id"])
-        # logger.debug("Role ID: %s",super_admin_role_id)
 
         # Create default permissions
         permission_ids = await create_default_permissions_for_organisation(
             org_data["organization_id"]
         )
         print(f"Created {len(permission_ids)} default permissions")
-        # logger.debug("Default permissions created - Request ID: %s, ",org_data["request_id"])
-        # logger.debug("Permission count: %s",len(permission_ids))
 
         # Assign all permissions to Super Admin role
         await assign_all_permissions_to_role(
             super_admin_role_id, org_data["organization_id"]
         )
         print("Assigned permissions to Super Admin role")
-        # logger.debug("Permissions assigned to role - Request ID: %s, ",org_data["request_id"])
-        # logger.debug("Organization member created - Request ID: %s, ",org_data["request_id"])
 
         # Create organization member
         member_result = await add_member_to_organisation(org_data["organization_id"], {
@@ -174,7 +166,7 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> Dict
             "role_id": super_admin_role_id,
             "status": "active",
         })
-        # logger.debug("Member ID: %s, User ID: %s",member_result['id'],org_data["user_id"])
+
         if member_result:
             print("Created organization member")
     except Exception as db_error:

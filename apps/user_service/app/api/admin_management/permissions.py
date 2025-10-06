@@ -58,7 +58,6 @@ router = APIRouter(prefix="/permissions", tags=["Permissions Management"])
 
 # Initialize logger for permissions module
 logger = get_logger("permissions-api")
-logger.info("Permissions API module loaded")
 
 # Authentication description for API documentation
 AUTH_DESCRIPTION = "Bearer token required for authentication"
@@ -107,9 +106,6 @@ async def get_permissions(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("GET /permissions request started - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
 
     # Set audit context for permissions listing
     request.state.audit_table = "permissions"
@@ -118,14 +114,9 @@ async def get_permissions(
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(current_user, "settings.roles.manage")
-    logger.debug("User context extracted and permissions validated - Request ID: %s, ",request_id)
-    logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     try:
         permissions_data = await get_all_permissions(user_context.organization_id)
-        logger.debug("Permissions retrieved from database - Request ID: %s, ",request_id)
-        logger.debug("Organization ID: %s, ",user_context.organization_id)
-        logger.debug("Permissions count: %s",len(permissions_data) if permissions_data else 0)
     except DatabaseOperationError as e:
         logger.error(
             "Database error retrieving permissions - Request ID: %s, Error: %s",
@@ -146,8 +137,6 @@ async def get_permissions(
     # Format permissions data efficiently
     permissions = await format_permissions_data(permissions_data)
 
-    logger.debug("Permissions data formatted - Request ID: %s, ",request_id)
-    logger.debug("Formatted permissions count: %s",len(permissions))
 
     # Set audit data for successful retrieval
     request.state.raw_audit_new_data = {
@@ -159,9 +148,6 @@ async def get_permissions(
         ),
     }
 
-    logger.info("GET /permissions request completed successfully - Request ID: %s, ",request_id)
-    logger.info("Organization ID: %s, ",user_context.organization_id)
-    logger.info("Permissions Count: %s, Status Code: 200",len(permissions))
 
     return PermissionsResponse(
         status_code=status.HTTP_200_OK,
@@ -200,10 +186,6 @@ async def get_permission_by_id(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("GET /permissions/%s request started - Request ID: %s, ",permission_id,request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Permission ID: %s, ",permission_id)
 
     # Set audit context for permission retrieval
     request.state.audit_requested_id = permission_id
@@ -213,20 +195,14 @@ async def get_permission_by_id(
 
     # Validate role_id format using utility function
     await validate_uuid_format(permission_id, "permission ID")
-    logger.debug("Permission ID format validated - Request ID: %s, ",request_id)
-    logger.debug("Permission ID: %s, ",permission_id)
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(current_user, "settings.roles.manage")
-    logger.debug("User context extracted and permissions validated - Request ID: %s, ",request_id)
-    logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     try:
         permission = await get_permission_details_by_id(
             permission_id, user_context.organization_id
         )
-        logger.debug("Permission retrieved from database - Request ID: %s, ",request_id)
-        logger.debug("Permission ID: %s, Permission found: %s",permission_id,permission is not None)
     except DatabaseOperationError as e:
         logger.error(
             "Database error retrieving permission - Request ID: %s, Error: %s",
@@ -249,9 +225,6 @@ async def get_permission_by_id(
 
     permissions = await format_permissions_data(permission)
 
-    logger.debug("Permission data formatted - Request ID: %s, ",request_id)
-    logger.debug("Permission ID: %s, Permission Name: %s",permission_id,permission['name'])
-    logger.debug("Permission Code: %s",permission['code'])
 
     # Set audit data for successful retrieval
     request.state.raw_audit_new_data = {
@@ -262,10 +235,6 @@ async def get_permission_by_id(
         "organization_id": user_context.organization_id,
     }
 
-    logger.info("GET /permissions/%s request completed successfully - ",permission_id)
-    logger.info("Request ID: %s, ",request_id)
-    logger.info("Permission ID: %s, Permission Name: %s",permission_id,permission['name'])
-    logger.info("Permission Code: %s, Status Code: 200",permission['code'])
 
     return PermissionsResponse(
         status_code=status.HTTP_200_OK,
@@ -299,11 +268,6 @@ async def create_permission(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("POST /permissions request started - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Permission Name: %s, ",permission_data.name)
-    logger.info("Permission Code: %s",permission_data.code)
 
     # Set audit context for permission creation
     request.state.audit_table = "permissions"
@@ -314,20 +278,12 @@ async def create_permission(
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(current_user, "settings.roles.manage")
-    logger.debug("User context extracted and permissions validated - Request ID: %s, ",request_id)
-    logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     try:
         permission = await create_new_permission(
             permission_data=permission_data,
             organization_id=user_context.organization_id
         )
-        logger.debug("Permission created in database - Request ID: %s, ",request_id)
-        logger.debug(
-            "Permission Name: %s, Permission Code: %s, ",
-            permission_data.name,permission_data.code
-        )
-        logger.debug("Permission created: %s",permission is not None)
     except DatabaseOperationError as e:
         logger.error(
             "Database error creating permission - Request ID: %s, Error: %s",
@@ -352,9 +308,6 @@ async def create_permission(
 
     permissions = await format_permissions_data(permission)
 
-    logger.debug("Created permission data formatted - Request ID: %s, ",request_id)
-    logger.debug("Permission ID: %s, Permission Name: %s, ",permission['id'],permission['name'])
-    logger.debug("Permission Code: %s",permission['code'])
 
     # Set audit data for successful creation
     request.state.raw_audit_new_data = {
@@ -369,9 +322,6 @@ async def create_permission(
         ),
     }
 
-    logger.info("POST /permissions request completed successfully - Request ID: %s, ",request_id)
-    logger.info("Permission ID: %s, Permission Name: %s, ",permission['id'],permission['name'])
-    logger.info("Permission Code: %s, Status Code: 201",permission['code'])
 
     return PermissionsResponse(
         status_code=status.HTTP_200_OK,
@@ -405,13 +355,8 @@ async def delete_permission(
     Returns:
         PermissionResponse: Success message indicating API is working
     """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-    logger.info(
-        "DELETE /permissions/%s request started - Request ID: %s, ",
-        permission_id,request_id
-    )
-    logger.info("Permission ID: %s, ",permission_id)
+    # # Generate request ID for tracking
+    # request_id = str(uuid.uuid4())
 
     # Set audit context for permission deletion
     request.state.audit_requested_id = str(permission_id)
@@ -431,13 +376,6 @@ async def delete_permission(
         "status": "DELETED",
         "deletion_timestamp": current_timestamp,
     }
-
-    logger.debug("Delete permission request processed - Request ID: %s, ",request_id)
-    logger.debug("Permission ID: %s, ",permission_id)
-
-    logger.info("DELETE /permissions/%s request completed successfully - ",permission_id)
-    logger.info("Request ID: %s, ",request_id)
-    logger.info("Permission ID: %s, Status Code: 200",permission_id)
 
     return PermissionResponse(
         message=f"Delete permission {permission_id} API is working",

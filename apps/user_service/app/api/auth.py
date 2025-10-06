@@ -10,7 +10,10 @@ Last Updated: 2024-12-19
 """
 
 # Standard library imports
-import re, os, sys, uuid
+import re
+import os
+import sys
+import uuid
 
 # Third-party imports
 from fastapi import APIRouter, HTTPException, status, Body, Request, Depends, Response
@@ -85,34 +88,12 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # Initialize logger for auth module
 logger = get_logger("auth-api")
-logger.info("Auth API module loaded")
 
 
 # ============================================================================
 # SIGNUP HELPER FUNCTIONS
 # ============================================================================
 
-
-def _prepare_signup_response_data(
-    # organization_id: str,
-    user_id: str,
-    # organization_name: str,
-    # slug: str,
-    signup_data: SignupRequest
-) -> dict:
-    """Prepare response data for successful signup."""
-    return {
-        # "organization_id": organization_id,
-        "user_id": user_id,
-        # "organization_name": organization_name,
-        # "user_email": signup_data.user_data.email,
-        # "account_type": signup_data.account_type.value,
-        # "plan_type": signup_data.plan_type.value,
-        # "slug": slug,
-        # "status": "trial",
-        # "role_name": "Super Admin",
-        # "max_users": _get_max_users_for_plan(signup_data.plan_type.value),
-    }
 
 def _is_password_strong(password: str) -> bool:
     """
@@ -268,11 +249,9 @@ async def forgot_password(request: Request, data: ForgotPasswordRequest):
             "detail": "Email not found in our system. Please check your Inbox and try again."
         }
     """
-    logger.info("=== FORGOT PASSWORD DEBUG START ===")
 
     try:
         # First, check if email exists in auth.users table
-        logger.info("Checking if email exists in auth.users...")
         user = await get_auth_user_by_email(data.email)
         if not user:
             raise HTTPException(
@@ -282,7 +261,6 @@ async def forgot_password(request: Request, data: ForgotPasswordRequest):
 
         # Send password reset email only if user exists
         await reset_the_password_email(data.email)
-        logger.info("Password reset email sent successfully")
         return ForgotPasswordResponse(
             # status_code=status.HTTP_200_OK,
             message="Password reset email sent successfully. Please check your email."
@@ -294,8 +272,6 @@ async def forgot_password(request: Request, data: ForgotPasswordRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process password reset request. Please try again."
         ) from error
-    finally:
-        logger.info("=== FORGOT PASSWORD DEBUG END ===")
 
 
 @router.post("/reset-password", response_model=PasswordResponse, status_code=status.HTTP_200_OK)
@@ -344,11 +320,6 @@ async def reset_password(
             "detail": "Invalid or expired reset token. Please request a new password reset."
         }
     """
-    logger.info("=== PASSWORD RESET DEBUG START ===")
-    logger.info("Request received for password reset")
-    logger.info("Token length: %s", len(data.token) if data.token else 'None')
-    logger.info("Token preview: %s...", data.token[:50] if data.token else 'None')
-    logger.info("New password length: %s", len(data.new_password) if data.new_password else 'None')
 
     try:
         user = await get_user_from_token(data.token)
@@ -367,9 +338,7 @@ async def reset_password(
             )
 
         result = await update_password_with_token(user['sub'], data.new_password)
-        logger.info("update_password_with_token result: %s", result)
         if result.user:
-            logger.info("Password updated successfully")
 
             # Send confirmation email to user
             user_email = user.get('email', '')
@@ -379,10 +348,7 @@ async def reset_password(
 
             try:
                 email_sent = send_password_reset_confirmation_email(user_email, user_name)
-                if email_sent:
-                    logger.info("Password reset confirmation email sent successfully to %s",
-                        user_email)
-                else:
+                if not email_sent:
                     logger.warning("Failed to send password reset confirmation email to %s",
                         user_email)
                     # Note: We don't fail the entire operation if email fails
@@ -410,8 +376,6 @@ async def reset_password(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reset password. Please try again."
         ) from error
-    finally:
-        logger.info("=== PASSWORD RESET DEBUG END ===")
 
     # 2. Organization creation based on account type
     # 3. Super Admin role and permissions setup
@@ -486,20 +450,18 @@ async def signup(
     user_id = await sign_up_supabase_user(signup_data)
     print(f"Created Supabase user: {user_id}")
 
-    logger.info(
-        "POST /auth/signup request completed successfully - Request ID: %s, ",
-        request_id
-    )
-    # logger.info("Organization ID: %s, User ID: %s, ",organization_id,user_id)
-    logger.info("Email: %s, Status Code: 201",signup_data.email)
 
     return SignupResponse(
         # status_code=status.HTTP_201_CREATED,
         message="Account created successfully! Please check your email for verification.",
-        data=_prepare_signup_response_data(
-            user_id=user_id,
-            signup_data=signup_data
-        )
+        data={
+            "user_id": user_id,
+            "email": signup_data.email,
+            "first_name": signup_data.first_name,
+            "last_name": signup_data.last_name,
+            "phone": signup_data.phone,
+            "timezone": signup_data.timezone,
+        }
     )
 
 
@@ -513,17 +475,6 @@ def _get_not_found_response():
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=data.model_dump())
-
-
-# def _parse_meta(meta_val):
-#     if isinstance(meta_val, dict):
-#         return meta_val
-#     if isinstance(meta_val, str):
-#         try:
-#             return json.loads(meta_val)
-#         except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-#             return None
-#     return None
 
 def _extract_user_type_strict(row) -> str|None:
     if not row:
@@ -559,7 +510,6 @@ async def verify_email(
     if not auth_user:
         return _get_not_found_response()
 
-    logger.info("Auth user: %s", auth_user)
 
     # 2) Extract and validate user type
     user_type = _extract_user_type_strict(auth_user)
@@ -675,109 +625,6 @@ async def oauth_connect(provider: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate {provider} OAuth URL"
         )
-
-# @router.get("/link-callback", status_code=status.HTTP_200_OK)
-# async def link_callback(request: Request):
-#     """
-#     Handle OAuth callback for linking identity.
-#     """
-#     try:
-#         # Get the authorization code
-#         code = request.query_params.get("code")
-#         user_id = request.query_params.get("user_id")
-
-#         if not code and not user_id:
-#             raise HTTPException(
-#                 status_code=status.HTTP_400_BAD_REQUEST,
-#                 detail="Missing authorization code or user ID"
-#             )
-
-#         # Exchange code for session
-#         session_result = await get_session_by_id_admin(code)
-
-#         logger.info("Session result: %s", session_result)
-
-#         # if not session_result.session:
-#         #     raise HTTPException(
-#         #         status_code=status.HTTP_400_BAD_REQUEST,
-#         #         detail="Failed to exchange authorization code"
-#         #     )
-
-#         # # Get Google user data
-#         # google_user = session_result.user
-#         # google_email = google_user.email
-
-#         # # Verify the user exists and get their email
-#         # user_response = await get_user_by_id(user_id)
-
-#         # logger.info("User response: %s", user_response)
-
-#         # if not user_response.user:
-#         #     raise HTTPException(
-#         #         status_code=status.HTTP_404_NOT_FOUND,
-#         #         detail="User not found"
-#         #     )
-
-#         # user_email = user_response.user.email
-
-#         # # Check if Google is already linked to this user
-#         # current_providers = user_response.user.get('app_metadata', {}).get('providers', [])
-#         # logger.info("Current providers: %s", current_providers)
-#         # if 'google' in current_providers:
-#         #     return {
-#         #         "success": True,
-#         #         "message": "Google account is already linked to this user!"
-#         #                    "You can login with either email/password or Google OAuth.",
-#         #         "redirect_url": "http://localhost:3000/dashboard"
-#         #     }
-
-#         # # Check if emails match
-#         # if google_email != user_email:
-#         #     raise HTTPException(
-#         #         status_code=status.HTTP_400_BAD_REQUEST,
-#         #         detail="Google account email doesn't match your account email"
-#         #     )
-
-#         # # Link Google identity to existing user
-#         # success = await link_google_identity_to_existing_user(
-#         #     user_id,
-#         #     google_user
-#         # )
-
-#         # if success:
-#         #     return {
-#         #         "success": True,
-#         #         "message": "Google account linked successfully!"
-#         #                    "You can now login with either email/password or Google OAuth.",
-#         #         "redirect_url": "http://localhost:3000/dashboard"  # Your frontend URL
-#         #     }
-
-#         # raise HTTPException(
-#         #     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#         #     detail="Failed to link Google account"
-#         # )
-#         return True
-
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error("Error in link callback: %s", str(e))
-#         log_exception()
-#         print("\n\n")
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to link Google account"
-#         )
-
-# @router.get("/callback")
-# async def callback(request: Request):
-#     """
-#     Callback endpoint to handle the OAuth callback.
-#     """
-#     res = dict(request.query_params)
-#     result = await get_session_by_id_admin(res["code"])
-#     logger.info("Callback result: %s", result)
-#     return {"message": "Callback received"}
 
 @router.get("/oauth-callback", status_code=status.HTTP_200_OK)
 async def oauth_callback(request: Request):

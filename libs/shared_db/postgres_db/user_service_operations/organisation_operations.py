@@ -952,9 +952,7 @@ async def archive_organisation(organisation_id: str) -> bool:
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({
-        "status": "archived",
-        "updated_at": "now()"
+    query = table.update({"status": "archived","updated_at": "now()"
     }).eq("id", organisation_id)
     result = await query.execute()
 
@@ -969,10 +967,8 @@ async def restore_organisation(organisation_id: str) -> bool:
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({
-        "status": "active",
-        "updated_at": "now()"
-    }).eq("id", organisation_id)
+    query = table.update({"status": "active","updated_at": "now()"
+        }).eq("id", organisation_id)
     result = await query.execute()
 
     return len(result.data) > 0 if result.data else False
@@ -991,9 +987,7 @@ async def get_organisation_health_status(organisation_id: str) -> Dict[str, Any]
 
     # Get organization status
     table = supabase.table("organizations")
-    select_query = table.select(
-        "status, created_at, updated_at"
-    )
+    select_query = table.select("status, created_at, updated_at")
     query = select_query.eq("id", organisation_id)
     org_result = await query.execute()
 
@@ -1056,9 +1050,7 @@ async def get_organisation_compliance_status(organisation_id: str) -> Dict[str, 
 
     # Get organization status
     table = supabase.table("organizations")
-    select_query = table.select(
-        "status, plan_type, created_at"
-    )
+    select_query = table.select("status, plan_type, created_at")
     query = select_query.eq("id", organisation_id)
     org_result = await query.execute()
 

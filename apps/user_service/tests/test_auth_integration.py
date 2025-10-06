@@ -474,25 +474,6 @@ def test_password_strength_validation():
     assert _is_password_strong("password123") == False  # No uppercase
     assert _is_password_strong("PASSWORD123") == False  # No lowercase
 
-def test_prepare_signup_response_data():
-    """Test signup response data preparation - covers auth.py helper function"""
-    from apps.user_service.app.api.auth import _prepare_signup_response_data
-    from apps.user_service.app.schemas.auth import SignupRequest
-
-    signup_data = SignupRequest(
-        email="test@example.com",
-        password="TestPass123!",
-        first_name="Test",
-        last_name="User"
-    )
-
-    result = _prepare_signup_response_data(
-        user_id="test-user-id",
-        signup_data=signup_data
-    )
-
-    assert result["user_id"] == "test-user-id"
-
 # Note: _parse_meta function is commented out in auth.py, so this test is removed
 
 def test_extract_user_type_strict():

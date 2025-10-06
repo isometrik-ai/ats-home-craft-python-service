@@ -1,4 +1,4 @@
-# pylint: disable=invalid-name,E0213
+# pylint: disable=invalid-name,E0213,C0301
 """
 Auth Schemas Module
 
@@ -7,10 +7,13 @@ Auth Schemas Module
 import base64
 import random
 import hashlib
-from typing import List, Optional, Dict, Any
 from enum import Enum
+from typing import List, Optional, Dict, Any
+
 from pydantic import BaseModel, Field, model_validator, EmailStr, field_validator
 from fastapi import HTTPException, status
+
+from apps.user_service.app.schemas import _bad_request
 
 # ============================================================================
 # ENUMS AND CONSTANTS
@@ -168,7 +171,9 @@ class ResetPasswordRequest(BaseModel):
     """Request model for reset password operations
 
     The token should be the access_token extracted from the password reset email URL.
-    Email URL format: http://localhost:3000/#access_token=eyJhbGciOiJIUzI1NiIs...&expires_at=1758009136&expires_in=3600&refresh_token=4bz3ixdhgdbv&token_type=bearer&type=recovery
+    Email URL format: http://localhost:3000/#access_token=eyJhbGciOiJIUzI1NiIs...
+                      &expires_at=1758009136&expires_in=3600...
+                      &refresh_token=4bz3ixdhgdbv&token_type=bearer&type=recovery
     """
 
     token: str  # access_token from the password reset email URL
@@ -447,73 +452,41 @@ class CompanyData(BaseModel):
     @model_validator(mode='after')
     def validate_enterprise_features_and_practice_areas(self):
         """Validate enterprise features and practice areas based on firm size."""
+        match self.company_size:
+            # Solo Practitioner validations
+            case FirmSize.SOLO_PRACTITIONER:
+                if self.need_help_importing_data is not False:
+                    _bad_request('need_help_importing_data is not applicable for Solo Practitioner')
+                if self.need_migration_assistance is not False:
+                    _bad_request('need_migration_assistance is not applicable for Solo Practitioner')
+                if self.compliance_security is not None:
+                    _bad_request('compliance_security is not applicable for Solo Practitioner')
+                if self.preferred_integration is not None:
+                    _bad_request('preferred_integration is not applicable for Solo Practitioner')
+                if self.team_setup is not None:
+                    _bad_request('team_setup is not applicable for Solo Practitioner')
+                if self.enterprise_features is not None:
+                    _bad_request('enterprise_features is not applicable for Solo Practitioner')
 
-        # Solo Practitioner validations
-        if self.company_size == FirmSize.SOLO_PRACTITIONER:
-            # These fields should not be provided for Solo Practitioner
-            if self.need_help_importing_data is not False:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='need_help_importing_data is not applicable for Solo Practitioner'
-                )
-            if self.need_migration_assistance is not False:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='need_migration_assistance is not applicable for Solo Practitioner'
-                )
-            if self.compliance_security is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='compliance_security is not applicable for Solo Practitioner'
-                )
-            if self.preferred_integration is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='preferred_integration is not applicable for Solo Practitioner'
-                )
-            if self.team_setup is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='team_setup is not applicable for Solo Practitioner'
-                )
-            if self.enterprise_features is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='enterprise_features is not applicable for Solo Practitioner'
-                )
+            # Small Firm (2-10 attorneys) validations
+            case FirmSize.SMALL_FIRM:
+                if self.enterprise_features is not None:
+                    _bad_request('enterprise_features is not applicable for Small Firm (2-10 attorneys)')
+                if self.compliance_security is not None:
+                    _bad_request('compliance_security is not applicable for Small Firm (2-10 attorneys)')
 
-        # Small Firm (2-10 attorneys) validations
-        elif self.company_size == FirmSize.SMALL_FIRM:
-            # These fields should not be provided for Small Firm
-            if self.enterprise_features is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='enterprise_features is not applicable for Small Firm (2-10 attorneys)'
-                )
-            if self.compliance_security is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='compliance_security is not applicable for Small Firm (2-10 attorneys)'
-                )
+            # Mid-Size/Large Firm (11-100 attorneys) validations
+            case FirmSize.MID_SIZE_LARGE_FIRM:
+                if self.enterprise_features is not None:
+                    _bad_request('enterprise_features is not applicable for Mid-Size/Large Firm (11-100 attorneys)')
 
-        # Mid-Size/Large Firm (11-100 attorneys) validations
-        elif self.company_size == FirmSize.MID_SIZE_LARGE_FIRM:
-            # These fields should not be provided for Mid-Size/Large Firm
-            if self.enterprise_features is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='enterprise_features is not applicable for '
-                           'Mid-Size/Large Firm (11-100 attorneys)'
-                )
+            # Enterprise Firm validations
+            case FirmSize.ENTERPRISE_FIRM:
+                if self.enterprise_features is None:
+                    _bad_request('enterprise_features are required for Enterprise Firm (100+ attorneys)')
 
-        # Enterprise Firm validations
-        elif self.company_size == FirmSize.ENTERPRISE_FIRM:
-            # Enterprise features are required for Enterprise Firm
-            if self.enterprise_features is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='enterprise_features are required for Enterprise Firm (100+ attorneys)'
-                )
+            case _:
+                pass
 
         # Validate secondary practice areas don't overlap with primary ones
         if self.secondary_practice_areas is not None:

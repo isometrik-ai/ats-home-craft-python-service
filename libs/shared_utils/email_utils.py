@@ -51,7 +51,6 @@ def send_email(email: str, subject: str, message: str, html: str = None) -> bool
             timeout=10,
         )
         if response.status_code == 200:
-            logger.info("Email sent successfully to %s", email)
             return True
         logger.error("Failed to send email: %s", response.text)
         return False
