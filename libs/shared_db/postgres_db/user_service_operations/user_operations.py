@@ -367,9 +367,8 @@ async def get_auth_user_by_email(email: str) -> Optional[Dict[str, Any]]:
 
     for user in result:
         if user.email == email:
-            logger.info(f"User with email {email} found")
             return user
-    logger.error(f"User with email {email} not found")
+    logger.error("User with email %s not found", email)
     return None
 
 

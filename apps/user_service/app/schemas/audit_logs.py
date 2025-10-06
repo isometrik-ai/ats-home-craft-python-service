@@ -247,7 +247,7 @@ class AuditLogsResponse(BaseModel):
         total_count (int): Total number of audit logs available (for pagination)
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(
         ..., description="Response message describing the operation result"
     )
@@ -299,7 +299,7 @@ class AuditLogDetailResponse(BaseModel):
         audit_log (AuditLogDetailItem): Detailed audit log information
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(
         ..., description="Response message describing the operation result"
     )
@@ -350,7 +350,7 @@ class DeleteAuditLogsResponse(BaseModel):
         deleted_count (int): Number of audit logs that were deleted
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(
         ..., description="Response message describing the operation result"
     )

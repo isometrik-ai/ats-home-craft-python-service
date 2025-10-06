@@ -18,7 +18,6 @@ import os  # Standard library import first
 from typing import List, Tuple, Optional
 
 import jwt
-from supabase import AsyncClient
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request, HTTPException, status, responses
 
@@ -115,10 +114,12 @@ async def check_user_access_async(
 
     try:
         # Get global Supabase client
-        supabase : AsyncClient = await get_supabase_client()
+        supabase = await get_supabase_client()
+
+        print(permission_code,user_id,organisation_id,sep='\n\n')
 
         # Use Supabase RPC function for permission checking
-        rpc_result = await supabase.rpc(
+        rpc_result = supabase.rpc(
             "check_permission",
             {
                 "user_id": user_id,
@@ -126,7 +127,8 @@ async def check_user_access_async(
                 "permission_code": permission_code,
             }
         )
-        response = rpc_result.execute()
+        response = await rpc_result.execute()
+        print("\n\nresponse",response)
 
         return response.data if response.data is not None else False
 
@@ -180,8 +182,8 @@ async def get_user_from_auth(
 #         )
 
     # Get user metadata and validate user type
-    user_metadata = user.get("user_metadata", {})
-    user_type = user_metadata.get("type")
+    # user_metadata = user.get("user_metadata", {})
+    # user_type = user_metadata.get("type")
 
     # if not user_type:
     #     raise_auth_error(
@@ -296,6 +298,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 audience="authenticated",
             )
             request.state.user = payload
+            request.state.access_token = token
             print(payload)
         except jwt.ExpiredSignatureError:
             return responses.JSONResponse(

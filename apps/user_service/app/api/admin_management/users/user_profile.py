@@ -48,7 +48,6 @@ router = APIRouter(prefix="", tags=["User Profile"])
 
 # Initialize logger for user profile module
 logger = get_logger("user-profile-api")
-logger.info("User Profile API module loaded")
 
 
 @router.get(
@@ -77,17 +76,8 @@ async def get_user_profile(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("GET /profile request started - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s",current_user.get('organization_id'))
 
     user_context = extract_user_context(current_user)
-    logger.debug("User context extracted - Request ID: %s, ",request_id)
-    logger.debug(
-        "Email: %s, Organization ID: %s, ",
-        user_context.email,user_context.organization_id
-    )
-    logger.debug("User Type: %s",user_context.user_type)
 
     # Set audit context for profile access
     request.state.audit_table = "organization_members"
@@ -95,10 +85,6 @@ async def get_user_profile(
         f"User accessed their own profile: {user_context.email}"
     )
     request.state.audit_risk_level = "low"
-    # logger.debug(
-    #     ("Audit context set for profile access - Request ID: %s, ",request_id),
-    #     ("Email: %s, Audit Table: %s",user_context.email,request.state.audit_table)
-    # )
 
     async def _fetch_org_member_profile() -> dict:
         """Fetch and validate organization member profile."""
@@ -106,8 +92,6 @@ async def get_user_profile(
             user_context.user_id,
             user_context.organization_id
         )
-        logger.debug("User profile retrieved from database - Request ID: %s, ",request_id)
-        logger.debug("Profile found: %s",user_profile is not None)
 
         if not user_profile:
             logger.warning("User profile not found - Request ID: %s, ",request_id)
@@ -145,14 +129,10 @@ async def get_user_profile(
                 user_context.user_id,
                 user_context.organization_id
             )
-            logger.debug("User permissions retrieved - Request ID: %s, ",request_id)
-            logger.debug("Permissions count: %s",len(permissions_data))
             await update_user_activity(
                 user_context.user_id,
                 user_context.organization_id
             )
-            logger.debug("User activity updated - Request ID: %s, ",request_id)
-            logger.debug("User ID: %s",user_context.user_id)
             return permissions_data
 
         permissions_data = await _fetch_permissions()
@@ -174,8 +154,6 @@ async def get_user_profile(
                 for p in permissions_data
             ]
             # Timestamps are now handled by create_user_profile_data
-            logger.debug("Profile data formatted - Request ID: %s, ",request_id)
-            logger.debug("Role: %s, Permissions: %s",role_info.role_name,len(permissions))
 
             # Set audit data for profile access
             request.state.raw_audit_new_data = {
@@ -207,12 +185,9 @@ async def get_user_profile(
     # User type validation is now handled in extract_user_context function
     # This else block should never be reached due to validation in common_utils
 
-    logger.info("GET /profile request completed successfully - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, Email: %s, ",user_context.user_id,user_context.email)
-    logger.info(" Status Code: %s",status.HTTP_200_OK)
 
     return UserProfileResponse(
-        status_code=status.HTTP_200_OK,
+        # status_code=status.HTTP_200_OK,
         message="User profile retrieved successfully",
         data=profile_data,
     )
@@ -242,15 +217,8 @@ async def get_user_by_id(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("GET /%s request started - Request ID: %s, ",user_id,request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Target User ID: %s",user_id)
 
     # user_context = extract_user_context(current_user)
-    # logger.debug("User context extracted - Request ID: %s, ",request_id)
-    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
-    # logger.debug("User Type: %s",user_context.user_type)
     user_context = await check_permissions(
         current_user, "settings.users.manage","access user profiles")
 
@@ -271,8 +239,6 @@ async def get_user_by_id(
     #     user_context=user_context,
     #     action_description="access user profiles",
     # )
-    # logger.debug("User permissions validated for profile access - Request ID: %s, ",request_id)
-    # logger.debug("Target User ID: %s",user_id)
 
     # Set audit context for user profile access
     # This endpoint only handles organization members, so audit table is always organization_members
@@ -280,14 +246,10 @@ async def get_user_by_id(
     request.state.audit_requested_id = user_id
     request.state.audit_description = f"Admin accessed user profile: {user_id}"
     request.state.audit_risk_level = "medium"
-    logger.debug("Audit context set for user profile access - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
 
     user_profile = await get_user_profile_by_id(
         user_id, user_context.organization_id
     )
-    logger.debug("User profile fetched - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s, Profile found: %s",user_id,user_profile is not None)
 
     if not user_profile:
         logger.warning("User not found in organization - Request ID: %s, ",request_id)
@@ -302,11 +264,6 @@ async def get_user_by_id(
 
     permissions_data = await get_user_permissions(
         user_id, user_context.organization_id
-    )
-    logger.debug("User permissions fetched - Request ID: %s, ",request_id)
-    logger.debug(
-        "Target User ID: %s, Permissions count: %s",
-        user_id,len(permissions_data) if permissions_data else 0
     )
 
     print("permission_id")
@@ -336,11 +293,6 @@ async def get_user_by_id(
         role_name=user_profile["role_name"],
         description=user_profile.get("role_description", ""),
     )
-    logger.debug("Profile data formatted - Request ID: %s, ",request_id)
-    logger.debug(
-        "Target User ID: %s, Role: %s, Permissions: %s",
-        user_id,role_info.role_name,len(permissions)
-    )
 
     # Set audit data for user profile access
     request.state.raw_audit_new_data = {
@@ -364,12 +316,9 @@ async def get_user_by_id(
         permissions=permissions
     )
 
-    logger.info("GET /%s request completed successfully - Request ID: %s, ",user_id,request_id)
-    logger.info("Target User ID: %s, Email: %s, ",user_id,user_profile['email'])
-    logger.info("Permissions: %s, Status Code: %s",len(permissions),status.HTTP_200_OK)
 
     return UserProfileResponse(
-        status_code=200,
+        # status_code=200,
         message="User profile retrieved successfully",
         data=profile_data,
     )

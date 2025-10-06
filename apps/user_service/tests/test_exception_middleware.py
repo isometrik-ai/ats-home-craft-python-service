@@ -1,3 +1,5 @@
+# pylint: disable=all
+
 """Test module for exception middleware.
 
 This module contains tests for:
@@ -9,14 +11,10 @@ This module contains tests for:
 """
 
 import pytest
-import pytest_asyncio
-import uuid
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.testclient import TestClient
 from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from apps.user_service.app.dependencies.exception_middleware import (
     extract_request_context,

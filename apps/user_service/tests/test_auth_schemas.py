@@ -1,3 +1,5 @@
+# pylint: disable=all
+
 """
 Test module for auth schemas.
 
@@ -10,7 +12,6 @@ Last Updated: 2024-12-19
 """
 
 import pytest
-from pydantic import ValidationError, EmailStr
 from fastapi import HTTPException
 
 from apps.user_service.app.schemas.auth import (
@@ -35,16 +36,15 @@ from apps.user_service.app.schemas.auth import (
     SessionFilter,
     AuthLogin,
     MemberBody,
-    UserSignupData,
     VerifyEmailRequest,
     VerifyEmailResponse,
-    SignupRequest,
     UserInfo,
     OrganizationInfo,
     AuthResponse,
     SignupResponse,
+    SetPasswordRequest,
     ResetPasswordRequest,
-    ResetPasswordResponse,
+    PasswordResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
 
@@ -191,13 +191,11 @@ class TestBasicModels:
     def test_verify_email_response_model(self):
         """Test VerifyEmailResponse model."""
         response = VerifyEmailResponse(
-            status_code=200,
             message="Email verified",
             email_found=True,
             status="active",
             can_login=True
         )
-        assert response.status_code == 200
         assert response.message == "Email verified"
         assert response.email_found is True
         assert response.status == "active"
@@ -205,7 +203,6 @@ class TestBasicModels:
 
         # Test with None status
         response = VerifyEmailResponse(
-            status_code=404,
             message="Email not found",
             email_found=False,
             status=None,
@@ -248,11 +245,9 @@ class TestBasicModels:
     def test_signup_response_model(self):
         """Test SignupResponse model."""
         response = SignupResponse(
-            status_code=201,
             message="User created successfully",
             data={"user_id": "123", "email": "test@example.com"}
         )
-        assert response.status_code == 201
         assert response.message == "User created successfully"
         assert response.data == {"user_id": "123", "email": "test@example.com"}
 
@@ -264,33 +259,26 @@ class TestBasicModels:
     def test_forgot_password_response_model(self):
         """Test ForgotPasswordResponse model."""
         response = ForgotPasswordResponse(
-            status_code=200,
             message="Password reset email sent"
         )
-        assert response.status_code == 200
         assert response.message == "Password reset email sent"
 
     def test_reset_password_response_model(self):
-        """Test ResetPasswordResponse model."""
-        response = ResetPasswordResponse(
-            status_code=200,
+        """Test PasswordResponse model."""
+        response = PasswordResponse(
             message="Password reset successfully"
         )
-        assert response.status_code == 200
         assert response.message == "Password reset successfully"
 
 
 class TestFieldValidators:
     """Test field validators for proper validation behavior."""
 
-    def test_user_signup_data_password_validation(self):
-        """Test UserSignupData password validation - covers lines 87-89."""
+    def test_set_password_request_validation(self):
+        """Test SetPasswordRequest validation."""
         # Test valid password
-        user_data = UserSignupData(email="test@example.com", password="password123")
-        assert user_data.password == "password123"
-
-        # Note: Password validator exists but first_name/last_name fields are commented out
-        # so the validator won't be triggered. This test covers the validator code.
+        request = SetPasswordRequest(password="password123")
+        assert request.password == "password123"
 
     def test_reset_password_request_password_validation(self):
         """Test ResetPasswordRequest password validation - covers lines 177-179."""
@@ -677,19 +665,16 @@ class TestComplexModels:
     def test_signup_wizard_response_model(self):
         """Test SignupWizardResponse model."""
         response = SignupWizardResponse(
-            status_code=201,
             message="Signup wizard completed successfully",
             data={"user_id": "123", "company_id": "456"},
             validation_passed=True
         )
-        assert response.status_code == 201
         assert response.message == "Signup wizard completed successfully"
         assert response.data == {"user_id": "123", "company_id": "456"}
         assert response.validation_passed is True
 
         # Test with default validation_passed
         response = SignupWizardResponse(
-            status_code=200,
             message="Signup wizard completed",
             data={"user_id": "123"}
         )

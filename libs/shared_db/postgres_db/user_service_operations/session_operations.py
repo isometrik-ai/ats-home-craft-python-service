@@ -33,6 +33,16 @@ logger = logging.getLogger(__name__)
     custom_messages=create_error_messages("create_session", "creating"))
 async def create_session(session_data: Dict[str, Any], organization_id: str) -> Dict[str, Any]:
     """Create a new user session."""
+    # Validate input parameters
+    if not organization_id or organization_id is None:
+        raise ValueError("Organization ID cannot be None or empty")
+    
+    if not session_data.get("session_id") or session_data.get("session_id") is None:
+        raise ValueError("Session ID cannot be None or empty")
+    
+    if not session_data.get("user_id") or session_data.get("user_id") is None:
+        raise ValueError("User ID cannot be None or empty")
+    
     supabase = await get_supabase_admin_client()
 
     session_record = {
@@ -49,6 +59,19 @@ async def create_session(session_data: Dict[str, Any], organization_id: str) -> 
         "accessed_phi": session_data.get("accessed_phi", False),
         "phi_access_purpose": session_data.get("phi_access_purpose")
     }
+
+    # Try to set user context for RLS policies
+    try:
+        # Set the user context in the Supabase client
+        supabase.auth.set_user({
+            "id": session_data["user_id"],
+            "email": session_data.get("user_email", ""),
+            "user_metadata": {
+                "organization_id": organization_id
+            }
+        })
+    except Exception as e:
+        logger.warning(f"Could not set user context: {e}")
 
     result = await supabase.table("user_sessions").insert(session_record).execute()
 
@@ -89,15 +112,24 @@ async def update_session(session_id: str, organization_id: str,
         "logout_timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+    # Helper to read from Pydantic model or dict uniformly
+    def _get(field_name: str):
+        if isinstance(update_data, dict):
+            return update_data.get(field_name)
+        return getattr(update_data, field_name, None)
+
     # Add optional fields if provided
-    if update_data.get("session_status") is not None:
-        update_payload["session_status"] = update_data["session_status"]
+    session_status_value = _get("session_status")
+    if session_status_value is not None:
+        update_payload["session_status"] = session_status_value
 
-    if update_data.get("accessed_phi") is not None:
-        update_payload["accessed_phi"] = update_data["accessed_phi"]
+    accessed_phi_value = _get("accessed_phi")
+    if accessed_phi_value is not None:
+        update_payload["accessed_phi"] = accessed_phi_value
 
-    if update_data.get("phi_access_purpose") is not None:
-        update_payload["phi_access_purpose"] = update_data["phi_access_purpose"]
+    phi_access_purpose_value = _get("phi_access_purpose")
+    if phi_access_purpose_value is not None:
+        update_payload["phi_access_purpose"] = phi_access_purpose_value
 
     result = await supabase.table("user_sessions").update(update_payload).eq(
         "id", session_id
@@ -113,6 +145,13 @@ async def update_session(session_id: str, organization_id: str,
     custom_messages=create_error_messages("check_session_exists", "checking"))
 async def check_session_exists(session_id: str, organization_id: str) -> bool:
     """Check if session exists."""
+    # Validate input parameters
+    if not session_id or session_id is None:
+        raise ValueError("Session ID cannot be None or empty")
+    
+    if not organization_id or organization_id is None:
+        raise ValueError("Organization ID cannot be None or empty")
+    
     supabase = await get_supabase_admin_client()
 
     result = await supabase.table("user_sessions").select("id").eq(
@@ -133,13 +172,12 @@ async def get_sessions_list(organization_id: str, filters: SessionFilter) -> Lis
     """Get paginated list of sessions with optional search and filtering."""
     supabase = await get_supabase_admin_client()
 
-    # Build the query with joins and filters
+    # Build the query with filters (without join for now)
     query = supabase.table("user_sessions").select(
         "id, user_id, organization_id, ip_address, user_agent, "
         "device_fingerprint, risk_score, login_timestamp, "
         "logout_timestamp, session_status, login_method, "
-        "accessed_phi, phi_access_purpose, "
-        "organization_members!inner(email, full_name)"
+        "accessed_phi, phi_access_purpose"
     ).eq("organization_id", organization_id)
 
     # Apply filters

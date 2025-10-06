@@ -344,9 +344,7 @@ async def database_operation(operation_name: str):
     supabase = None
     try:
         supabase = await get_supabase_admin_client()
-        logger.debug("Starting database operation: %s", operation_name)
         yield supabase
-        logger.debug("Completed database operation: %s", operation_name)
 
     except APIError as e:
         error_msg = f"Supabase API error in {operation_name}: {e}"

@@ -3,13 +3,11 @@
 Audit Decorator Module
 
 """
-import logging
 from functools import wraps
 from typing import Optional, Any, List
 from uuid import uuid4
 from datetime import datetime, timezone
 import json
-import asyncpg
 from fastapi import Request
 
 from apps.user_service.app.dependencies.audit_logs.audit_logger import (
@@ -256,9 +254,6 @@ async def maybe_log_audit_on_error(
     except (ValueError, TypeError) as e:
         # Handle data type conversion errors (str, dict, etc.)
         logger.warning("Audit logging failed - data conversion error: %s", str(e))
-    except asyncpg.PostgresError as e:
-        # Handle database-related errors in audit_logger
-        logger.warning("Audit logging failed - database error: %s", str(e))
     except (ConnectionError, OSError) as e:
         # Handle network/system errors (e.g., client.host access)
         logger.warning("Audit logging failed - connection error: %s", str(e))

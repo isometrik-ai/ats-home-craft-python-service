@@ -35,8 +35,9 @@ from apps.user_service.app.dependencies.exception_middleware import (
     unified_exception_handler,
     CacheRequestBodyMiddleware,
 )
-from apps.user_service.app.dependencies.logger import app_logger, setup_logging
+from apps.user_service.app.dependencies.logger import setup_logging
 from libs.shared_middleware.jwt_auth import JWTAuthMiddleware
+from libs.shared_db.supabase_db.admin_operations.session import get_session_by_id_admin
 
 # Setup paths and environment
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -47,7 +48,6 @@ load_dotenv(os.path.join(monorepo_root, ".env"))
 
 # Initialize logging at module level
 app_logger = setup_logging(log_level="INFO")
-app_logger.info("Application logging initialized")
 
 # ddtrace.auto is imported above and automatically patches supported libraries
 
@@ -74,6 +74,8 @@ async def health_check():
         HealthResponse: A response indicating the service is healthy
         test
     """
+    result = await get_session_by_id_admin("b4575ad2-debc-4340-9427-bec3468b1cd7")
+    print("result", result)
     return HealthResponse()
 
 

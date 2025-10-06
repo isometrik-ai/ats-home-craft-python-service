@@ -4,21 +4,26 @@ This module contains all user-related admin operations.
 All Supabase Auth admin API operations for user management should be centralized here.
 """
 
-import os
-import sys
-from typing import Optional, Tuple
+import urllib.parse
+from typing import Optional, Tuple, get_args
+
 from fastapi import HTTPException, status
 from supabase_auth.errors import AuthApiError
+from supabase_auth.types import Provider as AUTH_PROVIDER
+
 from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.schemas.users import CreateUserRequest
+from apps.user_service.app.dependencies.common_utils import UserContext
+from apps.user_service.app.schemas.auth import CODE_VERIFIER, CODE_CHALLENGE
+
+from libs.shared_utils.email_utils import send_email
+from libs.shared_utils.common_query import log_exception
+from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_db.supabase_db.admin_operations.user import update_email_of_user
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_user_profile_by_id,
     update_user_email,
 )
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
-from libs.shared_utils.email_utils import send_email
-from apps.user_service.app.schemas.users import CreateUserRequest
-from apps.user_service.app.dependencies.common_utils import UserContext
 
 logger = get_logger("user_utility_admin")
 
@@ -58,12 +63,9 @@ async def update_supabase_user_email(
         }
 
         # Send magic link email notification
-        logger.info("Sending magic link email notification to user %s", user_id)
         email_sent = await send_admin_update_email(user_data)
 
-        if email_sent:
-            logger.info("Magic link email sent successfully to %s", email)
-        else:
+        if not email_sent:
             logger.warning("Failed to send magic link email to %s", email)
             # Note: We don't fail the entire operation if email fails
             # The email update was successful, only the notification failed
@@ -95,16 +97,9 @@ async def generate_magic_link(email: str) -> Optional[str]:
             }
         )
 
-        logger.debug("Magic link generation response: %s", response)
-
         if response and hasattr(response, "properties") and response.properties:
             magic_link = response.properties.action_link
-            logger.debug("Generated magic link: %s", magic_link)
             if magic_link:
-                logger.info(
-                    "Magic link generated successfully using Supabase client for %s",
-                    email,
-                )
                 return magic_link
 
         logger.error("Magic link not found in Supabase client response")
@@ -194,7 +189,6 @@ async def send_admin_update_email(user: dict) -> bool:
     try:
         # Generate magic link using Supabase Auth Admin API
         magic_link = await generate_magic_link(user.get("email"))
-        logger.debug("Generated magic link for email update: %s", magic_link)
 
         if magic_link is None:
             logger.error("Failed to generate magic link for %s", user.get("email"))
@@ -212,7 +206,6 @@ async def send_admin_update_email(user: dict) -> bool:
         )
 
         if email_sent:
-            logger.info("Admin update email sent successfully to %s", user.get("email"))
             return True
 
         logger.error("Failed to send admin update email to %s", user.get("email"))
@@ -228,52 +221,52 @@ async def send_admin_update_email(user: dict) -> bool:
             detail="Failed to send admin update email"
         ) from error
 
-async def create_supabase_user(body, organization_id):
-    """
-    Create user in Supabase Auth with organization metadata using admin.createUser.
-    This is for admin-initiated user creation (like in create_organisation API).
+# async def create_supabase_user(body, organization_id):
+#     """
+#     Create user in Supabase Auth with organization metadata using admin.createUser.
+#     This is for admin-initiated user creation (like in create_organisation API).
 
-    Args:
-        body: Request body with user data
-        organization_id: Organization ID to associate with user
+#     Args:
+#         body: Request body with user data
+#         organization_id: Organization ID to associate with user
 
-    Returns:
-        str: Created user ID
+#     Returns:
+#         str: Created user ID
 
-    Raises:
-        HTTPException: For duplicate email or Supabase errors
-    """
-    try:
-        supabase = await get_supabase_admin_client()
-        supabase_response = supabase.auth.admin.create_user(
-            {
-                "email": body.email,
-                "password": body.password,
-                "email_confirm": True,  # Auto-confirm email for admin user
-                "user_metadata": {
-                    "organization_id": organization_id,
-                    "full_name": body.full_name,
-                    "phone": body.phone,
-                    "is_super_admin": True,
-                    "type": "",
-                },
-            }
-        )
-        return supabase_response.user.id
+#     Raises:
+#         HTTPException: For duplicate email or Supabase errors
+#     """
+#     try:
+#         supabase = await get_supabase_admin_client()
+#         supabase_response = supabase.auth.admin.create_user(
+#             {
+#                 "email": body.email,
+#                 "password": body.password,
+#                 "email_confirm": True,  # Auto-confirm email for admin user
+#                 "user_metadata": {
+#                     "organization_id": organization_id,
+#                     "full_name": body.full_name,
+#                     "phone": body.phone,
+#                     "is_super_admin": True,
+#                     "type": "",
+#                 },
+#             }
+#         )
+#         return supabase_response.user.id
 
-    except (ConnectionError, TimeoutError, ValueError) as supabase_error:
-        print(f"Supabase user creation failed: {supabase_error}")
-        if (
-            "already_exists" in str(supabase_error).lower()
-            or "duplicate" in str(supabase_error).lower()
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Email already exists"
-            ) from supabase_error
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user account",
-        ) from supabase_error
+#     except (ConnectionError, TimeoutError, ValueError) as supabase_error:
+#         print(f"Supabase user creation failed: {supabase_error}")
+#         if (
+#             "already_exists" in str(supabase_error).lower()
+#             or "duplicate" in str(supabase_error).lower()
+#         ):
+#             raise HTTPException(
+#                 status_code=status.HTTP_409_CONFLICT, detail="Email already exists"
+#             ) from supabase_error
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Failed to create user account",
+#         ) from supabase_error
 
 
 async def sign_up_supabase_user(body):
@@ -295,17 +288,16 @@ organization_id: Organization ID to associate with user
         supabase = await get_supabase_admin_client()
         supabase_response = await supabase.auth.sign_up(
             {
-                "email": body.user_data.email,
-                "password": body.user_data.password
-                # "options": {
-                #     "data": {
-                #         "organization_id": organization_id,
-                #         "full_name": body.full_name,
-                #         "phone": body.phone,
-                #         "is_super_admin": True,
-                #         "type": "organization_member",
-                #     }
-                # }
+                "email": body.email,
+                "password": body.password,
+                "options": {
+                    "data": {
+                        "first_name": body.first_name,
+                        "last_name": body.last_name,
+                        "phone": body.phone,
+                        "timezone": body.timezone,
+                    }
+                }
             }
         )
         print(f"Supabase user signup response: {supabase_response}")
@@ -393,8 +385,7 @@ async def invite_user_with_email(body: CreateUserRequest, user_context: UserCont
             },
         )
         return response.user.id
-        # logger.debug("Email: %s, User ID: %s",body.email,response.user.id)
-        # logger.debug("Supabase user invitation sent successfully - Request ID: %s, ",request_id)
+
     except Exception as e:
         error_message = str(e).lower()
         if (
@@ -403,7 +394,9 @@ async def invite_user_with_email(body: CreateUserRequest, user_context: UserCont
             or "user already exists" in error_message
         ):
             # logger.warning("User already exists during invitation - Request ID: %s, ",request_id)
-            # logger.warning("Email: %s, Organization ID: %s",body.email,user_context.organization_id)
+            # logger.warning(
+            #     "Email: %s, Organization ID: %s",
+            #     body.email,user_context.organization_id)
             raise HTTPException(
                 status_code=409,
                 detail="User with this email already exists in the organization",
@@ -463,8 +456,189 @@ async def update_password_with_token(token: str, new_password: str) -> dict:
             detail="Unexpected error occurred while updating password with token.",
         ) from e
 
-def log_exception():
-    """Log exception details"""
-    exc_type, _, exc_tb = sys.exc_info()
-    fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-    logger.error("Error: %s, File: %s, Line: %s", exc_type, fname, exc_tb.tb_lineno)
+async def supabase_user_oauth(provider: str) -> dict:
+    """
+    Link user identity using Supabase Auth Admin API.
+    """
+    try:
+        supabase = await get_supabase_admin_client()
+        _provider_validity_check(provider)
+
+        # Get the Supabase URL dynamically from the client
+        supabase_url = supabase.supabase_url
+        base_url = f"{supabase_url}/auth/v1/authorize"
+
+        params = {
+            "provider": provider,
+            "redirect_to": "http://localhost:5000/v1/admin/auth/oauth-callback",
+            "code_challenge": CODE_CHALLENGE,
+            "code_challenge_method": "S256"
+        }
+
+        # Construct the URL manually with our custom PKCE parameters
+        query_string = urllib.parse.urlencode(params)
+        oauth_url = f"{base_url}?{query_string}"
+
+        return {
+            "provider": provider,
+            "url": oauth_url,
+            "code_verifier": CODE_VERIFIER,  # Include this for reference
+            "code_challenge": CODE_CHALLENGE
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error while creating OAuth URL: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error occurred while creating OAuth URL.",
+        ) from e
+
+# async def supabase_user_oauth(user: dict, access_token: str, provider: str) -> dict:
+#     """
+#     Link user identity using Supabase Auth Admin API.
+#     This function links an existing Google account to an existing user in Supabase.
+#     """
+#     try:
+#         supabase_admin = await get_supabase_admin_client()
+
+#         # Get the current user to verify they exist
+#         user_response = await supabase_admin.auth.admin.get_user_by_id(user_id)
+#         if not user_response.user:
+#             raise HTTPException(
+#                 status_code=status.HTTP_404_NOT_FOUND,
+#                 detail="User not found."
+#             )
+
+#         user_email = user_response.user.email
+
+#         # For unified API approach, we'll validate the Google token and prepare for linking
+#         # The frontend passes the Google OAuth access token
+#         # We'll verify it and then use Supabase admin API to link the identity
+
+#         # First, verify the Google access token by fetching user info
+#         import httpx
+#         async with httpx.AsyncClient() as client:
+#             google_response = await client.get(
+#                 f"https://www.googleapis.com/oauth2/v2/userinfo?access_token={access_token}"
+#             )
+
+#             if google_response.status_code != 200:
+#                 raise HTTPException(
+#                     status_code=status.HTTP_400_BAD_REQUEST,
+#                     detail="Invalid Google access token."
+#                 )
+
+#             google_user_data = google_response.json()
+#             google_email = google_user_data.get("email")
+
+#             # Verify the email matches the existing user's email
+#             if google_email != user_email:
+#                 raise HTTPException(
+#                     status_code=status.HTTP_400_BAD_REQUEST,
+#                     detail="Google account email does not match user's email."
+#                 )
+
+#         # Now use Supabase admin API to link the identity
+#         # Note: The exact method may vary based on Supabase version
+#         # This is a placeholder for the actual linking logic
+#         link_response = await supabase_admin.auth.admin.link_identity({
+#             "user_id": user_id,
+#             "provider": provider,
+#             "access_token": access_token
+#         })
+
+#         return {
+#             "success": True,
+#             "provider": provider,
+#             "user_id": user_id,
+#             "user_email": user_email,
+#             "linked_identity": link_response
+#         }
+
+#     except Exception as e:
+#         log_exception()
+#         logger.error("Unexpected error while linking user identity: %s", str(e))
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Unexpected error occurred while linking user identity.",
+#         ) from e
+
+async def get_oauth_link_url(user_id: str, user_email: str, provider: str) -> dict:
+    """
+    Generate Google OAuth URL for linking to existing email/password user.
+    """
+    try:
+        supabase = await get_supabase_admin_client()
+        _provider_validity_check(provider)
+
+        # Generate OAuth URL with special parameters for linking
+        base_url = f"{supabase.supabase_url}/auth/v1/authorize"
+
+        params = {
+            "provider": provider,
+            "redirect_to": "http://localhost:5000/v1/admin/auth/oauth-callback",
+            "user_id": user_id,
+            "code_challenge": CODE_CHALLENGE,
+            "code_challenge_method": "S256"
+        }
+
+        query_string = urllib.parse.urlencode(params)
+        oauth_url = f"{base_url}?{query_string}"
+
+        return {
+            "success": True,
+            "oauth_url": oauth_url,
+            "user_email": user_email,
+            "message": f"Redirect user to this URL to link {provider} account"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error generating %s OAuth URL: %s", provider, str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate {provider} OAuth URL"
+        )
+
+async def link_google_identity_to_existing_user(user_id: str, google_user) -> bool:
+    """
+    Link Google identity to existing email/password user.
+    """
+    try:
+        supabase_admin = await get_supabase_admin_client()
+
+        # Update user to include Google provider
+        result = await supabase_admin.auth.admin.update_user_by_id(
+            user_id,
+            {
+                "app_metadata": {
+                    "provider": "email",
+                    "providers": ["email", "google"],
+                    "google_identity": {
+                        "google_id": google_user.id,
+                        "avatar_url": google_user.user_metadata.get("avatar_url"),
+                        "name": google_user.user_metadata.get("full_name"),
+                        "verified_email": google_user.email_confirmed_at is not None
+                    }
+                }
+            }
+        )
+
+        return result.user is not None
+
+    except Exception as e:
+        logger.error("Error linking Google identity: %s", str(e))
+        return False
+
+def _provider_validity_check(provider: str):
+    """
+    Check if provider is valid.
+    """
+    if provider not in get_args(AUTH_PROVIDER):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid provider"
+        )
+
+# log_exception function moved to libs.shared_utils.common_query to avoid circular imports
