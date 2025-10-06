@@ -40,15 +40,15 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 
-# Import update user routes
-from apps.user_service.app.api.admin_management.users.update_user import (
-    router as update_user_router
-)
+# # Import update user routes
+# from apps.user_service.app.api.admin_management.users.update_user import (
+#     router as update_user_router
+# )
 
-# Import user profile routes
-from apps.user_service.app.api.admin_management.users.user_profile import (
-    router as user_profile_router
-)
+# # Import user profile routes
+# from apps.user_service.app.api.admin_management.users.user_profile import (
+#     router as user_profile_router
+# )
 
 
 # Local imports
@@ -80,7 +80,6 @@ AUTH_DESCRIPTION = "Bearer token required for authentication"
 
 # Initialize logger for users module
 logger = get_logger("users-api")
-logger.info("Users API module loaded")
 
 
 @router.get("/list", response_model=UserListResponse, status_code=status.HTTP_200_OK)
@@ -104,14 +103,8 @@ async def get_users_list(
     """
     List all users in the current organization (async, paginated, sequential)
     """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-    logger.info("GET /users/list request started - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Search: %s, ",query_params.search)
-    logger.info("Page: %s, ",query_params.page)
-    logger.info("Page Size: %s",query_params.page_size)
+    # # Generate request ID for tracking
+    # request_id = str(uuid.uuid4())
 
     # Set audit context for user list access
     request.state.audit_table = "organization_members"
@@ -119,21 +112,15 @@ async def get_users_list(
         f"Admin accessed user list with search: '{query_params.search or 'none'}'"
     )
     request.state.audit_risk_level = "medium"
-    logger.debug("Audit context set for user list access - Request ID: %s, ",request_id)
-    logger.debug("Search: %s, ",query_params.search or 'none')
 
     # Validate pagination params and calculate offset
     page, page_size, offset = validate_pagination_params(
         query_params.page, query_params.page_size
     )
-    logger.debug("Pagination params validated - Request ID: %s, ", request_id,)
-    logger.debug("Page: %s, Page Size: %s, Offset: %s", page, page_size, offset)
 
     # Permission check
     user_context = await check_permissions(current_user, "settings.users.manage")
 
-    # logger.debug("User permissions validated for user list access - Request ID: %s, ",request_id)
-    # logger.debug("Organization ID: %s, ",user_context.organization_id)
 
     # --- Build queries dynamically ---
     # base_query, count_query, query_args, limit_offset_args = build_user_query(
@@ -150,22 +137,18 @@ async def get_users_list(
         limit=page_size,
         offset=offset
     )
-    logger.debug("Retrieved %s users from database - Request ID: %s, ",len(users_data),request_id)
 
     # Get total count using database operations
     total_count = await get_users_total_count(
         organization_id=user_context.organization_id,
         search=query_params.search
     )
-    logger.debug("Total users count: %s - Request ID: %s, ",total_count,request_id)
 
     # --- Fetch users and count ---
     # users_data = await db_conn.fetch(base_query, *query_args, *limit_offset_args)
     # count_result = await db_conn.fetchrow(count_query, *query_args)
     # --- Transform results ---
     users = await transform_users(users_data, user_context.organization_id)
-    logger.debug("Users data transformed successfully - Request ID: %s, ",request_id)
-    logger.debug("Transformed users count: %s",len(users))
 
     # Set audit data for user list access
     request.state.raw_audit_new_data = {
@@ -181,19 +164,8 @@ async def get_users_list(
         "user_ids_accessed": [user.user_id for user in users] if users else [],
     }
 
-    logger.info(
-        "GET /users/list request completed successfully - Request ID: %s, "
-        "Users Count: %s, Total Count: %s, "
-        "Page: %s, Page Size: %s, Status Code: 200",
-        request_id,
-        len(users),
-        total_count,
-        page,
-        page_size
-    )
-
     return UserListResponse(
-        status_code=200,
+        # status_code=200,
         message="Users retrieved successfully",
         data=users,
         total_count=total_count,
@@ -225,10 +197,6 @@ async def create_user(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("POST /users request started - Request ID: %s, ",request_id)
-    logger.info("Email: %s, Role ID: %s",body.email,body.role_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
 
     # Set audit context for user creation
     request.state.audit_table = "organization_members"
@@ -266,8 +234,6 @@ async def create_user(
 
     result = await create_new_user(user_data)
     new_user_id = str(result["user_id"]) if result else "unknown"
-    logger.debug("User created successfully - Request ID: %s, ",request_id)
-    logger.debug("New User ID: %s, Email: %s",new_user_id,body.email)
 
     # Set audit data for user creation
     request.state.raw_audit_new_data = {
@@ -284,9 +250,6 @@ async def create_user(
         "creation_timestamp": datetime.now().isoformat(),
     }
 
-    logger.info("POST /users request completed successfully - Request ID: %s, ",request_id)
-    logger.info("New User ID: %s, Email: %s",new_user_id,body.email)
-    logger.info("Status Code: 201")
 
     return UserResponse(
         message="User created and invited successfully",
@@ -320,10 +283,6 @@ async def update_user(
     """Update Users data by User id."""
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("PUT /users/update/{user_id} request started - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Target User ID: %s",user_id)
 
 
     # Set audit context for user update
@@ -350,8 +309,6 @@ async def update_user(
     current_user_data = await get_user_in_organization(
         user_id, user_ctx.organization_id
     )
-    logger.debug("Current user data retrieved for audit - Request ID: %s, ",request_id)
-    logger.debug("User ID: %s, Email: %s",user_id,current_user_data.get('email', 'N/A'))
 
     # Set old values for audit comparison
     request.state.raw_audit_old_data = {
@@ -398,11 +355,6 @@ async def update_user(
         user_type="organization_member",
         permissions=permissions
     )
-    logger.debug("User profile and permissions fetched successfully - Request ID: %s",request_id)
-    logger.debug(
-        "User ID: %s, Permissions count: %s",
-        user_id,len(permissions) if permissions else 0
-    )
 
     # Set new values for audit comparison
     request.state.raw_audit_new_data = {
@@ -422,15 +374,9 @@ async def update_user(
         "update_timestamp": datetime.now().isoformat(),
     }
 
-    logger.info(
-        "PUT /users/update/%s request completed successfully - Request ID: %s",
-        user_id,request_id
-    )
-    logger.info("User ID: %s, Email: %s",user_id,user_profile.get('email', 'N/A'))
-    logger.info("Status Code: 200")
 
     return UpdateUserResponse(
-        status_code=200,
+        # status_code=200,
         message="User updated successfully",
         data=profile_data,
     )
@@ -461,10 +407,6 @@ async def delete_user_from_system(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("DELETE /users/delete/{user_id} request started - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Target User ID: %s",user_id)
 
 
     # Set audit context for user deletion
@@ -479,8 +421,6 @@ async def delete_user_from_system(
     current_user_data = await get_user_in_organization(
         user_id, user_context.organization_id
     )
-    logger.debug("Current user data retrieved for deletion audit - Request ID: %s, ",request_id)
-    logger.debug("User ID: %s, Email: %s",user_id,current_user_data.get('email', 'N/A'))
 
     # Set old values for audit comparison (what was deleted)
     set_audit_old_data_from_user(request, current_user_data)
@@ -513,16 +453,6 @@ async def delete_user_from_system(
         "auth_user_deleted": True,  # Indicates auth.users table entry was also deleted
     }
 
-    logger.info(
-        "DELETE /users/delete/%s request completed successfully - "
-        "Request ID: %s, "
-        "User ID: %s, Email: %s, Status Code: 200",
-        user_id,
-        request_id,
-        user_id,
-        current_user_data.get('email', 'N/A')
-    )
-
     return UserResponse(
         message="User removed successfully",
         status="success",
@@ -553,13 +483,8 @@ async def invite_user(
     """
     Invite a user by email, send magic link, and create pending org member.
     """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-    logger.info("POST /users/invite request started - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Email: %s, Role ID: %s",body.email,body.role_id)
-
+    # # Generate request ID for tracking
+    # request_id = str(uuid.uuid4())
 
     # Set audit context for user invitation
     request.state.audit_table = "organization_members"
@@ -577,7 +502,6 @@ async def invite_user(
         if duplicate:
             logger.warning("Phone number already exists for another user during invitation - ")
             logger.warning("Phone: %s, Organization ID: %s",body.phone,user_context.organization_id)
-            logger.debug("Request ID: %s, ",request_id)
             raise HTTPException(
                 status_code=400,
                 detail="Phone number already exists for another user in the organization",
@@ -597,8 +521,6 @@ async def invite_user(
     }
 
     await create_new_user(user_data)
-    logger.debug("User organization member record created - Request ID: %s, ",request_id)
-    logger.debug("User ID: %s, Email: %s",user_id,body.email)
 
     # Set audit data for user invitation
     request.state.raw_audit_new_data = {
@@ -616,16 +538,13 @@ async def invite_user(
         "invitation_method": "supabase_magic_link",
     }
 
-    logger.info("POST /users/invite request completed successfully - Request ID: %s, ",request_id)
-    logger.info("User ID: %s, Email: %s",user_id,body.email)
-    logger.info("Status Code: 201")
 
     return UserResponse(
         message="Invite sent successfully",
         status="success",
     )
 
-# Include update user routes (more specific routes)
-router.include_router(update_user_router)
-# Include user profile routes last (to avoid conflicts with main routes)
-router.include_router(user_profile_router)
+# # Include update user routes (more specific routes)
+# router.include_router(update_user_router)
+# # Include user profile routes last (to avoid conflicts with main routes)
+# router.include_router(user_profile_router)

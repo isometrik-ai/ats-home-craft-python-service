@@ -17,12 +17,25 @@ Organisation-Specific Operations Covered:
 6. Default permissions and roles setup
 """
 
-from typing import Optional
+from typing import Optional, Any, Dict
 
 from fastapi import HTTPException, status
 
 # Local imports
 from apps.user_service.app.dependencies.common_utils import ORG_STATUSES
+from apps.user_service.app.dependencies.logger import get_logger
+
+from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
+from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
+from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
+    create_new_organisation,
+    create_super_admin_role,
+    create_default_permissions_for_organisation,
+    assign_all_permissions_to_role,
+    add_member_to_organisation,
+)
+
+logger = get_logger("organisation_utils")
 
 
 def validate_organisation_status(org_status: str) -> None:
@@ -115,3 +128,63 @@ def build_organisation_filter_message(
 
     filter_text = f" with filters: {', '.join(filter_info)}" if filter_info else ""
     return f"All organizations retrieved successfully{filter_text}"
+
+
+
+async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new organisation."""
+    try:
+        print(f"Creating organization: {org_data}")
+        org_result = await create_new_organisation(org_data)
+        print(f"Created organization: {org_result['id']}")
+
+        # Create Super Admin role
+        super_admin_role_result = await create_super_admin_role(org_data["organization_id"])
+        super_admin_role_id = super_admin_role_result['id']
+        print(f"Created Super Admin role: {super_admin_role_id}")
+
+        # Create default permissions
+        permission_ids = await create_default_permissions_for_organisation(
+            org_data["organization_id"]
+        )
+        print(f"Created {len(permission_ids)} default permissions")
+
+        # Assign all permissions to Super Admin role
+        await assign_all_permissions_to_role(
+            super_admin_role_id, org_data["organization_id"]
+        )
+        print("Assigned permissions to Super Admin role")
+
+        # Create organization member
+        member_result = await add_member_to_organisation(org_data["organization_id"], {
+            "user_id": org_data["user_id"],
+            "email": org_data["email"],
+            "first_name": org_data.get("first_name", None),
+            "last_name": org_data.get("last_name", None),
+            "phone": org_data.get("phone", None),
+            "timezone": org_data.get("timezone", "UTC"),
+            "role_id": super_admin_role_id,
+            "status": "active",
+        })
+
+        if member_result:
+            print("Created organization member")
+    except Exception as db_error:
+        log_exception()
+        print(f"Database transaction failed: {db_error}")
+
+        # Try to delete the Supabase user if database transaction fails
+        try:
+            await delete_auth_user(org_data["user_id"])
+            # print(f"Cleaned up Supabase user: {org_data["user_id"]}")
+        except Exception as cleanup_error:  # noqa: W0718
+            # print(f"Failed to cleanup Supabase user: {cleanup_error}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create account. Please try again.",
+            ) from cleanup_error
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create account. Please try again.",
+        ) from db_error

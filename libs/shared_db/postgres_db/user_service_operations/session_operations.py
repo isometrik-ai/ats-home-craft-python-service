@@ -112,15 +112,24 @@ async def update_session(session_id: str, organization_id: str,
         "logout_timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+    # Helper to read from Pydantic model or dict uniformly
+    def _get(field_name: str):
+        if isinstance(update_data, dict):
+            return update_data.get(field_name)
+        return getattr(update_data, field_name, None)
+
     # Add optional fields if provided
-    if update_data.session_status is not None:
-        update_payload["session_status"] = update_data.session_status
+    session_status_value = _get("session_status")
+    if session_status_value is not None:
+        update_payload["session_status"] = session_status_value
 
-    if update_data.accessed_phi is not None:
-        update_payload["accessed_phi"] = update_data.accessed_phi
+    accessed_phi_value = _get("accessed_phi")
+    if accessed_phi_value is not None:
+        update_payload["accessed_phi"] = accessed_phi_value
 
-    if update_data.phi_access_purpose is not None:
-        update_payload["phi_access_purpose"] = update_data.phi_access_purpose
+    phi_access_purpose_value = _get("phi_access_purpose")
+    if phi_access_purpose_value is not None:
+        update_payload["phi_access_purpose"] = phi_access_purpose_value
 
     result = await supabase.table("user_sessions").update(update_payload).eq(
         "id", session_id

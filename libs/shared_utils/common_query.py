@@ -1,7 +1,20 @@
 """Constants for query used across the application."""
 
+import os
+import sys
+from apps.user_service.app.dependencies.logger import get_logger
+
+logger = get_logger("common_utils")
+
 ROLE_TYPES = ["system", "custom"]
 # libs/shared_utils/common_query.py
+
+
+def log_exception():
+    """Log exception details"""
+    exc_type, _, exc_tb = sys.exc_info()
+    fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+    logger.error("Error: %s, File: %s, Line: %s", exc_type, fname, exc_tb.tb_lineno)
 
 
 # def _get_default_permissions() -> List[tuple]:

@@ -1,3 +1,5 @@
+# pylint: disable=all
+
 """
 Test module for logger functionality.
 
@@ -9,14 +11,12 @@ Date: 2024-12-19
 Last Updated: 2024-12-19
 """
 
-import pytest
 import logging
 import json
 import os
 import sys
-from unittest.mock import patch, MagicMock, call
-from datetime import datetime, timezone, timedelta
-from contextvars import ContextVar
+from unittest.mock import patch
+from datetime import datetime
 
 from apps.user_service.app.dependencies.logger import (
     RequestIdFilter,

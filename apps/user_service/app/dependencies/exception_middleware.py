@@ -48,7 +48,8 @@ def extract_request_context(request: Request) -> dict:
     # pylint: disable=protected-access
     if hasattr(request.state, "_cached_body"):
         try:
-            body_str = request.state._cached_body.decode("utf-8")  # Let it raise UnicodeError if invalid
+            # Let it raise UnicodeError if invalid
+            body_str = request.state._cached_body.decode("utf-8")
             context["body_preview"] = (
                 body_str[:200] + "..." if len(body_str) > 200 else body_str
             )
@@ -135,13 +136,7 @@ class CacheRequestBodyMiddleware(BaseHTTPMiddleware):
                     "Request body cached successfully - Request ID: %s, "
                     "Method: %s, URL: %s, Body Size: %s bytes"
                 )
-                exception_logger.debug(
-                    log_msg,
-                    request_id,
-                    request.method,
-                    str(request.url),
-                    len(body_bytes),
-                )
+
             except (OSError, ValueError) as e:
                 # pylint: disable=protected-access
                 request.state._cached_body = b""
@@ -233,11 +228,6 @@ async def unified_exception_handler(request: Request, exc: Exception):
     if route and hasattr(route.endpoint, "__audit_api_call_params__"):
         audit_params = route.endpoint.__audit_api_call_params__
         request.state.audit_metadata = audit_params
-        exception_logger.debug(
-            "Audit metadata extracted from route - Request ID: %s, Params: %s",
-            request_id,
-            str(audit_params),
-        )
 
     # Handle HTTP Exceptions (4xx, 5xx)
     if isinstance(exc, (FastAPIHTTPException, StarletteHTTPException)):
@@ -310,7 +300,6 @@ async def unified_exception_handler(request: Request, exc: Exception):
 
     # Also log to the audit logger for backward compatibility
     logger.error("Error in %s: %s", operation_name, error_message)
-    logger.debug(full_traceback)
 
     await _handle_audit_logging(request, error_message, 500, "unexpected error")
     print("JSONResponse 500")

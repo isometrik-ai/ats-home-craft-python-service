@@ -197,7 +197,7 @@ class UserProfileResponse(BaseModel):
         data (Optional[UserProfileData]): User profile data if successful
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(
         ..., description="Response message describing the operation result"
     )
@@ -325,7 +325,7 @@ class UpdateUserResponse(BaseModel):
         data (Optional[UserProfileData]): Updated user profile data
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(..., description="Response message")
     data: Optional[UserProfileData] = Field(
         None, description="Updated user profile data"
@@ -430,7 +430,7 @@ class UserListResponse(PaginationBase):
         page_size (int): Number of items per page
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(..., description="Response message")
     data: List[UserListItem] = Field(..., description="List of users")
     total_count: int = Field(..., description="Total number of users")

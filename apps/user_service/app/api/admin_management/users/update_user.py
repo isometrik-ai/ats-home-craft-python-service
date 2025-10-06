@@ -61,7 +61,6 @@ router = APIRouter(prefix="", tags=["User Update Operations"])
 
 # Initialize logger for user update module
 logger = get_logger("user-update-api")
-logger.info("User Update API module loaded")
 
 
 @router.put(
@@ -91,20 +90,12 @@ async def update_user_email(
     """
     Update user email
     """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-    logger.info("PUT /%s/email request started - Request ID: %s, ",user_id,request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Target User ID: %s, New Email: %s",user_id,body.email)
+    # # Generate request ID for tracking
+    # request_id = str(uuid.uuid4())
 
     await validate_uuid_format(user_id, "role ID")
-    logger.debug("User ID format validated - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
 
     user_context = await check_permissions(current_user, "settings.users.manage", 'delete roles')
-    # logger.debug("User context extracted - Request ID: %s, ",request_id)
-    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     # Set audit context for user email update
     request.state.audit_risk_level = "medium"
@@ -113,20 +104,10 @@ async def update_user_email(
     request.state.audit_description = (
         f"Admin updating user email: {user_id} to {body.email}"
     )
-    logger.debug("Audit context set for email update - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s, New Email: %s",user_id,body.email)
-
-    # logger.debug("User permissions validated for email update - Request ID: %s, ",request_id)
-    # logger.debug("Target User ID: %s",user_id)
 
     # Get current user data for audit before email update
     current_user_data = await get_user_in_organization(
         user_id, user_context.organization_id
-    )
-    logger.debug("Current user data retrieved for audit - Request ID: %s, ",request_id)
-    logger.debug(
-        "Target User ID: %s, Current Email: %s",
-        user_id,current_user_data.get('email', 'N/A')
     )
 
     # Set old values for audit comparison
@@ -135,8 +116,6 @@ async def update_user_email(
     await update_supabase_user_email(
         user_id, user_context.organization_id, body.email
     )
-    logger.info("Supabase user email updated and magic link sent - Request ID: %s, ",request_id)
-    logger.info("Target User ID: %s, New Email: %s",user_id,body.email)
 
     # Set new values for audit comparison
     request.state.raw_audit_new_data = {
@@ -148,10 +127,6 @@ async def update_user_email(
         "updated_by_email": user_context.email,
         "email_update_timestamp": datetime.now().isoformat(),
     }
-
-    logger.info("PUT /%s/email request completed successfully - Request ID: %s,",user_id,request_id)
-    logger.info("Target User ID: %s, Old Email: %s, ",user_id,current_user_data.get('email', 'N/A'))
-    logger.info("New Email: %s, Status Code: %s",body.email,status.HTTP_200_OK)
 
     return UserResponse(
         message="User email updated successfully and magic link sent",
@@ -195,34 +170,22 @@ async def ban_user(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("POST /ban/%s request started - Request ID: %s, ",user_id,request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Target User ID: %s",user_id)
 
     await validate_uuid_format(user_id, "User ID")
-    logger.debug("User ID format validated - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
 
     user_context = await check_permissions(current_user, "settings.users.manage", 'delete roles')
-    # logger.debug("User context extracted - Request ID: %s, ",request_id)
-    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     # Set audit context for user banning
     request.state.audit_risk_level = "high"
     request.state.audit_table = "organization_members"
     request.state.audit_requested_id = user_id
     request.state.audit_description = f"Admin banned user: {user_id}"
-    logger.debug("Audit context set for user banning - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
 
     # await require_permission(
     #     permission_code="settings.users.manage",
     #     user_context=user_context,
     #     action_description="delete roles",
     # )
-    # logger.debug("User permissions validated for user banning - Request ID: %s, ",request_id)
-    # logger.debug("Target User ID: %s",user_id)
 
     if user_id == user_context.user_id:
         logger.warning("User attempted to ban themselves - Request ID: %s, ",request_id)
@@ -233,15 +196,11 @@ async def ban_user(
     current_user_data = await get_user_in_organization(
         user_id, user_context.organization_id
     )
-    logger.debug("Current user data retrieved for ban audit - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s, Email: %s",user_id,current_user_data.get('email', 'N/A'))
 
     # Set old values for audit comparison
     set_audit_old_data_from_user(request, current_user_data)
 
     # banned_until = datetime.now(timezone.utc) + timedelta(days=365 * 100)
-    # logger.debug("Ban duration calculated - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s, Banned until: %s",user_id,"365d")
 
     # Ban user using database operations
     result = await ban_the_user(user_id)
@@ -252,8 +211,6 @@ async def ban_user(
         # logging.warning("User not found for banning: %s", user_id)
         raise HTTPException(status_code=404, detail="User not found")
 
-    logger.debug("User banned in auth.users successfully - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
 
     result = await suspend_user(user_id, user_context.organization_id)
     if not result:
@@ -265,8 +222,6 @@ async def ban_user(
         # logging.warning("User not found for banning: %s", user_id)
         raise HTTPException(status_code=404, detail="Organization User not found")
 
-    logger.debug("User suspended in organization successfully - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s, Organization ID: %s",user_id,user_context.organization_id)
 
     # Set new values for audit comparison
     request.state.raw_audit_new_data = {
@@ -282,10 +237,6 @@ async def ban_user(
         "ban_reason": "Admin ban action",
     }
 
-    # logging.info("Banned user: %s for reason: %s", user_id, req.reason)
-    logger.info("POST /ban/%s request completed successfully - Request ID: %s, ",user_id,request_id)
-    logger.info("Target User ID: %s, Email: %s, ",user_id,current_user_data.get('email', 'N/A'))
-    # logger.info("Banned until: %s, Status Code: %s",banned_until,status.HTTP_200_OK)
 
     return BanResponse(message="User successfully banned", reason="")
 
@@ -323,28 +274,18 @@ async def unban_user(
     """
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
-    logger.info("POST /unban/%s request started - Request ID: %s, ",user_id,request_id)
-    logger.info("User ID: %s, ",current_user.get('user_id'))
-    logger.info("Organization ID: %s, ",current_user.get('organization_id'))
-    logger.info("Target User ID: %s",user_id)
 
     # Validate user access
     await validate_uuid_format(user_id, "User ID")
-    logger.debug("User ID format validated - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(current_user, "settings.users.manage", 'delete roles')
-    # logger.debug("User context extracted - Request ID: %s, ",request_id)
-    # logger.debug("Email: %s, Organization ID: %s",user_context.email,user_context.organization_id)
 
     # Set audit context for user unbanning
     request.state.audit_table = "organization_members"
     request.state.audit_requested_id = user_id
     request.state.audit_description = f"Admin unbanned user: {user_id}"
     request.state.audit_risk_level = "medium"
-    logger.debug("Audit context set for user unbanning - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
 
     # # Check permission using utility function
     # await require_permission(
@@ -352,8 +293,6 @@ async def unban_user(
     #     user_context=user_context,
     #     action_description="delete roles",
     # )
-    # logger.debug("User permissions validated for user unbanning - Request ID: %s, ",request_id)
-    # logger.debug("Target User ID: %s",user_id)
 
     if user_id == user_context.user_id:
         logger.warning("User attempted to unban themselves - Request ID: %s, ",request_id)
@@ -364,8 +303,6 @@ async def unban_user(
     current_user_data = await get_user_in_organization(
         user_id, user_context.organization_id
     )
-    logger.debug("Current user data retrieved for unban audit - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s, Email: %s",user_id,current_user_data.get('email', 'N/A'))
 
     # Set old values for audit comparison
     set_audit_old_data_from_user(request, current_user_data)
@@ -378,8 +315,6 @@ async def unban_user(
         logger.warning("Target User ID: %s",user_id)
         raise HTTPException(status_code=404, detail="User not found or not banned")
 
-    logger.debug("User unbanned in auth.users successfully - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s",user_id)
 
     result = await revoke_suspended_user(user_id, user_context.organization_id)
 
@@ -392,8 +327,6 @@ async def unban_user(
         # logging.warning("User not found for banning: %s", user_id)
         raise HTTPException(status_code=404, detail="Organization User not found")
 
-    logger.debug("User activated in organization successfully - Request ID: %s, ",request_id)
-    logger.debug("Target User ID: %s, Organization ID: %s",user_id,user_context.organization_id)
 
     # Set new values for audit comparison
     request.state.raw_audit_new_data = {
@@ -408,9 +341,5 @@ async def unban_user(
         "ban_removed": True,
     }
 
-    # logging.info("Unbanned user: %s", user_id)
-    logger.info("POST /unban/%s request completed successfully - Request ID: %s",user_id,request_id)
-    logger.info("Target User ID: %s, Email: %s, ",user_id,current_user_data.get('email', 'N/A'))
-    logger.info("Status Code: %s",status.HTTP_200_OK)
 
     return UnbanResponse(message="User successfully unbanned")

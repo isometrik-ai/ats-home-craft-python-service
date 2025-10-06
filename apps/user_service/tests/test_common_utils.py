@@ -1,3 +1,5 @@
+# pylint: disable=all
+
 """
 Test module for common utilities functionality.
 
@@ -235,8 +237,7 @@ class TestExtractUserContext:
         assert isinstance(result, UserContext)
         assert result.user_id == "user123"
         assert result.email == "test@example.com"
-        # Note: The function doesn't pass organization_id to UserContext constructor
-        assert result.organization_id is None
+        assert result.organization_id == "org123"
         assert result.user_type == "organization_member"
 
     def test_extract_user_context_minimal_data(self):
@@ -329,7 +330,7 @@ class TestRequirePermission:
             mock_check.assert_called_once_with(
                 permission_code=["users.manage"],
                 user_id="user123",
-                organisation_id="org123"
+                organisation_id=None
             )
             mock_print.assert_called_once_with("Permission check took 100.00ms")
 
@@ -352,7 +353,7 @@ class TestRequirePermission:
             mock_check.assert_called_once_with(
                 permission_code=["users.manage", "roles.view"],
                 user_id="user123",
-                organisation_id="org123"
+                organisation_id=None
             )
 
     @pytest.mark.asyncio
@@ -443,7 +444,8 @@ class TestCheckPermissions:
             mock_require.assert_called_once_with(
                 permission_code="users.manage",
                 user_context=mock_user_context,
-                action_description="manage users"
+                action_description="manage users",
+                organization_id=None
             )
             assert result == mock_user_context
 
@@ -467,7 +469,8 @@ class TestCheckPermissions:
             mock_require.assert_called_once_with(
                 permission_code=["users.manage", "roles.view"],
                 user_context=mock_user_context,
-                action_description="access role details"
+                action_description="access role details",
+                organization_id=None
             )
             assert result == mock_user_context
 
@@ -491,7 +494,8 @@ class TestCheckPermissions:
             mock_require.assert_called_once_with(
                 permission_code="users.manage",
                 user_context=mock_user_context,
-                action_description="access role details"
+                action_description="access role details",
+                organization_id=None
             )
 
 
@@ -689,9 +693,9 @@ class TestHandleApiExceptions:
             with pytest.raises(HTTPException) as exc_info:
                 await test_func()
 
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Internal server error during test operation" in str(exc_info.value.detail)
-        mock_print.assert_called_once_with("Error in test operation: Something went wrong")
+        assert exc_info.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert "Value error during test operation" in str(exc_info.value.detail)
+        mock_print.assert_called_once_with("Value error in test operation: Something went wrong")
 
     @pytest.mark.asyncio
     async def test_handle_api_exceptions_with_args_and_kwargs(self):
@@ -1021,8 +1025,7 @@ class TestIntegration:
 
             assert user_context.user_id == "user123"
             assert user_context.email == "test@example.com"
-            # Note: extract_user_context doesn't pass organization_id to UserContext
-            assert user_context.organization_id is None
+            assert user_context.organization_id == "org123"
             mock_check.assert_called_once()
 
     @pytest.mark.asyncio

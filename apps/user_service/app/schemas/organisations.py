@@ -11,8 +11,8 @@ Last Updated: 2024-12-19
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
-
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from fastapi import HTTPException, status
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
 from apps.user_service.app.schemas.auth import CompanyData, PlanType, User
 
@@ -63,9 +63,9 @@ class OrganisationInfo(BaseModel):
     member_count: int = Field(
         default=0, description="Number of active members in the organisation"
     )
-    user_role: Optional[str] = Field(
-        None, description="Current user's role in this organisation"
-    )
+    # user_role: Optional[str] = Field(
+    #     None, description="Current user's role in this organisation"
+    # )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -102,7 +102,7 @@ class OrganisationListResponse(PaginationBase):
         page_size (int): Number of items per page
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(
         ..., description="Response message describing the operation result"
     )
@@ -241,7 +241,7 @@ class UpdateOrganisationResponse(BaseModel):
         data (Optional[OrganisationInfo]): Updated organisation data
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(..., description="Response message")
     data: Optional[OrganisationInfo] = Field(
         None, description="Updated organisation data"
@@ -276,7 +276,7 @@ class OrganisationDetailResponse(BaseModel):
         data (Optional[OrganisationInfo]): Organisation data if successful
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(
         ..., description="Response message describing the operation result"
     )
@@ -382,7 +382,7 @@ class NewOrganisationBody(BaseModel):
         plan_type (PlanType): The subscription plan type for the organisation (default: starter).
     """
     user_data: Optional[User] = None
-    company_data: Optional[CompanyData] = None
+    company_data: CompanyData
     plan_type: PlanType = PlanType.STARTER
 
 
@@ -395,7 +395,7 @@ class CreateOrganisationWithUserResponse(BaseModel):
         data (dict): Created organisation and user data
     """
 
-    status_code: int = Field(..., description="HTTP status code")
+    # status_code: int = Field(..., description="HTTP status code")
     message: str = Field(
         ..., description="Response message describing the operation result"
     )
@@ -458,6 +458,7 @@ class OrganizationUpdate(BaseModel):
     settings: Optional[dict] = Field(
         None,
         description="Custom JSON settings that apply organisation-wide",
+        examples=[{}]
     )
     timezone: Optional[str] = Field(
         None,
@@ -499,3 +500,29 @@ class OrganizationAdminUpdate(OrganizationUpdate):
         ge=1,
         description="Maximum number of users allowed under the current plan",
     )
+
+    # @model_validator(mode='after')
+    # def check_at_least_one_field_has_value(cls) -> 'OrganizationAdminUpdate':
+    #     # Check if at least one field has a non-None value
+    #     if all(value is None for value in cls.model_dump().values()):
+    #         raise ValueError("At least one field must have a non-None value.")
+    #     return cls
+
+    # @model_validator(mode='before')
+    # def check_at_least_one_non_none(self):
+    #     # Convert the model to a dictionary and check if any value is not None
+    #     if all(value is None for value in self.values()):
+    #         raise ValueError("At least one field must have a non-None value.")
+    #     return self
+
+    @model_validator(mode='after')
+    def check_at_least_one_field(self):
+        """
+        Check if at least one field has a non-None value.
+        """
+        # Get all field values dynamically & Check if at least one value is not None
+        if all(getattr(self, field) is None for field in self.__pydantic_fields__):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="At least one field must have a non-None value")
+        return self

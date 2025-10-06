@@ -7,7 +7,7 @@ import os
 import logging
 from datetime import datetime
 
-import requests
+import httpx
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def send_email(email: str, subject: str, message: str, html: str = None) -> bool
         if html:
             payload["html"] = html
         print(f"Sending email to {email} with subject {subject} and message {message}")
-        response = requests.post(
+        response = httpx.post(
             f"{SUPABASE_URL}/functions/v1/custom-email",
             headers={
                 "apikey": SERVICE_ROLE_KEY,
@@ -51,11 +51,10 @@ def send_email(email: str, subject: str, message: str, html: str = None) -> bool
             timeout=10,
         )
         if response.status_code == 200:
-            logger.info("Email sent successfully to %s", email)
             return True
         logger.error("Failed to send email: %s", response.text)
         return False
-    except requests.RequestException as error:
+    except httpx.HTTPError as error:
         logger.error("Error sending email: %s", str(error))
         return False
 

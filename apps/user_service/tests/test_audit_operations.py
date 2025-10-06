@@ -1,3 +1,5 @@
+# pylint: disable=all
+
 """
 Test module for audit operations database functions.
 
@@ -12,7 +14,6 @@ This module contains comprehensive tests for:
 """
 
 import pytest
-import pytest_asyncio
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch

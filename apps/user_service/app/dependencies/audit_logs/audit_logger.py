@@ -29,11 +29,12 @@ from typing import Dict, Any, Optional, List, Tuple
 import hashlib
 import json
 import asyncio
-import logging
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from fastapi import Request
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
+    DatabaseOperationError
+)
 
 from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
     get_last_audit_log_hash,

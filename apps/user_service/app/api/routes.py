@@ -18,6 +18,12 @@ from apps.user_service.app.api.admin_management.organisation import (
 from apps.user_service.app.api.admin_management.users.users import (
     router as users_router,
 )
+from apps.user_service.app.api.admin_management.users.user_profile import (
+    router as user_profile_router,
+)
+from apps.user_service.app.api.admin_management.users.update_user import (
+    router as update_user_router,
+)
 from apps.user_service.app.api.admin_management.roles import router as roles_router
 from apps.user_service.app.api.admin_management.sessions.sessions import (
     router as sessions_router,
@@ -35,11 +41,12 @@ router = APIRouter(prefix="/v1")
 router.include_router(auth_router, prefix="/admin")
 router.include_router(organisation_router, prefix="/admin")
 router.include_router(users_router, prefix="/admin")
+router.include_router(update_user_router, prefix="/admin")
+router.include_router(user_profile_router, prefix="/admin")
 router.include_router(roles_router, prefix="/admin")
 router.include_router(sessions_router, prefix="/admin")
 router.include_router(permissions_router, prefix="/admin")
 router.include_router(audit_logs_router, prefix="/admin")
-
 
 # Health check endpoint for the API router
 @router.get("/status")
