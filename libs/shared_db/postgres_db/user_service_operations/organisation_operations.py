@@ -146,9 +146,7 @@ async def update_organisation_details(
 
     # 2️⃣ Strip out empty strings so "" doesn't overwrite existing data
     #   (mimicking the empty string check)
-    payload = {
-        k: v for k, v in payload.items() if not (isinstance(v, str) and v.strip() == "")
-    }
+    payload = {k: v for k, v in payload.items() if not (isinstance(v, str) and v.strip() == "")}
 
     if not payload:  # nothing to change (mimicking the early return logic)
         return {}
@@ -158,9 +156,7 @@ async def update_organisation_details(
 
     # 4️⃣ Execute update with Supabase SDK (mimicking the WHERE id = $N logic)
     table = supabase.table("organizations")
-    result = await table.update(payload).eq(
-        "id", organisation_id
-    ).execute()
+    result = await table.update(payload).eq("id", organisation_id).execute()
 
     if result.data and len(result.data) > 0:
         return result.data[0]
@@ -716,29 +712,6 @@ async def get_organisation_activity_stats(organisation_id: str) -> Dict[str, Any
 # ============================================================================
 # ORGANISATION BULK OPERATIONS
 # ============================================================================
-
-# async def bulk_update_organisations(updates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-#     """Bulk update multiple organisations."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         results = []
-#         for update_data in updates:
-#             org_id = update_data.pop("id")
-#             result = await update_organisation_details(org_id, update_data)
-#             if result:
-#                 results.append(result)
-#         return results
-
-#     except APIError as e:
-#         logger.error("Supabase API error bulk updating organisations: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error bulk updating organisations: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error bulk updating organisations: %s", e, exc_info=True)
-#         raise
-
 
 @handle_database_errors(
     "bulk_delete_organisations",

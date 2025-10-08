@@ -437,4 +437,3 @@ async def check_role_usage(role_id: str, organization_id: str) -> int:
 # Note: Query building functions have been removed as Supabase SDK
 # provides built-in query methods that are more efficient and type-safe.
 # The filtering logic is now handled directly in the respective functions.
-

@@ -7,7 +7,6 @@ All endpoints include proper authentication, validation, and database operations
 """
 from datetime import datetime, timezone
 import uuid
-import asyncio
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 from pydantic import BaseModel
@@ -73,6 +72,9 @@ router = APIRouter(prefix="/roles", tags=["Roles Management"])
 role_data_permission_validity = lambda obj: obj is not None and len(obj) > 0
 
 def check_role_data_exist(data_object: dict, request_id: str):
+    """
+    Check if role data exists
+    """
     if not data_object:
         logger.warning("Role not found or access denied - Request ID: %s",request_id)
         raise HTTPException(
@@ -82,19 +84,22 @@ def check_role_data_exist(data_object: dict, request_id: str):
 
 async def check_permission_exist_in_organization(
     role_data, user_context, request_id):
-        permissions_exist = await check_permissions_exist(
-            permission_ids=role_data.permission_ids,
-            organization_id=user_context.organization_id,
+    """
+    Check if permissions exist in organization
+    """
+    permissions_exist = await check_permissions_exist(
+        permission_ids=role_data.permission_ids,
+        organization_id=user_context.organization_id,
+    )
+    if not permissions_exist:
+        logger.warning(
+            "Invalid permission IDs provided - Request ID: %s, ",
+            request_id
         )
-        if not permissions_exist:
-            logger.warning(
-                "Invalid permission IDs provided - Request ID: %s, ",
-                request_id
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="One or more permission IDs are invalid",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="One or more permission IDs are invalid",
+        )
 
 
 class RoleResponse(BaseModel):

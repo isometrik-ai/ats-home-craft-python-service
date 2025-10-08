@@ -193,9 +193,8 @@ The House of App AI Team</p>
         if email_sent:
             logger.info("Password reset confirmation email sent successfully to %s", email)
             return True
-        else:
-            logger.error("Failed to send password reset confirmation email to %s", email)
-            return False
+        logger.error("Failed to send password reset confirmation email to %s", email)
+        return False
 
     except Exception as error:
         logger.error("Error sending password reset confirmation email: %s", str(error))

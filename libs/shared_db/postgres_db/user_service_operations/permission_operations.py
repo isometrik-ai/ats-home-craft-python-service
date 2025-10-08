@@ -93,4 +93,3 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
     ).execute()
 
     return result.data if result.data else []
-

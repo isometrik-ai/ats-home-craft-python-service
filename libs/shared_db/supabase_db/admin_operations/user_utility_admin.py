@@ -568,4 +568,3 @@ def _provider_validity_check(provider: str):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid provider"
         )
-

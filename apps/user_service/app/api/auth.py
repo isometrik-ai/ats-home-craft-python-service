@@ -13,7 +13,6 @@ Last Updated: 2024-12-19
 import re
 import os
 import sys
-import uuid
 
 # Third-party imports
 from fastapi import APIRouter, HTTPException, status, Body, Request, Depends, Response
@@ -355,12 +354,11 @@ async def reset_password(
             return PasswordResponse(
                 message="Password reset successfully. You can now login with your new password."
             )
-        else:
-            logger.error("Password update failed - no user in result")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to update password. Please try again."
-            )
+        logger.error("Password update failed - no user in result")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to update password. Please try again."
+        )
 
     except Exception as error:
         log_exception()
