@@ -798,7 +798,7 @@ def test_reset_password_email_error_handling(auth_client):
     }
 
     with patch('apps.user_service.app.api.auth.get_user_from_token',
-               return_value={"sub": "user-id", "email": "test@example.com", 
+               return_value={"sub": "user-id", "email": "test@example.com",
                            "user_metadata": {"full_name": "Test User"}}), \
          patch('apps.user_service.app.api.auth.update_password_with_token',
                AsyncMock(return_value=MagicMock(user=MagicMock()))), \

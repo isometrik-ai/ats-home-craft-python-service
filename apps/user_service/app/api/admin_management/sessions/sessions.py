@@ -495,7 +495,7 @@ async def update_session_logout(
             logout_timestamp_value = existing_session["logout_timestamp"]
         else:
             logout_timestamp_value = format_iso_datetime(existing_session["logout_timestamp"]) or ""
-    
+
     request.state.raw_audit_old_data = {
         "session_id": session_id,
         "session_status": existing_session["session_status"],
@@ -550,7 +550,7 @@ async def update_session_logout(
         if isinstance(updated_session["login_timestamp"], str)
         else format_iso_datetime(updated_session["login_timestamp"]) or ""
     )
-    
+
     session_item = SessionItem(
         id=str(updated_session["id"]),
         user_id=str(updated_session["user_id"]),

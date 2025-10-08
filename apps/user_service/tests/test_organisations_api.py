@@ -181,7 +181,7 @@ class TestOrganisationList:
                 }
             ]
             mock_process.return_value = (formatted_orgs, 0)  # Simulate the else branch returning 0
-            
+
             response = client.get("/v1/admin/organisation/list")
 
             assert response.status_code == 200
@@ -611,7 +611,7 @@ class TestCreateOrganisation:
              patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=True)), \
              patch("apps.user_service.app.api.admin_management.organisation._determine_organization_name") as mock_determine_name:
             mock_determine_name.return_value = "John Doe"  # Simulate personal account type
-            
+
             response = client.post("/v1/admin/organisation/", json=request_data)
 
             assert response.status_code == 201

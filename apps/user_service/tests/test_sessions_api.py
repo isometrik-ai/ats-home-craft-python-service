@@ -1053,7 +1053,7 @@ class TestSessionOperationsCoverage:
     async def test_create_session_invalid_organization_id(self):
         """Test create_session with invalid organization_id - covers line 38"""
         from libs.shared_db.postgres_db.user_service_operations.exception_handling import DataValidationError
-        
+
         session_data = {
             "session_id": "test-session",
             "user_id": "test-user",
@@ -1076,7 +1076,7 @@ class TestSessionOperationsCoverage:
     async def test_create_session_invalid_session_id(self):
         """Test create_session with invalid session_id - covers line 41"""
         from libs.shared_db.postgres_db.user_service_operations.exception_handling import DataValidationError
-        
+
         session_data = {
             "session_id": None,
             "user_id": "test-user",
@@ -1100,7 +1100,7 @@ class TestSessionOperationsCoverage:
     async def test_create_session_invalid_user_id(self):
         """Test create_session with invalid user_id - covers line 44"""
         from libs.shared_db.postgres_db.user_service_operations.exception_handling import DataValidationError
-        
+
         session_data = {
             "session_id": "test-session",
             "user_id": None,
@@ -1228,7 +1228,7 @@ class TestSessionOperationsCoverage:
     async def test_check_session_exists_invalid_session_id(self):
         """Test check_session_exists with invalid session_id - covers line 150"""
         from libs.shared_db.postgres_db.user_service_operations.exception_handling import DataValidationError
-        
+
         with pytest.raises(DataValidationError) as exc_info:
             await check_session_exists(None, "org123")
         assert "Session ID cannot be None or empty" in str(exc_info.value)
@@ -1241,7 +1241,7 @@ class TestSessionOperationsCoverage:
     async def test_check_session_exists_invalid_organization_id(self):
         """Test check_session_exists with invalid organization_id - covers line 153"""
         from libs.shared_db.postgres_db.user_service_operations.exception_handling import DataValidationError
-        
+
         with pytest.raises(DataValidationError) as exc_info:
             await check_session_exists("session123", None)
         assert "Organization ID cannot be None or empty" in str(exc_info.value)
@@ -1299,21 +1299,21 @@ class TestSessionOperationsCoverage:
         mock_supabase = MagicMock()
         mock_count_result = MagicMock()
         mock_count_result.count = 2
-        
+
         # Create a more complex mock chain for the search case
         mock_table = MagicMock()
         mock_initial_query = MagicMock()
         mock_search_query = MagicMock()
-        
+
         # First select call (initial)
         mock_table.select.return_value = mock_initial_query
         mock_initial_query.eq.return_value = mock_initial_query
-        
+
         # Second select call (for search) - this returns a new query object
         mock_initial_query.select.return_value = mock_search_query
         mock_search_query.or_.return_value = mock_search_query
         mock_search_query.execute = AsyncMock(return_value=mock_count_result)
-        
+
         mock_supabase.table.return_value = mock_table
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",

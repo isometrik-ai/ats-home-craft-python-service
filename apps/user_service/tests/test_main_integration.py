@@ -86,11 +86,11 @@ def test_api_status_endpoint():
     """Test API status endpoint - covers routes.py"""
     # Test the function directly to avoid JWT middleware issues
     from apps.user_service.app.api.routes import api_status
-    
+
     # Test the async function directly
     import asyncio
     result = asyncio.run(api_status())
-    
+
     assert result["status"] == "success"
     assert "API routes are active" in result["message"]
     assert "available_endpoints" in result
