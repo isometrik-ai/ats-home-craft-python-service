@@ -43,6 +43,7 @@ from apps.user_service.app.dependencies.common_utils import (
 )
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
+from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 
 
 class TestUserContext:
@@ -170,7 +171,7 @@ class TestFormatPermissionsData:
             }
         ]
 
-        result = await format_permissions_data(permissions_data)
+        result = format_permissions_data(permissions_data)
 
         assert len(result) == 2
         assert isinstance(result[0], PermissionItem)
@@ -195,7 +196,7 @@ class TestFormatPermissionsData:
     @pytest.mark.asyncio
     async def test_format_permissions_data_empty_list(self):
         """Test formatting empty permissions data."""
-        result = await format_permissions_data([])
+        result = format_permissions_data([])
 
         assert result == []
 
@@ -215,7 +216,7 @@ class TestFormatPermissionsData:
 
         # The function expects datetime objects, not strings
         with pytest.raises(AttributeError):
-            await format_permissions_data(permissions_data)
+            format_permissions_data(permissions_data)
 
 
 class TestExtractUserContext:
@@ -508,7 +509,7 @@ class TestValidateUuidFormat:
         valid_uuid = str(uuid.uuid4())
 
         # Should not raise any exception
-        await validate_uuid_format(valid_uuid)
+        validate_uuid_format(valid_uuid)
 
     @pytest.mark.asyncio
     async def test_validate_uuid_format_valid_with_custom_field_name(self):
@@ -516,7 +517,7 @@ class TestValidateUuidFormat:
         valid_uuid = str(uuid.uuid4())
 
         # Should not raise any exception
-        await validate_uuid_format(valid_uuid, "role ID")
+        validate_uuid_format(valid_uuid, "role ID")
 
     @pytest.mark.asyncio
     async def test_validate_uuid_format_invalid(self):
@@ -524,7 +525,7 @@ class TestValidateUuidFormat:
         invalid_uuid = "not-a-uuid"
 
         with pytest.raises(HTTPException) as exc_info:
-            await validate_uuid_format(invalid_uuid)
+            validate_uuid_format(invalid_uuid)
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         assert "Invalid ID format" in str(exc_info.value.detail)
@@ -535,7 +536,7 @@ class TestValidateUuidFormat:
         invalid_uuid = "not-a-uuid"
 
         with pytest.raises(HTTPException) as exc_info:
-            await validate_uuid_format(invalid_uuid, "user ID")
+            validate_uuid_format(invalid_uuid, "user ID")
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         assert "Invalid user ID format" in str(exc_info.value.detail)
@@ -544,7 +545,7 @@ class TestValidateUuidFormat:
     async def test_validate_uuid_format_empty_string(self):
         """Test UUID validation with empty string."""
         with pytest.raises(HTTPException) as exc_info:
-            await validate_uuid_format("")
+            validate_uuid_format("")
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         assert "Invalid ID format" in str(exc_info.value.detail)
@@ -554,7 +555,7 @@ class TestValidateUuidFormat:
         """Test UUID validation with None."""
         # uuid.UUID(None) raises TypeError, not ValueError, so it's not caught
         with pytest.raises(TypeError):
-            await validate_uuid_format(None)
+            validate_uuid_format(None)
 
 
 class TestValidatePaginationParams:
@@ -845,7 +846,7 @@ class TestGetUserInOrganization:
                 await get_user_in_organization("user123", "org123")
 
             assert exc_info.value.status_code == 404
-            assert "User not found in organization" in str(exc_info.value.detail)
+            assert USER_NOT_FOUND_MESSAGE in str(exc_info.value.detail)
             mock_get_profile.assert_called_once_with("user123", "org123")
 
     @pytest.mark.asyncio
@@ -858,7 +859,7 @@ class TestGetUserInOrganization:
                 await get_user_in_organization("user123", "org123")
 
             assert exc_info.value.status_code == 404
-            assert "User not found in organization" in str(exc_info.value.detail)
+            assert USER_NOT_FOUND_MESSAGE in str(exc_info.value.detail)
 
 
 class TestSetAuditOldDataFromUser:
@@ -1073,8 +1074,8 @@ class TestIntegration:
         invalid_uuid = "not-a-uuid"
 
         # Should not raise exception
-        await validate_uuid_format(valid_uuid, "user ID")
+        validate_uuid_format(valid_uuid, "user ID")
 
         # Should raise exception
         with pytest.raises(HTTPException):
-            await validate_uuid_format(invalid_uuid, "user ID")
+            validate_uuid_format(invalid_uuid, "user ID")

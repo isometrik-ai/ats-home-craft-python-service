@@ -47,6 +47,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 )  # adjust path as needed
 
 # Local imports
+from libs.shared_utils.common_query import SETTINGS_ROLES_MANAGE
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_db.postgres_db.user_service_operations.role_operations import (
     create_role,
@@ -63,16 +64,38 @@ from libs.shared_db.postgres_db.user_service_operations.role_operations import (
     check_role_name_unique,
 )
 
-
-
-# Authentication description for API documentation
-AUTH_DESCRIPTION = "Bearer token required for authentication"
-
 # Initialize logger for roles module
 logger = get_logger("roles-api")
 
 # Create router for roles endpoints
 router = APIRouter(prefix="/roles", tags=["Roles Management"])
+
+role_data_permission_validity = lambda obj: obj is not None and len(obj) > 0
+
+def check_role_data_exist(data_object: dict, request_id: str):
+    if not data_object:
+        logger.warning("Role not found or access denied - Request ID: %s",request_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role not found or access denied",
+        )
+
+async def check_permission_exist_in_organization(
+    role_data, user_context, request_id):
+        permissions_exist = await check_permissions_exist(
+            permission_ids=role_data.permission_ids,
+            organization_id=user_context.organization_id,
+        )
+        if not permissions_exist:
+            logger.warning(
+                "Invalid permission IDs provided - Request ID: %s, ",
+                request_id
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="One or more permission IDs are invalid",
+            )
+
 
 class RoleResponse(BaseModel):
     """Response model for role operations"""
@@ -143,7 +166,7 @@ async def get_roles(
 
 
     # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user, "settings.roles.manage")
+    user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
 
     # Get roles using centralized operations
     roles_data = await get_roles_list(
@@ -185,7 +208,6 @@ async def get_roles(
     )
 
     return RolesResponse(
-        status_code=status.HTTP_200_OK,
         message=message,
         roles=roles,
         total_count=total_count,
@@ -229,33 +251,23 @@ async def get_role_from_id(
 
     # Validate role_id format using utility function
     request.state.audit_requested_id = role_id
-    await validate_uuid_format(role_id, "role ID")
+    validate_uuid_format(role_id, "role ID")
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(
-        current_user, ["settings.roles.manage", "settings.users.manage"])
+        current_user, [SETTINGS_ROLES_MANAGE, "settings.users.manage"])
 
     # Get role details using centralized operation
     role_data = await get_role_by_id(role_id, user_context.organization_id)
 
     # Check if role exists in user's organization
-    if not role_data:
-        logger.warning(
-            "Role not found or access denied - Request ID: %s, "
-            "Role ID: %s, Organization ID: %s, "
-            "Status Code: %s",
-            request_id,role_id,user_context.organization_id,status.HTTP_404_NOT_FOUND
-        )
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Role not found or access denied",
-        )
+    check_role_data_exist(role_data, request_id)
 
     # Get permissions for this role using centralized operation
     permissions_data = await get_role_permissions(role_id, user_context.organization_id)
 
     # Format permissions data using utility functions
-    permissions = await format_permissions_data(permissions_data)
+    permissions = format_permissions_data(permissions_data)
 
     # Format role data using utility functions
     role_detail = RoleDetailItem(
@@ -269,7 +281,6 @@ async def get_role_from_id(
     )
 
     return RoleDetailResponse(
-        status_code=status.HTTP_200_OK,
         message=(
             f"Role details retrieved successfully "
             f"(found {len(permissions)} permissions)"
@@ -333,38 +344,15 @@ async def create_new_role(
 
     # Validate permission IDs format using utility function
     if role_data.permission_ids:
-        validation_results = await asyncio.gather(
-            *[validate_uuid_format(uuid_str, "permission ID")
-            for uuid_str in role_data.permission_ids],
-            return_exceptions=True)
-
-        # Check if any validation failed
-        for result in validation_results:
-            if isinstance(result, Exception):
-                raise result
+        for uuid_str in role_data.permission_ids:
+            validate_uuid_format(uuid_str, "permission ID")
 
     # Extract and validate user context from JWT token
     # Check permission using utility function
-    user_context = await check_permissions(current_user, "settings.roles.manage")
-
+    user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
 
     # Validate that all permission IDs exist in the organization using centralized operation
-    permissions_exist = await check_permissions_exist(
-        permission_ids=role_data.permission_ids,
-        organization_id=user_context.organization_id,
-    )
-    if not permissions_exist:
-        logger.warning(
-            "Status Code: %s"
-            "Invalid permission IDs provided - Request ID: %s, "
-            "Permission IDs: %s, Organization ID: %s, ",
-            status.HTTP_400_BAD_REQUEST,request_id,
-            role_data.permission_ids,user_context.organization_id
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="One or more permission IDs are invalid",
-        )
+    await check_permission_exist_in_organization(role_data, user_context, request_id)
 
     # Check if role name is unique using centralized operation
     name_unique = await check_role_name_unique(
@@ -373,10 +361,8 @@ async def create_new_role(
     )
     if not name_unique:
         logger.warning(
-            "Role name already exists - Request ID: %s, "
-            "Role Name: %s, Organization ID: %s, "
-            "Status Code: %s",
-            request_id,role_data.name,user_context.organization_id,status.HTTP_400_BAD_REQUEST
+            "Role name already exists - Request ID: %s, ",
+            request_id
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -419,7 +405,6 @@ async def create_new_role(
     )
 
     return CreateRoleResponse(
-        status_code=status.HTTP_201_CREATED,
         message="Role created successfully",
     )
 
@@ -499,25 +484,15 @@ async def update_role_data(
     request.state.audit_requested_id = role_id
 
     # Validate role_id format using utility function
-    await validate_uuid_format(role_id, "role ID")
+    validate_uuid_format(role_id, "role_ID")
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(
-        current_user, ["settings.roles.manage", "settings.users.manage"])
+        current_user, [SETTINGS_ROLES_MANAGE, "settings.users.manage"])
 
     # Check if role exists in organization using centralized operation
     role_exists = await check_role_exists(role_id, user_context.organization_id)
-    if not role_exists:
-        logger.warning(
-            "Role not found or access denied - Request ID: %s, "
-            "Role ID: %s, Organization ID: %s, "
-            "Status Code: %s",
-            request_id,role_id,user_context.organization_id,status.HTTP_404_NOT_FOUND
-        )
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Role not found or access denied",
-        )
+    check_role_data_exist(role_exists, request_id)
 
     # Get existing role data using centralized operation
     existing_role = await get_role_by_id(role_id, user_context.organization_id)
@@ -542,33 +517,11 @@ async def update_role_data(
     }
 
     # Validate permission IDs if provided using centralized operation
-    if role_data.permission_ids is not None and len(role_data.permission_ids) > 0:
-        validation_results = await asyncio.gather(
-            *[validate_uuid_format(uuid_str, "permission ID")
-            for uuid_str in role_data.permission_ids],
-            return_exceptions=True)
+    if role_data_permission_validity(role_data.permission_ids):
+        for uuid_str in role_data.permission_ids:
+            validate_uuid_format(uuid_str, "permission ID")
 
-        # Check if any validation failed
-        for result in validation_results:
-            if isinstance(result, Exception):
-                raise result
-
-        permissions_exist = await check_permissions_exist(
-            permission_ids=role_data.permission_ids,
-            organization_id=user_context.organization_id,
-        )
-        if not permissions_exist:
-            logger.warning(
-                "Invalid permission IDs provided - Request ID: %s, "
-                "Status Code: %s"
-                "Permission IDs: %s, Organization ID: %s, ",
-                request_id,status.HTTP_400_BAD_REQUEST,
-                role_data.permission_ids,user_context.organization_id
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="One or more permission IDs are invalid",
-            )
+        await check_permission_exist_in_organization(role_data, user_context, request_id)
 
     # Check if new name conflicts with existing roles using centralized operation
     if role_data.name is not None and role_data.name != existing_role["name"]:
@@ -579,10 +532,8 @@ async def update_role_data(
         )
         if not name_unique:
             logger.warning(
-                "Role name already exists - Request ID: %s, "
-                "Role Name: %s, Organization ID: %s, "
-                "Status Code: %s",
-                request_id,role_data.name,user_context.organization_id,status.HTTP_400_BAD_REQUEST
+                "Role name already exists - Request ID: %s, ",
+                request_id
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -604,7 +555,7 @@ async def update_role_data(
 
     # Handle permissions update if provided using centralized operations
     # Add new permissions if any are provided using centralized operation
-    if role_data.permission_ids is not None and len(role_data.permission_ids) > 0:
+    if role_data_permission_validity(role_data.permission_ids):
         await assign_permissions_to_role(
             role_id=role_id,
             organization_id=user_context.organization_id,
@@ -637,7 +588,6 @@ async def update_role_data(
     request.state.raw_audit_new_data = new_role_data
 
     return UpdateRoleResponse(
-        status_code=status.HTTP_200_OK,
         message=message,
     )
 
@@ -681,24 +631,14 @@ async def delete_role_data(
     request.state.audit_requested_id = role_id
 
     # Validate role_id format using utility function
-    await validate_uuid_format(role_id, "role ID")
+    validate_uuid_format(role_id, "role ID")
 
     # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user, "settings.roles.manage")
+    user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
 
     # Check if role exists in organization using centralized operation
     role_exists = await check_role_exists(role_id, user_context.organization_id)
-    if not role_exists:
-        logger.warning(
-            "Role not found or access denied - Request ID: %s, "
-            "Role ID: %s, Organization ID: %s, "
-            "Status Code: %s",
-            request_id,role_id,user_context.organization_id,status.HTTP_404_NOT_FOUND
-        )
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Role not found or access denied",
-        )
+    check_role_data_exist(role_exists, request_id)
 
     # Get existing role data using centralized operation
     existing_role = await get_role_by_id(role_id, user_context.organization_id)
@@ -728,8 +668,6 @@ async def delete_role_data(
 
     if member_count > 0:
         logger.warning("Cannot delete role - it is currently in use - Request ID: %s, ",request_id)
-        logger.warning("Role ID: %s, Role Name: %s, ",role_id,existing_role['name'])
-        logger.warning("Member Count: %s, Status Code: %s",member_count,status.HTTP_409_CONFLICT)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -742,12 +680,7 @@ async def delete_role_data(
     role_deleted = await delete_role(role_id, user_context.organization_id)
 
     if not role_deleted:
-        logger.warning(
-            "Role not found or already deleted - Request ID: %s, "
-            "Role ID: %s, Organization ID: %s, "
-            "Status Code: %s",
-            request_id,role_id,user_context.organization_id,status.HTTP_404_NOT_FOUND
-        )
+        logger.warning("Role not found or already deleted - Request ID: %s, ",request_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Role not found or already deleted",
@@ -765,6 +698,5 @@ async def delete_role_data(
     }
 
     return DeleteRoleResponse(
-        status_code=status.HTTP_200_OK,
         message="Role deleted successfully",
     )

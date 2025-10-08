@@ -13,6 +13,12 @@ Last Updated: 2024-12-19
 from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
+from apps.user_service.app.schemas import ResponseModel
+from libs.shared_utils.common_query import SETTINGS_ROLES_MANAGE
+
+DESCRIPTION_OF_THE_ROLE = "Description of the role"
+IS_DEFAULT_ROLE = "Whether this is a system role (True) or custom role (False)"
+EXAMPLE_DESCRIPTION_OF_THE_ROLE = "Full access to all system features"
 
 class UserQueryParams(BaseModel):
     """Query parameters for Users API
@@ -97,9 +103,9 @@ class RoleItem(BaseModel):
 
     id: str = Field(..., description="Unique identifier for the role")
     name: str = Field(..., description="Human-readable name of the role")
-    description: Optional[str] = Field(None, description="Description of the role")
+    description: Optional[str] = Field(None, description=DESCRIPTION_OF_THE_ROLE)
     is_default: bool = Field(
-        ..., description="Whether this is a system role (True) or custom role (False)"
+        ..., description=IS_DEFAULT_ROLE
     )
     created_at: str = Field(..., description="ISO timestamp when role was created")
     user_count: int = Field(..., description="Number of users assigned to this role")
@@ -115,7 +121,7 @@ class RoleItem(BaseModel):
             "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "name": "Administrator",
-                "description": "Full access to all system features",
+                "description": EXAMPLE_DESCRIPTION_OF_THE_ROLE,
                 "is_default": True,
                 "created_at": "2024-12-19T10:00:00Z",
                 "user_count": 3,
@@ -161,29 +167,24 @@ class PermissionItem(BaseModel):
             "example": {
                 "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                 "name": "Manage Roles",
-                "code": "settings.roles.manage",
+                "code": SETTINGS_ROLES_MANAGE,
                 "category": "settings",
-                "description": "Allows managing roles and permissions",
-                "created_at": "2024-12-19T10:00:00Z",
+                "description": EXAMPLE_DESCRIPTION_OF_THE_ROLE,
+                "created_at": "2024-12-1T10:00:00Z",
             }
         }
     )
 
 
-class RolesResponse(BaseModel):
+class RolesResponse(ResponseModel):
     """Response model for roles operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         roles (List[RoleItem]): List of roles
         total_count (int): Total number of roles available (for pagination)
     """
 
-    status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     roles: List[RoleItem] = Field(..., description="List of roles")
     total_count: int = Field(
         ..., description="Total number of roles available (for pagination)"
@@ -198,9 +199,9 @@ class RolesResponse(BaseModel):
                     {
                         "id": "550e8400-e29b-41d4-a716-446655440000",
                         "name": "Administrator",
-                        "description": "Full access to all system features",
+                        "description": EXAMPLE_DESCRIPTION_OF_THE_ROLE,
                         "is_default": True,
-                        "created_at": "2024-12-19T10:00:00Z",
+                        "created_at": "2024-12-02T10:00:00Z",
                     }
                 ],
                 "total_count": 1,
@@ -209,7 +210,7 @@ class RolesResponse(BaseModel):
     )
 
 
-class PermissionsResponse(BaseModel):
+class PermissionsResponse(ResponseModel):
     """Response model for permissions operations
 
     Attributes:
@@ -218,10 +219,6 @@ class PermissionsResponse(BaseModel):
         permissions (List[PermissionItem]): List of permissions
     """
 
-    status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     permissions: List[PermissionItem] = Field(..., description="List of permissions")
 
     model_config = ConfigDict(
@@ -232,11 +229,11 @@ class PermissionsResponse(BaseModel):
                 "permissions": [
                     {
                         "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-                        "name": "Manage Roles",
-                        "code": "settings.roles.manage",
+                        "name": "Manage Permissions Roles",
+                        "code": SETTINGS_ROLES_MANAGE,
                         "category": "settings",
-                        "description": "Allows managing roles and permissions",
-                        "created_at": "2024-12-19T10:00:00Z",
+                        "description": EXAMPLE_DESCRIPTION_OF_THE_ROLE,
+                        "created_at": "2024-12-19T08:00:00Z",
                     }
                 ],
             }
@@ -259,9 +256,9 @@ class RoleDetailItem(BaseModel):
 
     id: str = Field(..., description="Unique identifier for the role")
     name: str = Field(..., description="Human-readable name of the role")
-    description: Optional[str] = Field(None, description="Description of the role")
+    description: Optional[str] = Field(None, description=DESCRIPTION_OF_THE_ROLE)
     is_default: bool = Field(
-        ..., description="Whether this is a system role (True) or custom role (False)"
+        ..., description=IS_DEFAULT_ROLE
     )
     created_at: str = Field(..., description="ISO timestamp when role was created")
     updated_at: str = Field(..., description="ISO timestamp when role was last updated")
@@ -274,18 +271,18 @@ class RoleDetailItem(BaseModel):
             "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "name": "Administrator",
-                "description": "Full access to all system features",
+                "description": EXAMPLE_DESCRIPTION_OF_THE_ROLE,
                 "is_default": True,
-                "created_at": "2024-12-19T10:00:00Z",
+                "created_at": "2024-12-13T10:00:00Z",
                 "updated_at": "2024-12-19T12:00:00Z",
                 "permissions": [
                     {
                         "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-                        "name": "Manage Roles",
-                        "code": "settings.roles.manage",
+                        "name": "Manage Role Details",
+                        "code": SETTINGS_ROLES_MANAGE,
                         "category": "settings",
                         "description": "Allows managing roles and permissions",
-                        "created_at": "2024-12-19T10:00:00Z",
+                        "created_at": "2024-12-19T11:50:00Z",
                     }
                 ],
             }
@@ -293,7 +290,7 @@ class RoleDetailItem(BaseModel):
     )
 
 
-class RoleDetailResponse(BaseModel):
+class RoleDetailResponse(ResponseModel):
     """Response model for single role detail operations
 
     Attributes:
@@ -302,10 +299,6 @@ class RoleDetailResponse(BaseModel):
         role (RoleDetailItem): Detailed role information with permissions
     """
 
-    status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     role: RoleDetailItem = Field(
         ..., description="Detailed role information with permissions"
     )
@@ -313,14 +306,13 @@ class RoleDetailResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "Role details retrieved successfully",
                 "role": {
                     "id": "550e8400-e29b-41d4-a716-446655440000",
                     "name": "Administrator",
-                    "description": "Full access to all system features",
+                    "description": EXAMPLE_DESCRIPTION_OF_THE_ROLE,
                     "is_default": True,
-                    "created_at": "2024-12-19T10:00:00Z",
+                    "created_at": "2024-12-20T10:00:00Z",
                     "updated_at": "2024-12-19T12:00:00Z",
                     "permissions": [],
                 }
@@ -342,7 +334,7 @@ class CreateRoleRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=100, description="Name of the role")
     role_type: str = Field(..., description="Type of role - 'system' or 'custom'")
     description: Optional[str] = Field(
-        None, max_length=500, description="Description of the role"
+        None, max_length=500, description=DESCRIPTION_OF_THE_ROLE
     )
     permission_ids: List[str] = Field(
         ..., description="List of permission IDs to assign to this role"
@@ -363,18 +355,12 @@ class CreateRoleRequest(BaseModel):
     )
 
 
-class CreateRoleResponse(BaseModel):
+class CreateRoleResponse(ResponseModel):
     """Response model for role creation operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
     """
-
-    status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -402,10 +388,10 @@ class UpdateRoleRequest(BaseModel):
         None, min_length=2, max_length=100, description="Updated name of the role"
     )
     description: Optional[str] = Field(
-        None, max_length=500, description="Updated description of the role"
+        None, max_length=500, description=f"Updated {DESCRIPTION_OF_THE_ROLE}"
     )
     is_default: Optional[bool] = Field(
-        None, description="Whether this is a system role (True) or custom role (False)"
+        None, description=IS_DEFAULT_ROLE
     )
     permission_ids: Optional[List[str]] = Field(
         None, description="List of permission IDs to assign to this role"
@@ -426,18 +412,13 @@ class UpdateRoleRequest(BaseModel):
     )
 
 
-class UpdateRoleResponse(BaseModel):
+class UpdateRoleResponse(ResponseModel):
     """Response model for role update operations
 
     Attributes:
         status_code (int): HTTP status code
         message (str): Response message describing the operation result
     """
-
-    status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -446,18 +427,12 @@ class UpdateRoleResponse(BaseModel):
     )
 
 
-class DeleteRoleResponse(BaseModel):
+class DeleteRoleResponse(ResponseModel):
     """Response model for role deletion operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
     """
-
-    status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -614,11 +589,10 @@ class SessionItem(BaseModel):
     )
 
 
-class SessionsResponse(BaseModel):
+class SessionsResponse(ResponseModel):
     """Response model for sessions list operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         sessions (List[SessionItem]): List of sessions
         total_count (int): Total number of sessions
@@ -626,10 +600,6 @@ class SessionsResponse(BaseModel):
         page_size (int): Number of items per page
     """
 
-    status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     sessions: List[SessionItem] = Field(..., description="List of sessions")
     total_count: int = Field(..., description="Total number of sessions")
     page: int = Field(..., description="Current page number")
@@ -638,7 +608,6 @@ class SessionsResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "Sessions retrieved successfully",
                 "sessions": [],
                 "total_count": 0,
@@ -671,25 +640,19 @@ class CreateSessionRequest(BaseModel):
     )
 
 
-class CreateSessionResponse(BaseModel):
+class CreateSessionResponse(ResponseModel):
     """Response model for session creation operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         session (SessionItem): Created session information
     """
 
-    status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     session: SessionItem = Field(..., description="Created session information")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 201,
                 "message": "Session created successfully",
                 "session": {
                     "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -750,25 +713,19 @@ class UpdateSessionRequest(BaseModel):
     )
 
 
-class UpdateSessionResponse(BaseModel):
+class UpdateSessionResponse(ResponseModel):
     """Response model for session update operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         session (SessionItem): Updated session information
     """
 
-    status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     session: SessionItem = Field(..., description="Updated session information")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "Session logout updated successfully",
                 "session": {
                     "id": "550e8400-e29b-41d4-a716-446655440000",

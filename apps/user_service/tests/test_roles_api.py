@@ -13,7 +13,7 @@ def app():
     from fastapi import FastAPI
     from apps.user_service.app.api.admin_management.roles import router as roles_router
     from libs.shared_middleware.jwt_auth import get_user_from_auth
-    from apps.user_service.app.dependencies.common_utils import check_user_access_async, check_permissions
+    from apps.user_service.app.dependencies.common_utils import UserContext, check_user_access_async, check_permissions
 
     app = FastAPI()
     app.include_router(roles_router, prefix="/v1/admin")
@@ -24,7 +24,11 @@ def app():
         "email": "test@example.com",
     }
     app.dependency_overrides[check_user_access_async] = lambda *a, **k: True
-    app.dependency_overrides[check_permissions] = AsyncMock(return_value={"user_id": str(uuid.uuid4()), "organization_id": str(uuid.uuid4())})
+    app.dependency_overrides[check_permissions] = AsyncMock(return_value=UserContext(
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        organization_id=str(uuid.uuid4())
+    ))
     return app
 
 
@@ -147,7 +151,7 @@ class TestCreateRole:
     def test_create_role_database_error(self, client):
         """Test role creation with database error."""
         payload = {"name": "TestRole", "description": "", "role_type": "custom", "permission_ids": []}
-        with patch("apps.user_service.app.api.admin_management.roles.check_permissions_exist", AsyncMock(side_effect=Exception("Database error"))):
+        with patch("apps.user_service.app.api.admin_management.roles.check_permission_exist_in_organization", AsyncMock(side_effect=Exception("Database error"))):
             # Since there's no error handling decorator, the exception will be raised directly
             with pytest.raises(Exception, match="Database error"):
                 client.post("/v1/admin/roles", json=payload)
@@ -169,7 +173,7 @@ class TestCreateRole:
     def test_create_role_permissions_not_exist(self, client):
         """Test role creation with non-existent permission IDs."""
         payload = {"name": "TestRole", "description": "", "role_type": "custom", "permission_ids": [str(uuid.uuid4())]}
-        with patch("apps.user_service.app.api.admin_management.roles.validate_uuid_format", AsyncMock(return_value=True)), \
+        with patch("apps.user_service.app.api.admin_management.roles.validate_uuid_format", MagicMock(return_value=True)), \
              patch("apps.user_service.app.api.admin_management.roles.check_permissions_exist", AsyncMock(return_value=False)):
             res = client.post("/v1/admin/roles", json=payload)
             assert res.status_code == 400
@@ -199,7 +203,7 @@ class TestUpdateRole:
         payload = {"name": "Updated", "description": "Updated"}
         res = client.put("/v1/admin/roles/invalid-uuid", json=payload)
         assert res.status_code == 400
-        assert "Invalid role ID format" in res.json()["detail"]
+        assert "Invalid role_ID format" in res.json()["detail"]
 
     def test_update_role_not_found(self, client):
         """Test role update when role doesn't exist."""
@@ -259,7 +263,7 @@ class TestUpdateRole:
              patch("apps.user_service.app.api.admin_management.roles.get_role_by_id", AsyncMock(return_value={
                  "id": role_id, "name": "TestRole", "description": "", "is_default": False
              })), \
-             patch("apps.user_service.app.api.admin_management.roles.validate_uuid_format", AsyncMock(return_value=True)), \
+             patch("apps.user_service.app.api.admin_management.roles.validate_uuid_format", MagicMock(return_value=True)), \
              patch("apps.user_service.app.api.admin_management.roles.check_permissions_exist", AsyncMock(return_value=True)), \
              patch("apps.user_service.app.api.admin_management.roles.assign_permissions_to_role", AsyncMock(return_value=True)):
             res = client.put(f"/v1/admin/roles/{role_id}", json=payload)
@@ -313,7 +317,7 @@ class TestUpdateRole:
              patch("apps.user_service.app.api.admin_management.roles.get_role_by_id", AsyncMock(return_value={
                  "id": role_id, "name": "TestRole", "description": "", "is_default": False
              })), \
-             patch("apps.user_service.app.api.admin_management.roles.validate_uuid_format", AsyncMock(return_value=True)), \
+             patch("apps.user_service.app.api.admin_management.roles.validate_uuid_format", MagicMock(return_value=True)), \
              patch("apps.user_service.app.api.admin_management.roles.check_permissions_exist", AsyncMock(return_value=False)):
             res = client.put(f"/v1/admin/roles/{role_id}", json=payload)
             assert res.status_code == 400

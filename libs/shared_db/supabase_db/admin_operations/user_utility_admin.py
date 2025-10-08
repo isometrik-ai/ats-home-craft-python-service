@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.auth import CODE_VERIFIER, CODE_CHALLENGE
 
 from libs.shared_utils.email_utils import send_email
 from libs.shared_utils.common_query import log_exception
+from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_db.supabase_db.admin_operations.user import update_email_of_user
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
@@ -39,7 +40,7 @@ async def update_supabase_user_email(
         user_info = await get_user_profile_by_id(user_id, organization_id)
 
         if user_info is None:
-            raise HTTPException(status_code=404, detail="User not found in organization")
+            raise HTTPException(status_code=404, detail=USER_NOT_FOUND_MESSAGE)
 
         # Update user email in Supabase Auth
         response = await update_email_of_user(user_id, email)
@@ -393,10 +394,6 @@ async def invite_user_with_email(body: CreateUserRequest, user_context: UserCont
             or "already registered" in error_message
             or "user already exists" in error_message
         ):
-            # logger.warning("User already exists during invitation - Request ID: %s, ",request_id)
-            # logger.warning(
-            #     "Email: %s, Organization ID: %s",
-            #     body.email,user_context.organization_id)
             raise HTTPException(
                 status_code=409,
                 detail="User with this email already exists in the organization",
@@ -494,75 +491,6 @@ async def supabase_user_oauth(provider: str) -> dict:
             detail="Unexpected error occurred while creating OAuth URL.",
         ) from e
 
-# async def supabase_user_oauth(user: dict, access_token: str, provider: str) -> dict:
-#     """
-#     Link user identity using Supabase Auth Admin API.
-#     This function links an existing Google account to an existing user in Supabase.
-#     """
-#     try:
-#         supabase_admin = await get_supabase_admin_client()
-
-#         # Get the current user to verify they exist
-#         user_response = await supabase_admin.auth.admin.get_user_by_id(user_id)
-#         if not user_response.user:
-#             raise HTTPException(
-#                 status_code=status.HTTP_404_NOT_FOUND,
-#                 detail="User not found."
-#             )
-
-#         user_email = user_response.user.email
-
-#         # For unified API approach, we'll validate the Google token and prepare for linking
-#         # The frontend passes the Google OAuth access token
-#         # We'll verify it and then use Supabase admin API to link the identity
-
-#         # First, verify the Google access token by fetching user info
-#         import httpx
-#         async with httpx.AsyncClient() as client:
-#             google_response = await client.get(
-#                 f"https://www.googleapis.com/oauth2/v2/userinfo?access_token={access_token}"
-#             )
-
-#             if google_response.status_code != 200:
-#                 raise HTTPException(
-#                     status_code=status.HTTP_400_BAD_REQUEST,
-#                     detail="Invalid Google access token."
-#                 )
-
-#             google_user_data = google_response.json()
-#             google_email = google_user_data.get("email")
-
-#             # Verify the email matches the existing user's email
-#             if google_email != user_email:
-#                 raise HTTPException(
-#                     status_code=status.HTTP_400_BAD_REQUEST,
-#                     detail="Google account email does not match user's email."
-#                 )
-
-#         # Now use Supabase admin API to link the identity
-#         # Note: The exact method may vary based on Supabase version
-#         # This is a placeholder for the actual linking logic
-#         link_response = await supabase_admin.auth.admin.link_identity({
-#             "user_id": user_id,
-#             "provider": provider,
-#             "access_token": access_token
-#         })
-
-#         return {
-#             "success": True,
-#             "provider": provider,
-#             "user_id": user_id,
-#             "user_email": user_email,
-#             "linked_identity": link_response
-#         }
-
-#     except Exception as e:
-#         log_exception()
-#         logger.error("Unexpected error while linking user identity: %s", str(e))
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Unexpected error occurred while linking user identity.",
-#         ) from e
 
 async def get_oauth_link_url(user_id: str, user_email: str, provider: str) -> dict:
     """
@@ -641,4 +569,3 @@ def _provider_validity_check(provider: str):
             detail="Invalid provider"
         )
 
-# log_exception function moved to libs.shared_utils.common_query to avoid circular imports

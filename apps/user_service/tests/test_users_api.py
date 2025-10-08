@@ -6,12 +6,13 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from fastapi import FastAPI, HTTPException
-from libs.shared_middleware.jwt_auth import get_user_from_auth
 from apps.user_service.app.dependencies.common_utils import check_user_access_async
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
 from apps.user_service.app.api.admin_management.users.users import router as users_router
 from apps.user_service.app.api.admin_management.users.update_user import router as update_user_router
 from apps.user_service.app.api.admin_management.users.user_profile import router as user_profile_router
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
+from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 
 
 @pytest.fixture
@@ -29,13 +30,6 @@ def app():
         "organization_id": str(uuid.uuid4()),
         "email": "test@example.com",
     }
-
-    def mock_check_permissions(current_user, _code, *_args):
-        org_id = current_user.get("organization_id") or "o"
-        user_id = "current-user-id"  # Always return the fixed current user ID
-        email = current_user.get("email") or "e@e.com"
-        user_type = current_user.get("user_type") or "organization_member"
-        return SimpleNamespace(organization_id=org_id, user_id=user_id, email=email, user_type=user_type)
 
     app.dependency_overrides[get_user_from_auth] = mock_get_user_from_auth
     app.dependency_overrides[check_user_access_async] = lambda *a, **k: True
@@ -158,7 +152,7 @@ def test_get_user_by_id_not_found(client):
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)):
         res = client.get(f"/v1/admin/{user_id}")
         assert res.status_code == 404
-        assert "User not found in organization" in res.json()["detail"]
+        assert USER_NOT_FOUND_MESSAGE in res.json()["detail"]
 
 
 def test_get_user_by_id_invalid_user_type(client):
@@ -325,7 +319,7 @@ def test_update_user_not_found(client):
 
         res = client.put(f"/v1/admin/users/update/{user_id}", json=update_data)
         assert res.status_code == 404
-        assert "User not found in organization" in res.json()["detail"]
+        assert USER_NOT_FOUND_MESSAGE in res.json()["detail"]
 
 
 # ============================================================================
@@ -377,7 +371,7 @@ def test_delete_user_not_found(client):
 
         res = client.delete(f"/v1/admin/users/delete/{user_id}")
         assert res.status_code == 404
-        assert "User not found in organization" in res.json()["detail"]
+        assert USER_NOT_FOUND_MESSAGE in res.json()["detail"]
 
 
 def test_delete_user_auth_not_found(client):
@@ -615,9 +609,9 @@ def test_ban_user_self_ban(client):
 
     # Use patches to override the functions for this specific test
     from unittest.mock import patch
-    from apps.user_service.app.dependencies.common_utils import check_permissions, UserContext
+    from apps.user_service.app.dependencies.common_utils import UserContext
 
-    async def mock_get_user_from_auth_same_user(request):
+    def mock_get_user_from_auth_same_user(request):
         # Set request.state.user to simulate JWT authentication
         request.state.user = {
             "sub": user_id,  # Same user_id as target - JWT uses 'sub' field
@@ -636,13 +630,12 @@ def test_ban_user_self_ban(client):
             }
         }
 
-    async def mock_check_permissions_async(*a, **k):
-        return UserContext(
-            organization_id=str(uuid.uuid4()),
-            user_id=user_id,  # Same user_id as target for self-ban test
-            email="test@example.com",
-            user_type="organization_member"
-        )
+    mock_check_permissions_async = AsyncMock(return_value=UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id=user_id,  # Same user_id as target for self-ban test
+        email="test@example.com",
+        user_type="organization_member"
+    ))
 
     with patch("libs.shared_middleware.jwt_auth.get_user_from_auth", mock_get_user_from_auth_same_user), \
          patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", mock_check_permissions_async), \
@@ -713,9 +706,9 @@ def test_unban_user_self_unban(client):
 
     # Use patches to override the functions for this specific test
     from unittest.mock import patch
-    from apps.user_service.app.dependencies.common_utils import check_permissions, UserContext
+    from apps.user_service.app.dependencies.common_utils import UserContext
 
-    async def mock_get_user_from_auth_same_user(request):
+    def mock_get_user_from_auth_same_user(request):
         # Set request.state.user to simulate JWT authentication
         request.state.user = {
             "sub": user_id,  # Same user_id as target - JWT uses 'sub' field
@@ -734,13 +727,12 @@ def test_unban_user_self_unban(client):
             }
         }
 
-    async def mock_check_permissions_async(*a, **k):
-        return UserContext(
-            organization_id=str(uuid.uuid4()),
-            user_id=user_id,  # Same user_id as target for self-unban test
-            email="test@example.com",
-            user_type="organization_member"
-        )
+    mock_check_permissions_async = AsyncMock(return_value=UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id=user_id,  # Same user_id as target for self-unban test
+        email="test@example.com",
+        user_type="organization_member"
+    ))
 
     with patch("libs.shared_middleware.jwt_auth.get_user_from_auth", mock_get_user_from_auth_same_user), \
          patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", mock_check_permissions_async), \
@@ -751,3 +743,57 @@ def test_unban_user_self_unban(client):
         print(f"Response body: {res.json()}")
         assert res.status_code == 400
         assert "You cannot Unban yourself" in res.json()["detail"]
+
+
+# ============================================================================
+# MISSING COVERAGE TESTS FOR UPDATE_USER.PY
+# ============================================================================
+
+def test_ban_user_auth_user_not_found(client):
+    """Test ban user when user not found in auth.users - covers lines 203-204"""
+    user_id = str(uuid.uuid4())
+
+    with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.ban_the_user", AsyncMock(return_value=False)):  # Return False to trigger user not found
+        res = client.post(f"/v1/admin/ban/{user_id}")
+        assert res.status_code == 404
+        assert "User not found" in res.json()["detail"]
+
+
+def test_ban_user_organization_user_not_found(client):
+    """Test ban user when user not found in organization - covers lines 209-215"""
+    user_id = str(uuid.uuid4())
+
+    with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.ban_the_user", AsyncMock(return_value=True)), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.suspend_user", AsyncMock(return_value=False)):  # Return False to trigger organization user not found
+        res = client.post(f"/v1/admin/ban/{user_id}")
+        assert res.status_code == 404
+        assert "Organization User not found" in res.json()["detail"]
+
+
+def test_unban_user_auth_user_not_found(client):
+    """Test unban user when user not found or not banned - covers lines 299-301"""
+    user_id = str(uuid.uuid4())
+
+    with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.unban_the_user", AsyncMock(return_value=False)):  # Return False to trigger user not found or not banned
+        res = client.post(f"/v1/admin/unban/{user_id}")
+        assert res.status_code == 404
+        assert "User not found or not banned" in res.json()["detail"]
+
+
+def test_unban_user_organization_user_not_found(client):
+    """Test unban user when user not found in organization - covers lines 307-313"""
+    user_id = str(uuid.uuid4())
+
+    with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.unban_the_user", AsyncMock(return_value=True)), \
+         patch("apps.user_service.app.api.admin_management.users.update_user.revoke_suspended_user", AsyncMock(return_value=False)):  # Return False to trigger organization user not found
+        res = client.post(f"/v1/admin/unban/{user_id}")
+        assert res.status_code == 404
+        assert "Organization User not found" in res.json()["detail"]

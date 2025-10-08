@@ -26,11 +26,6 @@ async def ban_the_user(user_id: str) -> bool:
     """Ban a user in the organization."""
     supabase = await get_supabase_admin_client()
     try:
-        # result = await supabase.table("organization_members").update({
-        #     "status": "active",
-        #     "ban_reason": None,
-        #     "updated_at": "now()"
-        # }).eq("user_id", user_id).eq("organization_id", organization_id).execute()
         result = supabase.auth.admin.update_user_by_id(user_id,{"ban_duration": "365d"})
         return result.user is not None
 
@@ -49,11 +44,6 @@ async def unban_the_user(user_id: str) -> bool:
     """Unban a user in the organization."""
     supabase = await get_supabase_admin_client()
     try:
-        # result = await supabase.table("organization_members").update({
-        #     "status": "active",
-        #     "ban_reason": None,
-        #     "updated_at": "now()"
-        # }).eq("user_id", user_id).eq("organization_id", organization_id).execute()
         result = supabase.auth.admin.update_user_by_id(user_id,{"ban_duration": "none"})
         return result.user is not None
 
@@ -135,8 +125,6 @@ async def update_password_with_link_identity(user_id: str, password: str) -> boo
         # First, get the user to check their current providers and email
         user_data = await supabase_admin.auth.admin.get_user_by_id(user_id)
         current_providers = user_data.user.app_metadata.get("providers", [])
-        user_email = user_data.user.email
-
 
         # Check if user already has email provider
         if "email" in current_providers:

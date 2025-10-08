@@ -46,6 +46,7 @@ from apps.user_service.app.schemas.organisations import (
 from apps.user_service.app.schemas.auth import CompanyData, AccountType
 
 # Third-party imports
+from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 # from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
@@ -67,6 +68,7 @@ logger = get_logger("organisation-api")
 
 # Authentication description for API documentation
 AUTH_DESCRIPTION = "Bearer token required for authentication"
+ORGANISATION_NOT_FOUND_MESSAGE = "Organisation not found"
 
 
 @dataclass
@@ -125,7 +127,6 @@ def _create_organisation_info(org_data: dict) -> OrganisationInfo:
         created_at=org_data["created_at"],
         updated_at=org_data["updated_at"],
         member_count=org_data["member_count"]
-        # user_role=None,  # No user role since we're showing all organizations
     )
 
 
@@ -201,8 +202,7 @@ def _determine_organization_name(acc_type: AccountType, company_data: CompanyDat
     )
 
 
-
-async def _validate_and_process_query_params(query_params: OrganisationQueryParams):
+def _validate_and_process_query_params(query_params: OrganisationQueryParams):
     """
     Validate and process query parameters for organisation listing.
 
@@ -277,7 +277,7 @@ async def _process_organisation_list_request(
 
     # Validate and process query parameters
     page, page_size, offset, validated_name, validated_status = (
-        await _validate_and_process_query_params(query_params)
+        _validate_and_process_query_params(query_params)
     )
 
     # Execute queries and get results
@@ -343,7 +343,6 @@ async def get_organisations_list(
 
 
     return OrganisationListResponse(
-        # status_code=status.HTTP_200_OK,
         message=message,
         data=organizations,
         total_count=total_count,
@@ -380,12 +379,12 @@ async def get_organisation_by_id(
     request_id = str(uuid.uuid4())
 
     # Validate organization ID format using utility function
-    await validate_uuid_format(organisation_id, "organization ID")
+    validate_uuid_format(organisation_id, "organization ID")
 
     # Extract and validate user context from JWT token
     # Check permission using utility function
     await check_permissions(
-        current_user, "settings.system.manage","access organization details", organisation_id)
+        current_user, SETTINGS_SYSTEM_MANAGE,"access organization details", organisation_id)
 
     # Get organization details using database operations
     organization_data = await get_organisation_details_by_id(organisation_id)
@@ -393,10 +392,9 @@ async def get_organisation_by_id(
     # Check if organization exists
     if not organization_data:
         logger.warning("Organization not found - Request ID: %s, ",request_id)
-        logger.warning("Target Organization ID: %s",organisation_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found",
+            detail=ORGANISATION_NOT_FOUND_MESSAGE,
         )
 
     # Create organization info object using helper function
@@ -404,7 +402,6 @@ async def get_organisation_by_id(
 
 
     return OrganisationDetailResponse(
-        # status_code=status.HTTP_200_OK,
         message="Organization retrieved successfully",
         data=org_info,
     )
@@ -451,19 +448,6 @@ async def create_organisation(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User ID is required"
         )
-
-    # # Generate UUID for new organization
-    # organization_id = str(uuid.uuid4())
-    # print(f"Generated organization_id: {organization_id}")
-
-    # # Validate slug uniqueness using database operations
-    # is_unique = await check_organisation_slug_unique(body.slug)
-    # if not is_unique:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_409_CONFLICT,
-    #         detail="Organisation slug already exists"
-    #     )
-
 
     # Generate organization details
     organization_id = str(uuid.uuid4())
@@ -578,22 +562,21 @@ async def update_organisation(
     request_id = str(uuid.uuid4())
 
     # Validate organization ID format using utility function
-    await validate_uuid_format(organisation_id, "organisation ID")
+    validate_uuid_format(organisation_id, "organisation ID")
 
     # Extract and validate user context from JWT token
     # Check permission using utility function
     await check_permissions(
-        current_user, "settings.system.manage","update organization", organisation_id)
+        current_user, SETTINGS_SYSTEM_MANAGE,"update organization", organisation_id)
 
     # Get organization details using database operations
     organization_data = await get_organisation_details_by_id(organisation_id)
 
     if not organization_data:
         logger.warning("Organization not found for update - Request ID: %s, ",request_id)
-        logger.warning("Target Organization ID: %s",organisation_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found",
+            detail=ORGANISATION_NOT_FOUND_MESSAGE,
         )
 
     # Update organization using database operations
@@ -636,20 +619,20 @@ async def delete_organisation_by_id(
         # request_id = str(uuid.uuid4())
 
         # Validate organization ID format using utility function
-        await validate_uuid_format(organisation_id, "organisation ID")
+        validate_uuid_format(organisation_id, "organisation ID")
 
         current_user['user_metadata']['organization_id'] = organisation_id
 
         # Extract and validate user context from JWT token
         # Check permission using utility function
         await check_permissions(
-            current_user, "settings.system.manage","delete organization", organisation_id)
+            current_user, SETTINGS_SYSTEM_MANAGE,"delete organization", organisation_id)
 
         result = await delete_organisation(organisation_id)
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Organization not found",
+                detail=ORGANISATION_NOT_FOUND_MESSAGE,
             )
 
         return OrganisationResponse(

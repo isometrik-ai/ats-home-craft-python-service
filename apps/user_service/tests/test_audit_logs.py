@@ -132,7 +132,7 @@ class TestAuditLogger:
         logger = AuditLogger()
         assert logger._queue.maxsize == 500
         assert logger._batch_size == 10
-        assert logger._batch_timeout == 3.0
+        assert logger._batch_timeout == 3
         assert logger._max_retries == 3
         assert logger._processing_task is None
         assert logger._last_hash is None
@@ -147,7 +147,7 @@ class TestAuditLogger:
         mock_process = AsyncMock()
         with patch.object(logger, '_process_audit_queue', mock_process):
             # Start processing
-            await logger.start_processing()
+            logger.start_processing()
             assert logger._processing_task is not None
             assert not logger._processing_task.done()
 
@@ -166,7 +166,7 @@ class TestAuditLogger:
         mock_process = AsyncMock()
         with patch.object(logger, '_process_audit_queue', mock_process):
             # Start and then shutdown
-            await logger.start_processing()
+            logger.start_processing()
             await logger.shutdown()
 
             assert logger._shutdown_event.is_set()
@@ -185,12 +185,15 @@ class TestAuditLogger:
 
         async def mock_process():
             """Mock the processing task to handle one event then exit"""
-            while not process_event.is_set():
-                if logger._queue.qsize() > 0:
-                    events = [await logger._queue.get()]
-                    await mock_write(events)
-                    process_event.set()
-                await asyncio.sleep(0.1)
+            # Wait for an event to be available in the queue
+            try:
+                event = await logger._queue.get()
+                events = [event]
+                await mock_write(events)
+                process_event.set()
+            except Exception:
+                # Handle any errors gracefully
+                process_event.set()
 
         # Mock write operation
         mock_write = AsyncMock()
@@ -200,7 +203,7 @@ class TestAuditLogger:
              patch.object(logger, '_create_audit_event_dict', return_value=mock_event):
 
             # Start processing
-            await logger.start_processing()
+            logger.start_processing()
 
             try:
                 # Log event
@@ -353,7 +356,7 @@ class TestAuditLogger:
             await logger._queue.put(event)
 
         # Collect batch
-        batch, got_events = await logger._collect_batch_events(timeout=0.1)
+        batch, got_events = await logger._collect_batch_events(timeout_duration=0.1)
 
         assert got_events is True
         assert len(batch) == 3
@@ -963,7 +966,7 @@ class TestAuditLogger:
         logger = AuditLogger()
 
         # Test with timeout when queue is empty
-        batch, got_events = await logger._collect_batch_events(timeout=0.01)
+        batch, got_events = await logger._collect_batch_events(timeout_duration=0.01)
 
         assert got_events is False
         assert len(batch) == 0
@@ -979,7 +982,7 @@ class TestAuditLogger:
             await logger._queue.put(event)
 
         # Collect batch
-        batch, got_events = await logger._collect_batch_events(timeout=0.1)
+        batch, got_events = await logger._collect_batch_events(timeout_duration=0.1)
 
         assert got_events is True
         assert len(batch) == 2
@@ -996,7 +999,7 @@ class TestAuditLogger:
             await logger._queue.put(event)
 
         # Collect batch
-        batch, got_events = await logger._collect_batch_events(timeout=0.1)
+        batch, got_events = await logger._collect_batch_events(timeout_duration=0.1)
 
         assert got_events is True
         assert len(batch) == 10
@@ -1013,7 +1016,7 @@ class TestAuditLogger:
             await logger._queue.put(event)
 
         # Collect batch
-        batch, got_events = await logger._collect_batch_events(timeout=0.1)
+        batch, got_events = await logger._collect_batch_events(timeout_duration=0.1)
 
         assert got_events is True
         assert len(batch) == 10  # Should only collect up to batch_size

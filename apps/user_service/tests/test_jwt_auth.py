@@ -206,8 +206,7 @@ class TestCheckUserAccessAsync:
 class TestGetUserFromAuth:
     """Test get_user_from_auth function."""
 
-    @pytest.mark.asyncio
-    async def test_get_user_from_auth_success(self):
+    def test_get_user_from_auth_success(self):
         """Test successful user authentication."""
         request = MagicMock(spec=Request)
         request.state = MagicMock()
@@ -218,21 +217,20 @@ class TestGetUserFromAuth:
             "session_id": "session123"
         }
 
-        result = await get_user_from_auth(request)
+        result = get_user_from_auth(request)
 
         assert result == request.state.user
         assert request.state.audit_risk_level == "low"
         assert request.state.audit_description == "Successfully authenticated and authorized user"
 
-    @pytest.mark.asyncio
-    async def test_get_user_from_auth_no_user(self):
+    def test_get_user_from_auth_no_user(self):
         """Test authentication with no user in request state."""
         request = MagicMock(spec=Request)
         request.state = MagicMock()
         request.state.user = None
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_user_from_auth(request)
+            get_user_from_auth(request)
 
         assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
         assert exc_info.value.detail == "Not authenticated"
@@ -243,8 +241,7 @@ class TestGetUserFromAuth:
 class TestGetUserFromToken:
     """Test get_user_from_token function."""
 
-    @pytest.mark.asyncio
-    async def test_get_user_from_token_success(self):
+    def test_get_user_from_token_success(self):
         """Test successful token decoding."""
         with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
             mock_payload = {
@@ -254,7 +251,7 @@ class TestGetUserFromToken:
             }
             mock_decode.return_value = mock_payload
 
-            result = await get_user_from_token("valid_token")
+            result = get_user_from_token("valid_token")
 
             assert result == mock_payload
             # Don't assert the exact JWT secret since it comes from environment
@@ -264,28 +261,26 @@ class TestGetUserFromToken:
             assert call_args[1]["algorithms"] == ["HS256"]
             assert call_args[1]["audience"] == "authenticated"
 
-    @pytest.mark.asyncio
-    async def test_get_user_from_token_expired(self):
+    def test_get_user_from_token_expired(self):
         """Test token decoding with expired token."""
         with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
             from jwt import ExpiredSignatureError
             mock_decode.side_effect = ExpiredSignatureError("Token expired")
 
             with pytest.raises(HTTPException) as exc_info:
-                await get_user_from_token("expired_token")
+                get_user_from_token("expired_token")
 
             assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
             assert exc_info.value.detail == "Token expired"
 
-    @pytest.mark.asyncio
-    async def test_get_user_from_token_invalid(self):
+    def test_get_user_from_token_invalid(self):
         """Test token decoding with invalid token."""
         with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
             from jwt import InvalidTokenError
             mock_decode.side_effect = InvalidTokenError("Invalid token")
 
             with pytest.raises(HTTPException) as exc_info:
-                await get_user_from_token("invalid_token")
+                get_user_from_token("invalid_token")
 
             assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
             assert exc_info.value.detail == "Invalid token"
@@ -442,7 +437,7 @@ class TestJWTIntegration:
             assert request.state.user == mock_payload
 
             # Test get_user_from_auth with the user from middleware
-            result = await get_user_from_auth(request)
+            result = get_user_from_auth(request)
 
             assert result == mock_payload
             assert request.state.audit_risk_level == "low"

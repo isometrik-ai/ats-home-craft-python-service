@@ -30,6 +30,7 @@ from apps.user_service.app.schemas.users import (
 
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE, USER_NOT_FOUND_MESSAGE
 
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
@@ -185,9 +186,7 @@ async def get_user_profile(
     # User type validation is now handled in extract_user_context function
     # This else block should never be reached due to validation in common_utils
 
-
     return UserProfileResponse(
-        # status_code=status.HTTP_200_OK,
         message="User profile retrieved successfully",
         data=profile_data,
     )
@@ -218,9 +217,8 @@ async def get_user_by_id(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
-    # user_context = extract_user_context(current_user)
     user_context = await check_permissions(
-        current_user, "settings.users.manage","access user profiles")
+        current_user, SETTINGS_USERS_MANAGE,"access user profiles")
 
     # Only organization members can access other user profiles
     if user_context.user_type != "organization_member":
@@ -228,17 +226,10 @@ async def get_user_by_id(
             "Non-organization member trying to access user profile - Request ID: %s, ",
             request_id
         )
-        logger.warning("User Type: %s, Target User ID: %s",user_context.user_id,user_id)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only organization members can access user profiles",
         )
-
-    # await require_permission(
-    #     permission_code="settings.users.manage",
-    #     user_context=user_context,
-    #     action_description="access user profiles",
-    # )
 
     # Set audit context for user profile access
     # This endpoint only handles organization members, so audit table is always organization_members
@@ -253,13 +244,9 @@ async def get_user_by_id(
 
     if not user_profile:
         logger.warning("User not found in organization - Request ID: %s, ",request_id)
-        logger.warning(
-            "Target User ID: %s, Organization ID: %s",
-            user_id,user_context.organization_id
-        )
         raise HTTPException(
             status_code=404,
-            detail="User not found in organization",
+            detail=USER_NOT_FOUND_MESSAGE,
         )
 
     permissions_data = await get_user_permissions(
@@ -277,16 +264,6 @@ async def get_user_by_id(
         )
         for p in permissions_data
     ]
-    # permissions = [
-    #     PermissionInfo(
-    #         permission_code=str(p["permission_id"]),
-    #         permission_name=p["permission_name"],
-    #         permission_code=p["permission_code"],
-    #         category=p["category"],
-    #     )
-    #     for p in permissions_data
-    # ]
-    print("permission_id")
 
     role_info = RoleInfoWithDescription(
         role_id=str(user_profile["role_id"]),
@@ -318,7 +295,6 @@ async def get_user_by_id(
 
 
     return UserProfileResponse(
-        # status_code=200,
         message="User profile retrieved successfully",
         data=profile_data,
     )

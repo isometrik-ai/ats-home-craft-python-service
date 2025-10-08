@@ -2,7 +2,7 @@
 
 import pytest
 import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException, status
 
 from apps.user_service.app.dependencies.organisation_utils import (

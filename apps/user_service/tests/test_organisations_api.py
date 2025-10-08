@@ -110,6 +110,85 @@ class TestOrganisationList:
             assert data["total_count"] == 1
             assert len(data["data"]) == 1
 
+    def test_organisations_list_with_status_filter(self, client):
+        """Test organisation list with status filter."""
+        mock_organisations = [
+            {
+                "id": "org-1", "name": "Test Org", "slug": "test-org",
+                "domain": "test.com", "logo_url": None, "plan_type": "free",
+                "status": "active", "max_users": 10, "timezone": "UTC",
+                "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
+                "member_count": 5
+            }
+        ]
+
+        with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
+             patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=1)):
+
+            response = client.get("/v1/admin/organisation/list?org_status=active")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total_count"] == 1
+            assert len(data["data"]) == 1
+
+    def test_organisations_list_count_result_as_int(self, client):
+        """Test organisation list when count result is returned as int."""
+        mock_organisations = [
+            {
+                "id": "org-1", "name": "Test Org", "slug": "test-org",
+                "domain": "test.com", "logo_url": None, "plan_type": "free",
+                "status": "active", "max_users": 10, "timezone": "UTC",
+                "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
+                "member_count": 5
+            }
+        ]
+
+        with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
+             patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=1)):
+
+            response = client.get("/v1/admin/organisation/list")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total_count"] == 1
+            assert len(data["data"]) == 1
+
+    def test_organisations_list_count_result_unexpected_type(self, client):
+        """Test organisation list when count result has unexpected type."""
+        mock_organisations = [
+            {
+                "id": "org-1", "name": "Test Org", "slug": "test-org",
+                "domain": "test.com", "logo_url": None, "plan_type": "free",
+                "status": "active", "max_users": 10, "timezone": "UTC",
+                "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
+                "member_count": 5
+            }
+        ]
+
+        # Mock _process_organisations_data to test the else branch
+        with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
+             patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value="unexpected_type")), \
+             patch("apps.user_service.app.api.admin_management.organisation._process_organisations_data") as mock_process:
+            # Create properly formatted organizations list for the mock
+            formatted_orgs = [
+                {
+                    "organization_id": "org-1", "name": "Test Org", "slug": "test-org",
+                    "domain": "test.com", "logo_url": None, "plan_type": "free",
+                    "status": "active", "max_users": 10, "timezone": "UTC",
+                    "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
+                    "member_count": 5
+                }
+            ]
+            mock_process.return_value = (formatted_orgs, 0)  # Simulate the else branch returning 0
+            
+            response = client.get("/v1/admin/organisation/list")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total_count"] == 0
+            assert len(data["data"]) == 1
+
 
 class TestOrganisationDetails:
     """Test cases for GET /organisation/{organisation_id} endpoint."""
@@ -167,7 +246,8 @@ class TestCreateOrganisation:
                 "company_name": "New Organization",
                 "company_website": "https://neworg.com",
                 "industry": "Technology",
-                "primary_practice_areas": ["Corporate Law"]
+                "primary_practice_areas": ["Corporate Law"],
+                "company_size": "Solo Practitioner"
             },
             "plan_type": "starter"
         }
@@ -313,7 +393,8 @@ class TestCreateOrganisation:
                 "company_name": "New Organization",
                 "company_website": "https://neworg.com",
                 "industry": "Technology",
-                "primary_practice_areas": ["Corporate Law"]
+                "primary_practice_areas": ["Corporate Law"],
+                "company_size": "Solo Practitioner"
             },
             "plan_type": "starter"
         }
@@ -341,6 +422,203 @@ class TestCreateOrganisation:
             response = client.post("/v1/admin/organisation/", json=request_data)
 
             assert response.status_code == 201
+
+    def test_create_organisation_missing_user_id(self, client):
+        """Test create organisation when user_context.user_id is None."""
+        request_data = {
+            "user_data": {
+                "first_name": "Admin",
+                "last_name": "User",
+                "phone": "+1234567890",
+                "timezone": "UTC"
+            },
+            "company_data": {
+                "company_name": "New Organization",
+                "company_website": "https://neworg.com",
+                "industry": "Technology",
+                "primary_practice_areas": ["Corporate Law"],
+                "company_size": "Solo Practitioner"
+            },
+            "plan_type": "starter"
+        }
+
+        # Mock extract_user_context to return None user_id
+        with patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", return_value=type('obj', (object,), {'user_id': None, 'email': 'test@example.com'})()):
+            response = client.post("/v1/admin/organisation/", json=request_data)
+
+            assert response.status_code == 403
+            data = response.json()
+            assert "User ID is required" in data["detail"]
+
+    def test_create_organisation_slug_conflict(self, client):
+        """Test create organisation when slug already exists."""
+        request_data = {
+            "user_data": {
+                "first_name": "Admin",
+                "last_name": "User",
+                "phone": "+1234567890",
+                "timezone": "UTC"
+            },
+            "company_data": {
+                "company_name": "New Organization",
+                "company_website": "https://neworg.com",
+                "industry": "Technology",
+                "primary_practice_areas": ["Corporate Law"],
+                "company_size": "Solo Practitioner"
+            },
+            "plan_type": "starter"
+        }
+
+        # Mock check_organisation_slug_unique to return False (slug exists)
+        with patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=False)):
+            response = client.post("/v1/admin/organisation/", json=request_data)
+
+            assert response.status_code == 409
+            data = response.json()
+            assert "Organisation slug already exists" in data["detail"]
+
+    def test_create_organisation_database_connection_error(self, client):
+        """Test create organisation with database connection error."""
+        request_data = {
+            "user_data": {
+                "first_name": "Admin",
+                "last_name": "User",
+                "phone": "+1234567890",
+                "timezone": "UTC"
+            },
+            "company_data": {
+                "company_name": "New Organization",
+                "company_website": "https://neworg.com",
+                "industry": "Technology",
+                "primary_practice_areas": ["Corporate Law"],
+                "company_size": "Solo Practitioner"
+            },
+            "plan_type": "starter"
+        }
+
+        # Mock slug check to pass, but database operation to fail
+        with patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=True)), \
+             patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(side_effect=ConnectionError("Database connection failed"))):
+            response = client.post("/v1/admin/organisation/", json=request_data)
+
+            assert response.status_code == 500
+            data = response.json()
+            assert "Failed to create organization" in data["detail"]
+
+    def test_create_organisation_database_timeout_error(self, client):
+        """Test create organisation with database timeout error."""
+        request_data = {
+            "user_data": {
+                "first_name": "Admin",
+                "last_name": "User",
+                "phone": "+1234567890",
+                "timezone": "UTC"
+            },
+            "company_data": {
+                "company_name": "New Organization",
+                "company_website": "https://neworg.com",
+                "industry": "Technology",
+                "primary_practice_areas": ["Corporate Law"],
+                "company_size": "Solo Practitioner"
+            },
+            "plan_type": "starter"
+        }
+
+        # Mock slug check to pass, but database operation to fail with timeout
+        with patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=True)), \
+             patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(side_effect=TimeoutError("Database timeout"))):
+            response = client.post("/v1/admin/organisation/", json=request_data)
+
+            assert response.status_code == 500
+            data = response.json()
+            assert "Failed to create organization" in data["detail"]
+
+    def test_create_organisation_database_value_error(self, client):
+        """Test create organisation with database value error."""
+        request_data = {
+            "user_data": {
+                "first_name": "Admin",
+                "last_name": "User",
+                "phone": "+1234567890",
+                "timezone": "UTC"
+            },
+            "company_data": {
+                "company_name": "New Organization",
+                "company_website": "https://neworg.com",
+                "industry": "Technology",
+                "primary_practice_areas": ["Corporate Law"],
+                "company_size": "Solo Practitioner"
+            },
+            "plan_type": "starter"
+        }
+
+        # Mock slug check to pass, but database operation to fail with value error
+        with patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=True)), \
+             patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(side_effect=ValueError("Invalid data format"))):
+            response = client.post("/v1/admin/organisation/", json=request_data)
+
+            assert response.status_code == 500
+            data = response.json()
+            assert "Failed to create organization" in data["detail"]
+
+    def test_create_organisation_personal_account_type(self, client):
+        """Test create organisation with personal account type."""
+        request_data = {
+            "user_data": {
+                "first_name": "John",
+                "last_name": "Doe",
+                "phone": "+1234567890",
+                "timezone": "UTC"
+            },
+            "company_data": {
+                "company_name": "Personal Business",
+                "company_website": "https://personal.com",
+                "industry": "Technology",
+                "primary_practice_areas": ["Personal Injury"],
+                "company_size": "Solo Practitioner"
+            },
+            "plan_type": "starter"
+        }
+
+        mock_result = {
+            "organization": {
+                "organization_id": str(uuid.uuid4()),
+                "name": "John Doe",  # Should use first_name + last_name for personal
+                "slug": "personal-john-doe-test123",
+                "domain": None,
+                "logo_url": None,
+                "plan_type": "starter",
+                "status": "active",
+                "max_users": 10,
+                "timezone": "UTC",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+                "member_count": 1
+            },
+            "user": {
+                "user_id": str(uuid.uuid4()),
+                "email": "admin@personal.com",
+                "first_name": "John",
+                "last_name": "Doe",
+                "role_id": str(uuid.uuid4()),
+                "organization_id": str(uuid.uuid4())
+            },
+            "super_admin_role_id": str(uuid.uuid4())
+        }
+
+        # Mock the functions to test personal account type logic
+        with patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(return_value=mock_result)), \
+             patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=True)), \
+             patch("apps.user_service.app.api.admin_management.organisation._determine_organization_name") as mock_determine_name:
+            mock_determine_name.return_value = "John Doe"  # Simulate personal account type
+            
+            response = client.post("/v1/admin/organisation/", json=request_data)
+
+            assert response.status_code == 201
+            data = response.json()
+            assert data["data"]["organization_name"] == "John Doe"
+            # Verify the function was called with personal account type
+            mock_determine_name.assert_called_once()
 
 
 class TestUpdateOrganisation:
@@ -496,3 +774,14 @@ class TestDeleteOrganisation:
             assert response.status_code == 200
             data = response.json()
             assert "delete organisation" in data["message"].lower()
+
+    def test_delete_organisation_unexpected_database_error(self, client):
+        """Test organisation deletion with unexpected database error."""
+        organisation_id = str(uuid.uuid4())
+
+        with patch("apps.user_service.app.api.admin_management.organisation.delete_organisation", AsyncMock(side_effect=Exception("Unexpected database error"))):
+            response = client.delete(f"/v1/admin/organisation/{organisation_id}")
+
+            assert response.status_code == 500
+            data = response.json()
+            assert "Failed to delete organization" in data["detail"]

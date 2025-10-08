@@ -30,7 +30,7 @@ from apps.user_service.app.schemas.users import (
     UpdateUserEmailRequest,
     UnbanResponse,
     BanResponse,
-    ErrorResponse,
+    ResponseModel,
 )
 
 # Audit logging imports
@@ -55,6 +55,7 @@ from libs.shared_db.supabase_db.admin_operations.user import (
 
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE
 
 # Create router for user update endpoints
 router = APIRouter(prefix="", tags=["User Update Operations"])
@@ -62,6 +63,7 @@ router = APIRouter(prefix="", tags=["User Update Operations"])
 # Initialize logger for user update module
 logger = get_logger("user-update-api")
 
+DELETED_ROLES = "delete roles"
 
 @router.put(
     "/{user_id}/email",
@@ -93,9 +95,9 @@ async def update_user_email(
     # # Generate request ID for tracking
     # request_id = str(uuid.uuid4())
 
-    await validate_uuid_format(user_id, "role ID")
+    validate_uuid_format(user_id, "user ID")
 
-    user_context = await check_permissions(current_user, "settings.users.manage", 'delete roles')
+    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE, DELETED_ROLES)
 
     # Set audit context for user email update
     request.state.audit_risk_level = "medium"
@@ -137,7 +139,7 @@ async def update_user_email(
 @router.post(
     "/ban/{user_id}",
     response_model=BanResponse,
-    responses={404: {"model": ErrorResponse}},
+    responses={404: {"model": ResponseModel}},
 )
 @limiter.limit("100/minute")  # Example: Limit to 5 requests per minute
 @audit_api_call(
@@ -171,21 +173,15 @@ async def ban_user(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
-    await validate_uuid_format(user_id, "User ID")
+    validate_uuid_format(user_id, "User ID")
 
-    user_context = await check_permissions(current_user, "settings.users.manage", 'delete roles')
+    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE, DELETED_ROLES)
 
     # Set audit context for user banning
     request.state.audit_risk_level = "high"
     request.state.audit_table = "organization_members"
     request.state.audit_requested_id = user_id
     request.state.audit_description = f"Admin banned user: {user_id}"
-
-    # await require_permission(
-    #     permission_code="settings.users.manage",
-    #     user_context=user_context,
-    #     action_description="delete roles",
-    # )
 
     if user_id == user_context.user_id:
         logger.warning("User attempted to ban themselves - Request ID: %s, ",request_id)
@@ -200,15 +196,11 @@ async def ban_user(
     # Set old values for audit comparison
     set_audit_old_data_from_user(request, current_user_data)
 
-    # banned_until = datetime.now(timezone.utc) + timedelta(days=365 * 100)
-
     # Ban user using database operations
     result = await ban_the_user(user_id)
 
     if not result:
         logger.warning("User not found for banning in auth.users - Request ID: %s, ",request_id)
-        logger.warning("Target User ID: %s",user_id)
-        # logging.warning("User not found for banning: %s", user_id)
         raise HTTPException(status_code=404, detail="User not found")
 
 
@@ -237,14 +229,13 @@ async def ban_user(
         "ban_reason": "Admin ban action",
     }
 
-
     return BanResponse(message="User successfully banned", reason="")
 
 
 @router.post(
     "/unban/{user_id}",
     response_model=UnbanResponse,
-    responses={404: {"model": ErrorResponse}},
+    responses={404: {"model": ResponseModel}},
 )
 @limiter.limit("100/minute")  # Example: Limit to 5 requests per minute
 @audit_api_call(
@@ -276,10 +267,10 @@ async def unban_user(
     request_id = str(uuid.uuid4())
 
     # Validate user access
-    await validate_uuid_format(user_id, "User ID")
+    validate_uuid_format(user_id, "User ID")
 
     # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user, "settings.users.manage", 'delete roles')
+    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE, DELETED_ROLES)
 
     # Set audit context for user unbanning
     request.state.audit_table = "organization_members"
@@ -287,12 +278,6 @@ async def unban_user(
     request.state.audit_description = f"Admin unbanned user: {user_id}"
     request.state.audit_risk_level = "medium"
 
-    # # Check permission using utility function
-    # await require_permission(
-    #     permission_code="settings.users.manage",
-    #     user_context=user_context,
-    #     action_description="delete roles",
-    # )
 
     if user_id == user_context.user_id:
         logger.warning("User attempted to unban themselves - Request ID: %s, ",request_id)
@@ -340,6 +325,5 @@ async def unban_user(
         "unban_timestamp": datetime.now().isoformat(),
         "ban_removed": True,
     }
-
 
     return UnbanResponse(message="User successfully unbanned")

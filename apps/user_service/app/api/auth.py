@@ -44,7 +44,9 @@ from apps.user_service.app.schemas.auth import (
     PasswordResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
-    SetPasswordRequest
+    SetPasswordRequest,
+    PASSWORD_CONDITION_MESSAGE_EXTENDED
+
 )
 
 # App instance
@@ -145,7 +147,6 @@ async def login(request: Request, data: AuthLogin):
             user=UserInfo(
                 id=result.user.id,
                 email=result.user.email,
-                # full_name=result.user.user_metadata.get("full_name", ""),
                 first_name=result.user.user_metadata.get("first_name", None),
                 last_name=result.user.user_metadata.get("last_name", None),
             ),
@@ -177,15 +178,12 @@ async def set_password(
         if not _is_password_strong(data.password):
             raise HTTPException(
                 status_code=400,
-                detail="Password must be at least 6 characters long and "
-                "contain at least one uppercase letter, one lowercase letter, "
-                "one number, and one special character."
+                detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
             )
         print("Password: %s", data.password)
         result = await update_password_with_link_identity(current_user['sub'], data.password)
         if result:
             return PasswordResponse(
-                # status_code=status.HTTP_202_ACCEPTED,
                 message="Password set successfully"
             )
         raise HTTPException(
@@ -262,7 +260,6 @@ async def forgot_password(request: Request, data: ForgotPasswordRequest):
         # Send password reset email only if user exists
         await reset_the_password_email(data.email)
         return ForgotPasswordResponse(
-            # status_code=status.HTTP_200_OK,
             message="Password reset email sent successfully. Please check your email."
         )
     except HTTPException as error:
@@ -322,7 +319,7 @@ async def reset_password(
     """
 
     try:
-        user = await get_user_from_token(data.token)
+        user = get_user_from_token(data.token)
         if not user:
             raise HTTPException(
                 status_code=404,
@@ -332,9 +329,7 @@ async def reset_password(
         if not _is_password_strong(data.new_password):
             raise HTTPException(
                 status_code=400,
-                detail="Password must be at least 6 characters long and "
-                "contain at least one uppercase letter, one lowercase letter, "
-                "one number, and one special character."
+                detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
             )
 
         result = await update_password_with_token(user['sub'], data.new_password)
@@ -358,7 +353,6 @@ async def reset_password(
                 # Note: We don't fail the entire operation if email fails
 
             return PasswordResponse(
-                # status_code=status.HTTP_200_OK,
                 message="Password reset successfully. You can now login with your new password."
             )
         else:
@@ -436,15 +430,11 @@ async def signup(
     - Transaction rollback on failures
     - Proper error handling without exposing internal details
     """
-    # Generate request ID and initialize audit context
-    request_id = str(uuid.uuid4())
 
     if not _is_password_strong(signup_data.password):
         raise HTTPException(
             status_code=400,
-            detail="Password must be at least 6 characters long and "
-            "contain at least one uppercase letter, one lowercase letter, "
-            "one number, and one special character."
+            detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
         )
 
     user_id = await sign_up_supabase_user(signup_data)
@@ -452,7 +442,6 @@ async def signup(
 
 
     return SignupResponse(
-        # status_code=status.HTTP_201_CREATED,
         message="Account created successfully! Please check your email for verification.",
         data={
             "user_id": user_id,
@@ -479,9 +468,7 @@ def _get_not_found_response():
 def _extract_user_type_strict(row) -> str|None:
     if not row:
         return None
-    # user_meta = _parse_meta(row.get("raw_user_meta_data"))
     user_meta = row.user_metadata
-    # app_meta = _parse_meta(row.get("raw_app_meta_data"))
     app_meta = row.app_metadata
     if isinstance(user_meta, dict):
         utype = user_meta.get("type") or user_meta.get("user_type")
@@ -521,7 +508,6 @@ async def verify_email(
         if status_value:
             can_login_local = status_value == "active"
             return VerifyEmailResponse(
-                # status_code=200,
                 message="Email found." if can_login_local else "Account is suspended.",
                 email_found=True,
                 status=status_value,
@@ -634,8 +620,6 @@ async def oauth_callback(request: Request):
     try:
         # Get parameters
         code = request.query_params.get("code")
-        user_id = request.query_params.get("user_id")  # For linking
-        provider = request.query_params.get("provider")  # For linking
 
         if not code:
             raise HTTPException(

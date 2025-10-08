@@ -36,13 +36,13 @@ async def create_session(session_data: Dict[str, Any], organization_id: str) -> 
     # Validate input parameters
     if not organization_id or organization_id is None:
         raise ValueError("Organization ID cannot be None or empty")
-    
+
     if not session_data.get("session_id") or session_data.get("session_id") is None:
         raise ValueError("Session ID cannot be None or empty")
-    
+
     if not session_data.get("user_id") or session_data.get("user_id") is None:
         raise ValueError("User ID cannot be None or empty")
-    
+
     supabase = await get_supabase_admin_client()
 
     session_record = {
@@ -71,7 +71,7 @@ async def create_session(session_data: Dict[str, Any], organization_id: str) -> 
             }
         })
     except Exception as e:
-        logger.warning(f"Could not set user context: {e}")
+        logger.warning("Could not set user context: %s", str(e))
 
     result = await supabase.table("user_sessions").insert(session_record).execute()
 
@@ -148,10 +148,10 @@ async def check_session_exists(session_id: str, organization_id: str) -> bool:
     # Validate input parameters
     if not session_id or session_id is None:
         raise ValueError("Session ID cannot be None or empty")
-    
+
     if not organization_id or organization_id is None:
         raise ValueError("Organization ID cannot be None or empty")
-    
+
     supabase = await get_supabase_admin_client()
 
     result = await supabase.table("user_sessions").select("id").eq(

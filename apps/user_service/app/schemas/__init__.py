@@ -10,6 +10,7 @@ Date: 2024-12-19
 Last Updated: 2024-12-19
 """
 from fastapi import HTTPException, status
+from pydantic import BaseModel, Field
 
 def _bad_request(detail: str) -> None:
     """Raise a standardized HTTP 400 error with the given detail.
@@ -17,3 +18,9 @@ def _bad_request(detail: str) -> None:
     Centralizing this avoids repetition across validation branches.
     """
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+class ResponseModel(BaseModel):
+    """Standard error response model."""
+    message: str = Field(
+        ..., description="Response message describing the operation result"
+    )

@@ -89,20 +89,18 @@ def extract_session_id_from_token(current_user: dict) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Session ID not found in token",
         )
-    
+
     # Validate that session_id is not None or empty string
     if session_id is None or session_id == "":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Session ID is null or empty in token",
         )
-    
+
     return session_id
 
 
-
-
-async def get_client_ip(request: Request) -> str:
+def get_client_ip(request: Request) -> str:
     """
     Extract client IP address from request.
 
@@ -124,7 +122,7 @@ async def get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-async def get_user_agent(request: Request) -> str:
+def get_user_agent(request: Request) -> str:
     """
     Extract user agent from request headers.
 
@@ -132,7 +130,7 @@ async def get_user_agent(request: Request) -> str:
     return request.headers.get("User-Agent", "unknown")
 
 
-async def get_device_fingerprint(request: Request) -> str:
+def get_device_fingerprint(request: Request) -> str:
     """
     Extract device fingerprint from request headers.
 
@@ -140,7 +138,7 @@ async def get_device_fingerprint(request: Request) -> str:
     return request.headers.get("X-Device-Fingerprint")
 
 
-async def get_risk_score(request: Request) -> int:
+def get_risk_score(request: Request) -> int:
     """
     Extract risk score from request headers or calculate based on context.
 
@@ -167,7 +165,7 @@ async def get_risk_score(request: Request) -> int:
     return min(risk_score, 100)
 
 
-async def get_login_method(request: Request) -> str:
+def get_login_method(request: Request) -> str:
     """
     Determine login method from request context.
 
@@ -182,8 +180,6 @@ async def get_login_method(request: Request) -> str:
 
     # Default to password-based login
     return "password"
-
-
 
 
 def build_session_filter_message(
@@ -213,17 +209,15 @@ def build_session_filter_message(
 
 
 
-async def _extract_session_data_from_request(request: Request) -> dict:
+def _extract_session_data_from_request(request: Request) -> dict:
     """Extract all session data from request headers."""
     return {
-        "ip_address": await get_client_ip(request),
-        "user_agent": await get_user_agent(request),
-        "device_fingerprint": await get_device_fingerprint(request),
-        "risk_score": await get_risk_score(request),
-        "login_method": await get_login_method(request),
+        "ip_address": get_client_ip(request),
+        "user_agent": get_user_agent(request),
+        "device_fingerprint": get_device_fingerprint(request),
+        "risk_score": get_risk_score(request),
+        "login_method": get_login_method(request),
     }
-
-
 
 
 @router.post(
@@ -307,7 +301,7 @@ async def start_session(
         ) from e
 
     # Extract client information from request headers
-    session_data = await _extract_session_data_from_request(request)
+    session_data = _extract_session_data_from_request(request)
 
     # Prepare session data for centralized operation
     session_data["session_id"] = session_id
@@ -363,7 +357,6 @@ async def start_session(
     )
 
     return CreateSessionResponse(
-        status_code=status.HTTP_201_CREATED,
         message="Session created successfully",
         session=session_item,
     )
@@ -379,8 +372,16 @@ def _format_session_item(session_data: dict) -> SessionItem:
         user_agent=session_data["user_agent"],
         device_fingerprint=session_data["device_fingerprint"],
         risk_score=session_data["risk_score"],
-        login_timestamp=session_data["login_timestamp"] if isinstance(session_data["login_timestamp"], str) else format_iso_datetime(session_data["login_timestamp"]) or "",
-        logout_timestamp=session_data["logout_timestamp"] if isinstance(session_data["logout_timestamp"], str) else format_iso_datetime(session_data["logout_timestamp"]),
+        login_timestamp=(
+            session_data["login_timestamp"]
+            if isinstance(session_data["login_timestamp"], str)
+            else format_iso_datetime(session_data["login_timestamp"]) or ""
+        ),
+        logout_timestamp=(
+            session_data["logout_timestamp"]
+            if isinstance(session_data["logout_timestamp"], str)
+            else format_iso_datetime(session_data["logout_timestamp"]) or ""
+        ),
         session_status=session_data["session_status"],
         login_method=session_data["login_method"],
         accessed_phi=session_data["accessed_phi"],
@@ -449,10 +450,6 @@ async def update_session_logout(
         if "Session ID not found" in str(e.detail):
             e.detail = "Session ID not found in token"
             raise
-            # raise HTTPException(
-            #     status_code=status.HTTP_400_BAD_REQUEST,
-            #     detail="Session ID not found in token"
-            # )
 
     # Check permission using utility function
     # await require_permission(
@@ -491,15 +488,18 @@ async def update_session_logout(
         ) from e
 
     # Set old values for audit comparison
+    # Extract logout timestamp formatting
+    logout_timestamp_value = None
+    if existing_session["logout_timestamp"]:
+        if isinstance(existing_session["logout_timestamp"], str):
+            logout_timestamp_value = existing_session["logout_timestamp"]
+        else:
+            logout_timestamp_value = format_iso_datetime(existing_session["logout_timestamp"]) or ""
+    
     request.state.raw_audit_old_data = {
         "session_id": session_id,
         "session_status": existing_session["session_status"],
-        "logout_timestamp": (
-            existing_session["logout_timestamp"] if isinstance(existing_session["logout_timestamp"], str)
-            else existing_session["logout_timestamp"].isoformat()
-            if existing_session["logout_timestamp"]
-            else None
-        ),
+        "logout_timestamp": logout_timestamp_value,
         "accessed_phi": existing_session["accessed_phi"],
         "phi_access_purpose": existing_session["phi_access_purpose"],
         "organization_id": user_context.organization_id,
@@ -544,6 +544,13 @@ async def update_session_logout(
         ) from e
 
     # Format updated session data for response
+    # Extract timestamp formatting
+    login_timestamp_value = (
+        updated_session["login_timestamp"]
+        if isinstance(updated_session["login_timestamp"], str)
+        else format_iso_datetime(updated_session["login_timestamp"]) or ""
+    )
+    
     session_item = SessionItem(
         id=str(updated_session["id"]),
         user_id=str(updated_session["user_id"]),
@@ -552,8 +559,12 @@ async def update_session_logout(
         user_agent=updated_session["user_agent"],
         device_fingerprint=updated_session["device_fingerprint"],
         risk_score=updated_session["risk_score"],
-        login_timestamp=updated_session["login_timestamp"] if isinstance(updated_session["login_timestamp"], str) else format_iso_datetime(updated_session["login_timestamp"]) or "",
-        logout_timestamp=updated_session["logout_timestamp"] if isinstance(updated_session["logout_timestamp"], str) else format_iso_datetime(updated_session["logout_timestamp"]),
+        login_timestamp=login_timestamp_value,
+        logout_timestamp=(
+            updated_session["logout_timestamp"]
+            if isinstance(updated_session["logout_timestamp"], str)
+            else format_iso_datetime(updated_session["logout_timestamp"])
+        ),
         session_status=updated_session["session_status"],
         login_method=updated_session["login_method"],
         accessed_phi=updated_session["accessed_phi"],
@@ -562,7 +573,6 @@ async def update_session_logout(
 
 
     return UpdateSessionResponse(
-        status_code=status.HTTP_200_OK,
         message="Session logout updated successfully",
         session=session_item,
     )
@@ -656,7 +666,6 @@ async def get_sessions(
     }
 
     return SessionsResponse(
-        status_code=status.HTTP_200_OK,
         message=message,
         sessions=sessions,
         total_count=total_count,

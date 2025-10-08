@@ -2,10 +2,9 @@
 
 import pytest
 import uuid
-from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch, MagicMock
 from postgrest import APIError
-from httpx import HTTPError, RequestError, TimeoutException
+from httpx import HTTPError
 
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
     create_new_organisation,
@@ -19,7 +18,6 @@ from libs.shared_db.postgres_db.user_service_operations.organisation_operations 
     get_organisations_with_members,
     check_organisation_slug_unique,
     check_organisation_name_unique,
-    validate_organisation_status,
     get_organisation_members,
     get_organisation_members_count,
     add_member_to_organisation,
@@ -48,6 +46,8 @@ from libs.shared_db.postgres_db.user_service_operations.exception_handling impor
     NetworkError,
     DataValidationError
 )
+
+from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE
 
 
 class TestOrganisationCRUD:
@@ -686,25 +686,6 @@ class TestOrganisationValidation:
             result = await check_organisation_name_unique(name, exclude_org_id)
 
             assert result is True
-
-    @pytest.mark.asyncio
-    async def test_validate_organisation_status_valid(self):
-        """Test organisation status validation with valid status."""
-        valid_statuses = ["active", "suspended", "trial", "inactive"]
-
-        for status in valid_statuses:
-            result = await validate_organisation_status(status)
-            assert result is True
-
-    @pytest.mark.asyncio
-    async def test_validate_organisation_status_invalid(self):
-        """Test organisation status validation with invalid status."""
-        invalid_statuses = ["invalid", "unknown", "pending", ""]
-
-        for status in invalid_statuses:
-            result = await validate_organisation_status(status)
-            assert result is False
-
 
 class TestOrganisationMembers:
     """Test cases for organisation member operations."""
@@ -1708,7 +1689,7 @@ class TestOrganisationPermissionsAndBulk:
             {
                 "id": "perm-2",
                 "name": "Manage Users",
-                "code": "settings.users.manage",
+                "code": SETTINGS_USERS_MANAGE,
                 "category": "settings",
                 "description": "Full user management",
                 "created_at": "2024-01-01T00:00:00Z",

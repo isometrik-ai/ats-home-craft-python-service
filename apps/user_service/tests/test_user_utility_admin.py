@@ -25,9 +25,9 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     login_user,
     invite_user_with_email,
     reset_the_password_email,
-    update_password_with_token,
-    log_exception
+    update_password_with_token
 )
+from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 
 class TestUpdateSupabaseUserEmail:
     """Test cases for update_supabase_user_email function."""
@@ -71,7 +71,7 @@ class TestUpdateSupabaseUserEmail:
                 await update_supabase_user_email(user_id, org_id, new_email)
 
             assert exc_info.value.status_code == 404
-            assert "User not found in organization" in exc_info.value.detail
+            assert USER_NOT_FOUND_MESSAGE in exc_info.value.detail
 
     @pytest.mark.asyncio
     async def test_update_supabase_user_email_supabase_failure(self):
@@ -353,79 +353,6 @@ class TestSendAdminUpdateEmail:
 
             assert exc_info.value.status_code == 500
             assert "Failed to send admin update email" in exc_info.value.detail
-
-# class TestCreateSupabaseUser:
-#     """Test cases for create_supabase_user function."""
-
-#     @pytest.mark.asyncio
-#     async def test_create_supabase_user_success(self):
-#         """Test successful user creation."""
-#         # Create a mock body object with all required fields
-#         body = MagicMock()
-#         body.email = "test@example.com"
-#         body.password = "password123"
-#         body.full_name = "Test User"
-#         body.phone = "1234567890"
-#         body.timezone = "UTC"
-#         body.role_id = str(uuid.uuid4())
-
-#         organization_id = str(uuid.uuid4())
-#         user_id = str(uuid.uuid4())
-
-#         mock_response = MagicMock()
-#         mock_response.user.id = user_id
-
-#         with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-#                    AsyncMock(return_value=MagicMock(auth=MagicMock(admin=MagicMock(create_user=MagicMock(return_value=mock_response)))))):
-
-#             result = await create_supabase_user(body, organization_id)
-#             assert result == user_id
-
-#     @pytest.mark.asyncio
-#     async def test_create_supabase_user_duplicate_email(self):
-#         """Test user creation with duplicate email."""
-#         # Create a mock body object with all required fields
-#         body = MagicMock()
-#         body.email = "test@example.com"
-#         body.password = "password123"
-#         body.full_name = "Test User"
-#         body.phone = "1234567890"
-#         body.timezone = "UTC"
-#         body.role_id = str(uuid.uuid4())
-
-#         organization_id = str(uuid.uuid4())
-
-#         with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-#                    AsyncMock(side_effect=ConnectionError("already_exists"))):
-
-#             with pytest.raises(HTTPException) as exc_info:
-#                 await create_supabase_user(body, organization_id)
-
-#             assert exc_info.value.status_code == 409
-#             assert "Email already exists" in exc_info.value.detail
-
-#     @pytest.mark.asyncio
-#     async def test_create_supabase_user_connection_error(self):
-#         """Test user creation with connection error."""
-#         # Create a mock body object with all required fields
-#         body = MagicMock()
-#         body.email = "test@example.com"
-#         body.password = "password123"
-#         body.full_name = "Test User"
-#         body.phone = "1234567890"
-#         body.timezone = "UTC"
-#         body.role_id = str(uuid.uuid4())
-
-#         organization_id = str(uuid.uuid4())
-
-#         with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-#                    AsyncMock(side_effect=ConnectionError("Connection failed"))):
-
-#             with pytest.raises(HTTPException) as exc_info:
-#                 await create_supabase_user(body, organization_id)
-
-#             assert exc_info.value.status_code == 500
-#             assert "Failed to create user account" in exc_info.value.detail
 
 class TestSignUpSupabaseUser:
     """Test cases for sign_up_supabase_user function."""
@@ -739,16 +666,16 @@ class TestLogException:
         """Test log_exception function."""
         with patch("libs.shared_utils.common_query.sys.exc_info") as mock_exc_info, \
              patch("libs.shared_utils.common_query.logger") as mock_logger:
-    
+
             # Create mock traceback
             mock_tb = MagicMock()
             mock_tb.tb_frame.f_code.co_filename = "/test/path/file.py"
             mock_tb.tb_lineno = 42
             mock_exc_info.return_value = (ValueError, ValueError("test error"), mock_tb)
-    
+
             from libs.shared_utils.common_query import log_exception
             log_exception()
-    
+
             mock_logger.error.assert_called_once()
             call_args = mock_logger.error.call_args[0]
             assert "Error:" in call_args[0]

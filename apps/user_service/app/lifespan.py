@@ -16,8 +16,8 @@ async def lifespan(app):  # pylint: disable=unused-argument
     """Application lifespan event handler"""
     # Startup
     app_logger.info("Starting up user service application")
-    # db_pool = await get_async_connection_pool()
-    await audit_logger.start_processing()
+
+    audit_logger.start_processing()
     app_logger.info("Audit logger processing started successfully")
 
     yield
