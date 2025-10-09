@@ -18,9 +18,10 @@ Operations Covered:
 
 from typing import List, Dict, Any, Optional
 
+from apps.user_service.app.dependencies.logger import get_logger
+from libs import NOW_CONSTANT
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_utils.common_query import ROLE_SELECT_FIELDS
-from apps.user_service.app.dependencies.logger import get_logger
 from .exception_handling import handle_database_errors, create_error_messages
 
 # Initialize logger
@@ -45,8 +46,8 @@ async def create_role(name: str, description: str, organization_id: str,
         "description": description,
         "organization_id": organization_id,
         "is_default": is_default,
-        "created_at": "now()",
-        "updated_at": "now()"
+        "created_at": NOW_CONSTANT,
+        "updated_at": NOW_CONSTANT
     }
 
     result = await supabase.table("roles").insert(role_record).execute()
@@ -73,29 +74,6 @@ async def get_role_by_id(role_id: str, organization_id: str) -> Optional[Dict[st
     return None
 
 
-# async def get_role_by_name(name: str, organization_id: str) -> Optional[Dict[str, Any]]:
-#     """Get role by name and organization ID."""
-#     pool = await get_async_connection_pool()
-#     async with pool.acquire() as conn:
-#         try:
-#             query = f"""
-#                 SELECT
-#                     {ROLE_SELECT_FIELDS}
-#                 FROM public.roles r
-#                 WHERE r.name = $1 AND r.organization_id = $2;
-#             """
-
-#             result = await conn.fetchrow(query, name, organization_id)
-#             return dict(result) if result else None
-
-#         except (asyncpg.PostgresError, ConnectionError) as e:
-#             logger.error("Database error getting role by name: %s", e, exc_info=True)
-#             raise
-#         except (LookupError, AttributeError) as e:
-#             logger.error("Data access error getting role by name: %s", e, exc_info=True)
-#             raise
-
-
 @handle_database_errors(
     "update_role",
     custom_messages=create_error_messages("update_role", "updating"))
@@ -119,7 +97,7 @@ async def update_role(
         return {}
 
     # Add updated_at
-    update_payload["updated_at"] = "now()"
+    update_payload["updated_at"] = NOW_CONSTANT
 
     result = await supabase.table("roles").update(update_payload).eq(
         "id", role_id
@@ -163,7 +141,6 @@ async def check_role_exists(role_id: str, organization_id: str) -> bool:
 # ============================================================================
 
 async def _get_roles_list_sdk_fallback(
-    supabase,
     organization_id: str,
     search: Optional[str],
     role_type: Optional[str],
@@ -174,6 +151,8 @@ async def _get_roles_list_sdk_fallback(
 
     Mirrors the previous logic to keep unit tests and behavior consistent.
     """
+    supabase = await get_supabase_admin_client()
+
     query = supabase.table("roles").select(
         "id, name, description, is_default, created_at, updated_at"
     ).eq("organization_id", organization_id).neq("name", "Super Admin")
@@ -232,7 +211,7 @@ async def get_roles_list(
     to ensure consistent parameter handling and filtering across the codebase.
     """
     supabase = await get_supabase_admin_client()
-    
+
     # Try RPC path first; fall back to SDK query when mocks don't support awaitables
     try:
         rpc_builder = supabase.rpc(
@@ -261,7 +240,7 @@ async def get_roles_list(
     except Exception:
         # Fall through to SDK query path on any RPC/mocking issues
         return await _get_roles_list_sdk_fallback(
-            supabase, organization_id, search, role_type, limit, offset
+            organization_id, search, role_type, limit, offset
         )
 
 
@@ -300,92 +279,6 @@ async def get_roles_count(
 
 
 
-
-
-
-
-
-    # supabase = await get_supabase_admin_client()
-    # try:
-    #     # Build the count query with filters
-    #     query = supabase.table("roles").select("id", count="exact").eq(
-    #         "organization_id", organization_id
-    #     )
-
-    #     # Apply filters
-    #     if search:
-    #         query = query.ilike("name", f"%{search}%")
-
-    #     if role_type:
-    #         if role_type == "system":
-    #             query = query.eq("is_default", True)
-    #         elif role_type == "custom":
-    #             query = query.eq("is_default", False)
-
-    #     result = await query.execute()
-
-    #     return result.count if result.count is not None else 0
-
-    # except APIError as e:
-    #     logger.error("Supabase API error getting roles count: %s", e, exc_info=True)
-    #     raise
-    # except (HTTPError, RequestError, TimeoutException) as e:
-    #     logger.error("Network error getting roles count: %s", e, exc_info=True)
-    #     raise
-    # except (KeyError, TypeError, ValueError) as e:
-    #     logger.error("Data validation error getting roles count: %s", e, exc_info=True)
-    #     raise
-
-
-# async def get_roles_with_permissions(organization_id: str, search: Optional[str] = None,
-#                                    limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
-#     """Get roles with their permission information."""
-    # pool = await get_async_connection_pool()
-    # async with pool.acquire() as conn:
-    #     try:
-    #         # Get roles first
-    #         roles_query, roles_params = build_roles_filter_query(
-    #             organization_id=organization_id,
-    #             search=search,
-    #             role_type=None,
-    #             limit=limit,
-    #             offset=offset
-    #         )
-
-    #         roles = await conn.fetch(roles_query, *roles_params)
-
-    #         # Get permissions for each role
-    #         result = []
-    #         for role in roles:
-    #             role_dict = dict(role)
-
-    #             # Get permissions for this role
-    #             permissions_query = f"""
-    #                 SELECT DISTINCT
-    #                     {PERMISSION_SELECT_FIELDS}
-    #                 FROM public.role_permissions rp
-    #                 INNER JOIN public.permissions p ON rp.permission_id = p.id
-    #                 WHERE rp.role_id = $1 AND rp.organization_id = $2
-    #                 ORDER BY p.category NULLS LAST, p.name ASC;
-    #             """
-
-    #             permissions = await conn.fetch(
-    #                 permissions_query, role["id"], organization_id
-    #             )
-
-    #             role_dict["permissions"] = [dict(perm) for perm in permissions]
-    #             result.append(role_dict)
-
-    #         return result
-
-    #     except (asyncpg.PostgresError, ConnectionError) as e:
-    #         logger.error("Database error getting roles with permissions: %s", e, exc_info=True)
-    #         raise
-    #     except (LookupError, AttributeError) as e:
-    #         logger.error("Data access error getting roles with permissions: %s", e, exc_info=True)
-    #         raise
-
-
 # ============================================================================
 # ROLE PERMISSION OPERATIONS
 # ============================================================================
@@ -411,7 +304,7 @@ async def assign_permissions_to_role(role_id: str, organization_id: str,
             "organization_id": organization_id,
             "role_id": role_id,
             "permission_id": permission_id,
-            "created_at": "now()"
+            "created_at": NOW_CONSTANT
         })
 
     # Bulk insert new permissions
@@ -544,195 +437,3 @@ async def check_role_usage(role_id: str, organization_id: str) -> int:
 # Note: Query building functions have been removed as Supabase SDK
 # provides built-in query methods that are more efficient and type-safe.
 # The filtering logic is now handled directly in the respective functions.
-
-
-# ============================================================================
-# ROLE STATISTICS OPERATIONS
-# ============================================================================
-
-# async def get_role_statistics(organization_id: str) -> Dict[str, Any]:
-#     """Get role statistics for organization."""
-    # pool = await get_async_connection_pool()
-    # async with pool.acquire() as conn:
-    #     try:
-    #         query = """
-    #             SELECT
-    #                 COUNT(*) as total_roles,
-    #                 COUNT(CASE WHEN is_default = true THEN 1 END) as system_roles,
-    #                 COUNT(CASE WHEN is_default = false THEN 1 END) as custom_roles
-    #             FROM public.roles
-    #             WHERE organization_id = $1;
-    #         """
-
-    #         result = await conn.fetchrow(query, organization_id)
-    #         return dict(result) if result else {}
-
-    #     except (asyncpg.PostgresError, ConnectionError) as e:
-    #         logger.error("Database error getting role statistics: %s", e, exc_info=True)
-    #         raise
-    #     except (LookupError, AttributeError) as e:
-    #         logger.error("Data access error getting role statistics: %s", e, exc_info=True)
-    #         raise
-
-
-# async def get_role_usage_stats(role_id: str, organization_id: str) -> Dict[str, Any]:
-#     """Get usage statistics for a specific role."""
-    # pool = await get_async_connection_pool()
-    # async with pool.acquire() as conn:
-    #     try:
-    #         query = """
-    #             SELECT
-    #                 COUNT(*) as user_count,
-    #                 COUNT(CASE WHEN status = 'active' THEN 1 END) as active_users,
-    #                 COUNT(CASE WHEN status = 'inactive' THEN 1 END) as inactive_users
-    #             FROM public.organization_members
-    #             WHERE role_id = $1 AND organization_id = $2;
-    #         """
-
-    #         result = await conn.fetchrow(query, role_id, organization_id)
-    #         return dict(result) if result else {}
-
-    #     except (asyncpg.PostgresError, ConnectionError) as e:
-    #         logger.error("Database error getting role usage stats: %s", e, exc_info=True)
-    #         raise
-    #     except (LookupError, AttributeError) as e:
-    #         logger.error("Data access error getting role usage stats: %s", e, exc_info=True)
-    #         raise
-
-
-# ============================================================================
-# ROLE BULK OPERATIONS
-# ============================================================================
-
-# async def bulk_create_roles(
-#   roles_data: List[Dict[str, Any]],
-#   organization_id: str) -> List[Dict[str, Any]]:
-#     """Bulk create multiple roles."""
-    # if not roles_data:
-    #     return []
-
-    # pool = await get_async_connection_pool()
-    # async with pool.acquire() as conn:
-    #     try:
-    #         async with conn.transaction():
-    #             results = []
-    #             for role_data in roles_data:
-    #                 result = await create_role(
-    #                     name=role_data["name"],
-    #                     description=role_data["description"],
-    #                     organization_id=organization_id,
-    #                     is_default=role_data.get("is_default", False)
-    #                 )
-    #                 results.append(result)
-    #             return results
-
-    #     except (asyncpg.PostgresError, ConnectionError) as e:
-    #         logger.error("Database error bulk creating roles: %s", e, exc_info=True)
-    #         raise
-    #     except (LookupError, AttributeError) as e:
-    #         logger.error("Data access error bulk creating roles: %s", e, exc_info=True)
-    #         raise
-
-
-# async def bulk_update_roles(
-#   updates: List[Dict[str, Any]],
-#   organization_id: str) -> List[Dict[str, Any]]:
-#     """Bulk update multiple roles."""
-#     if not updates:
-#         return []
-
-#     pool = await get_async_connection_pool()
-#     async with pool.acquire() as conn:
-#         try:
-#             async with conn.transaction():
-#                 results = []
-#                 for update_data in updates:
-#                     role_id = update_data.pop("role_id")
-#                     result = await update_role(role_id, organization_id, update_data)
-#                     results.append(result)
-#                 return results
-
-#         except (asyncpg.PostgresError, ConnectionError) as e:
-#             logger.error("Database error bulk updating roles: %s", e, exc_info=True)
-#             raise
-#         except (LookupError, AttributeError) as e:
-#             logger.error("Data access error bulk updating roles: %s", e, exc_info=True)
-#             raise
-
-
-# async def bulk_delete_roles(role_ids: List[str], organization_id: str) -> int:
-#     """Bulk delete multiple roles."""
-    # if not role_ids:
-    #     return 0
-
-    # pool = await get_async_connection_pool()
-    # async with pool.acquire() as conn:
-    #     try:
-    #         async with conn.transaction():
-    #             delete_query = """
-    #                 DELETE FROM public.roles
-    #                 WHERE id = ANY($1) AND organization_id = $2;
-    #             """
-
-    #             result = await conn.execute(delete_query, role_ids, organization_id)
-    #             # Extract number from result like "DELETE 3"
-    #             return int(result.split()[-1]) if result.startswith("DELETE") else 0
-
-    #     except (asyncpg.PostgresError, ConnectionError) as e:
-    #         logger.error("Database error bulk deleting roles: %s", e, exc_info=True)
-    #         raise
-    #     except (LookupError, AttributeError) as e:
-    #         logger.error("Data access error bulk deleting roles: %s", e, exc_info=True)
-    #         raise
-
-
-# ============================================================================
-# ROLE PERMISSION BULK OPERATIONS
-# ============================================================================
-
-# async def bulk_assign_permissions(
-#   assignments: List[Dict[str, Any]],
-#   organization_id: str) -> bool:
-#     """Bulk assign permissions to multiple roles."""
-    # if not assignments:
-    #     return True
-
-    # pool = await get_async_connection_pool()
-    # async with pool.acquire() as conn:
-    #     try:
-    #         async with conn.transaction():
-    #             for assignment in assignments:
-    #                 role_id = assignment["role_id"]
-    #                 permission_ids = assignment["permission_ids"]
-    #                 await assign_permissions_to_role(role_id, organization_id, permission_ids)
-    #             return True
-
-    #     except (asyncpg.PostgresError, ConnectionError) as e:
-    #         logger.error("Database error bulk assigning permissions: %s", e, exc_info=True)
-    #         raise
-    #     except (LookupError, AttributeError) as e:
-    #         logger.error("Data access error bulk assigning permissions: %s", e, exc_info=True)
-    #         raise
-
-
-# async def bulk_remove_permissions(removals: List[Dict[str, Any]], organization_id: str) -> bool:
-#     """Bulk remove permissions from multiple roles."""
-    # if not removals:
-    #     return True
-
-    # pool = await get_async_connection_pool()
-    # async with pool.acquire() as conn:
-    #     try:
-    #         async with conn.transaction():
-    #             for removal in removals:
-    #                 role_id = removal["role_id"]
-    #                 permission_ids = removal["permission_ids"]
-    #                 await remove_permissions_from_role(role_id, organization_id, permission_ids)
-    #             return True
-
-    #     except (asyncpg.PostgresError, ConnectionError) as e:
-    #         logger.error("Database error bulk removing permissions: %s", e, exc_info=True)
-    #         raise
-    #     except (LookupError, AttributeError) as e:
-    #         logger.error("Data access error bulk removing permissions: %s", e, exc_info=True)
-    #         raise

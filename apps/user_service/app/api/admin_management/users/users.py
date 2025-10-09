@@ -40,23 +40,13 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 
-# # Import update user routes
-# from apps.user_service.app.api.admin_management.users.update_user import (
-#     router as update_user_router
-# )
-
-# # Import user profile routes
-# from apps.user_service.app.api.admin_management.users.user_profile import (
-#     router as user_profile_router
-# )
-
-
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     invite_user_with_email
 )
+from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE, USER_NOT_FOUND_MESSAGE
 
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
@@ -119,16 +109,7 @@ async def get_users_list(
     )
 
     # Permission check
-    user_context = await check_permissions(current_user, "settings.users.manage")
-
-
-    # --- Build queries dynamically ---
-    # base_query, count_query, query_args, limit_offset_args = build_user_query(
-    #     organization_id=user_context.organization_id,
-    #     search=query_params.search,
-    #     page_size=page_size,
-    #     offset=offset,
-    # )
+    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
 
     # Get users list using database operations
     users_data = await get_users_details_list(
@@ -144,10 +125,6 @@ async def get_users_list(
         search=query_params.search
     )
 
-    # --- Fetch users and count ---
-    # users_data = await db_conn.fetch(base_query, *query_args, *limit_offset_args)
-    # count_result = await db_conn.fetchrow(count_query, *query_args)
-    # --- Transform results ---
     users = await transform_users(users_data, user_context.organization_id)
 
     # Set audit data for user list access
@@ -165,7 +142,6 @@ async def get_users_list(
     }
 
     return UserListResponse(
-        # status_code=200,
         message="Users retrieved successfully",
         data=users,
         total_count=total_count,
@@ -205,7 +181,7 @@ async def create_user(
     )
     request.state.audit_risk_level = "medium"
 
-    user_context = await check_permissions(current_user, "settings.users.manage")
+    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
 
     # Check if user already exists in the organization
     exists = await check_user_exists(body.email, user_context.organization_id)
@@ -291,7 +267,7 @@ async def update_user(
     request.state.audit_description = f"Admin updating user: {user_id}"
     request.state.audit_risk_level = "medium"
 
-    user_ctx = await check_permissions(current_user, "settings.users.manage")
+    user_ctx = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
 
     if body.phone:
         duplicate = await check_phone_exists_for_other_user(
@@ -338,14 +314,12 @@ async def update_user(
     result = await update_user_info(user_id, user_ctx.organization_id, update_data)
     if not result:
         logger.warning("User not found in organization - Request ID: %s, ",request_id)
-        logger.warning("User ID: %s, Organization ID: %s",user_id,user_ctx.organization_id)
-        raise HTTPException(status_code=404, detail="User not found in organization")
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND_MESSAGE)
 
     user_profile = await get_user_profile_by_id(user_id, user_ctx.organization_id)
     if not user_profile:
         logger.warning("User profile not found in organization - Request ID: %s, ",request_id)
-        logger.warning("User ID: %s, Organization ID: %s",user_id,user_ctx.organization_id)
-        raise HTTPException(status_code=404, detail="User not found in organization")
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND_MESSAGE)
 
     permissions = await get_user_permissions(
         user_id, user_ctx.organization_id
@@ -376,7 +350,6 @@ async def update_user(
 
 
     return UpdateUserResponse(
-        # status_code=200,
         message="User updated successfully",
         data=profile_data,
     )
@@ -415,7 +388,7 @@ async def delete_user_from_system(
     request.state.audit_description = f"Admin deleting user: {user_id}"
     request.state.audit_risk_level = "high"
 
-    user_context = await check_permissions(current_user, "settings.users.manage")
+    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
 
     # Get current user data for audit before deletion
     current_user_data = await get_user_in_organization(
@@ -429,15 +402,13 @@ async def delete_user_from_system(
     result = await delete_user(user_id, user_context.organization_id)
     if not result:
         logger.warning("User not found in organization for deletion - Request ID: %s, ",request_id)
-        logger.warning("User ID: %s, Organization ID: %s",user_id,user_context.organization_id)
-        raise HTTPException(status_code=404, detail="User not found in organization")
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND_MESSAGE)
 
     # Delete auth user
     auth_result = await delete_auth_user(user_id)
 
     if not auth_result:
         logger.warning("Auth user not found for deletion - Request ID: %s, ",request_id)
-        logger.warning("User ID: %s, ",user_id)
         raise HTTPException(status_code=404, detail="User not found")
 
     # Set new values for audit comparison (deletion confirmation)
@@ -493,7 +464,7 @@ async def invite_user(
     )
     request.state.audit_risk_level = "medium"
 
-    user_context = await check_permissions(current_user, "settings.users.manage")
+    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
 
     if body.phone:
         duplicate = await check_phone_exists_for_other_user(
@@ -543,8 +514,3 @@ async def invite_user(
         message="Invite sent successfully",
         status="success",
     )
-
-# # Include update user routes (more specific routes)
-# router.include_router(update_user_router)
-# # Include user profile routes last (to avoid conflicts with main routes)
-# router.include_router(user_profile_router)

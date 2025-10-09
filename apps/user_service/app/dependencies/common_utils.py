@@ -35,6 +35,7 @@ from libs.shared_db.postgres_db.user_service_operations.user_operations import (
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     DatabaseOperationError
 )
+from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 
 # ============================================================================
 # DATA CLASSES
@@ -80,7 +81,7 @@ class PerformanceTimer:
 # PERMISSION UTILITIES
 # ============================================================================
 
-async def format_permissions_data(permissions_data: List[Dict[str, Any]]) -> List[PermissionItem]:
+def format_permissions_data(permissions_data: List[Dict[str, Any]]) -> List[PermissionItem]:
     """
     Format permissions data into PermissionItem objects.
     """
@@ -134,32 +135,11 @@ def extract_user_context(current_user: dict) -> UserContext:
             detail="Invalid token: user ID not found",
         )
 
-    # if not organization_id:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_400_BAD_REQUEST,
-    #         detail="Invalid token: organization ID not found",
-    #     )
-
     if not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid token: email not found",
         )
-
-    # if not user_type:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_400_BAD_REQUEST,
-    #         detail="Invalid token: user type not found",
-    #     )
-
-    # Validate user type is one of the expected values
-    # valid_user_types = ["organization_member", "client", "candidate"]
-    # if user_type not in valid_user_types:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_400_BAD_REQUEST,
-    #         detail=f"Invalid token: user type '{user_type}' is not supported. "
-    #                f"Expected one of: {', '.join(valid_user_types)}",
-    #     )
 
     return UserContext(
         user_id=user_id,
@@ -244,7 +224,6 @@ async def check_permissions(
     """
     user_context = extract_user_context(current_user)
     await require_permission(
-        # permission_code=["settings.roles.manage", "settings.users.manage"],
         permission_code=permission_codes,
         user_context=user_context,
         action_description=action_description,
@@ -258,7 +237,7 @@ async def check_permissions(
 # ============================================================================
 
 
-async def validate_uuid_format(value: str, field_name: str = "ID") -> None:
+def validate_uuid_format(value: str, field_name: str = "ID") -> None:
     """
     Validate UUID format and raise HTTPException if invalid.
 
@@ -270,8 +249,8 @@ async def validate_uuid_format(value: str, field_name: str = "ID") -> None:
         HTTPException: 400 for invalid UUID format
 
     Usage:
-        await validate_uuid_format(role_id, "role ID")
-        await validate_uuid_format(user_id, "user ID")
+        validate_uuid_format(role_id, "role ID")
+        validate_uuid_format(user_id, "user ID")
     """
     try:
         uuid.UUID(value)
@@ -458,7 +437,7 @@ async def get_user_in_organization(user_id: str, organization_id: str):
 
     current_user_data = await get_user_profile_by_id(user_id, organization_id)
     if not current_user_data:
-        raise HTTPException(status_code=404, detail="User not found in organization")
+        raise HTTPException(status_code=404, detail=USER_NOT_FOUND_MESSAGE)
 
     return current_user_data
 

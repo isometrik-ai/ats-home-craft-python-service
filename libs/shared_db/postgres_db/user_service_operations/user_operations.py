@@ -18,9 +18,10 @@ Operations Covered:
 
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.users import UserListItem
+from libs import NOW_CONSTANT
+from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from .exception_handling import handle_database_errors, create_error_messages
 #
 # Initialize logger
@@ -100,9 +101,9 @@ async def create_new_user(user_data: Dict[str, Any]) -> Dict[str, Any]:
         "role_id": user_data.get("role_id"),
         "status": user_data.get("status", "active"),
         "organization_id": user_data.get("organization_id"),
-        "created_at": "now()",
-        "joined_at": "now()",
-        "updated_at": "now()"
+        "created_at": NOW_CONSTANT,
+        "joined_at": NOW_CONSTANT,
+        "updated_at": NOW_CONSTANT
     }
 
     result = await supabase.table("organization_members").insert(user_record).execute()
@@ -135,7 +136,7 @@ async def update_user_info(
         return {}
 
     # Add updated_at
-    update_payload["updated_at"] = "now()"
+    update_payload["updated_at"] = NOW_CONSTANT
 
     result = await supabase.table("organization_members").update(update_payload).eq(
         "user_id", user_id
@@ -269,8 +270,8 @@ async def update_user_activity(user_id: str, organization_id: str) -> None:
     supabase = await get_supabase_admin_client()
 
     await supabase.table("organization_members").update({
-        "last_active_at": "now()",
-        "updated_at": "now()"
+        "last_active_at": NOW_CONSTANT,
+        "updated_at": NOW_CONSTANT
     }).eq("user_id", user_id
     ).eq("organization_id", organization_id
     ).eq("status", "active").execute()
@@ -289,11 +290,8 @@ async def suspend_user(user_id: str, organization_id: str) -> bool:
 
     update_data = {
         "status": "suspended",
-        "updated_at": "now()"
+        "updated_at": NOW_CONSTANT
     }
-
-    # if reason:
-    #     update_data["ban_reason"] = reason
 
     result = await supabase.table("organization_members").update(update_data).eq(
         "user_id", user_id
@@ -310,11 +308,8 @@ async def revoke_suspended_user(user_id: str, organization_id: str) -> bool:
 
     update_data = {
         "status": "active",
-        "updated_at": "now()"
+        "updated_at": NOW_CONSTANT
     }
-
-    # if reason:
-    #     update_data["ban_reason"] = reason
 
     result = await supabase.table("organization_members").update(update_data).eq(
         "user_id", user_id
@@ -336,7 +331,7 @@ async def update_user_email(user_id: str, organization_id: str, new_email: str) 
 
     result = await supabase.table("organization_members").update({
         "email": new_email,
-        "updated_at": "now()"
+        "updated_at": NOW_CONSTANT
     }).eq("user_id", user_id).eq("organization_id", organization_id).execute()
 
     return len(result.data) > 0 if result.data else False
@@ -402,7 +397,6 @@ async def transform_users(users_data, organization_id):
     if not users_data:
         return []
 
-    # from libs.shared_db.supabase_client import get_supabase_admin_client
     supabase = await get_supabase_admin_client()
 
     result = await supabase.table("role_permissions").select(

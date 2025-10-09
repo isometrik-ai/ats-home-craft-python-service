@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator
 from fastapi import HTTPException, status
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
 from apps.user_service.app.schemas.auth import CompanyData, PlanType, User
+from apps.user_service.app.schemas import ResponseModel
 
 
 class OrganisationInfo(BaseModel):
@@ -74,7 +75,7 @@ class OrganisationInfo(BaseModel):
                 "name": "Acme Corporation",
                 "slug": "acme-corp",
                 "domain": "acme.com",
-                "logo_url": "https://example.com/logo.png",
+                "logo_url": "example.com/logo.png",
                 "plan_type": "professional",
                 "status": "active",
                 "max_users": 100,
@@ -88,13 +89,12 @@ class OrganisationInfo(BaseModel):
     )
 
 
-class OrganisationListResponse(PaginationBase):
+class OrganisationListResponse(PaginationBase, ResponseModel):
     """Response model for organisation list operations
 
     This is the standard response wrapper for organisation list endpoints.
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         data (List[OrganisationInfo]): List of organisations if successful
         total_count (int): Total number of organisations
@@ -102,10 +102,6 @@ class OrganisationListResponse(PaginationBase):
         page_size (int): Number of items per page
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     data: List[OrganisationInfo] = Field(
         ..., description="List of organisations if successful"
     )
@@ -114,14 +110,13 @@ class OrganisationListResponse(PaginationBase):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "Organizations retrieved successfully",
                 "data": [
                     {
                         "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-                        "name": "Acme Corporation",
+                        "name": "Apple Corporation",
                         "slug": "acme-corp",
-                        "domain": "acme.com",
+                        "domain": "apple.com",
                         "logo_url": "https://example.com/logo.png",
                         "plan_type": "professional",
                         "status": "active",
@@ -181,10 +176,10 @@ class CreateOrganisationRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "name": "Acme Corporation",
+                "name": "Samsung Electronics",
                 "slug": "acme-corp",
-                "domain": "acme.com",
-                "logo_url": "https://example.com/logo.png",
+                "domain": "samsung.com",
+                "logo_url": "https://demo.com/logo.png",
                 "plan_type": "professional",
                 "max_users": 100,
                 "timezone": "UTC",
@@ -232,17 +227,14 @@ class UpdateOrganisationRequest(BaseModel):
     )
 
 
-class UpdateOrganisationResponse(BaseModel):
+class UpdateOrganisationResponse(ResponseModel):
     """Response model for organisation update operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message
         data (Optional[OrganisationInfo]): Updated organisation data
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(..., description="Response message")
     data: Optional[OrganisationInfo] = Field(
         None, description="Updated organisation data"
     )
@@ -250,7 +242,6 @@ class UpdateOrganisationResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "Organisation updated successfully",
                 "data": {
                     "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
@@ -267,19 +258,14 @@ class UpdateOrganisationResponse(BaseModel):
     )
 
 
-class OrganisationDetailResponse(BaseModel):
+class OrganisationDetailResponse(ResponseModel):
     """Response model for organisation detail operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         data (Optional[OrganisationInfo]): Organisation data if successful
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     data: Optional[OrganisationInfo] = Field(
         None, description="Organisation data if successful"
     )
@@ -287,13 +273,12 @@ class OrganisationDetailResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "Organisation retrieved successfully",
                 "data": {
                     "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-                    "name": "Acme Corporation",
+                    "name": "Sony Corporation",
                     "slug": "acme-corp",
-                    "domain": "acme.com",
+                    "domain": "sony.com",
                     "plan_type": "professional",
                     "status": "active",
                     "max_users": 100,
@@ -386,25 +371,19 @@ class NewOrganisationBody(BaseModel):
     plan_type: PlanType = PlanType.STARTER
 
 
-class CreateOrganisationWithUserResponse(BaseModel):
+class CreateOrganisationWithUserResponse(ResponseModel):
     """Response model for creating organisation with user signup
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         data (dict): Created organisation and user data
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     data: dict = Field(..., description="Created organisation and user data")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 201,
                 "message": "Organisation and user created successfully",
                 "data": {
                     "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
@@ -500,20 +479,6 @@ class OrganizationAdminUpdate(OrganizationUpdate):
         ge=1,
         description="Maximum number of users allowed under the current plan",
     )
-
-    # @model_validator(mode='after')
-    # def check_at_least_one_field_has_value(cls) -> 'OrganizationAdminUpdate':
-    #     # Check if at least one field has a non-None value
-    #     if all(value is None for value in cls.model_dump().values()):
-    #         raise ValueError("At least one field must have a non-None value.")
-    #     return cls
-
-    # @model_validator(mode='before')
-    # def check_at_least_one_non_none(self):
-    #     # Convert the model to a dictionary and check if any value is not None
-    #     if all(value is None for value in self.values()):
-    #         raise ValueError("At least one field must have a non-None value.")
-    #     return self
 
     @model_validator(mode='after')
     def check_at_least_one_field(self):

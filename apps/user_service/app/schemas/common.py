@@ -6,6 +6,8 @@ from typing import Dict, Any
 
 from pydantic import BaseModel, Field, ConfigDict  # third-party
 
+from apps.user_service.app.schemas import ResponseModel
+
 
 class AuditContext(BaseModel):
     """Audit Logs parameters."""
@@ -70,16 +72,14 @@ class PaginationBase(BaseModel):
     )
 
 
-class SimpleResponse(BaseModel):
+class SimpleResponse(ResponseModel):
     """Standard API response for simple success/failure operations."""
 
-    message: str = Field(..., description="Response message")
     status: str = Field(default="success", description="Operation status indicator")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "message": "Operation completed successfully",
                 "status": "success",
             }
         }

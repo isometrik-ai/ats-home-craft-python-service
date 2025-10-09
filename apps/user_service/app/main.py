@@ -1,13 +1,3 @@
-# from fastapi import FastAPI
-# from pydantic import BaseModel
-
-# app = FastAPI()
-
-# @app.get("/")
-# def read_root():
-#     return {"message": "Hello, World!"}
-
-
 """Main FastAPI application module for the API service.
 
 This module initializes the FastAPI application, sets up middleware,

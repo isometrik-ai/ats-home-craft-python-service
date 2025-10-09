@@ -272,7 +272,7 @@ def test_reset_password_endpoint_success(auth_client):
     }
 
     with patch('apps.user_service.app.api.auth.get_user_from_token',
-               AsyncMock(return_value={"sub": "user-id"})), \
+               return_value={"sub": "user-id"}), \
          patch('apps.user_service.app.api.auth.update_password_with_token',
                AsyncMock(return_value=MagicMock(user=MagicMock()))):
         response = auth_client.post("/auth/reset-password", json=reset_data)
@@ -293,7 +293,7 @@ async def test_reset_password_endpoint_success_async(async_auth_client):
     )
 
     with patch('apps.user_service.app.api.auth.get_user_from_token',
-               AsyncMock(return_value={"sub": "user-id"})), \
+               return_value={"sub": "user-id"}), \
          patch('apps.user_service.app.api.auth.update_password_with_token',
                AsyncMock(return_value=MagicMock(user=MagicMock()))):
         mock_request = MagicMock(spec=Request)
@@ -309,7 +309,7 @@ def test_reset_password_endpoint_weak_password(auth_client):
     }
 
     with patch('apps.user_service.app.api.auth.get_user_from_token',
-               AsyncMock(return_value={"sub": "user-id"})):
+               return_value={"sub": "user-id"}):
         response = auth_client.post("/auth/reset-password", json=reset_data)
         assert response.status_code == 400
         assert "Password must be at least 6 characters" in response.json()["detail"]
@@ -327,7 +327,7 @@ async def test_reset_password_endpoint_weak_password_async(async_auth_client):
     )
 
     with patch('apps.user_service.app.api.auth.get_user_from_token',
-               AsyncMock(return_value={"sub": "user-id"})):
+               return_value={"sub": "user-id"}):
         mock_request = MagicMock(spec=Request)
 
         with pytest.raises(HTTPException) as exc_info:
@@ -701,7 +701,6 @@ async def test_oauth_endpoints_async(async_auth_client):
     # Test get_oauth_link_url_endpoint
     with patch('apps.user_service.app.api.auth.get_oauth_link_url',
                AsyncMock(return_value={"oauth_url": "https://oauth.google.com/auth", "message": "Success"})):
-        mock_request = MagicMock(spec=Request)
         result = await get_oauth_link_url_endpoint("google", {"sub": "test-user-id", "email": "test@example.com",
                                                               "app_metadata": {"providers": ["email"]}})
         assert "oauth_url" in result
@@ -725,3 +724,144 @@ async def test_oauth_endpoints_async(async_auth_client):
                AsyncMock(return_value=mock_session_result)):
         result = await oauth_callback(mock_request)
         assert result["success"] == True
+
+
+# ============================================================================
+# MISSING COVERAGE TESTS
+# ============================================================================
+
+def test_set_password_update_fails(auth_client):
+    """Test set_password when password update fails - covers lines 189"""
+    set_password_data = {"password": "NewPass123!"}
+
+    with patch('apps.user_service.app.api.auth.update_password_with_link_identity',
+               AsyncMock(return_value=False)):  # Return False to trigger failure
+        response = auth_client.post("/auth/set-password", json=set_password_data)
+        assert response.status_code == 500
+        data = response.json()
+        assert "Failed to set password" in data["detail"]
+
+def test_set_password_exception_handling(auth_client):
+    """Test set_password exception handling - covers lines 195-197"""
+    set_password_data = {"password": "NewPass123!"}
+
+    with patch('apps.user_service.app.api.auth.update_password_with_link_identity',
+               AsyncMock(side_effect=Exception("Database error"))):
+        response = auth_client.post("/auth/set-password", json=set_password_data)
+        assert response.status_code == 500
+        data = response.json()
+        assert "Failed to set password" in data["detail"]
+
+def test_set_password_general_exception(auth_client):
+    """Test set_password general exception handling - covers line 159"""
+    set_password_data = {"password": "NewPass123!"}
+
+    with patch('apps.user_service.app.api.auth.update_password_with_link_identity',
+               AsyncMock(side_effect=Exception("General error"))):
+        response = auth_client.post("/auth/set-password", json=set_password_data)
+        assert response.status_code == 500
+        data = response.json()
+        assert "Failed to set password" in data["detail"]
+
+def test_forgot_password_exception_handling(auth_client):
+    """Test forgot_password exception handling - covers lines 267-268"""
+    forgot_data = {"email": "test@example.com"}
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value={"id": "user-id"})), \
+         patch('apps.user_service.app.api.auth.reset_the_password_email',
+               AsyncMock(side_effect=Exception("Email service error"))):
+        response = auth_client.post("/auth/forgot-password", json=forgot_data)
+        assert response.status_code == 500
+        data = response.json()
+        assert "Failed to process password reset request" in data["detail"]
+
+def test_reset_password_user_not_found(auth_client):
+    """Test reset_password when user not found - covers line 324"""
+    reset_data = {
+        "token": "invalid-token",
+        "new_password": "NewPass123!"
+    }
+
+    with patch('apps.user_service.app.api.auth.get_user_from_token',
+               return_value=None):  # Return None to trigger user not found
+        response = auth_client.post("/auth/reset-password", json=reset_data)
+        assert response.status_code == 404
+        data = response.json()
+        assert "User not found" in data["detail"]
+
+def test_reset_password_email_error_handling(auth_client):
+    """Test reset_password email error handling - covers lines 351-352"""
+    reset_data = {
+        "token": "valid-reset-token",
+        "new_password": "NewPass123!"
+    }
+
+    with patch('apps.user_service.app.api.auth.get_user_from_token',
+               return_value={"sub": "user-id", "email": "test@example.com",
+                           "user_metadata": {"full_name": "Test User"}}), \
+         patch('apps.user_service.app.api.auth.update_password_with_token',
+               AsyncMock(return_value=MagicMock(user=MagicMock()))), \
+         patch('apps.user_service.app.api.auth.send_password_reset_confirmation_email',
+               side_effect=Exception("Email service error")):
+        response = auth_client.post("/auth/reset-password", json=reset_data)
+        # Should still succeed even if email fails
+        assert response.status_code == 200
+        data = response.json()
+        assert "Password reset successfully" in data["message"]
+
+def test_reset_password_update_fails(auth_client):
+    """Test reset_password when password update fails - covers lines 359-360"""
+    reset_data = {
+        "token": "valid-reset-token",
+        "new_password": "NewPass123!"
+    }
+
+    with patch('apps.user_service.app.api.auth.get_user_from_token',
+               return_value={"sub": "user-id"}), \
+         patch('apps.user_service.app.api.auth.update_password_with_token',
+               AsyncMock(return_value=MagicMock(user=None))):  # Return result without user
+        response = auth_client.post("/auth/reset-password", json=reset_data)
+        assert response.status_code == 400
+        data = response.json()
+        assert "Failed to update password" in data["detail"]
+
+def test_reset_password_general_exception(auth_client):
+    """Test reset_password general exception handling - covers line 369"""
+    reset_data = {
+        "token": "valid-reset-token",
+        "new_password": "NewPass123!"
+    }
+
+    with patch('apps.user_service.app.api.auth.get_user_from_token',
+               side_effect=Exception("Token processing error")):
+        response = auth_client.post("/auth/reset-password", json=reset_data)
+        assert response.status_code == 500
+        data = response.json()
+        assert "Failed to reset password" in data["detail"]
+
+def test_login_general_exception(auth_client):
+    """Test login general exception handling - covers line 159"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+    }
+
+    with patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=Exception("General authentication error"))):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 500
+        data = response.json()
+        assert "Authentication failed" in data["detail"]
+
+# Note: Exception handling tests removed as they're covered by the @handle_api_exceptions decorator
+# The decorator catches exceptions and converts them to HTTP 500 errors, which is already tested
+
+def test_delete_user_exception_handling(auth_client):
+    """Test delete_user exception handling - covers error scenarios"""
+    with patch('apps.user_service.app.api.auth.delete_auth_user',
+               AsyncMock(side_effect=Exception("Delete service error"))):
+        response = auth_client.delete("/auth/user")
+        assert response.status_code == 500
+        data = response.json()
+        assert "Failed to delete user" in data["detail"]

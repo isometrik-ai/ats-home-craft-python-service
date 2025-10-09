@@ -16,7 +16,7 @@ from enum import Enum
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
-
+from apps.user_service.app.schemas import ResponseModel
 
 class UserStatus(str, Enum):
     """Enumeration for user account status"""
@@ -120,7 +120,7 @@ class UserProfileData(BaseModel):
 
     user_id: str = Field(..., description="Unique identifier for the user")
     email: str = Field(..., description="User's email address")
-    full_name: Optional[str] = Field(None, description="User's full name")
+    full_name: Optional[str] = Field(None, description="full name of the user")
     first_name: Optional[str] = Field(None, description="User's first name")
     last_name: Optional[str] = Field(None, description="User's last name")
     avatar_url: Optional[str] = Field(None, description="URL to user's profile picture")
@@ -157,7 +157,7 @@ class UserProfileData(BaseModel):
             "example": {
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "email": "john.doe@example.com",
-                "full_name": "John Doe",
+                "full_name": "John Jani janardhan",
                 "avatar_url": "https://example.com/avatar.jpg",
                 "phone": "+1234567890",
                 "timezone": "UTC",
@@ -186,21 +186,16 @@ class UserProfileData(BaseModel):
 
 
 
-class UserProfileResponse(BaseModel):
+class UserProfileResponse(ResponseModel):
     """Response model for user profile operations
 
     This is the standard response wrapper for user profile endpoints.
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         data (Optional[UserProfileData]): User profile data if successful
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     data: Optional[UserProfileData] = Field(
         None, description="User profile data if successful"
     )
@@ -208,11 +203,10 @@ class UserProfileResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "User profile retrieved successfully",
                 "data": {
                     "user_id": "550e8400-e29b-41d4-a716-446655440000",
-                    "email": "john.doe@example.com",
+                    "email": "doe@example.com",
                     "full_name": "John Doe",
                     "timezone": "UTC",
                     "status": "active",
@@ -234,7 +228,7 @@ class UpdateUserEmailRequest(BaseModel):
         email (EmailStr): User's email address (required)
     """
 
-    email: EmailStr = Field(..., description="User's email address")
+    email: EmailStr = Field(..., description="User's New Updated email address")
 
 
 
@@ -250,7 +244,7 @@ class CreateUserRequest(BaseModel):
         organization_id (str): ID of the organization to add user to
     """
 
-    email: EmailStr = Field(..., description="User's email address")
+    email: EmailStr = Field(..., description="User's New email address")
     full_name: str = Field(
         ..., min_length=2, max_length=255, description="User's full name"
     )
@@ -316,17 +310,14 @@ class UpdateUserRequest(BaseModel):
     )
 
 
-class UpdateUserResponse(BaseModel):
+class UpdateUserResponse(ResponseModel):
     """Response model for user update operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message
         data (Optional[UserProfileData]): Updated user profile data
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(..., description="Response message")
     data: Optional[UserProfileData] = Field(
         None, description="Updated user profile data"
     )
@@ -334,7 +325,6 @@ class UpdateUserResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "User updated successfully",
                 "data": None,
             }
@@ -349,24 +339,16 @@ class BanRequest(BaseModel):
     reason: Optional[str] = Field(None, description="Reason for banning the users")
 
 
-class ErrorResponse(BaseModel):
-    """Standard error response model."""
 
-    error: str
-    detail: str
-
-
-class BanResponse(BaseModel):
+class BanResponse(ResponseModel):
     """Response model after banning a user."""
 
-    message: str
     reason: str
 
 
-class UnbanResponse(BaseModel):
+class UnbanResponse(ResponseModel):
     """Response model after unbanning a user."""
 
-    message: str
 
 
 class UserListItem(BaseModel):
@@ -385,7 +367,7 @@ class UserListItem(BaseModel):
     """
 
     user_id: str = Field(..., description="Unique identifier for the user")
-    email: str = Field(..., description="User's email address")
+    email: str = Field(..., description="email address of the user")
     full_name: Optional[str] = Field(None, description="User's full name")
     phone: Optional[str] = Field(None, description="Updated phone number")
     first_name: Optional[str] = Field(None, description="Updated first name")
@@ -405,8 +387,8 @@ class UserListItem(BaseModel):
         json_schema_extra={
             "example": {
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
-                "email": "john.doe@example.com",
-                "full_name": "John Doe",
+                "email": "john@example.com",
+                "full_name": "J Jonnah Jamison",
                 "role_name": "Administrator",
                 "status": "active",
                 "joined_at": "2024-12-19T10:00:00Z",
@@ -418,11 +400,10 @@ class UserListItem(BaseModel):
     )
 
 
-class UserListResponse(PaginationBase):
+class UserListResponse(PaginationBase, ResponseModel):
     """Response model for user list operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message
         data (List[UserListItem]): List of users
         total_count (int): Total number of users
@@ -430,15 +411,12 @@ class UserListResponse(PaginationBase):
         page_size (int): Number of items per page
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(..., description="Response message")
     data: List[UserListItem] = Field(..., description="List of users")
     total_count: int = Field(..., description="Total number of users")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "Users retrieved successfully",
                 "data": [],
                 "total_count": 0,

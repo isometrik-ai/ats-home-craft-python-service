@@ -1,0 +1,1 @@
+NOW_CONSTANT = "now()"
