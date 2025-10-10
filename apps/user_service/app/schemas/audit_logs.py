@@ -13,6 +13,8 @@ Last Updated: 2024-12-19
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 
+from apps.user_service.app.schemas import ResponseModel
+
 
 class AuditLogItem(BaseModel):
     """Model for audit log information in lists
@@ -110,7 +112,7 @@ class AuditLogItem(BaseModel):
                 "risk_level": "low",
                 "ip_address": "192.168.1.1",
                 "description": "Created new user account",
-                "timestamp": "2024-12-19T10:30:00Z",
+                "timestamp": "2024-12-10T10:30:00Z",
                 "status_code": 201,
                 "category": "user_management",
             }
@@ -213,20 +215,20 @@ class AuditLogDetailItem(BaseModel):
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "organization_id": "550e8400-e29b-41d4-a716-446655440001",
                 "user_id": "550e8400-e29b-41d4-a716-446655440002",
-                "user_email": "user@example.com",
+                "user_email": "user_email@example.com",
                 "user_role": "admin",
                 "action_type": "CREATE",
                 "data_classification": "general",
                 "table_name": "users",
                 "record_id": "550e8400-e29b-41d4-a716-446655440003",
                 "old_values": None,
-                "new_values": {"name": "John Doe", "email": "john@example.com"},
+                "new_values": {"name": "John Janardhan", "email": "john_doe@example.com"},
                 "changed_fields": ["name", "email"],
                 "compliance_tags": ["audit_required"],
                 "risk_level": "low",
                 "ip_address": "192.168.1.1",
-                "description": "Created new user account",
-                "timestamp": "2024-12-19T10:30:00Z",
+                "description": "Updated new user account",
+                "timestamp": "2024-12-10T10:30:00Z",
                 "hash_signature": "abc123def456...",
                 "previous_hash": "xyz789abc123...",
                 "retention_date": "2027-12-19T10:30:00Z",
@@ -237,20 +239,15 @@ class AuditLogDetailItem(BaseModel):
     )
 
 
-class AuditLogsResponse(BaseModel):
+class AuditLogsResponse(ResponseModel):
     """Response model for audit logs operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         audit_logs (List[AuditLogItem]): List of audit logs
         total_count (int): Total number of audit logs available (for pagination)
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     audit_logs: List[AuditLogItem] = Field(..., description="List of audit logs")
     total_count: int = Field(
         ..., description="Total number of audit logs available (for pagination)"
@@ -259,27 +256,26 @@ class AuditLogsResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "Audit logs retrieved successfully (showing 10 of 150 total)",
                 "audit_logs": [
                     {
                         "id": "550e8400-e29b-41d4-a716-446655440000",
                         "organization_id": "550e8400-e29b-41d4-a716-446655440001",
                         "user_id": "550e8400-e29b-41d4-a716-446655440002",
-                        "user_email": "user@example.com",
+                        "user_email": "user_email2@example.com",
                         "user_role": "admin",
                         "action_type": "CREATE",
                         "data_classification": "general",
                         "table_name": "users",
                         "record_id": "550e8400-e29b-41d4-a716-446655440003",
                         "old_values": None,
-                        "new_values": {"name": "John Doe", "email": "john@example.com"},
+                        "new_values": {"name": "John Jonnah", "email": "doe@example.com"},
                         "changed_fields": ["name", "email"],
                         "compliance_tags": ["audit_required"],
                         "risk_level": "low",
                         "ip_address": "192.168.1.1",
-                        "description": "Created new user account",
-                        "timestamp": "2024-12-19T10:30:00Z",
+                        "description": "Deleted new user account",
+                        "timestamp": "2024-12-19T101:30:00Z",
                         "status_code": 201,
                         "category": "user_management",
                     }
@@ -290,19 +286,14 @@ class AuditLogsResponse(BaseModel):
     )
 
 
-class AuditLogDetailResponse(BaseModel):
+class AuditLogDetailResponse(ResponseModel):
     """Response model for single audit log detail operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         audit_log (AuditLogDetailItem): Detailed audit log information
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     audit_log: AuditLogDetailItem = Field(
         ..., description="Detailed audit log information"
     )
@@ -310,20 +301,19 @@ class AuditLogDetailResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "Audit log details retrieved successfully",
                 "audit_log": {
                     "id": "550e8400-e29b-41d4-a716-446655440000",
                     "organization_id": "550e8400-e29b-41d4-a716-446655440001",
                     "user_id": "550e8400-e29b-41d4-a716-446655440002",
-                    "user_email": "user@example.com",
+                    "user_email": "user_email3@example.com",
                     "user_role": "admin",
                     "action_type": "CREATE",
                     "data_classification": "general",
                     "table_name": "users",
                     "record_id": "550e8400-e29b-41d4-a716-446655440003",
                     "old_values": None,
-                    "new_values": {"name": "John Doe", "email": "john@example.com"},
+                    "new_values": {"name": "John Wick", "email": "john_doe_email@example.com"},
                     "changed_fields": ["name", "email"],
                     "compliance_tags": ["audit_required"],
                     "risk_level": "low",
@@ -341,19 +331,14 @@ class AuditLogDetailResponse(BaseModel):
     )
 
 
-class DeleteAuditLogsResponse(BaseModel):
+class DeleteAuditLogsResponse(ResponseModel):
     """Response model for delete audit logs operations
 
     Attributes:
-        status_code (int): HTTP status code
         message (str): Response message describing the operation result
         deleted_count (int): Number of audit logs that were deleted
     """
 
-    # status_code: int = Field(..., description="HTTP status code")
-    message: str = Field(
-        ..., description="Response message describing the operation result"
-    )
     deleted_count: int = Field(
         ..., description="Number of audit logs that were deleted"
     )
@@ -361,7 +346,6 @@ class DeleteAuditLogsResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "status_code": 200,
                 "message": "All audit logs deleted successfully",
                 "deleted_count": 150,
             }

@@ -142,7 +142,7 @@ async def check_user_access_async(
 
 
 
-async def get_user_from_auth(
+def get_user_from_auth(
     request: Request
 ) -> dict:
     """
@@ -167,50 +167,6 @@ async def get_user_from_auth(
             "Not authenticated",
         )
 
-    # if not user_id or not organization_id:
-    #     raise_auth_error(
-    #         request,
-    #         "JWT token missing user_id or organization_id",
-    #         "Invalid token: missing user or organization ID",
-    #     )
-
-#     if not session_id:
-#         request.state.audit_description = "JWT token missing session_id"
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Invalid token: missing session ID",
-#         )
-
-    # Get user metadata and validate user type
-    # user_metadata = user.get("user_metadata", {})
-    # user_type = user_metadata.get("type")
-
-    # if not user_type:
-    #     raise_auth_error(
-    #         request,
-    #         "JWT token missing user type",
-    #         "Invalid token: missing user type",
-    #     )
-
-    # # Validate user based on type using helper functions
-    # user_type_validators = {
-    #     "organization_member": validate_organization_member,
-    #     "client": validate_client_member,
-    #     "candidate": validate_candidate,
-    # }
-
-    # if user_type not in user_type_validators:
-    #     raise_auth_error(
-    #         request,
-    #         f"Unsupported user type: {user_type}",
-    #         "Invalid token: unsupported user type",
-    #     )
-
-    # # Validate user and get role
-    # role_name = await user_type_validators[user_type](
-    #     request, user_id, organization_id, user_email
-    # )
-
     # ✅ User is valid, update audit context and success markers
     # request.state.audit_user_context["user_role"] = role_name
     request.state.audit_risk_level = "low"
@@ -220,7 +176,7 @@ async def get_user_from_auth(
     return user
 
 
-async def get_user_from_token(token: str) -> dict:
+def get_user_from_token(token: str) -> dict:
     """
     Get user from token
 

@@ -24,6 +24,7 @@ from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     handle_database_errors, create_error_messages
 )
+from libs import NOW_CONSTANT
 
 # Initialize logger
 logger = get_logger("organisation_operations")
@@ -54,8 +55,8 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "referral_source": organisation_data.get("referral_source"),
         "max_users": organisation_data.get("max_users"),
         # "account_type": organisation_data.get("account_type", "personal"),
-        "created_at": "now()",
-        "updated_at":"now()",
+        "created_at": NOW_CONSTANT,
+        "updated_at":NOW_CONSTANT,
         "created_by_id":organisation_data.get("user_id")
     }
 
@@ -145,21 +146,17 @@ async def update_organisation_details(
 
     # 2️⃣ Strip out empty strings so "" doesn't overwrite existing data
     #   (mimicking the empty string check)
-    payload = {
-        k: v for k, v in payload.items() if not (isinstance(v, str) and v.strip() == "")
-    }
+    payload = {k: v for k, v in payload.items() if not (isinstance(v, str) and v.strip() == "")}
 
     if not payload:  # nothing to change (mimicking the early return logic)
         return {}
 
     # 3️⃣ Always set updated_at (mimicking the audit column logic)
-    payload["updated_at"] = "now()"
+    payload["updated_at"] = NOW_CONSTANT
 
     # 4️⃣ Execute update with Supabase SDK (mimicking the WHERE id = $N logic)
     table = supabase.table("organizations")
-    result = await table.update(payload).eq(
-        "id", organisation_id
-    ).execute()
+    result = await table.update(payload).eq("id", organisation_id).execute()
 
     if result.data and len(result.data) > 0:
         return result.data[0]
@@ -394,12 +391,6 @@ async def check_organisation_name_unique(name: str, exclude_org_id: Optional[str
     return len(result.data) == 0 if result.data else True
 
 
-async def validate_organisation_status(status: str) -> bool:
-    """Validate if organisation status is valid."""
-    valid_statuses = ["active", "suspended", "trial", "inactive"]
-    return status in valid_statuses
-
-
 # ============================================================================
 # ORGANISATION MEMBER OPERATIONS
 # ============================================================================
@@ -479,9 +470,9 @@ async def add_member_to_organisation(
         "role_id": member_data.get("role_id"),
         "status": member_data.get("status", "active"),
         "organization_id": organisation_id,
-        "created_at": "now()",
-        "updated_at": "now()",
-        "joined_at": "now()"
+        "created_at": NOW_CONSTANT,
+        "updated_at": NOW_CONSTANT,
+        "joined_at": NOW_CONSTANT
     }
 
     data = await get_user_by_id(member_data["user_id"])
@@ -525,7 +516,7 @@ async def update_member_role(organisation_id: str, user_id: str, role_id: str) -
     table = supabase.table("organization_members")
     query = table.update({
         "role_id": role_id,
-        "updated_at": "now()"
+        "updated_at": NOW_CONSTANT
     }).eq("user_id", user_id).eq("organization_id", organisation_id)
     result = await query.execute()
 
@@ -562,7 +553,7 @@ async def update_organisation_settings(organisation_id: str, settings: Dict[str,
     table = supabase.table("organizations")
     query = table.update({
         "settings": settings,
-        "updated_at": "now()"
+        "updated_at": NOW_CONSTANT
     }).eq("id", organisation_id)
     result = await query.execute()
 
@@ -595,7 +586,7 @@ async def update_organisation_preferences(organisation_id: str,preferences: Dict
     table = supabase.table("organizations")
     query = table.update({
         "preferences": preferences,
-        "updated_at": "now()"
+        "updated_at": NOW_CONSTANT
     }).eq("id", organisation_id)
     result = await query.execute()
 
@@ -722,29 +713,6 @@ async def get_organisation_activity_stats(organisation_id: str) -> Dict[str, Any
 # ORGANISATION BULK OPERATIONS
 # ============================================================================
 
-# async def bulk_update_organisations(updates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-#     """Bulk update multiple organisations."""
-#     supabase = await get_supabase_admin_client()
-#     try:
-#         results = []
-#         for update_data in updates:
-#             org_id = update_data.pop("id")
-#             result = await update_organisation_details(org_id, update_data)
-#             if result:
-#                 results.append(result)
-#         return results
-
-#     except APIError as e:
-#         logger.error("Supabase API error bulk updating organisations: %s", e, exc_info=True)
-#         raise
-#     except (HTTPError, RequestError, TimeoutException) as e:
-#         logger.error("Network error bulk updating organisations: %s", e, exc_info=True)
-#         raise
-#     except (KeyError, TypeError, ValueError) as e:
-#         logger.error("Data validation error bulk updating organisations: %s", e, exc_info=True)
-#         raise
-
-
 @handle_database_errors(
     "bulk_delete_organisations",
     custom_messages=create_error_messages("bulk_delete_organisations", "bulk deleting"))
@@ -781,8 +749,8 @@ async def bulk_add_members(
             "role_id": member_data.get("role_id"),
             "status": member_data.get("status", "active"),
             "organization_id": organisation_id,
-            "created_at": "now()",
-            "updated_at": "now()"
+            "created_at": NOW_CONSTANT,
+            "updated_at": NOW_CONSTANT
         })
 
     table = supabase.table("organization_members")
@@ -813,7 +781,7 @@ async def create_default_permissions_for_organisation(organisation_id: str) -> L
             "name": name,
             "description": description,
             "category": category,
-            "created_at": "now()"
+            "created_at": NOW_CONSTANT
         })
 
     # Insert permissions with conflict handling
@@ -838,8 +806,8 @@ async def create_super_admin_role(organisation_id: str) -> Dict[str, Any]:
         "description": "Full administrative access to all system features",
         "organization_id": organisation_id,
         "is_default": True,
-        "created_at": "now()",
-        "updated_at": "now()"
+        "created_at": NOW_CONSTANT,
+        "updated_at": NOW_CONSTANT
     }
 
     table = supabase.table("roles")
@@ -874,7 +842,7 @@ async def assign_all_permissions_to_role(role_id: str, organisation_id: str) -> 
             "organization_id": organisation_id,
             "role_id": role_id,
             "permission_id": permission["id"],
-            "created_at": "now()"
+            "created_at": NOW_CONSTANT
         })
 
     # Insert role-permission assignments with conflict handling
@@ -952,7 +920,7 @@ async def archive_organisation(organisation_id: str) -> bool:
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({"status": "archived","updated_at": "now()"
+    query = table.update({"status": "archived","updated_at": NOW_CONSTANT
     }).eq("id", organisation_id)
     result = await query.execute()
 
@@ -967,7 +935,7 @@ async def restore_organisation(organisation_id: str) -> bool:
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({"status": "active","updated_at": "now()"
+    query = table.update({"status": "active","updated_at": NOW_CONSTANT
         }).eq("id", organisation_id)
     result = await query.execute()
 

@@ -8,11 +8,11 @@ All Supabase Auth admin API operations for session management should be centrali
 from postgrest import APIError
 from httpx import HTTPError, RequestError, TimeoutException
 from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.schemas.auth import CODE_VERIFIER, CODE_CHALLENGE
-logger = get_logger("session_admin_operations")
+from apps.user_service.app.schemas.auth import CODE_VERIFIER
 
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 
+logger = get_logger("session_admin_operations")
 
 async def get_session_by_id_admin(code: str):
     """

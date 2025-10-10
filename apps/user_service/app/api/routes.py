@@ -4,10 +4,6 @@ This module sets up the main API router and includes all sub-routers
 for different API endpoints.
 """
 
-# flake8: noqa
-# type: ignore
-# pants: no-infer-dep
-
 from fastapi import APIRouter
 
 # Import admin management routers
@@ -35,18 +31,18 @@ from apps.user_service.app.api.audit_logs.audit_logs import router as audit_logs
 
 
 # Create main API router
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1/admin")
 
 # Include all admin management routers
-router.include_router(auth_router, prefix="/admin")
-router.include_router(organisation_router, prefix="/admin")
-router.include_router(users_router, prefix="/admin")
-router.include_router(update_user_router, prefix="/admin")
-router.include_router(user_profile_router, prefix="/admin")
-router.include_router(roles_router, prefix="/admin")
-router.include_router(sessions_router, prefix="/admin")
-router.include_router(permissions_router, prefix="/admin")
-router.include_router(audit_logs_router, prefix="/admin")
+router.include_router(auth_router)
+router.include_router(organisation_router)
+router.include_router(users_router)
+router.include_router(update_user_router)
+router.include_router(user_profile_router)
+router.include_router(roles_router)
+router.include_router(sessions_router)
+router.include_router(permissions_router)
+router.include_router(audit_logs_router)
 
 # Health check endpoint for the API router
 @router.get("/status")

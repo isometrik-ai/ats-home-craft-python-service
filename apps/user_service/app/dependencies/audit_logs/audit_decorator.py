@@ -254,7 +254,7 @@ async def maybe_log_audit_on_error(
     except (ValueError, TypeError) as e:
         # Handle data type conversion errors (str, dict, etc.)
         logger.warning("Audit logging failed - data conversion error: %s", str(e))
-    except (ConnectionError, OSError) as e:
+    except OSError as e:
         # Handle network/system errors (e.g., client.host access)
         logger.warning("Audit logging failed - connection error: %s", str(e))
     except (RuntimeError, LookupError) as e:

@@ -5,7 +5,7 @@ Auth Schemas Module
 """
 
 import base64
-import random
+import secrets
 import hashlib
 from enum import Enum
 from typing import List, Optional, Dict, Any
@@ -13,11 +13,14 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, model_validator, EmailStr, field_validator
 from fastapi import HTTPException, status
 
-from apps.user_service.app.schemas import _bad_request
+from apps.user_service.app.schemas import _bad_request, ResponseModel
 
 # ============================================================================
 # ENUMS AND CONSTANTS
 # ============================================================================
+
+PASSWORD_CONDITION_MESSAGE = "Password must be at least 6 characters long"
+PASSWORD_CONDITION_MESSAGE_EXTENDED = PASSWORD_CONDITION_MESSAGE + " and contain at least one uppercase letter, one lowercase letter, one number, and one special character."
 
 
 class AccountType(str, Enum):
@@ -75,7 +78,6 @@ class VerifyEmailRequest(BaseModel):
 class VerifyEmailResponse(BaseModel):
     """Response model for Verify Email operations"""
 
-    # status_code: int
     message: str
     email_found: bool
     status: Optional[str]  # 'active', 'suspended', or None
@@ -108,18 +110,8 @@ class SignupRequest(BaseModel):
     def validate_password(cls, v):
         """Validate password meets minimum length requirements"""
         if len(v) < 6:
-            raise ValueError("Password must be at least 6 characters long")
+            raise ValueError(PASSWORD_CONDITION_MESSAGE)
         return v
-
-
-    # @classmethod
-    # @field_validator("company_data")
-    # def validate_company_data(cls, v, info):
-    #     """Validate company data for business account type."""
-    #     values = info.data
-    #     if values.get("account_type") == AccountType.BUSINESS and not v:
-    #         raise ValueError("Company data is required for business accounts")
-    #     return v
 
 
 # ============================================================================
@@ -155,11 +147,9 @@ class AuthResponse(BaseModel):
     user: UserInfo
 
 
-class SignupResponse(BaseModel):
+class SignupResponse(ResponseModel):
     """Response model for signup operations"""
 
-    # status_code: int
-    message: str
     data: dict
 
 class SetPasswordRequest(BaseModel):
@@ -184,15 +174,13 @@ class ResetPasswordRequest(BaseModel):
     def validate_password(cls, v):
         """Validate password meets minimum length requirements"""
         if len(v) < 6:
-            raise ValueError("Password must be at least 6 characters long")
+            raise ValueError(PASSWORD_CONDITION_MESSAGE)
         return v
 
 
-class PasswordResponse(BaseModel):
+class PasswordResponse(ResponseModel):
     """Response model for set/reset password operations"""
 
-    # status_code: int
-    message: str
 
 class ForgotPasswordRequest(BaseModel):
     """Request model for forgot password operations"""
@@ -200,11 +188,9 @@ class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
 
-class ForgotPasswordResponse(BaseModel):
+class ForgotPasswordResponse(ResponseModel):
     """Response model for forgot password operations"""
 
-    # status_code: int
-    message: str
 
 # """
 # Signup Wizard Schemas
@@ -415,7 +401,7 @@ class CompanyData(BaseModel):
     company_name: str
     company_website: Optional[str] = None
     industry: Optional[str] = None
-    company_size: Optional[str] = None
+    company_size: Optional[FirmSize] = None
     description: Optional[str] = None
     logo_url: Optional[str] = None
     max_users: Optional[int] = None
@@ -452,41 +438,46 @@ class CompanyData(BaseModel):
     @model_validator(mode='after')
     def validate_enterprise_features_and_practice_areas(self):
         """Validate enterprise features and practice areas based on firm size."""
+        def check_field_applicability(field_list, firm_type):
+            for field, expected in field_list:
+                value = getattr(self, field)
+                if value != expected:
+                    _bad_request(f"{field} is not applicable for {firm_type.value}")
+
         match self.company_size:
             # Solo Practitioner validations
             case FirmSize.SOLO_PRACTITIONER:
-                if self.need_help_importing_data is not False:
-                    _bad_request('need_help_importing_data is not applicable for Solo Practitioner')
-                if self.need_migration_assistance is not False:
-                    _bad_request('need_migration_assistance is not applicable for Solo Practitioner')
-                if self.compliance_security is not None:
-                    _bad_request('compliance_security is not applicable for Solo Practitioner')
-                if self.preferred_integration is not None:
-                    _bad_request('preferred_integration is not applicable for Solo Practitioner')
-                if self.team_setup is not None:
-                    _bad_request('team_setup is not applicable for Solo Practitioner')
-                if self.enterprise_features is not None:
-                    _bad_request('enterprise_features is not applicable for Solo Practitioner')
+                # Reduce cognitive complexity by using a loop over field names and expected values
+                solo_fields = [
+                    ("need_help_importing_data", False),
+                    ("need_migration_assistance", False),
+                    ("compliance_security", None),
+                    ("preferred_integration", None),
+                    ("team_setup", None),
+                    ("enterprise_features", None),
+                ]
+                check_field_applicability(solo_fields, FirmSize.SOLO_PRACTITIONER)
 
             # Small Firm (2-10 attorneys) validations
             case FirmSize.SMALL_FIRM:
-                if self.enterprise_features is not None:
-                    _bad_request('enterprise_features is not applicable for Small Firm (2-10 attorneys)')
-                if self.compliance_security is not None:
-                    _bad_request('compliance_security is not applicable for Small Firm (2-10 attorneys)')
+                small_firm_fields = [
+                    ("enterprise_features", None),
+                    ("compliance_security", None),
+                ]
+                check_field_applicability(small_firm_fields, FirmSize.SMALL_FIRM)
 
             # Mid-Size/Large Firm (11-100 attorneys) validations
             case FirmSize.MID_SIZE_LARGE_FIRM:
-                if self.enterprise_features is not None:
-                    _bad_request('enterprise_features is not applicable for Mid-Size/Large Firm (11-100 attorneys)')
+                mid_size_large_firm_fields = [("compliance_security", None)]
+                check_field_applicability(mid_size_large_firm_fields, FirmSize.MID_SIZE_LARGE_FIRM)
 
             # Enterprise Firm validations
             case FirmSize.ENTERPRISE_FIRM:
-                if self.enterprise_features is None:
-                    _bad_request('enterprise_features are required for Enterprise Firm (100+ attorneys)')
+                enterprise_firm_fields = [("enterprise_features", None)]
+                check_field_applicability(enterprise_firm_fields, FirmSize.ENTERPRISE_FIRM)
 
             case _:
-                pass
+                _bad_request('Invalid firm size')
 
         # Validate secondary practice areas don't overlap with primary ones
         if self.secondary_practice_areas is not None:
@@ -503,10 +494,8 @@ class CompanyData(BaseModel):
 
 
 
-class SignupWizardResponse(BaseModel):
+class SignupWizardResponse(ResponseModel):
     """Signup wizard response."""
-    # status_code: int
-    message: str
     data: Dict[str, Any]
     validation_passed: bool = True
 
@@ -516,7 +505,7 @@ def generate_pkce_pair():
     # Generate a secure random string for the code verifier (RFC 7636).
     # It must be between 43 and 128 characters long. We generate 32 bytes,
     # which is 43 URL-safe base64 characters.
-    verifier_bytes = random.randbytes(32)
+    verifier_bytes = secrets.token_bytes(32)
     code_verifier = base64.urlsafe_b64encode(verifier_bytes).rstrip(b'=').decode('utf-8')
 
     # Hash the code verifier using SHA256.

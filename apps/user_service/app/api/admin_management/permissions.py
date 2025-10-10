@@ -28,6 +28,7 @@ from apps.user_service.app.schemas.admin_access_management import (
     CreatePermissionRequest,
 )
 
+
 from apps.user_service.app.dependencies.common_utils import check_permissions
 
 from apps.user_service.app.app_instance import limiter
@@ -38,6 +39,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 )
 
 # Local imports
+from libs.shared_utils.common_query import SETTINGS_ROLES_MANAGE
 from libs.shared_middleware.jwt_auth import (
     get_user_from_auth,
 )
@@ -61,6 +63,7 @@ logger = get_logger("permissions-api")
 
 # Authentication description for API documentation
 AUTH_DESCRIPTION = "Bearer token required for authentication"
+PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE = "Permissions retrieved successfully"
 
 
 class PermissionResponse(BaseModel):
@@ -113,7 +116,7 @@ async def get_permissions(
     request.state.audit_risk_level = "low"
 
     # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user, "settings.roles.manage")
+    user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
 
     try:
         permissions_data = await get_all_permissions(user_context.organization_id)
@@ -135,7 +138,7 @@ async def get_permissions(
         )
 
     # Format permissions data efficiently
-    permissions = await format_permissions_data(permissions_data)
+    permissions = format_permissions_data(permissions_data)
 
 
     # Set audit data for successful retrieval
@@ -144,14 +147,13 @@ async def get_permissions(
         "permissions_count": len(permissions),
         "permission_ids": [str(perm["id"]) for perm in permissions_data],
         "permission_categories": list(
-            set(perm["category"] for perm in permissions_data if perm["category"])
+            {perm["category"] for perm in permissions_data if perm["category"]}
         ),
     }
 
 
     return PermissionsResponse(
-        status_code=status.HTTP_200_OK,
-        message="Permissions retrieved successfully",
+        message=PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE,
         permissions=permissions,
     )
 
@@ -194,10 +196,10 @@ async def get_permission_by_id(
     request.state.audit_risk_level = "low"
 
     # Validate role_id format using utility function
-    await validate_uuid_format(permission_id, "permission ID")
+    validate_uuid_format(permission_id, "permission ID")
 
     # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user, "settings.roles.manage")
+    user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
 
     try:
         permission = await get_permission_details_by_id(
@@ -214,16 +216,12 @@ async def get_permission_by_id(
 
     if not permission:
         logger.warning("Permission not found - Request ID: %s, ",request_id)
-        logger.warning(
-            "Permission ID: %s, Organization ID: %s",
-            permission_id,user_context.organization_id
-        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Permission not found",
         )
 
-    permissions = await format_permissions_data(permission)
+    permissions = format_permissions_data(permission)
 
 
     # Set audit data for successful retrieval
@@ -237,8 +235,7 @@ async def get_permission_by_id(
 
 
     return PermissionsResponse(
-        status_code=status.HTTP_200_OK,
-        message="Permissions retrieved successfully",
+        message=PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE,
         permissions=permissions,
     )
 
@@ -277,7 +274,7 @@ async def create_permission(
     request.state.audit_risk_level = "medium"
 
     # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user, "settings.roles.manage")
+    user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
 
     try:
         permission = await create_new_permission(
@@ -306,8 +303,7 @@ async def create_permission(
             detail="Failed to create permission",
         )
 
-    permissions = await format_permissions_data(permission)
-
+    permissions = format_permissions_data(permission)
 
     # Set audit data for successful creation
     request.state.raw_audit_new_data = {
@@ -324,8 +320,7 @@ async def create_permission(
 
 
     return PermissionsResponse(
-        status_code=status.HTTP_200_OK,
-        message="Permissions retrieved successfully",
+        message=PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE,
         permissions=permissions,
     )
 

@@ -278,7 +278,7 @@ async def unified_exception_handler(request: Request, exc: Exception):
 
     # Handle Unhandled/Generic Exceptions
     error_message = str(exc)
-    full_traceback = traceback.format_exc()
+    traceback.format_exc()
 
     log_msg = (
         "Unexpected exception occurred - Error: %s, Exception Type: %s, "

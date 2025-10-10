@@ -33,6 +33,8 @@ from apps.user_service.app.dependencies.logger import get_logger
 # Initialize logger
 logger = get_logger("exception_handling")
 
+NO_EXCEPTION_MESSAGE = "No exception traceback available"
+
 # Type variables for generic functions
 T = TypeVar('T')
 F = TypeVar('F', bound=Callable[..., Any])
@@ -393,41 +395,41 @@ async def execute_safe_query(
     """
     supabase = await get_supabase_admin_client()
 
-    if operation == "insert":
-        if not data:
-            raise DataValidationError("Data is required for insert operation")
-        result = await (await supabase.table(table_name)).insert(data).execute()
-        return {"data": result.data, "count": len(result.data) if result.data else 0}
+    match operation:
+        case "insert":
+            if not data:
+                raise DataValidationError("Data is required for insert operation")
+            result = await (await supabase.table(table_name)).insert(data).execute()
+            return {"data": result.data, "count": len(result.data) if result.data else 0}
 
-    elif operation == "select":
-        query = await supabase.table(table_name)
-        query = await query.select("*")
+        case "select":
+            query = await supabase.table(table_name)
+            query = await query.select("*")
 
-        if organization_id:
-            query = await query.eq("organization_id", organization_id)
+            if organization_id:
+                query = await query.eq("organization_id", organization_id)
 
-        result = await query.execute()
-        return {"data": result.data, "count": len(result.data) if result.data else 0}
+            result = await query.execute()
+            return {"data": result.data, "count": len(result.data) if result.data else 0}
 
-    elif operation == "update":
-        if not data:
-            raise DataValidationError("Data is required for update operation")
+        case "update":
+            if not data:
+                raise DataValidationError("Data is required for update operation")
 
+            query = await supabase.table(table_name)
+            query = await query.update(data)
 
-        query = await supabase.table(table_name)
-        query = await query.update(data)
+            result = await query.execute()
+            return {"data": result.data, "count": len(result.data) if result.data else 0}
 
-        result = await query.execute()
-        return {"data": result.data, "count": len(result.data) if result.data else 0}
+        case "delete":
+            query = await supabase.table(table_name)
+            query = await query.delete()
+            result = await query.execute()
+            return {"data": result.data, "count": len(result.data) if result.data else 0}
 
-    elif operation == "delete":
-        query = await supabase.table(table_name)
-        query = await query.delete()
-        result = await query.execute()
-        return {"data": result.data, "count": len(result.data) if result.data else 0}
-
-    else:
-        raise DataValidationError(f"Unsupported operation: {operation}")
+        case _:
+            raise DataValidationError(f"Unsupported operation: {operation}")
 
 
 @handle_database_errors("bulk_insert")
@@ -547,7 +549,7 @@ def log_exception(operation: str = None, context: str = None):
     exc_type, exc_value, exc_tb = sys.exc_info()
 
     if exc_tb is None:
-        logger.error("No exception traceback available")
+        logger.error(NO_EXCEPTION_MESSAGE)
         return
 
     fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
@@ -581,7 +583,7 @@ def log_exception_with_retry(operation: str, context: str = None, retry_count: i
     exc_type, exc_value, exc_tb = sys.exc_info()
 
     if exc_tb is None:
-        logger.error("No exception traceback available")
+        logger.error(NO_EXCEPTION_MESSAGE)
         return
 
     fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
@@ -620,7 +622,7 @@ def log_database_operation_error(operation: str, table: str = None, record_id: s
     exc_type, exc_value, exc_tb = sys.exc_info()
 
     if exc_tb is None:
-        logger.error("No exception traceback available")
+        logger.error(NO_EXCEPTION_MESSAGE)
         return
 
     fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]

@@ -23,7 +23,6 @@ Date: 2024
 """
 
 # apps/user_service/app/dependencies/audit_logs/audit_logger.py
-# apps/user_service/app/dependencies/audit_logs/audit_logger.py
 
 from typing import Dict, Any, Optional, List, Tuple
 import hashlib
@@ -82,7 +81,7 @@ class AuditLogger:
         self._batch_timeout = 3.0
         self._max_retries = 3
 
-    async def start_processing(self):
+    def start_processing(self):
         """
         Start the audit processing task.
 
@@ -180,7 +179,7 @@ class AuditLogger:
             "category": event_data.category,
         }
 
-    async def _collect_batch_events(self, timeout: float) -> Tuple[List[Dict], bool]:
+    async def _collect_batch_events(self, timeout_duration: float) -> Tuple[List[Dict], bool]:
         """
         Collect events from queue up to batch size or until queue is empty.
         Returns (batch, got_events) where got_events indicates if any events were collected.
@@ -188,9 +187,10 @@ class AuditLogger:
         batch = []
         got_events = False
         try:
-            event = await asyncio.wait_for(self._queue.get(), timeout=timeout)
-            batch.append(event)
-            got_events = True
+            async with asyncio.timeout(timeout_duration):
+                event = await self._queue.get()
+                batch.append(event)
+                got_events = True
 
             while len(batch) < self._batch_size:
                 try:
