@@ -51,7 +51,7 @@ def audit_api_call(
         @wraps(func)
         async def wrapper(**kwargs):
             request: Request = kwargs.get("request")
-            if not request:
+            if request is None:
                 raise ValueError("Request must be passed as a keyword argument")
 
             request.state.audit_metadata = func.audit_metadata
