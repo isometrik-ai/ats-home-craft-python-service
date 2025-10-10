@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field, ConfigDict
 from apps.user_service.app.schemas import ResponseModel
 
 
-class AuditLogItem(BaseModel):
-    """Model for audit log information in lists
+class AuditLogBase(BaseModel):
+    """Base model for audit log information containing common fields
 
     Attributes:
         id (str): Unique identifier for the audit log
@@ -92,6 +92,13 @@ class AuditLogItem(BaseModel):
     category: Optional[str] = Field(
         None, description="Category classification for the audit log"
     )
+
+
+class AuditLogItem(AuditLogBase):
+    """Model for audit log information in lists
+
+    Inherits all fields from AuditLogBase.
+    """
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -120,79 +127,17 @@ class AuditLogItem(BaseModel):
     )
 
 
-class AuditLogDetailItem(BaseModel):
+class AuditLogDetailItem(AuditLogBase):
     """Model for detailed audit log information
 
-    Attributes:
-        id (str): Unique identifier for the audit log
-        organization_id (str): Organization ID where the audit log was created
-        user_id (str): User ID who performed the action
-        user_email (str): Email of the user who performed the action
-        user_role (str): Role of the user who performed the action
-        action_type (str): Type of action performed (e.g., CREATE, UPDATE, DELETE, READ)
-        data_classification (str): Classification of the data involved (e.g., general,
-            confidential, pii)
-        table_name (str): Name of the table that was affected
-        record_id (Optional[str]): ID of the specific record that was affected
-        old_values (Optional[Dict]): Previous values before the change
-        new_values (Optional[Dict]): New values after the change
-        changed_fields (Optional[List[str]]): List of fields that were changed
-        compliance_tags (Optional[List[str]]): Compliance tags for the audit log
-        risk_level (str): Risk level of the action (low, medium, high)
-        ip_address (str): IP address of the user who performed the action
-        description (str): Human-readable description of the action
-        timestamp (str): ISO timestamp when the audit log was created
+    Inherits all fields from AuditLogBase and adds additional fields for detailed audit logs.
+
+    Additional Attributes:
         hash_signature (Optional[str]): Hash signature for audit integrity
         previous_hash (Optional[str]): Previous hash for chain verification
         retention_date (Optional[str]): Date when this audit log should be retained until
-        status_code (Optional[int]): HTTP status code of the API call
-        category (Optional[str]): Category classification for the audit log
     """
 
-    id: str = Field(..., description="Unique identifier for the audit log")
-    organization_id: str = Field(
-        ..., description="Organization ID where the audit log was created"
-    )
-    user_id: str = Field(..., description="User ID who performed the action")
-    user_email: str = Field(
-        ..., description="Email of the user who performed the action"
-    )
-    user_role: str = Field(..., description="Role of the user who performed the action")
-    action_type: str = Field(
-        ..., description="Type of action performed (e.g., CREATE, UPDATE, DELETE, READ)"
-    )
-    data_classification: str = Field(
-        ...,
-        description="Classification of the data involved (e.g., general, confidential, pii)",
-    )
-    table_name: str = Field(..., description="Name of the table that was affected")
-    record_id: Optional[str] = Field(
-        None, description="ID of the specific record that was affected"
-    )
-    old_values: Optional[Dict[str, Any]] = Field(
-        None, description="Previous values before the change"
-    )
-    new_values: Optional[Dict[str, Any]] = Field(
-        None, description="New values after the change"
-    )
-    changed_fields: Optional[List[str]] = Field(
-        None, description="List of fields that were changed"
-    )
-    compliance_tags: Optional[List[str]] = Field(
-        None, description="Compliance tags for the audit log"
-    )
-    risk_level: str = Field(
-        ..., description="Risk level of the action (low, medium, high)"
-    )
-    ip_address: str = Field(
-        ..., description="IP address of the user who performed the action"
-    )
-    description: str = Field(
-        ..., description="Human-readable description of the action"
-    )
-    timestamp: str = Field(
-        ..., description="ISO timestamp when the audit log was created"
-    )
     hash_signature: Optional[str] = Field(
         None, description="Hash signature for audit integrity"
     )
@@ -201,12 +146,6 @@ class AuditLogDetailItem(BaseModel):
     )
     retention_date: Optional[str] = Field(
         None, description="Date when this audit log should be retained until"
-    )
-    status_code: Optional[int] = Field(
-        None, description="HTTP status code of the API call"
-    )
-    category: Optional[str] = Field(
-        None, description="Category classification for the audit log"
     )
 
     model_config = ConfigDict(

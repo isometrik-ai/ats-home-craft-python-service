@@ -279,32 +279,28 @@ class AuditLogger:
             try:
                 await self._write_audit_batch(events)
                 return
-            except DatabaseOperationError as e:
-                self._handle_write_error(e, attempt, "database")
+            except Exception as e:
+                error_type = self._categorize_error(e)
+                self._handle_write_error(e, attempt, error_type)
+
                 if attempt == self._max_retries - 1:
                     break
-                await asyncio.sleep(2**attempt)
-            except (OSError, RuntimeError) as e:
-                self._handle_write_error(e, attempt, "system")
-                if attempt == self._max_retries - 1:
-                    break
-                await asyncio.sleep(2**attempt)
-            except (json.JSONDecodeError, UnicodeError) as e:
-                self._handle_write_error(e, attempt, "serialization")
-                if attempt == self._max_retries - 1:
-                    break
-                await asyncio.sleep(2**attempt)
-            except (LookupError, AttributeError) as e:
-                self._handle_write_error(e, attempt, "data access")
-                if attempt == self._max_retries - 1:
-                    break
+
                 await asyncio.sleep(2**attempt)
 
-        if attempt == self._max_retries - 1:
-            print(
-                f"Failed to write {len(events)} audit events "
-                f"after {self._max_retries} attempts"
-            )
+        print(f"Failed to write {len(events)} audit events after {self._max_retries} attempts")
+
+    def _categorize_error(self, error: Exception) -> str:
+        """Categorize error type for consistent handling."""
+        if isinstance(error, DatabaseOperationError):
+            return "database"
+        elif isinstance(error, (OSError, RuntimeError)):
+            return "system"
+        elif isinstance(error, (json.JSONDecodeError, UnicodeError)):
+            return "serialization"
+        elif isinstance(error, (LookupError, AttributeError)):
+            return "data access"
+        return "unknown"
 
     async def _get_last_hash_from_db(self, organization_id: str = None) -> Optional[str]:
         """
