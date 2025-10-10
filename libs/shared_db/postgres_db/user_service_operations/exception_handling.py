@@ -180,90 +180,79 @@ def handle_database_errors(
         async def wrapper(*args, **kwargs):
             try:
                 return await func(*args, **kwargs)
-
-            except APIError as e:
-                if custom_messages and 'api_error' in custom_messages:
-                    error_msg = custom_messages['api_error'].format(
-                        e=e, operation=operation_name)
-                else:
-                    error_msg = f"Supabase API error in {operation_name}: {e}"
-                _log_error(error_msg, e, log_level, operation_name)
-                if reraise:
-                    # Extract status code if available
-                    status_code = getattr(e, 'status_code', None)
-                    raise SupabaseAPIError(
-                        error_msg,
-                        status_code=status_code,
-                        operation=operation_name) from e
-                return return_default
-
-            except (HTTPError, RequestError, TimeoutException) as e:
-                if custom_messages and 'network_error' in custom_messages:
-                    error_msg = custom_messages['network_error'].format(
-                        e=e, operation=operation_name)
-                else:
-                    error_msg = f"Network error in {operation_name}: {e}"
-                _log_error(error_msg, e, log_level, operation_name)
-                if reraise:
-                    # Extract retry_after if available
-                    retry_after = getattr(e, 'retry_after', None)
-                    raise NetworkError(
-                        error_msg,
-                        operation=operation_name,
-                        retry_after=retry_after) from e
-                return return_default
-
-            except (json.JSONDecodeError, UnicodeError) as e:
-                if custom_messages and 'serialization_error' in custom_messages:
-                    error_msg = custom_messages['serialization_error'].format(
-                        e=e, operation=operation_name)
-                else:
-                    error_msg = f"Serialization error in {operation_name}: {e}"
-                _log_error(error_msg, e, log_level, operation_name)
-                if reraise:
-                    # Determine data type from error context
-                    data_type = "JSON" if isinstance(e, json.JSONDecodeError) else "Unicode"
-                    raise SerializationError(
-                        error_msg,
-                        data_type=data_type,
-                        operation=operation_name) from e
-                return return_default
-
-            except (KeyError, TypeError, ValueError) as e:
-                if custom_messages and 'validation_error' in custom_messages:
-                    error_msg = custom_messages['validation_error'].format(
-                        e=e, operation=operation_name)
-                else:
-                    error_msg = f"Data validation error in {operation_name}: {e}"
-                _log_error(error_msg, e, log_level, operation_name)
-                if reraise:
-                    # Try to extract field name from error context
-                    field = None
-                    if isinstance(e, KeyError):
-                        field = str(e).strip("'\"")
-                    raise DataValidationError(
-                        error_msg,
-                        field=field,
-                        operation=operation_name) from e
-                return return_default
-
             except Exception as e:
-                if custom_messages and 'unexpected_error' in custom_messages:
-                    error_msg = custom_messages['unexpected_error'].format(
-                        e=e, operation=operation_name)
-                else:
-                    error_msg = f"Unexpected error in {operation_name}: {e}"
-                _log_error(error_msg, e, log_level, operation_name)
-                if reraise:
-                    context = {"exception_type": type(e).__name__, "args": str(e.args)}
-                    raise DatabaseOperationError(
-                        error_msg,
-                        operation=operation_name,
-                        context=context) from e
-                return return_default
-
+                error_type = _get_exception_type(e)
+                return _handle_exception(
+                    e, error_type, operation_name, log_level,
+                    reraise, return_default, custom_messages)
         return wrapper
     return decorator
+
+
+def _get_exception_type(exception: Exception) -> str:
+    """Map exception to error type."""
+    if isinstance(exception, (APIError, SupabaseAPIError)):
+        return 'api'
+    elif isinstance(exception, (HTTPError, RequestError, TimeoutException, NetworkError)):
+        return 'network'
+    elif isinstance(exception, (json.JSONDecodeError, UnicodeError, SerializationError)):
+        return 'serialization'
+    elif isinstance(exception, (KeyError, TypeError, ValueError, DataValidationError)):
+        return 'validation'
+    else:
+        return 'unexpected'
+
+def _handle_exception(
+    e, error_type, operation_name,
+    log_level, reraise,
+    return_default, custom_messages
+) -> Any:
+    """Unified exception handler for all error types."""
+    # Get custom message or use default
+    message_key = f'{error_type}_error'
+    if custom_messages and message_key in custom_messages:
+        error_msg = custom_messages[message_key].format(e=e, operation=operation_name)
+    else:
+        # Use specific error message formats for each type
+        match error_type:
+            case 'api':
+                error_msg = f"Supabase API error in {operation_name}: {e}"
+            case 'network':
+                error_msg = f"Network error in {operation_name}: {e}"
+            case 'serialization':
+                error_msg = f"Serialization error in {operation_name}: {e}"
+            case 'validation':
+                error_msg = f"Data validation error in {operation_name}: {e}"
+            case _:
+                error_msg = f"Unexpected error in {operation_name}: {e}"
+
+    _log_error(error_msg, e, log_level, operation_name)
+
+    if not reraise:
+        return return_default
+
+    # Raise appropriate exception based on type
+    match error_type:
+        case 'api':
+            status_code = getattr(e, 'status_code', None)
+            raise SupabaseAPIError(
+                error_msg, status_code=status_code, operation=operation_name) from e
+        case 'network':
+            retry_after = getattr(e, 'retry_after', None)
+            raise NetworkError(error_msg, operation=operation_name, retry_after=retry_after) from e
+        case 'serialization':
+            data_type = "JSON" if isinstance(e, json.JSONDecodeError) else "Unicode"
+            raise SerializationError(
+                error_msg, data_type=data_type, operation=operation_name) from e
+        case 'validation':
+            field = None
+            if isinstance(e, KeyError):
+                field = str(e).strip("'\"")
+            raise DataValidationError(error_msg, field=field, operation=operation_name) from e
+        case _:  # unexpected
+            context = {"exception_type": type(e).__name__, "args": str(e.args)}
+            raise DatabaseOperationError(
+                error_msg, operation=operation_name, context=context) from e
 
 
 def _log_error(

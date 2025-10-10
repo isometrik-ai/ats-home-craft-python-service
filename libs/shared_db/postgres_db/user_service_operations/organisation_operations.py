@@ -3,17 +3,6 @@ Organisation Database Operations Module
 
 This module contains all organisation-related database operations.
 All SQL queries for organisation management should be centralized here.
-
-Author: AI Assistant
-Date: 2024-12-19
-Last Updated: 2024-12-19
-
-Operations Covered:
-- Organisation CRUD operations
-- Organisation member management
-- Organisation validation operations
-- Organisation search and filtering
-- Organisation settings operations
 """
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
@@ -31,6 +20,34 @@ logger = get_logger("organisation_operations")
 
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+async def _get_supabase_client():
+    """Get Supabase admin client."""
+    return await get_supabase_admin_client()
+
+def _has_result_data(result) -> bool:
+    """Check if result has data."""
+    return len(result.data) > 0 if result.data else False
+
+def _get_result_data(result, default=None):
+    """Get result data with default fallback."""
+    return result.data if result.data else (default or [])
+
+def _apply_search_filter(query, search: str, fields: List[str]):
+    """Apply search filter to query."""
+    if not search:
+        return query
+
+    search_conditions = [f"{field}.ilike.%{search}%" for field in fields]
+    return query.or_(','.join(search_conditions))
+
+def _apply_pagination(query, limit: int, offset: int):
+    """Apply pagination to query."""
+    return query.order("created_at", desc=True).range(offset, offset + limit - 1)
+
+# ============================================================================
 # ORGANISATION CRUD OPERATIONS
 # ============================================================================
 
@@ -39,8 +56,7 @@ logger = get_logger("organisation_operations")
     custom_messages=create_error_messages("create_new_organisation", "creating"))
 async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str, Any]:
     """Create a new organisation."""
-    supabase = await get_supabase_admin_client()
-
+    supabase = await _get_supabase_client()
     org_record = {
         "id": organisation_data["organization_id"],
         "name": organisation_data["name"],
@@ -64,7 +80,7 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
     insert_query = table.insert(org_record)
     result = await insert_query.execute()
 
-    if result.data and len(result.data) > 0:
+    if _has_result_data(result):
         return result.data[0]
     return {}
 
@@ -126,7 +142,6 @@ async def get_organisation_by_slug(slug: str) -> Optional[Dict[str, Any]]:
         return result.data[0]
     return None
 
-
 @handle_database_errors(
     "update_organisation_details",
     custom_messages=create_error_messages("update_organisation_details", "updating"))
@@ -175,7 +190,7 @@ async def delete_organisation(organisation_id: str) -> bool:
         "id", organisation_id
     ).execute()
 
-    return len(result.data) > 0 if result.data else False
+    return _has_result_data(result)
 
 
 @handle_database_errors(
@@ -190,8 +205,7 @@ async def check_organisation_exists(organisation_id: str) -> bool:
     query = select_query.eq("id", organisation_id)
     result = await query.execute()
 
-    return len(result.data) > 0 if result.data else False
-
+    return _has_result_data(result)
 
 # ============================================================================
 # ORGANISATION LISTING AND SEARCH
@@ -207,7 +221,7 @@ async def get_list_of_organisations(search: Optional[str] = None, status: Option
     This function mimics the logic from build_organisations_filter_query() in organisation_utils.py
     to ensure consistent parameter handling and filtering across the codebase.
     """
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
     # Get the table object first
     table = supabase.table("organizations")
@@ -218,32 +232,19 @@ async def get_list_of_organisations(search: Optional[str] = None, status: Option
         "created_at, updated_at, organization_members(id)"
     )
 
-    # Apply search filter (mimicking the ILIKE logic from build_organisations_filter_query)
-    # This handles the same search logic: name, slug, domain with case-insensitive partial matching
-    if search:
-        or_query = select_query.or_(
-            f"name.ilike.%{search}%,"
-            f"slug.ilike.%{search}%,"
-            f"domain.ilike.%{search}%"
-        )
-        query = or_query
-    else:
-        query = select_query
+    # Apply search filter using helper function
+    query = _apply_search_filter(select_query, search, ["name", "slug", "domain"])
 
     # Apply status filter (mimicking the exact match logic from build_organisations_filter_query)
     if status:
-        status_query = query.eq("status", status)
-        query = status_query
+        query = query.eq("status", status)
 
-    # Apply pagination and ordering (mimicking the LIMIT/OFFSET and ORDER BY logic)
-    order_query = query.order("created_at", desc=True)
-    range_query = order_query.range(offset, offset + limit - 1)
-    result = await range_query.execute()
+    # Apply pagination using helper function
+    paginated_query = _apply_pagination(query, limit, offset)
+    result = await paginated_query.execute()
 
-    # Process results to add member count
-    # (mimicking the GROUP BY logic from build_organisations_filter_query)
-    # This calculates member_count by counting organization_members, just like the SQL query does
-    organisations = result.data if result.data else []
+    # Process results to add member count using helper function
+    organisations = _get_result_data(result)
     for org in organisations:
         org["member_count"] = len(org.get("organization_members", []))
         # Remove the organization_members array as it's not needed in response
@@ -262,33 +263,22 @@ async def get_organisations_count(search: Optional[str], status: Optional[str]) 
     This function mimics the logic from build_organisations_count_query() in organisation_utils.py
     to ensure consistent parameter handling and filtering across the codebase.
     """
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
     # Build the count query with filters (mimicking build_organisations_count_query logic)
     table = supabase.table("organizations")
     select_query = table.select("id", count="exact")
 
-    # Apply search filter (mimicking the ILIKE logic from build_organisations_count_query)
-    # This handles the same search logic: name, slug, domain with case-insensitive partial matching
-    if search:
-        or_query = select_query.or_(
-            f"name.ilike.%{search}%,"
-            f"slug.ilike.%{search}%,"
-            f"domain.ilike.%{search}%"
-        )
-        query = or_query
-    else:
-        query = select_query
+    # Apply search filter using helper function
+    query = _apply_search_filter(select_query, search, ["name", "slug", "domain"])
 
     # Apply status filter (mimicking the exact match logic from build_organisations_count_query)
     if status:
-        status_query = query.eq("status", status)
-        query = status_query
+        query = query.eq("status", status)
 
     result = await query.execute()
 
     return result.count if result.count is not None else 0
-
 
 @handle_database_errors(
     "get_organisations_with_members",
@@ -296,7 +286,7 @@ async def get_organisations_count(search: Optional[str], status: Optional[str]) 
 async def get_organisations_with_members(search: Optional[str] = None, status: Optional[str] = None,
                                        limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
     """Get organisations with member count information."""
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
     # Build the query with joins and filters
     table = supabase.table("organizations")
@@ -306,36 +296,25 @@ async def get_organisations_with_members(search: Optional[str] = None, status: O
         "organization_members(id)"
     )
 
-    # Apply search filter
-    if search:
-        or_query = select_query.or_(
-            f"name.ilike.%{search}%,"
-            f"slug.ilike.%{search}%,"
-            f"domain.ilike.%{search}%"
-        )
-        query = or_query
-    else:
-        query = select_query
+    # Apply search filter using helper function
+    query = _apply_search_filter(select_query, search, ["name", "slug", "domain"])
 
     # Apply status filter
     if status:
-        status_query = query.eq("status", status)
-        query = status_query
+        query = query.eq("status", status)
 
-    # Apply pagination and ordering
-    order_query = query.order("created_at", desc=True)
-    range_query = order_query.range(offset, offset + limit - 1)
-    result = await range_query.execute()
+    # Apply pagination using helper function
+    paginated_query = _apply_pagination(query, limit, offset)
+    result = await paginated_query.execute()
 
-    # Process results to add member count
-    organisations = result.data if result.data else []
+    # Process results to add member count using helper function
+    organisations = _get_result_data(result)
     for org in organisations:
         org["member_count"] = len(org.get("organization_members", []))
         # Remove the organization_members array as it's not needed in response
         org.pop("organization_members", None)
 
     return organisations
-
 
 # ============================================================================
 # ORGANISATION VALIDATION OPERATIONS
@@ -425,7 +404,7 @@ async def get_organisation_members(organisation_id: str, search: Optional[str] =
     )
     result = await query.execute()
 
-    return result.data if result.data else []
+    return _get_result_data(result)
 
 
 @handle_database_errors(
@@ -489,7 +468,7 @@ async def add_member_to_organisation(
         "organization_id": organisation_id
     })
 
-    return len(result.data) > 0 if result.data else False
+    return _has_result_data(result)
 
 
 @handle_database_errors(
@@ -503,7 +482,7 @@ async def remove_member_from_organisation(organisation_id: str, user_id: str) ->
     query = table.delete().eq("user_id", user_id).eq("organization_id", organisation_id)
     result = await query.execute()
 
-    return len(result.data) > 0 if result.data else False
+    return _has_result_data(result)
 
 
 @handle_database_errors(
@@ -520,7 +499,7 @@ async def update_member_role(organisation_id: str, user_id: str, role_id: str) -
     }).eq("user_id", user_id).eq("organization_id", organisation_id)
     result = await query.execute()
 
-    return len(result.data) > 0 if result.data else False
+    return _has_result_data(result)
 
 
 # ============================================================================
@@ -557,7 +536,7 @@ async def update_organisation_settings(organisation_id: str, settings: Dict[str,
     }).eq("id", organisation_id)
     result = await query.execute()
 
-    return len(result.data) > 0 if result.data else False
+    return _has_result_data(result)
 
 
 @handle_database_errors(
@@ -590,17 +569,7 @@ async def update_organisation_preferences(organisation_id: str,preferences: Dict
     }).eq("id", organisation_id)
     result = await query.execute()
 
-    return len(result.data) > 0 if result.data else False
-
-
-# ============================================================================
-# ORGANISATION QUERY BUILDING
-# ============================================================================
-
-# Note: Query building functions have been removed as Supabase SDK
-# provides built-in query methods that are more efficient and type-safe.
-# The filtering logic is now handled directly in the respective functions.
-
+    return _has_result_data(result)
 
 # ============================================================================
 # ORGANISATION STATISTICS OPERATIONS
@@ -708,7 +677,6 @@ async def get_organisation_activity_stats(organisation_id: str) -> Dict[str, Any
         "period_days": 30
     }
 
-
 # ============================================================================
 # ORGANISATION BULK OPERATIONS
 # ============================================================================
@@ -757,8 +725,7 @@ async def bulk_add_members(
     query = table.insert(member_records)
     result = await query.execute()
 
-    return len(result.data) > 0 if result.data else False
-
+    return _has_result_data(result)
 
 # ============================================================================
 # ORGANISATION PERMISSIONS OPERATIONS
@@ -853,7 +820,7 @@ async def assign_all_permissions_to_role(role_id: str, organisation_id: str) -> 
     )
     result = await upsert_query.execute()
 
-    return len(result.data) > 0 if result.data else False
+    return _has_result_data(result)
 
 
 @handle_database_errors(
@@ -870,8 +837,7 @@ async def get_organisation_permissions(organisation_id: str) -> List[Dict[str, A
     query = select_query.eq("organization_id", organisation_id)
     result = await query.execute()
 
-    return result.data if result.data else []
-
+    return _get_result_data(result)
 
 # ============================================================================
 # ORGANISATION CLEANUP OPERATIONS
@@ -911,7 +877,6 @@ async def cleanup_organisation_data(organisation_id: str) -> Dict[str, int]:
         "permissions_deleted": permissions_deleted
     }
 
-
 @handle_database_errors(
     "archive_organisation",
     custom_messages=create_error_messages("archive_organisation", "archiving"))
@@ -924,8 +889,7 @@ async def archive_organisation(organisation_id: str) -> bool:
     }).eq("id", organisation_id)
     result = await query.execute()
 
-    return len(result.data) > 0 if result.data else False
-
+    return _has_result_data(result)
 
 @handle_database_errors(
     "restore_organisation",
@@ -939,8 +903,7 @@ async def restore_organisation(organisation_id: str) -> bool:
         }).eq("id", organisation_id)
     result = await query.execute()
 
-    return len(result.data) > 0 if result.data else False
-
+    return _has_result_data(result)
 
 # ============================================================================
 # ORGANISATION MONITORING OPERATIONS
@@ -974,7 +937,6 @@ async def get_organisation_health_status(organisation_id: str) -> Dict[str, Any]
         "updated_at": org_data.get("updated_at")
     }
 
-
 @handle_database_errors(
     "get_organisation_usage_stats",
     custom_messages=create_error_messages("get_organisation_usage_stats", "getting"))
@@ -1007,7 +969,6 @@ async def get_organisation_usage_stats(organisation_id: str) -> Dict[str, Any]:
         "role_count": role_count,
         "usage_percentage": min(100, (member_count / 100) * 100)  # Assuming 100 is max
     }
-
 
 @handle_database_errors(
     "get_organisation_compliance_status",

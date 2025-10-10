@@ -25,6 +25,57 @@ from .exception_handling import handle_database_errors, create_error_messages
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+async def _get_supabase_client():
+    """Get Supabase admin client."""
+    return await get_supabase_admin_client()
+
+
+def _has_result_data(result) -> bool:
+    """Check if result has data."""
+    return len(result.data) > 0 if result.data else False
+
+
+def _get_result_data(result, default=None):
+    """Get result data with default fallback."""
+    return result.data if result.data else (default or [])
+
+
+def _build_audit_record(audit_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Build audit record from audit data."""
+    audit_record = {
+        "organization_id": audit_data["organization_id"],
+        "user_id": audit_data["user_id"],
+        "user_email": audit_data["user_email"],
+        "user_role": audit_data["user_role"],
+        "action_type": audit_data["action_type"],
+        "data_classification": audit_data["data_classification"],
+        "table_name": audit_data["table_name"],
+        "record_id": audit_data["record_id"],
+        "old_values": json.dumps(audit_data.get("old_values", None)),
+        "new_values": json.dumps(audit_data.get("new_values", None)),
+        "changed_fields": audit_data.get("changed_fields"),
+        "compliance_tags": audit_data.get("compliance_tags"),
+        "risk_level": audit_data["risk_level"],
+        "ip_address": audit_data["ip_address"],
+        "timestamp": audit_data["timestamp"],
+        "hash_signature": audit_data["hash_signature"],
+        "previous_hash": audit_data.get("previous_hash"),
+        "description": audit_data["description"],
+        "status_code": audit_data.get("status_code"),
+        "category": audit_data.get("category")
+    }
+
+    # Add optional fields
+    if audit_data.get("retention_date"):
+        audit_record["retention_date"] = audit_data.get("retention_date")
+
+    return audit_record
+
+
 @dataclass
 class AuditLogFilter:
     """Data class for audit log filtering parameters."""
@@ -48,35 +99,12 @@ class AuditLogFilter:
     custom_messages=create_error_messages("create_audit_log", "creating"))
 async def create_audit_log(audit_data: Dict[str, Any]) -> Dict[str, Any]:
     """Create a new audit log entry."""
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
-    audit_record = {
-        "organization_id": audit_data["organization_id"],
-        "user_id": audit_data["user_id"],
-        "user_email": audit_data["user_email"],
-        "user_role": audit_data["user_role"],
-        "action_type": audit_data["action_type"],
-        "data_classification": audit_data["data_classification"],
-        "table_name": audit_data["table_name"],
-        "record_id": audit_data["record_id"],
-        "old_values": json.dumps(audit_data.get("old_values",None)),
-        "new_values": json.dumps(audit_data.get("new_values",None)),
-        "changed_fields": audit_data.get("changed_fields"),
-        "compliance_tags": audit_data.get("compliance_tags"),
-        "risk_level": audit_data["risk_level"],
-        "ip_address": audit_data["ip_address"],
-        "timestamp": audit_data["timestamp"],
-        "hash_signature": audit_data["hash_signature"],
-        "previous_hash": audit_data.get("previous_hash"),
-        "description": audit_data["description"],
-        "retention_date": audit_data.get("retention_date"),
-        "status_code": audit_data.get("status_code"),
-        "category": audit_data.get("category")
-    }
-
+    audit_record = _build_audit_record(audit_data)
     result = await supabase.table("audit_logs").insert(audit_record).execute()
 
-    if result.data and len(result.data) > 0:
+    if _has_result_data(result):
         return result.data[0]
     return {}
 
@@ -86,7 +114,7 @@ async def create_audit_log(audit_data: Dict[str, Any]) -> Dict[str, Any]:
     custom_messages=create_error_messages("get_audit_log_by_id", "getting"))
 async def get_audit_log_by_id(audit_log_id: str) -> Optional[Dict[str, Any]]:
     """Get audit log by ID."""
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
     result = await supabase.table("audit_logs").select(
         "id, organization_id, user_id, user_email, user_role, "
@@ -97,7 +125,7 @@ async def get_audit_log_by_id(audit_log_id: str) -> Optional[Dict[str, Any]]:
         "status_code, category"
     ).eq("id", audit_log_id).limit(1).execute()
 
-    if result.data and len(result.data) > 0:
+    if _has_result_data(result):
         return result.data[0]
     return None
 
@@ -107,7 +135,7 @@ async def get_audit_log_by_id(audit_log_id: str) -> Optional[Dict[str, Any]]:
     custom_messages=create_error_messages("delete_all_audit_logs", "deleting"))
 async def delete_all_audit_logs() -> int:
     """Delete all audit logs from database."""
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
     # First get count for return value
     count_result = await supabase.table("audit_logs").select("id", count="exact").execute()
@@ -128,7 +156,7 @@ async def delete_all_audit_logs() -> int:
     custom_messages=create_error_messages("get_audit_logs_list", "getting"))
 async def get_audit_logs_list(filter_params: AuditLogFilter) -> List[Dict[str, Any]]:
     """Get paginated list of audit logs with optional search and filtering."""
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
     # Build the query with filters
     query = supabase.table("audit_logs").select(
@@ -170,7 +198,7 @@ async def get_audit_logs_list(filter_params: AuditLogFilter) -> List[Dict[str, A
         filter_params.offset, filter_params.offset + filter_params.limit - 1
     ).execute()
 
-    return result.data if result.data else []
+    return _get_result_data(result)
 
 
 @handle_database_errors(
@@ -178,7 +206,7 @@ async def get_audit_logs_list(filter_params: AuditLogFilter) -> List[Dict[str, A
     custom_messages=create_error_messages("get_audit_logs_count", "getting"))
 async def get_audit_logs_count(filter_params: AuditLogFilter) -> int:
     """Get total count of audit logs matching search criteria."""
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
     # Build the count query with filters
     query = supabase.table("audit_logs").select("id", count="exact")
@@ -219,7 +247,7 @@ async def get_audit_logs_count(filter_params: AuditLogFilter) -> int:
     custom_messages=create_error_messages("get_last_audit_log_hash", "getting"))
 async def get_last_audit_log_hash(organization_id: str) -> Optional[str]:
     """Get the last audit log hash signature for an organization."""
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
     result = await supabase.table("audit_logs").select("hash_signature").eq(
         "organization_id", organization_id
@@ -251,34 +279,17 @@ async def bulk_create_audit_logs(audit_logs_data: List[Dict[str, Any]]) -> List[
     if not audit_logs_data:
         return []
 
-    supabase = await get_supabase_admin_client()
+    supabase = await _get_supabase_client()
 
-    # Prepare all audit records
+    # Prepare all audit records using helper function
     audit_records = []
     for audit_data in audit_logs_data:
-        audit_record = {
-            "organization_id": audit_data["organization_id"],
-            "user_id": audit_data["user_id"],
-            "user_email": audit_data["user_email"],
-            "user_role": audit_data["user_role"],
-            "action_type": audit_data["action_type"],
-            "data_classification": audit_data["data_classification"],
-            "table_name": audit_data["table_name"],
-            "record_id": audit_data["record_id"],
-            "old_values": json.dumps(audit_data.get("old_values",None)),
-            "new_values": json.dumps(audit_data.get("new_values",None)),
-            "changed_fields": audit_data.get("changed_fields"),
-            "compliance_tags": audit_data.get("compliance_tags"),
-            "risk_level": audit_data["risk_level"],
-            "ip_address": audit_data["ip_address"],
-            "timestamp": audit_data["timestamp"].isoformat(),
-            "hash_signature": audit_data["hash_signature"],
-            "previous_hash": audit_data.get("previous_hash"),
-            "description": audit_data["description"],
-            "status_code": audit_data.get("status_code"),
-            "category": audit_data.get("category")
-        }
-        if audit_data.get("retention_date"):
+        audit_record = _build_audit_record(audit_data)
+        # Handle timestamp conversion for bulk operations
+        if isinstance(audit_data.get("timestamp"), datetime):
+            audit_record["timestamp"] = audit_data["timestamp"].isoformat()
+        if audit_data.get("retention_date") and isinstance(
+            audit_data.get("retention_date"), datetime):
             audit_record["retention_date"] = audit_data.get("retention_date").isoformat()
         audit_records.append(audit_record)
 
@@ -286,4 +297,4 @@ async def bulk_create_audit_logs(audit_logs_data: List[Dict[str, Any]]) -> List[
     # Bulk insert all records
     result = await supabase.table("audit_logs").insert(audit_records).execute()
     print(f"Bulk create audit logs result: {result}")
-    return result.data if result.data else []
+    return _get_result_data(result)

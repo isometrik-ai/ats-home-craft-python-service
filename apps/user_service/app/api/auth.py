@@ -400,7 +400,7 @@ async def reset_password(
     category="USER_SIGNUP",
 )
 async def signup(
-    request: Request,
+    request: Request, # pylint: disable=unused-argument
     signup_data: SignupRequest = Body(...),
 ):
     """
