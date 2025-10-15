@@ -1585,7 +1585,7 @@ class TestOrganisationPermissionsAndBulk:
 
         mock_role = {
             "id": str(uuid.uuid4()),
-            "name": "Super Admin",
+            "name": "admin",
             "description": "Full administrative access to all system features",
             "organization_id": organisation_id,
             "is_default": True,

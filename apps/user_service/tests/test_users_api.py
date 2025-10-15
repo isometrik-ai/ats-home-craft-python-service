@@ -86,7 +86,7 @@ def test_get_user_profile_success(client):
         "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
         "joined_at": None, "last_active_at": None
     })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
-        res = client.get("/v1/admin/profile")
+        res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200
         body = res.json()
         assert body["data"]["email"] == "test@example.com"
@@ -96,7 +96,7 @@ def test_get_user_profile_success(client):
 def test_get_user_profile_not_found(client):
     """Test user profile not found."""
     with patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)):
-        res = client.get("/v1/admin/profile")
+        res = client.get("/v1/admin/users/profile")
         assert res.status_code == 404
         assert "User profile not found or access denied to organization" in res.json()["detail"]
 
@@ -109,7 +109,7 @@ def test_get_user_profile_email_mismatch(client):
         "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
         "joined_at": None, "last_active_at": None
     })):
-        res = client.get("/v1/admin/profile")
+        res = client.get("/v1/admin/users/profile")
         assert res.status_code == 403
         assert "Token email does not match user profile" in res.json()["detail"]
 
@@ -122,7 +122,7 @@ def test_get_user_profile_invalid_user_type(client):
         "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
         "joined_at": None, "last_active_at": None
     })):
-        res = client.get("/v1/admin/profile")
+        res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200  # This endpoint doesn't check user_type
         body = res.json()
         assert body["data"]["email"] == "test@example.com"
@@ -138,7 +138,7 @@ def test_get_user_by_id_success(client):
              "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
              "joined_at": None, "last_active_at": None
          })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
-        res = client.get(f"/v1/admin/{user_id}")
+        res = client.get(f"/v1/admin/users/{user_id}")
         assert res.status_code == 200
         body = res.json()
         assert body["data"]["user_id"] == user_id
@@ -150,7 +150,7 @@ def test_get_user_by_id_not_found(client):
     user_id = str(uuid.uuid4())
     with patch("apps.user_service.app.api.admin_management.users.user_profile.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id=user_id, email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)):
-        res = client.get(f"/v1/admin/{user_id}")
+        res = client.get(f"/v1/admin/users/{user_id}")
         assert res.status_code == 404
         assert USER_NOT_FOUND_MESSAGE in res.json()["detail"]
 
@@ -164,7 +164,7 @@ def test_get_user_by_id_invalid_user_type(client):
              "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
              "organization_id": str(uuid.uuid4())
          })):
-        res = client.get(f"/v1/admin/{user_id}")
+        res = client.get(f"/v1/admin/users/{user_id}")
         assert res.status_code == 403
         assert "Only organization members can access user profiles" in res.json()["detail"]
 
@@ -179,7 +179,7 @@ def test_get_user_by_id_permission_denied(client):
              "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
              "joined_at": None, "last_active_at": None
          })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
-        res = client.get(f"/v1/admin/{user_id}")
+        res = client.get(f"/v1/admin/users/{user_id}")
         assert res.status_code == 200  # This should pass with our mock
 
 
@@ -494,7 +494,7 @@ def test_update_user_email_success(client):
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "old@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.update_supabase_user_email", AsyncMock(return_value={"id": user_id})):
-        res = client.put(f"/v1/admin/{user_id}/email", json=payload)
+        res = client.put(f"/v1/admin/users/{user_id}/email", json=payload)
         assert res.status_code == 200
         assert "User email updated successfully" in res.json()["message"]
 
@@ -507,7 +507,7 @@ def test_update_user_email_user_not_found(client):
 
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(side_effect=HTTPException(status_code=404, detail="User not found"))):
-        res = client.put(f"/v1/admin/{user_id}/email", json=payload)
+        res = client.put(f"/v1/admin/users/{user_id}/email", json=payload)
         assert res.status_code == 404
         assert "User not found" in res.json()["detail"]
 
@@ -521,7 +521,7 @@ def test_update_user_email_duplicate_email(client):
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "old@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.update_supabase_user_email", AsyncMock(side_effect=HTTPException(status_code=400, detail="Email already exists"))):
-        res = client.put(f"/v1/admin/{user_id}/email", json=payload)
+        res = client.put(f"/v1/admin/users/{user_id}/email", json=payload)
         assert res.status_code == 400
         assert "Email already exists" in res.json()["detail"]
 
@@ -535,7 +535,7 @@ def test_update_user_email_database_error(client):
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "old@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.update_supabase_user_email", AsyncMock(side_effect=DatabaseOperationError("Database error"))):
-        res = client.put(f"/v1/admin/{user_id}/email", json=payload)
+        res = client.put(f"/v1/admin/users/{user_id}/email", json=payload)
         assert res.status_code == 500
         assert "Database error" in res.json()["detail"]
 
@@ -546,7 +546,7 @@ def test_update_user_email_invalid_email(client):
     new_email = "invalid-email"
     payload = {"email": new_email}
 
-    res = client.put(f"/v1/admin/{user_id}/email", json=payload)
+    res = client.put(f"/v1/admin/users/{user_id}/email", json=payload)
     assert res.status_code == 422
     assert "value is not a valid email address" in res.json()["detail"][0]["msg"]
 
@@ -563,7 +563,7 @@ def test_ban_user_success(client):
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.ban_the_user", AsyncMock(return_value={"id": user_id})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.suspend_user", AsyncMock(return_value=True)):
-        res = client.post(f"/v1/admin/ban/{user_id}")
+        res = client.post(f"/v1/admin/users/ban/{user_id}")
         assert res.status_code == 200
         assert "User successfully banned" in res.json()["message"]
 
@@ -574,7 +574,7 @@ def test_ban_user_not_found(client):
 
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(side_effect=HTTPException(status_code=404, detail="User not found"))):
-        res = client.post(f"/v1/admin/ban/{user_id}")
+        res = client.post(f"/v1/admin/users/ban/{user_id}")
         assert res.status_code == 404
         assert "User not found" in res.json()["detail"]
 
@@ -586,7 +586,7 @@ def test_ban_user_already_banned(client):
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.ban_the_user", AsyncMock(side_effect=HTTPException(status_code=400, detail="User is already banned"))):
-        res = client.post(f"/v1/admin/ban/{user_id}")
+        res = client.post(f"/v1/admin/users/ban/{user_id}")
         assert res.status_code == 400
         assert "User is already banned" in res.json()["detail"]
 
@@ -598,7 +598,7 @@ def test_ban_user_database_error(client):
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.ban_the_user", AsyncMock(side_effect=DatabaseOperationError("Database error"))):
-        res = client.post(f"/v1/admin/ban/{user_id}")
+        res = client.post(f"/v1/admin/users/ban/{user_id}")
         assert res.status_code == 500
         assert "Database error" in res.json()["detail"]
 
@@ -641,7 +641,7 @@ def test_ban_user_self_ban(client):
          patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", mock_check_permissions_async), \
          patch("apps.user_service.app.dependencies.common_utils.check_user_access_async", lambda *a, **k: True):
 
-        res = client.post(f"/v1/admin/ban/{user_id}")
+        res = client.post(f"/v1/admin/users/ban/{user_id}")
         print(f"Response status: {res.status_code}")
         print(f"Response body: {res.json()}")
         assert res.status_code == 400
@@ -660,7 +660,7 @@ def test_unban_user_success(client):
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.unban_the_user", AsyncMock(return_value={"id": user_id})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.revoke_suspended_user", AsyncMock(return_value=True)):
-        res = client.post(f"/v1/admin/unban/{user_id}")
+        res = client.post(f"/v1/admin/users/unban/{user_id}")
         assert res.status_code == 200
         assert "User successfully unbanned" in res.json()["message"]
 
@@ -671,7 +671,7 @@ def test_unban_user_not_found(client):
 
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(side_effect=HTTPException(status_code=404, detail="User not found"))):
-        res = client.post(f"/v1/admin/unban/{user_id}")
+        res = client.post(f"/v1/admin/users/unban/{user_id}")
         assert res.status_code == 404
         assert "User not found" in res.json()["detail"]
 
@@ -683,7 +683,7 @@ def test_unban_user_not_banned(client):
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.unban_the_user", AsyncMock(side_effect=HTTPException(status_code=400, detail="User is not banned"))):
-        res = client.post(f"/v1/admin/unban/{user_id}")
+        res = client.post(f"/v1/admin/users/unban/{user_id}")
         assert res.status_code == 400
         assert "User is not banned" in res.json()["detail"]
 
@@ -695,7 +695,7 @@ def test_unban_user_database_error(client):
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.unban_the_user", AsyncMock(side_effect=DatabaseOperationError("Database error"))):
-        res = client.post(f"/v1/admin/unban/{user_id}")
+        res = client.post(f"/v1/admin/users/unban/{user_id}")
         assert res.status_code == 500
         assert "Database error" in res.json()["detail"]
 
@@ -738,7 +738,7 @@ def test_unban_user_self_unban(client):
          patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", mock_check_permissions_async), \
          patch("apps.user_service.app.dependencies.common_utils.check_user_access_async", lambda *a, **k: True):
 
-        res = client.post(f"/v1/admin/unban/{user_id}")
+        res = client.post(f"/v1/admin/users/unban/{user_id}")
         print(f"Response status: {res.status_code}")
         print(f"Response body: {res.json()}")
         assert res.status_code == 400
@@ -756,7 +756,7 @@ def test_ban_user_auth_user_not_found(client):
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.ban_the_user", AsyncMock(return_value=False)):  # Return False to trigger user not found
-        res = client.post(f"/v1/admin/ban/{user_id}")
+        res = client.post(f"/v1/admin/users/ban/{user_id}")
         assert res.status_code == 404
         assert "User not found" in res.json()["detail"]
 
@@ -769,7 +769,7 @@ def test_ban_user_organization_user_not_found(client):
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.ban_the_user", AsyncMock(return_value=True)), \
          patch("apps.user_service.app.api.admin_management.users.update_user.suspend_user", AsyncMock(return_value=False)):  # Return False to trigger organization user not found
-        res = client.post(f"/v1/admin/ban/{user_id}")
+        res = client.post(f"/v1/admin/users/ban/{user_id}")
         assert res.status_code == 404
         assert "Organization User not found" in res.json()["detail"]
 
@@ -781,7 +781,7 @@ def test_unban_user_auth_user_not_found(client):
     with patch("apps.user_service.app.api.admin_management.users.update_user.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id="current-user-id", email="test@example.com", user_type="organization_member"))), \
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.unban_the_user", AsyncMock(return_value=False)):  # Return False to trigger user not found or not banned
-        res = client.post(f"/v1/admin/unban/{user_id}")
+        res = client.post(f"/v1/admin/users/unban/{user_id}")
         assert res.status_code == 404
         assert "User not found or not banned" in res.json()["detail"]
 
@@ -794,6 +794,6 @@ def test_unban_user_organization_user_not_found(client):
          patch("apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization", AsyncMock(return_value={"user_id": user_id, "email": "test@example.com", "full_name": "Test User", "organization_id": str(uuid.uuid4())})), \
          patch("apps.user_service.app.api.admin_management.users.update_user.unban_the_user", AsyncMock(return_value=True)), \
          patch("apps.user_service.app.api.admin_management.users.update_user.revoke_suspended_user", AsyncMock(return_value=False)):  # Return False to trigger organization user not found
-        res = client.post(f"/v1/admin/unban/{user_id}")
+        res = client.post(f"/v1/admin/users/unban/{user_id}")
         assert res.status_code == 404
         assert "Organization User not found" in res.json()["detail"]

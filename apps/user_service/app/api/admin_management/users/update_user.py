@@ -58,7 +58,7 @@ from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE
 
 # Create router for user update endpoints
-router = APIRouter(prefix="", tags=["User Update Operations"])
+router = APIRouter(prefix="/users", tags=["User Update Operations"])
 
 # Initialize logger for user update module
 logger = get_logger("user-update-api")

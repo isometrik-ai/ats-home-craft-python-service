@@ -176,17 +176,21 @@ class TestGetAuditLogById:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
-            mock_eq = MagicMock()
+            mock_eq1 = MagicMock()
+            mock_eq2 = MagicMock()
+            mock_eq3 = MagicMock()
             mock_limit = MagicMock()
 
             mock_table.select.return_value = mock_select
-            mock_select.eq.return_value = mock_eq
-            mock_eq.limit.return_value = mock_limit
+            mock_select.eq.return_value = mock_eq1
+            mock_eq1.eq.return_value = mock_eq2
+            mock_eq2.eq.return_value = mock_eq3
+            mock_eq3.limit.return_value = mock_limit
             mock_limit.execute = AsyncMock(return_value=mock_result)
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
-            result = await get_audit_log_by_id(audit_log_id)
+            result = await get_audit_log_by_id(audit_log_id, str(uuid.uuid4()), str(uuid.uuid4()))
 
             assert result == mock_audit_log
             mock_select.eq.assert_called_once_with("id", audit_log_id)
@@ -203,17 +207,21 @@ class TestGetAuditLogById:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
-            mock_eq = MagicMock()
+            mock_eq1 = MagicMock()
+            mock_eq2 = MagicMock()
+            mock_eq3 = MagicMock()
             mock_limit = MagicMock()
 
             mock_table.select.return_value = mock_select
-            mock_select.eq.return_value = mock_eq
-            mock_eq.limit.return_value = mock_limit
+            mock_select.eq.return_value = mock_eq1
+            mock_eq1.eq.return_value = mock_eq2
+            mock_eq2.eq.return_value = mock_eq3
+            mock_eq3.limit.return_value = mock_limit
             mock_limit.execute = AsyncMock(return_value=mock_result)
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
-            result = await get_audit_log_by_id(audit_log_id)
+            result = await get_audit_log_by_id(audit_log_id, str(uuid.uuid4()), str(uuid.uuid4()))
 
             assert result is None
 
@@ -431,15 +439,19 @@ class TestGetAuditLogsCount:
             mock_select = MagicMock()
             mock_eq1 = MagicMock()
             mock_eq2 = MagicMock()
+            mock_eq3 = MagicMock()
+            mock_eq4 = MagicMock()
 
             mock_table.select.return_value = mock_select
             mock_select.eq.return_value = mock_eq1
             mock_eq1.eq.return_value = mock_eq2
-            mock_eq2.execute = AsyncMock(return_value=mock_result)
+            mock_eq2.eq.return_value = mock_eq3
+            mock_eq3.eq.return_value = mock_eq4
+            mock_eq4.execute = AsyncMock(return_value=mock_result)
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
-            result = await get_audit_logs_count(filter_params)
+            result = await get_audit_logs_count(str(uuid.uuid4()), str(uuid.uuid4()), filter_params)
 
             assert result == 15
 
@@ -458,17 +470,21 @@ class TestGetAuditLogsCount:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
-            mock_eq = MagicMock()
+            mock_eq1 = MagicMock()
+            mock_eq2 = MagicMock()
+            mock_eq3 = MagicMock()
             mock_or = MagicMock()
 
             mock_table.select.return_value = mock_select
-            mock_select.eq.return_value = mock_eq
-            mock_eq.or_.return_value = mock_or
+            mock_select.eq.return_value = mock_eq1
+            mock_eq1.eq.return_value = mock_eq2
+            mock_eq2.eq.return_value = mock_eq3
+            mock_eq3.or_.return_value = mock_or
             mock_or.execute = AsyncMock(return_value=mock_result)
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
-            result = await get_audit_logs_count(filter_params)
+            result = await get_audit_logs_count(str(uuid.uuid4()), str(uuid.uuid4()), filter_params)
 
             assert result == 3
 
@@ -486,15 +502,19 @@ class TestGetAuditLogsCount:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
-            mock_eq = MagicMock()
+            mock_eq1 = MagicMock()
+            mock_eq2 = MagicMock()
+            mock_eq3 = MagicMock()
 
             mock_table.select.return_value = mock_select
-            mock_select.eq.return_value = mock_eq
-            mock_eq.execute = AsyncMock(return_value=mock_result)
+            mock_select.eq.return_value = mock_eq1
+            mock_eq1.eq.return_value = mock_eq2
+            mock_eq2.eq.return_value = mock_eq3
+            mock_eq3.execute = AsyncMock(return_value=mock_result)
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
-            result = await get_audit_logs_count(filter_params)
+            result = await get_audit_logs_count(str(uuid.uuid4()), str(uuid.uuid4()), filter_params)
 
             assert result == 0
 

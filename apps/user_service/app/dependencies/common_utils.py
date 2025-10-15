@@ -21,6 +21,7 @@ Common Patterns Covered:
 import time
 import uuid
 import json
+import traceback
 from typing import Optional, List, Callable, Union, Dict, Any
 from functools import wraps
 from dataclasses import dataclass
@@ -86,7 +87,7 @@ def format_permissions_data(permissions_data: List[Dict[str, Any]]) -> List[Perm
     Format permissions data into PermissionItem objects.
     """
     return [PermissionItem(
-        id=str(permission["id"]),
+        id=permission["id"],
         name=permission["name"],
         code=permission["code"],
         category=permission["category"],
@@ -227,7 +228,7 @@ async def check_permissions(
         permission_code=permission_codes,
         user_context=user_context,
         action_description=action_description,
-        organization_id=organization_id
+        organization_id=organization_id if organization_id else user_context.organization_id
     )
     return user_context
 
@@ -350,6 +351,7 @@ def handle_api_exceptions(operation_name: str):
             except Exception as error:
                 # Handle any other unexpected errors
                 print(f"Error in {operation_name}: {error}")
+                traceback.print_exc()
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Internal server error during {operation_name}",
@@ -368,8 +370,21 @@ def handle_api_exceptions(operation_name: str):
 def format_iso_datetime(dt) -> Optional[str]:
     """
     Format datetime or ISO-string to ISO string, handling None values.
+    Handles both datetime objects and ISO string inputs.
     """
-    return dt.isoformat() if dt else None
+    if not dt:
+        return None
+
+    # If it's already a string, return as-is (assuming it's already in ISO format)
+    if isinstance(dt, str):
+        return dt
+
+    # If it's a datetime object, convert to ISO string
+    if hasattr(dt, 'isoformat'):
+        return dt.isoformat()
+
+    # Fallback: convert to string
+    return str(dt)
 
 
 def safe_json_loads(json_str, default=None):

@@ -303,7 +303,7 @@ class TestCreateOrganisation:
             data = response.json()
             assert data["data"]["organization_name"] == "New Organization"
             assert data["data"]["user_email"] == "test@example.com"
-            assert data["data"]["role_name"] == "Super Admin"
+            assert data["data"]["role_name"] == "admin"
 
     def test_create_organisation_missing_user_data(self, client):
         """Test organisation creation with missing user data."""

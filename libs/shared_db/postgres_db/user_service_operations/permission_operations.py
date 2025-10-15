@@ -93,3 +93,16 @@ async def get_all_permissions(organization_id: str) -> List[Dict[str, Any]]:
     ).execute()
 
     return result.data if result.data else []
+
+
+@handle_database_errors(
+    "delete_permission",
+    custom_messages=create_error_messages("delete_permission", "deleting"))
+async def delete_permission(permission_id: str, organization_id: str) -> bool:
+    """Delete a permission."""
+    supabase = await get_supabase_admin_client()
+    result = await supabase.table(
+        "permissions").delete().eq(
+            "id", permission_id).eq(
+            "organization_id", organization_id).execute()
+    return result.data if result.data else []

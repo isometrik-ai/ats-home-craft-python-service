@@ -236,13 +236,13 @@ class TestDeletePermission:
 
     def test_delete_permission_success(self, client):
         """Test successful permission deletion."""
-        permission_id = 123  # Note: delete endpoint expects int, not str
+        permission_id = str(uuid.uuid4())  # Use UUID string, not int
 
-        res = client.delete(f"/v1/admin/permissions/{permission_id}")
-        assert res.status_code == 200
-        data = res.json()
-        assert data["message"] == f"Delete permission {permission_id} API is working"
-        assert data["status"] == "success"
+        with patch("apps.user_service.app.api.admin_management.permissions.get_permission_details_by_id", AsyncMock(return_value={
+            "id": permission_id, "name": "Test Permission", "code": "test_code", "category": "test", "description": "Test description"
+        })), patch("apps.user_service.app.api.admin_management.permissions.delete_permission", AsyncMock(return_value=True)):
+            res = client.delete(f"/v1/admin/permissions/{permission_id}")
+            assert res.status_code == 204
 
     def test_delete_permission_invalid_id(self, client):
         """Test permission deletion with invalid ID format."""

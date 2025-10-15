@@ -17,7 +17,7 @@ Operations Covered:
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import logging
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_supabase_client
 from apps.user_service.app.schemas.auth import SessionFilter
 from .exception_handling import handle_database_errors, create_error_messages
 
@@ -168,7 +168,7 @@ async def check_session_exists(session_id: str, organization_id: str) -> bool:
 @handle_database_errors(
     "get_sessions_list",
     custom_messages=create_error_messages("get_sessions_list", "getting"))
-async def get_sessions_list(organization_id: str, filters: SessionFilter) -> List[Dict[str, Any]]:
+async def get_sessions_list(organization_id: str, user_id: str, filters: SessionFilter) -> List[Dict[str, Any]]:
     """Get paginated list of sessions with optional search and filtering."""
     supabase = await get_supabase_admin_client()
 
@@ -178,7 +178,7 @@ async def get_sessions_list(organization_id: str, filters: SessionFilter) -> Lis
         "device_fingerprint, risk_score, login_timestamp, "
         "logout_timestamp, session_status, login_method, "
         "accessed_phi, phi_access_purpose"
-    ).eq("organization_id", organization_id)
+    ).eq("organization_id", organization_id).eq("user_id", user_id)
 
     # Apply filters
     if filters.session_status:
@@ -204,14 +204,16 @@ async def get_sessions_list(organization_id: str, filters: SessionFilter) -> Lis
 @handle_database_errors(
     "get_sessions_count",
     custom_messages=create_error_messages("get_sessions_count", "getting"))
-async def get_sessions_count(organization_id: str, filters: SessionFilter) -> int:
+async def get_sessions_count(organization_id: str, user_id: str, filters: SessionFilter) -> int:
     """Get total count of sessions matching search criteria."""
     supabase = await get_supabase_admin_client()
 
     # Build the count query with filters
     query = supabase.table("user_sessions").select(
         "id", count="exact"
-    ).eq("organization_id", organization_id)
+    ).eq("organization_id", organization_id).eq(
+        "user_id", user_id
+    )
 
     # Apply filters
     if filters.session_status:

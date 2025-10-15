@@ -57,36 +57,6 @@ DEFAULT_PERMISSIONS = [
         "business",
     ),
     (
-        "talent.candidates.view",
-        "View Candidates",
-        "View candidate profiles",
-        "talent",
-    ),
-    (
-        "talent.candidates.manage",
-        "Manage Candidates",
-        "Full candidate management",
-        "talent",
-    ),
-    (
-        "talent.rst_templates.view",
-        "View RST Templates",
-        "View templates only",
-        "talent",
-    ),
-    (
-        "talent.rst_templates.manage",
-        "Manage RST Templates",
-        "Create and edit templates",
-        "talent",
-    ),
-    (
-        "talent.search.advanced",
-        "Advanced Search",
-        "Access to advanced search features",
-        "talent",
-    ),
-    (
         "automation.triggers.manage",
         "Manage Triggers",
         "Create and manage automation triggers",
@@ -135,12 +105,12 @@ DEFAULT_PERMISSIONS = [
 
 # Common SELECT fields for roles
 ROLE_SELECT_FIELDS = """
-    r.id,
-    r.name,
-    r.description,
-    r.is_default,
-    r.updated_at,
-    r.created_at
+    id,
+    name,
+    description,
+    is_default,
+    updated_at,
+    created_at
 """
 
 # Common SELECT fields for permissions
@@ -157,5 +127,6 @@ SETTINGS_SYSTEM_MANAGE = "settings.system.manage"
 SETTINGS_ROLES_MANAGE = "settings.roles.manage"
 SETTINGS_USERS_MANAGE = "settings.users.manage"
 SETTINGS_USERS_VIEW = "settings.users.view"
+SETTINGS_PERMISSIONS_MANAGE = "settings.permissions.manage"
 
 USER_NOT_FOUND_MESSAGE = "User not found in organization"

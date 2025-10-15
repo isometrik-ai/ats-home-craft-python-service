@@ -21,6 +21,7 @@ from apps.user_service.app.dependencies.common_utils import (
     format_iso_datetime,
     safe_json_loads,
     validate_uuid_format,
+    check_permissions,
 )
 
 # Audit logs utility imports
@@ -45,7 +46,7 @@ from apps.user_service.app.app_instance import limiter
 
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-
+from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
 
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
@@ -119,16 +120,8 @@ async def get_audit_logs(
         HTTPException: 403 for insufficient permissions
         HTTPException: 500 for database errors
     """
-    # Extract and validate user context from JWT token
-    user_context = extract_user_context(current_user)
-
-    # Check permission using utility function
-    # await require_permission(
-    #     permission_code="audit.logs.view",
-    #     user_context=user_context,
-    #     db_conn=db_conn,
-    #     action_description="view audit logs",
-    # )
+    # Extract and validate user context from JWT token & check permission
+    user_context = await check_permissions(current_user, SETTINGS_SYSTEM_MANAGE, "view audit logs")
 
     # Create filter parameters
     filter_params = AuditLogFilter(
@@ -136,13 +129,14 @@ async def get_audit_logs(
         search=query_params.search,
         limit=query_params.limit,
         offset=query_params.skip,
+        user_id=user_context.user_id,
     )
 
     # Get audit logs using centralized database operations
     audit_logs_data = await get_audit_logs_list(filter_params)
 
     # Get total count using centralized database operations
-    total_count = await get_audit_logs_count(filter_params)
+    total_count = await get_audit_logs_count(user_context.organization_id, user_context.user_id, filter_params)
 
     # Format audit logs data using utility functions
     audit_logs = [
@@ -209,7 +203,7 @@ async def get_audit_logs(
 async def get_audit_log_from_id(
     audit_log_id: str,
     request: Request,
-    # current_user: dict = Depends(get_user_from_auth),
+    current_user: dict = Depends(get_user_from_auth),
 ):
     """
     Get audit log by ID with all details (Optimized & Truly Async)
@@ -244,19 +238,14 @@ async def get_audit_log_from_id(
     request.state.audit_requested_id = audit_log_id
     validate_uuid_format(audit_log_id, "audit log ID")
 
-    # Extract and validate user context from JWT token
-    # user_context = extract_user_context(current_user)
-
-    # Check permission using utility function
-    # await require_permission(
-    #     permission_code="audit.logs.view",
-    #     user_context=user_context,
-    #     db_conn=db_conn,
-    #     action_description="view audit log details",
-    # )
-
+    # Extract and validate user context from JWT token & check permission
+    user_context = await check_permissions(
+        current_user=current_user,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
+        action_description="view audit log details",
+    )
     # Get audit log using centralized database operations
-    audit_log_data = await get_audit_log_by_id(audit_log_id)
+    audit_log_data = await get_audit_log_by_id(audit_log_id, user_context.organization_id, user_context.user_id)
 
     # Check if audit log exists
     if not audit_log_data:

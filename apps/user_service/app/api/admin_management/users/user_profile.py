@@ -4,7 +4,7 @@ This module provides user profile operations including getting own profile and g
 All endpoints include proper authentication, validation, and database operations.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request
@@ -13,7 +13,6 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.dependencies.common_utils import (
     extract_user_context,
-    # require_permission,
     check_permissions
 )
 from apps.user_service.app.dependencies.user_utils import (
@@ -45,7 +44,7 @@ from libs.shared_db.postgres_db.user_service_operations.user_operations import (
 # )
 
 # Create router for user profile endpoints
-router = APIRouter(prefix="", tags=["User Profile"])
+router = APIRouter(prefix="/users", tags=["User Profile"])
 
 # Initialize logger for user profile module
 logger = get_logger("user-profile-api")
@@ -118,70 +117,61 @@ async def get_user_profile(
 
         return user_profile
 
-    # Handle different user types
-    if user_context.user_type == "organization_member":
-        # Original flow for organization members
-        user_profile = await _fetch_org_member_profile()
+    user_profile = await _fetch_org_member_profile()
 
-        async def _fetch_permissions() -> list:
-            """Fetch user permissions and update activity."""
+    async def _fetch_permissions() -> list:
+        """Fetch user permissions and update activity."""
 
-            permissions_data = await get_user_permissions(
-                user_context.user_id,
-                user_context.organization_id
-            )
-            await update_user_activity(
-                user_context.user_id,
-                user_context.organization_id
-            )
-            return permissions_data
-
-        permissions_data = await _fetch_permissions()
-
-        def _format_org_member_data(user_profile: dict, permissions_data: list) -> UserProfileData:
-            """Format organization member profile data."""
-            role_info = RoleInfoWithDescription(
-                role_id=str(user_profile["role_id"]),
-                role_name=user_profile["role_name"],
-                description=user_profile.get("role_description", ""),
-            )
-            permissions = [
-                PermissionInfo(
-                    permission_id=str(p["permission_id"]),
-                    permission_name=p["permission_name"],
-                    permission_code=p["permission_code"],
-                    category=p["category"],
-                )
-                for p in permissions_data
-            ]
-            # Timestamps are now handled by create_user_profile_data
-
-            # Set audit data for profile access
-            request.state.raw_audit_new_data = {
-                "user_id": str(user_profile["user_id"]),
-                "email": user_profile["email"],
-                "full_name": user_profile["full_name"],
-                "organization_id": str(user_profile["organization_id"]),
-                "role_id": str(user_profile["role_id"]),
-                "role_name": user_profile["role_name"],
-                "status": user_profile["status"],
-                "permission_count": len(permissions),
-                "access_timestamp": datetime.now().isoformat(),
-            }
-
-            return create_user_profile_data(
-                user_profile=user_profile,
-                user_type=user_context.user_type,
-                role_info=role_info,
-                permissions=permissions
-            )
-
-        profile_data = _format_org_member_data(user_profile, permissions_data)
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user type",
+        permissions_data = await get_user_permissions(
+            user_context.user_id,
+            user_context.organization_id
         )
+        await update_user_activity(
+            user_context.user_id,
+            user_context.organization_id
+        )
+        return permissions_data
+
+    permissions_data = await _fetch_permissions()
+
+    def _format_org_member_data(user_profile: dict, permissions_data: list) -> UserProfileData:
+        """Format organization member profile data."""
+        role_info = RoleInfoWithDescription(
+            role_id=str(user_profile["role_id"]),
+            description=user_profile.get("role_description", ""),
+        )
+        permissions = [
+            PermissionInfo(
+                permission_id=str(p["id"]),
+                permission_name=p["name"],
+                permission_code=p["code"],
+                category=p["category"],
+            )
+            for p in permissions_data
+        ]
+        # Timestamps are now handled by create_user_profile_data
+
+        # Set audit data for profile access
+        request.state.raw_audit_new_data = {
+            "user_id": str(user_profile["user_id"]),
+            "email": user_profile["email"],
+            "full_name": user_profile["full_name"],
+            "organization_id": str(user_profile["organization_id"]),
+            "role_id": str(user_profile["role_id"]),
+            # "role_name": user_profile["role_name"],
+            "status": user_profile["status"],
+            "permission_count": len(permissions),
+            "access_timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        return create_user_profile_data(
+            user_profile=user_profile,
+            user_type=user_context.user_type,
+            role_info=role_info,
+            permissions=permissions
+        )
+
+    profile_data = _format_org_member_data(user_profile, permissions_data)
 
     # User type validation is now handled in extract_user_context function
     # This else block should never be reached due to validation in common_utils
@@ -253,8 +243,6 @@ async def get_user_by_id(
         user_id, user_context.organization_id
     )
 
-    print("permission_id")
-    print(permissions_data)
     permissions = [
         PermissionInfo(
             permission_id=str(p.permission_id),

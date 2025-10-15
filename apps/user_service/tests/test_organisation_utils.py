@@ -175,7 +175,7 @@ class TestCreateOrganisationWithSuperAdmin:
         }
 
         mock_org_result = {"id": org_data["organization_id"], "name": "Test Org"}
-        mock_role_result = {"id": str(uuid.uuid4()), "name": "Super Admin"}
+        mock_role_result = {"id": str(uuid.uuid4()), "name": "admin"}
         mock_permissions = ["perm-1", "perm-2", "perm-3"]
         mock_member_result = {"id": str(uuid.uuid4())}
 
@@ -216,7 +216,7 @@ class TestCreateOrganisationWithSuperAdmin:
         }
 
         mock_org_result = {"id": org_data["organization_id"], "name": "Test Org"}
-        mock_role_result = {"id": str(uuid.uuid4()), "name": "Super Admin"}
+        mock_role_result = {"id": str(uuid.uuid4()), "name": "admin"}
         mock_permissions = ["perm-1", "perm-2"]
         mock_member_result = {"id": str(uuid.uuid4())}
 
@@ -348,7 +348,7 @@ class TestCreateOrganisationWithSuperAdmin:
         }
 
         mock_org_result = {"id": org_data["organization_id"], "name": "Test Org"}
-        mock_role_result = {"id": str(uuid.uuid4()), "name": "Super Admin"}
+        mock_role_result = {"id": str(uuid.uuid4()), "name": "admin"}
         permissions_error = Exception("Permissions creation failed")
 
         with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
@@ -382,7 +382,7 @@ class TestCreateOrganisationWithSuperAdmin:
         }
 
         mock_org_result = {"id": org_data["organization_id"], "name": "Test Org"}
-        mock_role_result = {"id": str(uuid.uuid4()), "name": "Super Admin"}
+        mock_role_result = {"id": str(uuid.uuid4()), "name": "admin"}
         mock_permissions = ["perm-1", "perm-2"]
         member_error = Exception("Member creation failed")
 

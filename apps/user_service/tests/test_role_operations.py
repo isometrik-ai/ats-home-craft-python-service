@@ -596,8 +596,8 @@ class TestRoleOperations:
             result = await get_role_permissions(role_id, organization_id)
 
             assert len(result) == 2
-            assert result[0] == permission_id1
-            assert result[1] == permission_id2
+            assert result[0]["permission_id"] == permission_id1
+            assert result[1]["permission_id"] == permission_id2
 
     @pytest.mark.asyncio
     async def test_get_role_permissions_empty(self):
@@ -634,8 +634,9 @@ class TestRoleOperations:
 
             result = await get_role_permissions(role_id, organization_id)
 
-            assert len(result) == 1
-            assert result[0] == "perm1"
+            assert len(result) == 2
+            assert result[0]["permission_id"] is None
+            assert result[1]["permission_id"] == "perm1"
 
     # ============================================================================
     # VALIDATION OPERATIONS

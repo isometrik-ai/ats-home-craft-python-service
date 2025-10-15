@@ -63,9 +63,6 @@ class RoleQueryParams(BaseModel):
     limit: int = Field(
         10, ge=1, le=100, description="Maximum number of roles to return (max: 100)"
     )
-    role_type: Optional[str] = Field(
-        None, description="Filter by role type - 'system' or 'custom'"
-    )
     sort_type: Optional[bool] = Field(
         default=False,
         description=(
@@ -80,7 +77,6 @@ class RoleQueryParams(BaseModel):
                 "search": "admin",
                 "skip": 0,
                 "limit": 10,
-                "role_type": "system",
                 "sort_type": False,
             }
         }
@@ -326,13 +322,11 @@ class CreateRoleRequest(BaseModel):
 
     Attributes:
         name (str): Name of the role (required)
-        role_type (str): Type of role - "system" or "custom" (required)
         description (Optional[str]): Description of the role
         permission_ids (List[str]): List of permission IDs to assign to this role
     """
 
     name: str = Field(..., min_length=2, max_length=100, description="Name of the role")
-    role_type: str = Field(..., description="Type of role - 'system' or 'custom'")
     description: Optional[str] = Field(
         None, max_length=500, description=DESCRIPTION_OF_THE_ROLE
     )
@@ -344,7 +338,6 @@ class CreateRoleRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "name": "Project Manager",
-                "role_type": "custom",
                 "description": "Manages projects and team members",
                 "permission_ids": [
                     "6ba7b810-9dad-11d1-80b4-00c04fd430c8",

@@ -21,6 +21,7 @@ from apps.user_service.app.dependencies.common_utils import (
     extract_user_context,
     format_iso_datetime,
     validate_pagination_params,
+    check_permissions,
 )
 
 # Schema imports
@@ -41,6 +42,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 )
 
 # Local imports
+from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     DatabaseOperationError
@@ -205,8 +207,6 @@ def build_session_filter_message(
     filter_text = f" with filters: {', '.join(filters)}" if filters else ""
 
     return f"Sessions retrieved successfully (page {page}, {page_size} per page){filter_text}"
-
-
 
 
 def _extract_session_data_from_request(request: Request) -> dict:
@@ -405,12 +405,14 @@ async def _fetch_sessions_data(
     # Get sessions using centralized operations
     sessions_data = await get_sessions_list(
         organization_id=user_context.organization_id,
+        user_id=user_context.user_id,
         filters=filters
     )
 
     # Get total count using centralized operation
     total_count = await get_sessions_count(
         organization_id=user_context.organization_id,
+        user_id=user_context.user_id,
         filters=filters
     )
 
@@ -591,7 +593,7 @@ async def update_session_logout(
 #     table_name="user_sessions",
 #     category="SESSION",
 # )
-async def get_sessions(
+async def get_sessions_details(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     query_params: SessionQueryParams = Depends(),
@@ -614,16 +616,10 @@ async def get_sessions(
     # request_id = str(uuid.uuid4())
 
     # Extract and validate user context from JWT token
-    user_context = extract_user_context(current_user)
-
-    # Check permission using utility function
-    # await require_permission(
-    #     permission_code="settings.sessions.manage",
-    #     user_context=user_context,
-    #     db_conn=db_conn,
-    #     action_description="view sessions",
-    # )
-
+    user_context = await check_permissions(current_user=current_user,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
+        action_description="view sessions list"
+    )
     # Set audit context for session list access
     request.state.audit_table = "user_sessions"
     request.state.audit_description = (
