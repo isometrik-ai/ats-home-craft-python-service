@@ -42,18 +42,14 @@ from apps.user_service.app.dependencies.common_utils import (
 from apps.user_service.app.dependencies.invite_utils import (
     validate_email_format,
     validate_expiration_days,
-    is_invite_expired,
-    can_resend_invite,
     can_revoke_invite,
     build_invite_details_response,
     build_invite_list_item,
     handle_invite_validation_error,
-    handle_invite_not_found_error,
     handle_invite_permission_error,
     generate_invite_url,
     check_organization_capacity,
     validate_organization_access,
-    is_valid_status_transition,
 )
 
 # Schema imports
@@ -62,9 +58,7 @@ from apps.user_service.app.schemas.invites import (
     InviteResponse,
     InviteAcceptRequest,
     InviteAcceptResponse,
-    InviteDetailsResponse,
     InviteListResponse,
-    InviteListQueryParams,
 )
 
 # Third-party imports
@@ -740,7 +734,8 @@ async def resend_invitation(
 
     # Extract user context
     user_context = await check_permissions(current_user=current_user,
-        permission_codes=SETTINGS_SYSTEM_MANAGE, action_description="resend organization invitations")
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
+        action_description="resend organization invitations")
 
     # Get invitation details
     invitation_data = await get_invite_by_id(invite_id)

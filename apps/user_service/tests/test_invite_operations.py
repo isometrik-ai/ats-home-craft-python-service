@@ -1,3 +1,4 @@
+# pylint: disable=all
 """
 Test cases for invite_operations.py module
 
@@ -584,13 +585,9 @@ class TestCheckExistingInvite:
         with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
-            mock_select = MagicMock()
-            mock_eq = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_eq.limit.return_value = mock_limit
-            mock_select.eq.return_value = mock_eq
-            mock_table.select.return_value = mock_select
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -619,13 +616,9 @@ class TestCheckExistingInvite:
         with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
-            mock_select = MagicMock()
-            mock_eq = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_eq.limit.return_value = mock_limit
-            mock_select.eq.return_value = mock_eq
-            mock_table.select.return_value = mock_select
+            mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -645,13 +638,9 @@ class TestCheckExistingInvite:
         with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
-            mock_select = MagicMock()
-            mock_eq = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_eq.limit.return_value = mock_limit
-            mock_select.eq.return_value = mock_eq
-            mock_table.select.return_value = mock_select
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -682,13 +671,9 @@ class TestCheckUserMembership:
         with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
-            mock_select = MagicMock()
-            mock_eq = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_eq.limit.return_value = mock_limit
-            mock_select.eq.return_value = mock_eq
-            mock_table.select.return_value = mock_select
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -709,13 +694,9 @@ class TestCheckUserMembership:
         with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
-            mock_select = MagicMock()
-            mock_eq = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_eq.limit.return_value = mock_limit
-            mock_select.eq.return_value = mock_eq
-            mock_table.select.return_value = mock_select
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 

@@ -16,7 +16,6 @@ from pydantic import BaseModel
 
 # Utility imports
 from apps.user_service.app.dependencies.common_utils import (
-    extract_user_context,
     handle_api_exceptions,
     format_iso_datetime,
     safe_json_loads,
@@ -136,7 +135,9 @@ async def get_audit_logs(
     audit_logs_data = await get_audit_logs_list(filter_params)
 
     # Get total count using centralized database operations
-    total_count = await get_audit_logs_count(user_context.organization_id, user_context.user_id, filter_params)
+    total_count = await get_audit_logs_count(
+        user_context.organization_id,
+        user_context.user_id, filter_params)
 
     # Format audit logs data using utility functions
     audit_logs = [
@@ -245,7 +246,11 @@ async def get_audit_log_from_id(
         action_description="view audit log details",
     )
     # Get audit log using centralized database operations
-    audit_log_data = await get_audit_log_by_id(audit_log_id, user_context.organization_id, user_context.user_id)
+    audit_log_data = await get_audit_log_by_id(
+        audit_log_id=audit_log_id,
+        organization_id=user_context.organization_id,
+        user_id=user_context.user_id,
+    )
 
     # Check if audit log exists
     if not audit_log_data:

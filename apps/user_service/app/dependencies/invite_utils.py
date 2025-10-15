@@ -18,8 +18,8 @@ Utilities Covered:
 
 import re
 import hashlib
-from datetime import datetime
-from typing import Optional, Dict, Any, Coroutine
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any
 from apps.user_service.app.dependencies.common_utils import UserContext
 from fastapi import HTTPException, status
 from apps.user_service.app.dependencies.logger import get_logger
@@ -103,7 +103,10 @@ def is_invite_expired(expires_at: str) -> bool:
     """
     try:
         expiration_time = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-        return datetime.now() > expiration_time
+        # If expiration_time is naive, make it timezone-aware
+        if expiration_time.tzinfo is None:
+            expiration_time = expiration_time.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expiration_time
     except (ValueError, AttributeError):
         logger.warning("Invalid expiration date format: %s", expires_at)
         return True
@@ -297,7 +300,7 @@ def generate_invite_url(base_url: str, token: str) -> str:
     Returns:
         str: Complete invitation URL
     """
-    return f"{base_url}/invite/accept/{token}"
+    return f"{base_url.rstrip('/')}/invite/accept/{token}"
 
 
 def extract_token_from_url(url: str) -> Optional[str]:
@@ -313,7 +316,7 @@ def extract_token_from_url(url: str) -> Optional[str]:
     # Simple token extraction from URL pattern
     # Assumes URL format: /invite/accept/{token}
     parts = url.split("/")
-    if len(parts) >= 3 and parts[-2] == "accept":
+    if len(parts) >= 4 and parts[-3] == "invite" and parts[-2] == "accept" and parts[-1]:
         return parts[-1]
     return None
 
@@ -349,7 +352,7 @@ async def validate_organization_access(user_context, organization_id: str) -> bo
     Returns:
         bool: True if user has access
     """
-    user_org_id = user_context if isinstance(user_context, Coroutine | UserContext) else await user_context
+    user_org_id = user_context if isinstance(user_context, UserContext) else await user_context
     return user_org_id.organization_id == organization_id
 
 
