@@ -28,6 +28,7 @@ from apps.user_service.app.api.admin_management.permissions import (
     router as permissions_router,
 )
 from apps.user_service.app.api.audit_logs.audit_logs import router as audit_logs_router
+from apps.user_service.app.api.invites import router as invites_router
 
 
 # Create main API router
@@ -43,6 +44,7 @@ router.include_router(roles_router)
 router.include_router(sessions_router)
 router.include_router(permissions_router)
 router.include_router(audit_logs_router)
+router.include_router(invites_router)
 
 # Health check endpoint for the API router
 @router.get("/status")
@@ -64,6 +66,7 @@ async def api_status():
             "/admin/permissions",
             "/admin/role-permissions",
             "/admin/audit-logs",
+            "/admin/invite",
             "/embedding",
             "/clients",
         ],
