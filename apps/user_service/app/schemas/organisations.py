@@ -390,7 +390,7 @@ class CreateOrganisationWithUserResponse(ResponseModel):
                     "user_id": "550e8400-e29b-41d4-a716-446655440000",
                     "organization_name": "Acme Corporation",
                     "user_email": "admin@acme.com",
-                    "role_name": "Super Admin",
+                    "role_name": "admin",
                 }
             }
         }

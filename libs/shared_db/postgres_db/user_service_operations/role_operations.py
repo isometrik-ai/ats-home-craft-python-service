@@ -143,7 +143,6 @@ async def check_role_exists(role_id: str, organization_id: str) -> bool:
 async def _get_roles_list_sdk_fallback(
     organization_id: str,
     search: Optional[str],
-    role_type: Optional[str],
     limit: int,
     offset: int
 ) -> List[Dict[str, Any]]:
@@ -155,14 +154,10 @@ async def _get_roles_list_sdk_fallback(
 
     query = supabase.table("roles").select(
         "id, name, description, is_default, created_at, updated_at"
-    ).eq("organization_id", organization_id).neq("name", "Super Admin")
+    ).eq("organization_id", organization_id).neq("name", "admin")
 
     if search:
         query = query.ilike("name", f"%{search}%")
-
-    if role_type:
-        is_default_value = role_type == "system"
-        query = query.eq("is_default", is_default_value)
 
     result = await query.order("updated_at", desc=True).range(
         offset, offset + limit - 1
@@ -201,7 +196,6 @@ async def _get_roles_list_sdk_fallback(
 async def get_roles_list(
     organization_id: str,
     search: Optional[str] = None,
-    role_type: Optional[str] = None,
     limit: int = 20,
     offset: int = 0
 ) -> List[Dict[str, Any]]:
@@ -219,11 +213,13 @@ async def get_roles_list(
             {
                 "p_org_id": organization_id,
                 "p_search": search,
-                "p_role_type": role_type,
                 "p_limit": limit,
                 "p_offset": offset,
             },
         )
+
+        result = await rpc_builder.execute()
+        print("----------------\n\n\nresult", result)
 
         # Execute may be sync or async depending on test mocks; handle both
         execute_fn = getattr(rpc_builder, "execute", None)
@@ -240,7 +236,7 @@ async def get_roles_list(
     except Exception:
         # Fall through to SDK query path on any RPC/mocking issues
         return await _get_roles_list_sdk_fallback(
-            organization_id, search, role_type, limit, offset
+            organization_id, search, limit, offset
         )
 
 
@@ -250,7 +246,7 @@ async def get_roles_list(
 async def get_roles_count(
     organization_id: str,
     search: Optional[str] = None,
-    role_type: Optional[str] = None
+    # role_type: Optional[str] = None
 ) -> int:
     """Get total count of roles matching search criteria.
 
@@ -262,16 +258,11 @@ async def get_roles_count(
     # Build the count query with filters (mimicking build_roles_count_query logic)
     query = supabase.table("roles").select("id", count="exact").eq(
         "organization_id", organization_id
-    ).neq("name", "Super Admin")
+    ).neq("name", "admin")
 
     # Apply search filter (mimicking the ILIKE logic from build_roles_count_query)
     if search:
         query = query.ilike("name", f"%{search}%")
-
-    # Apply role type filter (mimicking the is_default logic from build_roles_count_query)
-    if role_type:
-        is_default_value = role_type == "system"
-        query = query.eq("is_default", is_default_value)
 
     result = await query.execute()
 
@@ -357,22 +348,14 @@ async def get_role_permissions(role_id: str, organization_id: str) -> List[Dict[
 
     result = await supabase.table(
         "role_permissions"
-        ).select("permission_id"
+        ).select("*"
         ).eq("role_id", role_id
         ).eq("organization_id", organization_id
         ).execute()
 
-    # Extract permissions from the nested structure
-    permissions = []
-    if result.data:
-        for item in result.data:
-            if item.get("permission_id"):
-                permissions.append(item["permission_id"])
+    print("----------------\n\n\nresult :", result,end='\n\n\n')
 
-    # # Sort by category and name
-    # permissions.sort(key=lambda x: (x.get("category") or "", x.get("name", "")))
-
-    return permissions
+    return result.data if result.data else []
 
 
 @handle_database_errors(

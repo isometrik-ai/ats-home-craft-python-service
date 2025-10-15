@@ -109,7 +109,8 @@ async def get_users_list(
     )
 
     # Permission check
-    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
+    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE,
+        action_description="access user list")
 
     # Get users list using database operations
     users_data = await get_users_details_list(

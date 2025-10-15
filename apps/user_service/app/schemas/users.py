@@ -35,7 +35,7 @@ class RoleInfo(BaseModel):
     """
 
     role_id: str = Field(..., description="Unique identifier for the role")
-    role_name: str = Field(..., description="Human-readable name of the role")
+    # role_name: str = Field(..., description="Human-readable name of the role")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -127,8 +127,8 @@ class UserProfileData(BaseModel):
     phone: Optional[str] = Field(None, description="User's phone number")
     timezone: str = Field(default="UTC", description="User's timezone setting")
     status: str = Field(..., description="User's membership status in organization")
-    joined_at: str = Field(
-        ..., description="ISO timestamp when user joined organization"
+    joined_at: Optional[str] = Field(
+        None, description="ISO timestamp when user joined organization"
     )
     last_active_at: Optional[str] = Field(
         None, description="ISO timestamp of last activity"
@@ -136,9 +136,9 @@ class UserProfileData(BaseModel):
     organization_id: str = Field(
         ..., description="ID of the organization user belongs to"
     )
-    user_type: str = Field(
-        ..., description="Type of user (organization_member, client, candidate)"
-    )
+    # user_type: str = Field(
+    #     ..., description="Type of user (organization_member, client, candidate)"
+    # )
     role: Optional[RoleInfoWithDescription] = Field(
         None,
         description="User's assigned role information (only for organization_member)",
@@ -372,7 +372,7 @@ class UserListItem(BaseModel):
     phone: Optional[str] = Field(None, description="Updated phone number")
     first_name: Optional[str] = Field(None, description="Updated first name")
     last_name: Optional[str] = Field(None, description="Updated last name")
-    role_name: str = Field(..., description="Name of user's assigned role")
+    # role_name: str = Field(..., description="Name of user's assigned role")
     status: str = Field(..., description="User's membership status")
     joined_at: str = Field(..., description="ISO timestamp when user joined")
     last_active_at: Optional[str] = Field(

@@ -19,7 +19,7 @@ from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.dependencies.common_utils import (
     validate_uuid_format,
     handle_api_exceptions,
-    format_permissions_data,
+    format_permissions_data
 )
 
 # Schema imports
@@ -39,7 +39,10 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 )
 
 # Local imports
-from libs.shared_utils.common_query import SETTINGS_ROLES_MANAGE
+from libs.shared_utils.common_query import (
+    SETTINGS_ROLES_MANAGE,
+    SETTINGS_SYSTEM_MANAGE
+)
 from libs.shared_middleware.jwt_auth import (
     get_user_from_auth,
 )
@@ -48,6 +51,7 @@ from libs.shared_db.postgres_db.user_service_operations.permission_operations im
     get_permission_details_by_id,
     get_all_permissions,
     create_new_permission,
+    delete_permission,
 )
 
 # Import DatabaseOperationError for manual error handling
@@ -116,7 +120,10 @@ async def get_permissions(
     request.state.audit_risk_level = "low"
 
     # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
+    user_context = await check_permissions(
+        current_user=current_user, permission_codes=SETTINGS_ROLES_MANAGE,
+        action_description="get permissions"
+    )
 
     try:
         permissions_data = await get_all_permissions(user_context.organization_id)
@@ -131,7 +138,6 @@ async def get_permissions(
 
     if not permissions_data:
         logger.warning("No permissions found - Request ID: %s, ",request_id)
-        logger.warning("Organization ID: %s, ",user_context.organization_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No permissions found",
@@ -199,7 +205,10 @@ async def get_permission_by_id(
     validate_uuid_format(permission_id, "permission ID")
 
     # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
+    user_context = await check_permissions(
+        current_user=current_user, permission_codes=SETTINGS_ROLES_MANAGE,
+        action_description="get permission by ID"
+    )
 
     try:
         permission = await get_permission_details_by_id(
@@ -221,8 +230,7 @@ async def get_permission_by_id(
             detail="Permission not found",
         )
 
-    permissions = format_permissions_data(permission)
-
+    permissions = format_permissions_data([permission])
 
     # Set audit data for successful retrieval
     request.state.raw_audit_new_data = {
@@ -232,7 +240,6 @@ async def get_permission_by_id(
         "permission_category": permission["category"],
         "organization_id": user_context.organization_id,
     }
-
 
     return PermissionsResponse(
         message=PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE,
@@ -274,7 +281,10 @@ async def create_permission(
     request.state.audit_risk_level = "medium"
 
     # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
+    user_context = await check_permissions(
+        current_user=current_user, permission_codes=SETTINGS_SYSTEM_MANAGE,
+        action_description="create permission"
+    )
 
     try:
         permission = await create_new_permission(
@@ -303,7 +313,7 @@ async def create_permission(
             detail="Failed to create permission",
         )
 
-    permissions = format_permissions_data(permission)
+    permissions = format_permissions_data([permission])
 
     # Set audit data for successful creation
     request.state.raw_audit_new_data = {
@@ -327,8 +337,7 @@ async def create_permission(
 
 @router.delete(
     "/{permission_id}",
-    response_model=PermissionResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_204_NO_CONTENT,
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -338,8 +347,9 @@ async def create_permission(
     table_name="permissions",
     category="PERMISSION",
 )
-async def delete_permission(
-    request: Request, permission_id: int
+async def delete_permission_by_id(
+    request: Request, permission_id: uuid.UUID,
+    current_user: dict = Depends(get_user_from_auth)
 ):
     """
     Delete a permission
@@ -350,14 +360,28 @@ async def delete_permission(
     Returns:
         PermissionResponse: Success message indicating API is working
     """
-    # # Generate request ID for tracking
-    # request_id = str(uuid.uuid4())
+    # Generate request ID for tracking
+    request_id = str(uuid.uuid4())
 
     # Set audit context for permission deletion
     request.state.audit_requested_id = str(permission_id)
     request.state.audit_table = "permissions"
     request.state.audit_description = f"Deleted permission with ID: {permission_id}"
     request.state.audit_risk_level = "high"
+
+    # Extract and validate user context from JWT token
+    user_context = await check_permissions(
+        current_user=current_user, permission_codes=SETTINGS_SYSTEM_MANAGE,
+        action_description="delete permission"
+    )
+
+    permission = await get_permission_details_by_id(permission_id, user_context.organization_id)
+    if not permission:
+        logger.warning("Permission not found - Request ID: %s, ",request_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Permission not found",
+        )
 
     # Set audit data for deletion (placeholder since this endpoint is not fully implemented)
     current_timestamp = datetime.now(timezone.utc).isoformat()
@@ -372,7 +396,12 @@ async def delete_permission(
         "deletion_timestamp": current_timestamp,
     }
 
-    return PermissionResponse(
-        message=f"Delete permission {permission_id} API is working",
-        status="success",
-    )
+    result = await delete_permission(permission_id, user_context.organization_id)
+    if not result:
+        logger.warning("Failed to delete permission - Request ID: %s, ",request_id)
+        logger.warning("Permission ID: %s, ",permission_id)
+        logger.warning("Organization ID: %s, ",user_context.organization_id)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to delete permission",
+        )

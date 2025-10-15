@@ -173,13 +173,11 @@ async def set_password(
     Set password for user Signed Up from Google or Magic Link.
     """
     try:
-        print("Current User: %s", current_user['sub'])
         if not _is_password_strong(data.password):
             raise HTTPException(
                 status_code=400,
                 detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
             )
-        print("Password: %s", data.password)
         result = await update_password_with_link_identity(current_user['sub'], data.password)
         if result:
             return PasswordResponse(
@@ -436,8 +434,6 @@ async def signup(
         )
 
     user_id = await sign_up_supabase_user(signup_data)
-    print(f"Created Supabase user: {user_id}")
-
 
     return SignupResponse(
         message="Account created successfully! Please check your email for verification.",
@@ -544,7 +540,7 @@ async def delete_user(
     """
     try:
         user_id = current_user['sub']
-        print("user_id",user_id,sep='\n\n')
+
         result = await delete_auth_user(user_id)
 
         if result is not None:
@@ -624,8 +620,6 @@ async def oauth_callback(request: Request):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing authorization code"
             )
-
-        print("Code: 1234567890 \n\n\n")
 
         # Exchange code for session
         session_result = await get_session_by_id_admin(code)

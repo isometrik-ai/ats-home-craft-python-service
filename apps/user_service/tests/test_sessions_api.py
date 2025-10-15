@@ -635,13 +635,14 @@ class TestGetSessionsList:
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
-            result = await get_sessions_list(organization_id, filters)
+            result = await get_sessions_list(organization_id, user_id, filters)
             assert result == mock_sessions
 
     @pytest.mark.asyncio
     async def test_get_sessions_list_empty_result(self):
         """Test sessions list with empty result."""
         organization_id = str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
         filters = SessionFilter(session_status="inactive")
 
         mock_result = MagicMock()
@@ -659,20 +660,21 @@ class TestGetSessionsList:
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
-            result = await get_sessions_list(organization_id, filters)
+            result = await get_sessions_list(organization_id, user_id, filters)
             assert result == []
 
     @pytest.mark.asyncio
     async def test_get_sessions_list_database_error(self):
         """Test sessions list with database error."""
         organization_id = str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
         filters = SessionFilter()
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
                    AsyncMock(side_effect=Exception("Database connection failed"))):
 
             with pytest.raises(DatabaseOperationError):
-                await get_sessions_list(organization_id, filters)
+                await get_sessions_list(organization_id, user_id, filters)
 
 
 class TestGetSessionsCount:
@@ -682,6 +684,7 @@ class TestGetSessionsCount:
     async def test_get_sessions_count_success(self):
         """Test successful sessions count retrieval."""
         organization_id = str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
         filters = SessionFilter(session_status="active")
 
         mock_result = MagicMock()
@@ -697,13 +700,14 @@ class TestGetSessionsCount:
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
-            result = await get_sessions_count(organization_id, filters)
+            result = await get_sessions_count(organization_id, user_id, filters)
             assert result == 5
 
     @pytest.mark.asyncio
     async def test_get_sessions_count_zero(self):
         """Test sessions count returning zero."""
         organization_id = str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
         filters = SessionFilter(session_status="inactive")
 
         mock_result = MagicMock()
@@ -719,20 +723,21 @@ class TestGetSessionsCount:
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
-            result = await get_sessions_count(organization_id, filters)
+            result = await get_sessions_count(organization_id, user_id, filters)
             assert result == 0
 
     @pytest.mark.asyncio
     async def test_get_sessions_count_database_error(self):
         """Test sessions count with database error."""
         organization_id = str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
         filters = SessionFilter()
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
                    AsyncMock(side_effect=Exception("Database connection failed"))):
 
             with pytest.raises(DatabaseOperationError):
-                await get_sessions_count(organization_id, filters)
+                await get_sessions_count(organization_id, user_id, filters)
 
 
 # ============================================================================
@@ -1024,7 +1029,7 @@ class TestSessionOperationsIntegration:
                 limit=10,
                 offset=0
             )
-            sessions = await get_sessions_list(organization_id, filters)
+            sessions = await get_sessions_list(organization_id, user_id, filters)
             assert len(sessions) == 2
 
         # Test sessions count with proper mocking
@@ -1038,7 +1043,7 @@ class TestSessionOperationsIntegration:
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_count_table)))):
-            count = await get_sessions_count(organization_id, filters)
+            count = await get_sessions_count(organization_id, user_id, filters)
             assert count == 2
 
 
@@ -1254,6 +1259,7 @@ class TestSessionOperationsCoverage:
     async def test_get_sessions_list_with_search(self):
         """Test get_sessions_list with search filter - covers lines 188, 191"""
         organization_id = "org123"
+        user_id = "user123"
         filters = SessionFilter(
             search="test@example.com",
             limit=10,
@@ -1280,7 +1286,7 @@ class TestSessionOperationsCoverage:
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
                    AsyncMock(return_value=mock_supabase)):
-            sessions = await get_sessions_list(organization_id, filters)
+            sessions = await get_sessions_list(organization_id, user_id, filters)
             assert len(sessions) == 2
             # Verify or_ was called for search
             mock_query.or_.assert_called_once()
@@ -1289,6 +1295,7 @@ class TestSessionOperationsCoverage:
     async def test_get_sessions_count_with_search(self):
         """Test get_sessions_count with search filter - covers lines 221, 225"""
         organization_id = "org123"
+        user_id = "user123"
         filters = SessionFilter(
             search="test@example.com",
             limit=10,
@@ -1318,7 +1325,7 @@ class TestSessionOperationsCoverage:
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
                    AsyncMock(return_value=mock_supabase)):
-            count = await get_sessions_count(organization_id, filters)
+            count = await get_sessions_count(organization_id, user_id, filters)
             assert count == 2
             # Verify or_ was called for search
             mock_search_query.or_.assert_called_once()
