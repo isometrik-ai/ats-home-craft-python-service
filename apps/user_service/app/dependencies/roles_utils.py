@@ -22,7 +22,6 @@ from typing import Optional
 
 def build_role_filter_message(
     search: Optional[str] = None,
-    role_type: Optional[str] = None,
     skip: int = 0,
     limit: int = 20,
 ) -> str:
@@ -31,7 +30,6 @@ def build_role_filter_message(
 
     Args:
         search (Optional[str]): Search term
-        role_type (Optional[str]): Role type filter
         skip (int): Skip/offset value
         limit (int): Limit value
 
@@ -39,14 +37,12 @@ def build_role_filter_message(
         str: Formatted filter message
 
     Usage:
-        filter_msg = build_role_filter_message(search="admin", role_type="system")
+        filter_msg = build_role_filter_message(search="admin")
     """
     filter_info = []
 
     if search:
         filter_info.append(f"search='{search}'")
-    if role_type:
-        filter_info.append(f"type={role_type}")
     if skip > 0:
         filter_info.append(f"skip={skip}")
     filter_info.append(f"limit={limit}")

@@ -43,12 +43,14 @@ def _build_supabase_mock():
             return self
         def like(self, *_, **__):
             return self
+        def or_(self, *_, **__):
+            return self
         def order(self, *_, **__):
             return self
         def range(self, *_, **__):
             return self
         async def execute(self):
-            return SimpleNamespace(data=[])
+            return SimpleNamespace(data=[], count=0)
 
     class MockSupabase:
         def __init__(self):
@@ -91,7 +93,7 @@ def patch_operations_to_use_mock_supabase():
         common_utils.get_user_profile_by_id = user_ops.get_user_profile_by_id
 
     # Patch check_permissions at each API module to a simple allow mock
-    async def _mock_check_permissions(current_user, _code, *_args):
+    async def _mock_check_permissions(current_user, permission_codes, action_description="access role details", organization_id=None, **kwargs):
         from types import SimpleNamespace
         org_id = current_user.get("organization_id") or current_user.get("organisation_id") or "o"
         user_id = current_user.get("user_id") or current_user.get("sub") or "u"

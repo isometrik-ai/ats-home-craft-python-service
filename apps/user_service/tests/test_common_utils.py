@@ -200,9 +200,8 @@ class TestFormatPermissionsData:
 
         assert result == []
 
-    @pytest.mark.asyncio
-    async def test_format_permissions_data_with_string_datetime(self):
-        """Test formatting permissions data with string datetime (should raise AttributeError)."""
+    def test_format_permissions_data_with_string_datetime(self):
+        """Test formatting permissions data with string datetime (should work)."""
         permissions_data = [
             {
                 "id": "perm1",
@@ -213,10 +212,12 @@ class TestFormatPermissionsData:
                 "created_at": "2024-01-01T00:00:00Z"
             }
         ]
-
-        # The function expects datetime objects, not strings
-        with pytest.raises(AttributeError):
-            format_permissions_data(permissions_data)
+        
+        result = format_permissions_data(permissions_data)
+        
+        assert len(result) == 1
+        assert result[0].id == "perm1"
+        assert result[0].created_at == "2024-01-01T00:00:00Z"
 
 
 class TestExtractUserContext:
@@ -446,7 +447,7 @@ class TestCheckPermissions:
                 permission_code="users.manage",
                 user_context=mock_user_context,
                 action_description="manage users",
-                organization_id=None
+                organization_id="org123"
             )
             assert result == mock_user_context
 
@@ -471,7 +472,7 @@ class TestCheckPermissions:
                 permission_code=["users.manage", "roles.view"],
                 user_context=mock_user_context,
                 action_description="access role details",
-                organization_id=None
+                organization_id="org123"
             )
             assert result == mock_user_context
 
@@ -496,7 +497,7 @@ class TestCheckPermissions:
                 permission_code="users.manage",
                 user_context=mock_user_context,
                 action_description="access role details",
-                organization_id=None
+                organization_id="org123"
             )
 
 
@@ -726,12 +727,11 @@ class TestFormatIsoDatetime:
         assert result is None
 
     def test_format_iso_datetime_with_string(self):
-        """Test formatting string datetime (should raise AttributeError)."""
+        """Test formatting string datetime (should return as-is)."""
         dt_str = "2024-01-01T12:30:45Z"
-
-        # The function expects datetime objects, not strings
-        with pytest.raises(AttributeError):
-            format_iso_datetime(dt_str)
+        
+        result = format_iso_datetime(dt_str)
+        assert result == dt_str
 
     def test_format_iso_datetime_with_naive_datetime(self):
         """Test formatting naive datetime."""

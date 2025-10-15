@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
 from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_metadata_of_user
 from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_supabase_client
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     handle_database_errors, create_error_messages
 )
@@ -56,7 +56,7 @@ def _apply_pagination(query, limit: int, offset: int):
     custom_messages=create_error_messages("create_new_organisation", "creating"))
 async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str, Any]:
     """Create a new organisation."""
-    supabase = await _get_supabase_client()
+    supabase = await get_supabase_admin_client()
     org_record = {
         "id": organisation_data["organization_id"],
         "name": organisation_data["name"],
@@ -769,7 +769,7 @@ async def create_super_admin_role(organisation_id: str) -> Dict[str, Any]:
     supabase = await get_supabase_admin_client()
 
     role_record = {
-        "name": "Super Admin",
+        "name": "admin",
         "description": "Full administrative access to all system features",
         "organization_id": organisation_id,
         "is_default": True,

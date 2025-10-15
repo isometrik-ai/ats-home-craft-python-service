@@ -141,7 +141,7 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> Dict
         # Create Super Admin role
         super_admin_role_result = await create_super_admin_role(org_data["organization_id"])
         super_admin_role_id = super_admin_role_result['id']
-        print(f"Created Super Admin role: {super_admin_role_id}")
+        print(f"Created Admin role: {super_admin_role_id}")
 
         # Create default permissions
         permission_ids = await create_default_permissions_for_organisation(

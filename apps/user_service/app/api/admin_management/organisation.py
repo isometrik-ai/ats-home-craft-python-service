@@ -468,10 +468,6 @@ async def create_organisation(
             detail="Organisation slug already exists"
         )
 
-    # # Create user in Supabase Auth
-    # user_id = await create_supabase_user(body, organization_id)
-    # print(f"Created Supabase user: {user_id}")
-
     # Create organization using database operations
     try:
         # Create organization
@@ -501,15 +497,6 @@ async def create_organisation(
         logger.error("Database transaction failed - Request ID: %s, ",request_id)
         logger.error("Error: %s",str(db_error))
         print(f"Database transaction failed: {db_error}")
-        # # Try to delete the Supabase user if database transaction fails
-        # try:
-        #     result = await delete_auth_user(user_context.user_id)
-        #     if result is not None:
-        #         print(f"Cleaned up Supabase user: {user_context.user_id}")
-        # except (ConnectionError, TimeoutError, ValueError) as cleanup_error:
-        #     logger.error("Failed to cleanup Supabase user - Request ID: %s, ",request_id)
-        #     logger.error("User ID: %s, Error: %s",user_context.user_id,str(cleanup_error))
-        #     print(f"Failed to cleanup Supabase user: {cleanup_error}")
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -524,7 +511,7 @@ async def create_organisation(
             "user_id": user_context.user_id,
             "organization_name": organization_name,
             "user_email": user_context.email,
-            "role_name": "Super Admin",
+            "role_name": "admin",
             "slug": slug,
             "plan_type": body.plan_type.value,
             "max_users": body.company_data.max_users,

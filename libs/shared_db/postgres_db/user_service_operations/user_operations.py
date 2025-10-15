@@ -211,7 +211,7 @@ async def get_users_details_list(organization_id: str, search: Optional[str] = N
 
     # Build the query with filters
     query = supabase.table("organization_members").select(
-        "id, user_id, email, full_name, phone, timezone, role_id, status, "
+        "id, user_id, email, full_name, first_name, last_name, phone, timezone, role_id, status, "
         "created_at, updated_at, last_active_at"
     ).eq("organization_id", organization_id)
 
@@ -416,16 +416,15 @@ async def transform_users(users_data, organization_id):
             first_name=u["first_name"],
             last_name=u["last_name"],
             phone=u["phone"],
-            role_name=u["role_name"],
             role_id=str(u["role_id"]),
             status=u["status"],
             joined_at=(
                 u["joined_at"].isoformat()
-                if u["joined_at"]
+                if u.get("joined_at")
                 else datetime.now().isoformat()
             ),
             last_active_at=(
-                u["last_active_at"].isoformat() if u["last_active_at"] else None
+                u["last_active_at"].isoformat() if u.get("last_active_at") else None
             ),
             permissions_count=permissions_count,
         )

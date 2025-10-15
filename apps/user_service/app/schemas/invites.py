@@ -7,7 +7,7 @@ These schemas are used for request/response validation and API documentation.
 """
 
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from apps.user_service.app.schemas.common import PaginationBase
 from apps.user_service.app.schemas import ResponseModel
 
@@ -63,15 +63,15 @@ class InviteCreateRequest(BaseModel):
     role: str = Field(default="member", description="Role: owner, admin, or member")
     expires_in_days: int = Field(default=7, ge=1, le=30, description="Days until invite expires")
 
-    class Config:
-        """Config for invitation creation request"""
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "email": EXAMPLE_EMAIL,
                 "role": "member",
                 "expires_in_days": 7
             }
         }
+    )
 
 
 class InviteAcceptRequest(BaseModel):
@@ -80,13 +80,13 @@ class InviteAcceptRequest(BaseModel):
     """
     token: str = Field(..., description="Invite token from the URL")
 
-    class Config:
-        """Config for invitation acceptance request"""
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "token": "abc123xyz456..."
             }
         }
+    )
 
 
 class InviteListItem(BaseModel):
@@ -101,9 +101,8 @@ class InviteListItem(BaseModel):
     created_at: str = Field(..., description="ISO timestamp when invitation was created")
     updated_at: str = Field(..., description="ISO timestamp when invitation was last updated")
 
-    class Config:
-        """Config for invitation list item"""
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "invite_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                 "email": EXAMPLE_EMAIL,
@@ -115,6 +114,7 @@ class InviteListItem(BaseModel):
                 "updated_at": EXAMPLE_TIMESTAMP
             }
         }
+    )
 
 
 class InviteListResponse(PaginationBase, ResponseModel):
@@ -125,9 +125,8 @@ class InviteListResponse(PaginationBase, ResponseModel):
     )
     total_count: int = Field(..., description="Total number of invitations")
 
-    class Config:
-        """Config for invitation list response"""
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "message": "Retrieved 5 invitations",
                 "data": [
@@ -147,6 +146,7 @@ class InviteListResponse(PaginationBase, ResponseModel):
                 "page_size": 20
             }
         }
+    )
 
 
 class InviteListQueryParams(BaseModel):
@@ -156,12 +156,12 @@ class InviteListQueryParams(BaseModel):
     page_size: int = Field(default=20, ge=1, le=100, description="Number of items per page")
     status: Optional[str] = Field(None, description="Filter by invitation status")
 
-    class Config:
-        """Config for invitation list query params"""
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "page": 1,
                 "page_size": 20,
                 "status": "pending"
             }
         }
+    )
