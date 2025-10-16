@@ -419,12 +419,12 @@ async def transform_users(users_data, organization_id):
             role_id=str(u["role_id"]),
             status=u["status"],
             joined_at=(
-                u["joined_at"].isoformat()
+                u["joined_at"]
                 if u.get("joined_at")
                 else datetime.now().isoformat()
             ),
             last_active_at=(
-                u["last_active_at"].isoformat() if u.get("last_active_at") else None
+                u["last_active_at"] if u.get("last_active_at") else None
             ),
             permissions_count=permissions_count,
         )

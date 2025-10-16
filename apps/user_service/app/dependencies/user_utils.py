@@ -51,7 +51,8 @@ def create_user_profile_data(
         ),
         last_active_at=(
             user_profile["last_active_at"].isoformat()
-            if user_profile["last_active_at"] and isinstance(user_profile["last_active_at"], datetime)
+            if user_profile["last_active_at"] 
+            and isinstance(user_profile["last_active_at"], datetime)
             else user_profile["last_active_at"]
         ),
         organization_id=str(user_profile["organization_id"]),

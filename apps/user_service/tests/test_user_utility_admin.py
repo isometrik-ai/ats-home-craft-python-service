@@ -1232,6 +1232,201 @@ class TestSendPasswordResetConfirmationEmail:
             assert "2025" in html_message  # current year
 
 
+class TestSendOrganizationInvitationEmail:
+    """Test cases for send_organization_invitation_email function."""
+
+    def test_send_organization_invitation_email_success(self):
+        """Test successful organization invitation email sending."""
+        from libs.shared_utils.email_utils import send_organization_invitation_email
+
+        email = "test@example.com"
+        organization_name = "Test Organization"
+        inviter_name = "John Doe"
+        invite_url = "https://example.com/invite/123"
+        role_name = "member"
+        expires_at = "2024-12-31 23:59:59"
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email, \
+             patch("libs.shared_utils.email_utils.logger") as mock_logger:
+
+            result = send_organization_invitation_email(
+                email, organization_name, inviter_name, invite_url, role_name, expires_at
+            )
+
+            assert result is True
+            mock_send_email.assert_called_once()
+
+            # Verify the email was sent with correct parameters
+            call_args = mock_send_email.call_args
+            assert call_args[0][0] == email  # email
+            assert call_args[0][1] == f"You're invited to join {organization_name}"  # subject
+            assert organization_name in call_args[0][2]  # message
+            assert invite_url in call_args[0][2]  # message contains invite URL
+            assert role_name in call_args[0][2]  # message contains role
+            assert expires_at in call_args[0][2]  # message contains expiration
+            assert organization_name in call_args[0][3]  # html_message
+
+            # Verify success logging
+            mock_logger.info.assert_called_with("Organization invitation email sent successfully to %s", email)
+
+    def test_send_organization_invitation_email_failure(self):
+        """Test organization invitation email sending failure."""
+        from libs.shared_utils.email_utils import send_organization_invitation_email
+
+        email = "test@example.com"
+        organization_name = "Test Organization"
+        inviter_name = "John Doe"
+        invite_url = "https://example.com/invite/123"
+        role_name = "admin"
+        expires_at = "2024-12-31 23:59:59"
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=False) as mock_send_email, \
+             patch("libs.shared_utils.email_utils.logger") as mock_logger:
+
+            result = send_organization_invitation_email(
+                email, organization_name, inviter_name, invite_url, role_name, expires_at
+            )
+
+            assert result is False
+            mock_send_email.assert_called_once()
+
+            # Verify error logging
+            mock_logger.error.assert_called_with("Failed to send organization invitation email to %s", email)
+
+    def test_send_organization_invitation_email_exception(self):
+        """Test organization invitation email sending with exception."""
+        from libs.shared_utils.email_utils import send_organization_invitation_email
+
+        email = "test@example.com"
+        organization_name = "Test Organization"
+        inviter_name = "John Doe"
+        invite_url = "https://example.com/invite/123"
+        role_name = "owner"
+        expires_at = "2024-12-31 23:59:59"
+
+        with patch("libs.shared_utils.email_utils.send_email", side_effect=Exception("SMTP Error")) as mock_send_email, \
+             patch("libs.shared_utils.email_utils.logger") as mock_logger:
+
+            result = send_organization_invitation_email(
+                email, organization_name, inviter_name, invite_url, role_name, expires_at
+            )
+
+            assert result is False
+            mock_send_email.assert_called_once()
+
+            # Verify exception logging
+            mock_logger.error.assert_called_with("Error sending organization invitation email: %s", "SMTP Error")
+
+    def test_send_organization_invitation_email_content_validation(self):
+        """Test organization invitation email content validation."""
+        from libs.shared_utils.email_utils import send_organization_invitation_email
+
+        email = "test@example.com"
+        organization_name = "Acme Corp"
+        inviter_name = "Jane Smith"
+        invite_url = "https://acme.com/invite/abc123"
+        role_name = "manager"
+        expires_at = "2024-06-15 18:30:00"
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+
+            result = send_organization_invitation_email(
+                email, organization_name, inviter_name, invite_url, role_name, expires_at
+            )
+
+            assert result is True
+
+            # Verify email content
+            call_args = mock_send_email.call_args
+            subject = call_args[0][1]
+            message = call_args[0][2]
+            html_message = call_args[0][3]
+
+            # Check subject
+            assert subject == f"You're invited to join {organization_name}"
+
+            # Check plain text message
+            assert organization_name in message
+            assert inviter_name in message
+            assert role_name in message
+            assert invite_url in message
+            assert expires_at in message
+            assert "You're invited to join" in message
+            assert "To accept this invitation" in message
+            assert "This invitation will expire" in message
+
+            # Check HTML message
+            assert organization_name in html_message
+            assert inviter_name in html_message
+            assert role_name in html_message
+            assert invite_url in html_message
+            assert expires_at in html_message
+            assert "You're invited to join" in html_message
+            assert "Accept Invitation" in html_message
+            assert "This invitation will expire" in html_message
+
+    def test_send_organization_invitation_email_html_structure(self):
+        """Test organization invitation email HTML structure."""
+        from libs.shared_utils.email_utils import send_organization_invitation_email
+
+        email = "test@example.com"
+        organization_name = "Test Org"
+        inviter_name = "Test User"
+        invite_url = "https://test.com/invite"
+        role_name = "member"
+        expires_at = "2024-12-31"
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+
+            send_organization_invitation_email(
+                email, organization_name, inviter_name, invite_url, role_name, expires_at
+            )
+
+            call_args = mock_send_email.call_args
+            html_message = call_args[0][3]
+
+            # Check HTML structure elements
+            assert "<!DOCTYPE html>" in html_message
+            assert "<html>" in html_message
+            assert "<head>" in html_message
+            assert "<body>" in html_message
+            assert "class=\"container\"" in html_message
+            assert "class=\"header\"" in html_message
+            assert "class=\"content\"" in html_message
+            assert "class=\"button\"" in html_message
+            assert "class=\"highlight\"" in html_message
+            assert "class=\"footer\"" in html_message
+
+    def test_send_organization_invitation_email_different_roles(self):
+        """Test organization invitation email with different role types."""
+        from libs.shared_utils.email_utils import send_organization_invitation_email
+
+        email = "test@example.com"
+        organization_name = "Test Organization"
+        inviter_name = "Admin User"
+        invite_url = "https://example.com/invite/123"
+        expires_at = "2024-12-31 23:59:59"
+
+        roles = ["owner", "admin", "member", "viewer", "editor"]
+
+        for role_name in roles:
+            with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+
+                result = send_organization_invitation_email(
+                    email, organization_name, inviter_name, invite_url, role_name, expires_at
+                )
+
+                assert result is True
+
+                # Verify role is included in email content
+                call_args = mock_send_email.call_args
+                message = call_args[0][2]
+                html_message = call_args[0][3]
+
+                assert role_name in message
+                assert role_name in html_message
+
+
 class TestUpdateMetadataOfUser:
     """Test cases for update_metadata_of_user function."""
 

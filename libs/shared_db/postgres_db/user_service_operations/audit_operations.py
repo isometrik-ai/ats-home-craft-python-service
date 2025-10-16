@@ -112,7 +112,10 @@ async def create_audit_log(audit_data: Dict[str, Any]) -> Dict[str, Any]:
 @handle_database_errors(
     "get_audit_log_by_id",
     custom_messages=create_error_messages("get_audit_log_by_id", "getting"))
-async def get_audit_log_by_id(audit_log_id: str, organization_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+async def get_audit_log_by_id(
+    audit_log_id: str,
+    organization_id: str,
+    user_id: str) -> Optional[Dict[str, Any]]:
     """Get audit log by ID."""
     supabase = await _get_supabase_client()
 
@@ -123,7 +126,8 @@ async def get_audit_log_by_id(audit_log_id: str, organization_id: str, user_id: 
         "risk_level, ip_address, description, timestamp, "
         "hash_signature, previous_hash, retention_date, "
         "status_code, category"
-    ).eq("id", audit_log_id).eq("organization_id", organization_id).eq("user_id", user_id).limit(1).execute()
+    ).eq("id", audit_log_id).eq("organization_id", organization_id
+    ).eq("user_id", user_id).limit(1).execute()
 
     if _has_result_data(result):
         return result.data[0]
@@ -204,7 +208,9 @@ async def get_audit_logs_list(filter_params: AuditLogFilter) -> List[Dict[str, A
 @handle_database_errors(
     "get_audit_logs_count",
     custom_messages=create_error_messages("get_audit_logs_count", "getting"))
-async def get_audit_logs_count(organization_id: str, user_id: str, filter_params: AuditLogFilter) -> int:
+async def get_audit_logs_count(
+    organization_id: str, user_id: str, 
+    filter_params: AuditLogFilter) -> int:
     """Get total count of audit logs matching search criteria."""
     supabase = await _get_supabase_client()
 

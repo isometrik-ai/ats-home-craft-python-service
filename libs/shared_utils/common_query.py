@@ -9,7 +9,6 @@ logger = get_logger("common_utils")
 ROLE_TYPES = ["system", "custom"]
 # libs/shared_utils/common_query.py
 
-
 def log_exception():
     """Log exception details"""
     exc_type, _, exc_tb = sys.exc_info()
@@ -57,30 +56,11 @@ DEFAULT_PERMISSIONS = [
         "business",
     ),
     (
-        "automation.triggers.manage",
-        "Manage Triggers",
-        "Create and manage automation triggers",
-        "automation",
+        "settings.users.manage",
+        "Manage Users",
+        "Full user management",
+        "settings",
     ),
-    (
-        "automation.analytics.view",
-        "View Analytics",
-        "Access to analytics dashboard",
-        "automation",
-    ),
-    (
-        "automation.analytics.export",
-        "Export Analytics",
-        "Export analytics data",
-        "automation",
-    ),
-    (
-        "automation.ai_assistant.access",
-        "AI Assistant Access",
-        "Access to AI assistant features",
-        "automation",
-    ),
-    ("settings.users.manage", "Manage Users", "Full user management", "settings"),
     (
         "settings.roles.manage",
         "Manage Roles",

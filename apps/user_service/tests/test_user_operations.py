@@ -743,8 +743,8 @@ class TestUserOperations:
                 "role_name": "Admin",
                 "role_id": str(uuid.uuid4()),
                 "status": "active",
-                "joined_at": datetime.now(),
-                "last_active_at": datetime.now()
+                "joined_at": datetime.now().isoformat(),
+                "last_active_at": datetime.now().isoformat()
             }
         ]
 
@@ -789,8 +789,8 @@ class TestUserOperations:
                 "role_name": "Admin",
                 "role_id": str(uuid.uuid4()),
                 "status": "active",
-                "joined_at": datetime.now(),
-                "last_active_at": datetime.now()
+                "joined_at": datetime.now().isoformat(),
+                "last_active_at": datetime.now().isoformat()
             }
         ]
 
@@ -823,7 +823,7 @@ class TestUserOperations:
                 "role_id": str(uuid.uuid4()),
                 "status": "active",
                 "joined_at": None,
-                "last_active_at": datetime.now()
+                "last_active_at": datetime.now().isoformat()
             }
         ]
 
