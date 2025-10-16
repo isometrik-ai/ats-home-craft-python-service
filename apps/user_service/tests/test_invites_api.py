@@ -192,6 +192,19 @@ class TestAcceptInvitation:
             assert response.status_code == 409
             assert "already a member" in response.json()["detail"]
 
+    def test_accept_invitation_email_mismatch(self, client, mock_invite_data):
+        """Test invitation acceptance when user email doesn't match invitation email."""
+        request_data = {"token": "valid-token-123"}
+        
+        # Set invitation email to different email
+        mock_invite_data["email"] = "different@example.com"
+
+        with patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)):
+            response = client.post("/v1/invite/accept", json=request_data)
+
+            assert response.status_code == 409
+            assert "User email does not match invitation email" in response.json()["detail"]
+
     def test_accept_invitation_database_error(self, client, mock_invite_data):
         """Test invitation acceptance with database error."""
         request_data = {"token": "valid-token-123"}
@@ -456,7 +469,6 @@ class TestCreateInvitation:
         assert response.status_code == 422
 
     def test_create_invitation_database_error(self, client, mock_organization_data):
-        """Test invitation creation with database error."""
         organization_id = str(uuid.uuid4())
         request_data = {
             "email": "newuser@example.com",
@@ -635,9 +647,9 @@ class TestRevokeInvitation:
              patch("apps.user_service.app.api.invites.can_revoke_invite", return_value=True), \
              patch("apps.user_service.app.api.invites.update_invite_status", AsyncMock(return_value=True)):
 
-            response = client.post(f"/v1/invite/{invite_id}/revoke")
+            response = client.put(f"/v1/invite/revoke/{invite_id}")
 
-            assert response.status_code == 200
+            assert response.status_code == 202
             data = response.json()
             assert data["success"] is True
             assert "revoked successfully" in data["message"]
@@ -647,7 +659,7 @@ class TestRevokeInvitation:
         invite_id = str(uuid.uuid4())
 
         with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=None)):
-            response = client.post(f"/v1/invite/{invite_id}/revoke")
+            response = client.put(f"/v1/invite/revoke/{invite_id}")
 
             assert response.status_code == 404
             assert "Invitation not found" in response.json()["detail"]
@@ -656,7 +668,7 @@ class TestRevokeInvitation:
         """Test revoke invitation with invalid invite ID."""
         invalid_invite_id = "invalid-uuid"
 
-        response = client.post(f"/v1/invite/{invalid_invite_id}/revoke")
+        response = client.put(f"/v1/invite/revoke/{invalid_invite_id}")
 
         assert response.status_code == 400
 
@@ -670,7 +682,7 @@ class TestRevokeInvitation:
         with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=mock_invite_data)), \
              patch("apps.user_service.app.api.invites.can_revoke_invite", return_value=False):
 
-            response = client.post(f"/v1/invite/{invite_id}/revoke")
+            response = client.put(f"/v1/invite/revoke/{invite_id}")
 
             assert response.status_code == 400
             assert "cannot be revoked" in response.json()["detail"]
@@ -686,7 +698,7 @@ class TestRevokeInvitation:
              patch("apps.user_service.app.api.invites.can_revoke_invite", return_value=True), \
              patch("apps.user_service.app.api.invites.update_invite_status", AsyncMock(side_effect=DatabaseOperationError("Database error"))):
 
-            response = client.post(f"/v1/invite/{invite_id}/revoke")
+            response = client.put(f"/v1/invite/revoke/{invite_id}")
 
             assert response.status_code == 500
             assert "Failed to revoke invitation" in response.json()["detail"]
@@ -711,10 +723,7 @@ class TestDeleteInvitation:
 
             response = client.delete(f"/v1/invite/{invite_id}")
 
-            assert response.status_code == 200
-            data = response.json()
-            assert data["success"] is True
-            assert "deleted successfully" in data["message"]
+            assert response.status_code == 204
 
     def test_delete_invitation_not_found(self, client):
         """Test delete invitation when invitation doesn't exist."""
@@ -887,8 +896,8 @@ class TestInvitePermissions:
         """Test revoke invitation with insufficient permissions."""
         invite_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.require_permission", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
-            response = client.post(f"/v1/invite/{invite_id}/revoke")
+        with patch("apps.user_service.app.api.invites.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
+            response = client.put(f"/v1/invite/revoke/{invite_id}")
 
             assert response.status_code == 403
 
@@ -896,7 +905,7 @@ class TestInvitePermissions:
         """Test delete invitation with insufficient permissions."""
         invite_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.require_permission", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
+        with patch("apps.user_service.app.api.invites.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
             response = client.delete(f"/v1/invite/{invite_id}")
 
             assert response.status_code == 403
