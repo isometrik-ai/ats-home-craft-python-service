@@ -804,10 +804,10 @@ async def resend_invitation(
 
 
 @handle_api_exceptions("revoke invitation")
-@router.post(
-    "/{invite_id}/revoke",
+@router.put(
+    "/revoke/{invite_id}",
     response_model=InviteResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 @limiter.limit("100/minute")
 # pylint: disable=unused-argument  # Required by @limiter.limit
@@ -834,12 +834,9 @@ async def revoke_invitation(
     validate_uuid_format(invite_id, INVITATION_ID_LABEL)
 
     # Extract user context
-    user_context = extract_user_context(current_user)
-
-    # Check permissions
-    await require_permission(
-        permission_code=ORGANIZATION_MANAGE_PERMISSION,
-        user_context=user_context,
+    user_context = await check_permissions(
+        current_user=current_user,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
         action_description="revoke organization invitations",
     )
 
@@ -887,8 +884,7 @@ async def revoke_invitation(
 @handle_api_exceptions("delete invitation")
 @router.delete(
     "/{invite_id}",
-    response_model=InviteResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_204_NO_CONTENT,
 )
 @limiter.limit("100/minute")
 # pylint: disable=unused-argument  # Required by @limiter.limit
@@ -915,12 +911,9 @@ async def delete_invitation(
     validate_uuid_format(invite_id, INVITATION_ID_LABEL)
 
     # Extract user context
-    user_context = extract_user_context(current_user)
-
-    # Check permissions
-    await require_permission(
-        permission_code=ORGANIZATION_MANAGE_PERMISSION,
-        user_context=user_context,
+    user_context = await check_permissions(
+        current_user=current_user,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
         action_description="delete organization invitations",
     )
 
@@ -949,10 +942,7 @@ async def delete_invitation(
         logger.info("Invitation deleted successfully - Request ID: %s, Invite ID: %s",
                    request_id, invite_id)
 
-        return InviteResponse(
-            success=True,
-            message="Invitation deleted successfully"
-        )
+        return None
 
     except HTTPException as http_error:
         raise http_error
