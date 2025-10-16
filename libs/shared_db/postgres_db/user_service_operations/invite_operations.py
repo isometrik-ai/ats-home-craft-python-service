@@ -140,8 +140,7 @@ async def get_organization_invites(
     offset_query = limit_query.offset(offset)
     result = await offset_query.execute()
 
-    return result.data or []
-
+    return result.data if result.data else []
 
 @handle_database_errors(
     "get_organization_invites_count",
@@ -157,7 +156,7 @@ async def get_organization_invites_count(
     eq_query = count_query.eq("organization_id", organization_id)
 
     result = await eq_query.execute()
-    return result.count or 0
+    return result.count if result.count else 0
 
 
 @handle_database_errors(
