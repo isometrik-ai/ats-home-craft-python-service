@@ -200,7 +200,7 @@ async def get_roles(
     return RolesResponse(
         message=message,
         roles=roles,
-        total_count=total_count,
+        total_count=max(total_count, len(roles))
     )
 
 
