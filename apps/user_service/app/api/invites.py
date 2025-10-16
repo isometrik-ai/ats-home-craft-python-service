@@ -107,7 +107,6 @@ BASE_URL = "http://localhost:5000"
 ORGANIZATION_MANAGE_PERMISSION = "organization.appscrip.manage"
 INVITATION_ID_LABEL = "invitation ID"
 DATABASE_ERROR_MESSAGE = "Database transaction failed - Request ID: %s, Error: %s"
-INVITATION_NOT_FOUND_LOG = "Invitation not found - Request ID: %s, Invite ID: %s"
 INVALID_INVITATION_TOKEN_MESSAGE = "Invalid invitation token"
 INVALID_INVITATION_REQUEST_MESSAGE = INVALID_INVITATION_TOKEN_MESSAGE + " Request ID: %s"
 
@@ -741,7 +740,6 @@ async def resend_invitation(
     invitation_data = await get_invite_by_id(invite_id)
 
     if not invitation_data:
-        logger.warning(INVITATION_NOT_FOUND_LOG, request_id, invite_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=INVITE_NOT_FOUND_MESSAGE,
@@ -766,13 +764,21 @@ async def resend_invitation(
         # Generate invitation URL
         invite_url = generate_invite_url(BASE_URL, invitation_data["token_hash"])
 
+        role_name = await get_role_by_id(invitation_data["role_id"], organization_data["id"])
+
+        if not role_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Role not found"
+            )
+
         # Send invitation email
         email_sent = send_organization_invitation_email(
             email=invitation_data["email"],
             organization_name=organization_data["name"],
             inviter_name=user_context.email,  # You might want to get the actual name
             invite_url=invite_url,
-            role=invitation_data["role"],
+            role_name=role_name["name"],
             expires_at=invitation_data["expires_at"]
         )
 
@@ -841,7 +847,6 @@ async def revoke_invitation(
     invitation_data = await get_invite_by_id(invite_id)
 
     if not invitation_data:
-        logger.warning(INVITATION_NOT_FOUND_LOG, request_id, invite_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=INVITE_NOT_FOUND_MESSAGE,
@@ -923,7 +928,6 @@ async def delete_invitation(
     invitation_data = await get_invite_by_id(invite_id)
 
     if not invitation_data:
-        logger.warning(INVITATION_NOT_FOUND_LOG, request_id, invite_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=INVITE_NOT_FOUND_MESSAGE,

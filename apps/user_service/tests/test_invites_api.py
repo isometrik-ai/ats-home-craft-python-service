@@ -553,6 +553,7 @@ class TestResendInvitation:
 
         with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=mock_invite_data)), \
              patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
+             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
              patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
 
             response = client.put(f"/v1/invite/resend/{invite_id}")
@@ -589,6 +590,7 @@ class TestResendInvitation:
 
         with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=mock_invite_data)), \
              patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
+             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
              patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=False):
 
             response = client.put(f"/v1/invite/resend/{invite_id}")
