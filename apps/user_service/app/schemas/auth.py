@@ -518,6 +518,3 @@ def generate_pkce_pair():
 
 # Example usage
 CODE_VERIFIER, CODE_CHALLENGE = generate_pkce_pair()
-
-print(f"Code Verifier: {CODE_VERIFIER}")
-print(f"Code Challenge: {CODE_CHALLENGE}")

@@ -27,6 +27,8 @@ from libs.shared_db.postgres_db.user_service_operations.exception_handling impor
     handle_database_errors, create_error_messages
 )
 from libs import NOW_CONSTANT
+from libs.shared_db.postgres_db.user_service_operations.user_operations import create_new_user
+from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
 
 # Initialize logger
 logger = get_logger("invite_operations")
@@ -260,15 +262,19 @@ async def add_user_to_organization(
     invited_by: str
 ) -> Dict[str, Any]:
     """Add user to organization as a member."""
-    supabase = await get_supabase_admin_client()
+    user_data = await get_user_by_id(user_id)
 
     member_record = {
-        "id": str(uuid.uuid4()),
         "organization_id": organization_id,
         "user_id": user_id,
         "email": email,
+        "full_name": user_data.user.user_metadata.get("full_name", None),
+        "first_name": user_data.user.user_metadata.get("first_name", None),
+        "last_name": user_data.user.user_metadata.get("last_name", None),
+        "phone": user_data.user.user_metadata.get("phone", None),
+        "timezone": user_data.user.user_metadata.get("timezone", "UTC"),
         "role_id": role_id,
-        "role_name": role_name,
+        "role": role_name,
         "status": "active",
         "invited_by": invited_by,
         "joined_at": NOW_CONSTANT,
@@ -276,13 +282,9 @@ async def add_user_to_organization(
         "updated_at": NOW_CONSTANT
     }
 
-    table = supabase.table("organization_members")
-    insert_query = table.insert(member_record)
-    result = await insert_query.execute()
+    result = await create_new_user(member_record)
 
-    if result.data and len(result.data) > 0:
-        return result.data[0]
-    return {}
+    return result
 
 
 @handle_database_errors(

@@ -116,7 +116,11 @@ async def check_user_access_async(
         # Get global Supabase client
         supabase = await get_supabase_client()
 
-        print(permission_code,user_id,organisation_id,sep='\n\n')
+        if not organisation_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not a member of any organization",
+            )
 
         # Use Supabase RPC function for permission checking
         rpc_result = supabase.rpc(
@@ -128,12 +132,12 @@ async def check_user_access_async(
             }
         )
         response = await rpc_result.execute()
-        print("\n\nresponse",response)
 
         return response.data if response.data is not None else False
 
+    except HTTPException as error:
+        raise error
     except Exception as error:
-        print(f"Async permission check error: {error}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to check permission",
@@ -151,7 +155,6 @@ def get_user_from_auth(
     Ensures audit context is populated even during authentication/authorization failures.
     """
     user = getattr(request.state, "user", None)
-    print(user)
 
     # Extract user data from JWT token
     user_id, organization_id, user_email, session_id = extract_user_data(user)
@@ -171,7 +174,6 @@ def get_user_from_auth(
     # request.state.audit_user_context["user_role"] = role_name
     request.state.audit_risk_level = "low"
     request.state.audit_description = "Successfully authenticated and authorized user"
-    print("get_user_from_auth")
 
     return user
 
@@ -198,8 +200,7 @@ def get_user_from_token(token: str) -> dict:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired"
         )
-    except jwt.InvalidTokenError as exception:
-        print("JWT DECODE ERROR:", str(exception))
+    except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
         )
@@ -245,7 +246,6 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         token = auth_header.split(" ")[1]
-        print("working fine")
         try:
             payload = jwt.decode(
                 token,
@@ -255,13 +255,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             )
             request.state.user = payload
             request.state.access_token = token
-            print(payload)
         except jwt.ExpiredSignatureError:
             return responses.JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Token expired"}
             )
-        except jwt.InvalidTokenError as exception:
-            print("JWT DECODE ERROR:", str(exception))
+        except jwt.InvalidTokenError:
             return responses.JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"}
             )

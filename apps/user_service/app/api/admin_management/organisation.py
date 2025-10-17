@@ -49,6 +49,11 @@ from apps.user_service.app.schemas.auth import CompanyData, AccountType
 from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+
+# Audit logging import
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
+    audit_api_call,
+)
 # from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
@@ -334,7 +339,7 @@ async def get_organisations_list(
     # request_id = str(uuid.uuid4())
 
     # Extract user context
-    user_context = extract_user_context(current_user)
+    user_context = await extract_user_context(current_user)
 
     # Process the request
     organizations, total_count, page, page_size, message = (
@@ -414,6 +419,18 @@ async def get_organisation_by_id(
     status_code=status.HTTP_201_CREATED,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Creating organization involves personal information
+        "pii",  # Organization creation contains personally identifiable information
+        "soc2_audit",  # Organization management is critical for SOC2 compliance
+        "audit_required",  # Organization creation requires audit trail
+    ],
+    table_name="organizations",
+    category="ORGANIZATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def create_organisation(
     request: Request,
@@ -440,8 +457,13 @@ async def create_organisation(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for organization creation
+    request.state.audit_table = "organizations"
+    request.state.audit_description = f"Created new organization: {body.company_data.company_name}"
+    request.state.audit_risk_level = "high"
+
     # Extract and validate user context from JWT token
-    user_context = extract_user_context(current_user)
+    user_context = await extract_user_context(current_user)
 
     if user_context.user_id is None:
         raise HTTPException(
@@ -455,10 +477,6 @@ async def create_organisation(
     slug = _generate_organization_slug(
         user_context.user_id,organization_name, AccountType.BUSINESS.value
     )
-
-    print(f"Generated organization_id: {organization_id}")
-    print(f"Organization name: {organization_name}")
-    print(f"Organization slug: {slug}")
 
     # Validate slug uniqueness
     result = await check_organisation_slug_unique(slug)
@@ -492,11 +510,15 @@ async def create_organisation(
                 exclude_unset=True, exclude_none=True).items():
                 org_data[key] = value
         await create_organisation_with_super_admin(org_data)
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": organization_id,
+        }
     except (ConnectionError, TimeoutError, ValueError) as db_error:
         log_exception()
         logger.error("Database transaction failed - Request ID: %s, ",request_id)
         logger.error("Error: %s",str(db_error))
-        print(f"Database transaction failed: {db_error}")
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -526,6 +548,18 @@ async def create_organisation(
     status_code=status.HTTP_200_OK,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Updating organization involves personal information
+        "pii",  # Organization updates contain personally identifiable information
+        "soc2_audit",  # Organization management is critical for SOC2 compliance
+        "audit_required",  # Organization updates require audit trail
+    ],
+    table_name="organizations",
+    category="ORGANIZATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def update_organisation(
     organisation_id: str,
@@ -548,13 +582,25 @@ async def update_organisation(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for organization update
+    request.state.audit_table = "organizations"
+    request.state.audit_requested_id = organisation_id
+    request.state.audit_description = f"Updated organization: {organisation_id}"
+    request.state.audit_risk_level = "medium"
+
     # Validate organization ID format using utility function
     validate_uuid_format(organisation_id, "organisation ID")
 
     # Extract and validate user context from JWT token
     # Check permission using utility function
-    await check_permissions(
+    user_context = await check_permissions(
         current_user, SETTINGS_SYSTEM_MANAGE,"update organization", organisation_id)
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id or organisation_id,
+    }
 
     # Get organization details using database operations
     organization_data = await get_organisation_details_by_id(organisation_id)
@@ -570,6 +616,7 @@ async def update_organisation(
     update_data = body.model_dump(exclude_unset=True, exclude_none=True)
     await update_organisation_details(organisation_id, update_data)
 
+    request.state.audit_new_values = update_data
 
     return OrganisationResponse(
         message="Update organisation successfully",
@@ -584,6 +631,18 @@ async def update_organisation(
     status_code=status.HTTP_200_OK,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Deleting organization involves personal information
+        "pii",  # Organization deletion contains personally identifiable information
+        "soc2_audit",  # Organization management is critical for SOC2 compliance
+        "audit_required",  # Organization deletion requires audit trail
+    ],
+    table_name="organizations",
+    category="ORGANIZATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def delete_organisation_by_id(
     organisation_id: str,
@@ -604,6 +663,19 @@ async def delete_organisation_by_id(
     try:
         # # Generate request ID for tracking
         # request_id = str(uuid.uuid4())
+
+        # Set audit context for organization deletion
+        request.state.audit_table = "organizations"
+        request.state.audit_requested_id = organisation_id
+        request.state.audit_description = f"Deleted organization: {organisation_id}"
+        request.state.audit_risk_level = "high"
+
+        user_context = await extract_user_context(current_user)
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id or organisation_id,
+        }
 
         # Validate organization ID format using utility function
         validate_uuid_format(organisation_id, "organisation ID")
@@ -631,7 +703,6 @@ async def delete_organisation_by_id(
     except Exception as db_error:
         log_exception()
         logger.error("Error: %s",str(db_error))
-        print(f"Database transaction failed: {db_error}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete organization",

@@ -323,6 +323,7 @@ class TestGetAuditLogsList:
 
             mock_table.select.return_value = mock_select
             mock_select.eq.return_value = mock_eq
+            mock_eq.eq.return_value = mock_eq  # Chain the eq calls
             mock_eq.order.return_value = mock_order
             mock_order.range.return_value = mock_range
             mock_range.execute = AsyncMock(return_value=mock_result)
@@ -407,6 +408,7 @@ class TestGetAuditLogsList:
 
             mock_table.select.return_value = mock_select
             mock_select.eq.return_value = mock_eq
+            mock_eq.eq.return_value = mock_eq  # Chain the eq calls
             mock_eq.order.return_value = mock_order
             mock_order.range.return_value = mock_range
             mock_range.execute = AsyncMock(return_value=mock_result)
@@ -440,14 +442,12 @@ class TestGetAuditLogsCount:
             mock_eq1 = MagicMock()
             mock_eq2 = MagicMock()
             mock_eq3 = MagicMock()
-            mock_eq4 = MagicMock()
 
             mock_table.select.return_value = mock_select
             mock_select.eq.return_value = mock_eq1
             mock_eq1.eq.return_value = mock_eq2
             mock_eq2.eq.return_value = mock_eq3
-            mock_eq3.eq.return_value = mock_eq4
-            mock_eq4.execute = AsyncMock(return_value=mock_result)
+            mock_eq3.execute = AsyncMock(return_value=mock_result)
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -472,14 +472,12 @@ class TestGetAuditLogsCount:
             mock_select = MagicMock()
             mock_eq1 = MagicMock()
             mock_eq2 = MagicMock()
-            mock_eq3 = MagicMock()
             mock_or = MagicMock()
 
             mock_table.select.return_value = mock_select
             mock_select.eq.return_value = mock_eq1
             mock_eq1.eq.return_value = mock_eq2
-            mock_eq2.eq.return_value = mock_eq3
-            mock_eq3.or_.return_value = mock_or
+            mock_eq2.or_.return_value = mock_or
             mock_or.execute = AsyncMock(return_value=mock_result)
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
@@ -504,13 +502,11 @@ class TestGetAuditLogsCount:
             mock_select = MagicMock()
             mock_eq1 = MagicMock()
             mock_eq2 = MagicMock()
-            mock_eq3 = MagicMock()
 
             mock_table.select.return_value = mock_select
             mock_select.eq.return_value = mock_eq1
             mock_eq1.eq.return_value = mock_eq2
-            mock_eq2.eq.return_value = mock_eq3
-            mock_eq3.execute = AsyncMock(return_value=mock_result)
+            mock_eq2.execute = AsyncMock(return_value=mock_result)
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 

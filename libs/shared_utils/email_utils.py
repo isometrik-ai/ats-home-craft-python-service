@@ -39,7 +39,6 @@ def send_email(email: str, subject: str, message: str, html: str = None) -> bool
 
         if html:
             payload["html"] = html
-        print(f"Sending email to {email} with subject {subject} and message {message}")
         response = httpx.post(
             f"{SUPABASE_URL}/functions/v1/custom-email",
             headers={
@@ -344,4 +343,181 @@ The {organization_name} Team"""
 
     except Exception as error:
         logger.error("Error sending organization invitation email: %s", str(error))
+        return False
+
+
+def send_welcome_email(
+    email: str,
+    first_name: str,
+    company_name: str = "House of App AI",
+    dashboard_url: str = "https://app.houseofapp.ai/dashboard",
+    support_email: str = "support@houseofapp.ai",
+    company_address: str = "123 Main Street, City, State 12345",
+    privacy_policy_url: str = "https://houseofapp.ai/privacy",
+    terms_url: str = "https://houseofapp.ai/terms"
+) -> bool:
+    """
+    Send a welcome email to newly signed up users.
+
+    Args:
+        email (str): User's email address
+        first_name (str): User's first name
+        company_name (str): Company name (default: "House of App AI")
+        dashboard_url (str): Dashboard URL for the call-to-action button
+        support_email (str): Support email address
+        company_address (str): Company address for footer
+        privacy_policy_url (str): Privacy policy URL
+        terms_url (str): Terms of service URL
+
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    try:
+        current_year = datetime.now().year
+        creation_date = datetime.now().strftime("%B %d, %Y")
+
+        subject = f"Welcome to {company_name}!"
+
+        # Plain text message
+        message = f"""Hello {first_name},
+
+Thank you for signing up with us on {creation_date}. We are thrilled to have you join our community. Our platform is designed to help you manage your practice efficiently and effectively.
+
+To get started, visit your dashboard: {dashboard_url}
+
+If you have any questions or need assistance, feel free to reach out to our support team at {support_email}.
+
+Best regards,
+The {company_name} Team"""
+
+        # HTML message
+        html_message = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Welcome to {company_name}</title>
+    <style>
+        /* Reset styles */
+        body, table, td, a {{ -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }}
+        table, td {{ mso-table-lspace: 0pt; mso-table-rspace: 0pt; }}
+        img {{ -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }}
+        body {{ margin: 0; padding: 0; width: 100% !important; height: 100% !important; }}
+
+        /* Mobile Responsive Styles */
+        @media only screen and (max-width: 600px) {{
+            .email-container {{ width: 100% !important; }}
+            .mobile-padding {{ padding: 15px !important; }}
+            .mobile-font-size {{ font-size: 16px !important; }}
+            .button {{ width: 100% !important; }}
+        }}
+    </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: Arial, Helvetica, sans-serif;">
+
+    <!-- Preview Text (hidden but shows in email preview) -->
+    <div style="display: none; max-height: 0px; overflow: hidden;">
+        Welcome to {company_name}! We're excited to have you on board.
+    </div>
+
+    <!-- Email Container -->
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f9fafb;">
+        <tr>
+            <td style="padding: 40px 20px;">
+
+                <!-- Main Email Table -->
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" class="email-container" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td style="padding: 30px 40px; text-align: center; border-bottom: 1px solid #e5e7eb;">
+                            <h1 style="margin: 0; color: #1e3a8a; font-size: 24px; font-weight: bold;">
+                                Welcome to {company_name}
+                            </h1>
+                        </td>
+                    </tr>
+
+                    <!-- Body Content -->
+                    <tr>
+                        <td style="padding: 40px;" class="mobile-padding">
+
+                            <!-- Greeting -->
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                                Hello {first_name},
+                            </p>
+
+                            <!-- Main Message -->
+                            <p style="margin: 0 0 20px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">
+                                Thank you for signing up with us on {creation_date}. We are thrilled to have you join our community. Our platform is designed to help you manage your practice efficiently and effectively.
+                            </p>
+
+                            <!-- Call-to-Action Button -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 30px 0;">
+                                <tr>
+                                    <td style="text-align: center;">
+                                        <a href="{dashboard_url}" style="display: inline-block; padding: 14px 40px; background-color: #3b82f6; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: 600; min-width: 200px;">
+                                            Go to Dashboard
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Additional Information -->
+                            <p style="margin: 20px 0 0 0; color: #6b7280; font-size: 14px; line-height: 1.6;">
+                                If you have any questions or need assistance, feel free to reach out to our support team.
+                            </p>
+
+                        </td>
+                    </tr>
+
+                    <!-- Support Section -->
+                    <tr>
+                        <td style="padding: 30px 40px; background-color: #f9fafb; border-top: 1px solid #e5e7eb;">
+                            <p style="margin: 0 0 10px 0; color: #6b7280; font-size: 14px; line-height: 1.5;">
+                                Questions or need assistance?
+                            </p>
+                            <p style="margin: 0; color: #6b7280; font-size: 14px; line-height: 1.5;">
+                                Contact our support team at
+                                <a href="mailto:{support_email}" style="color: #3b82f6; text-decoration: none;">{support_email}</a>
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="padding: 30px 40px; text-align: center; border-top: 1px solid #e5e7eb;">
+                            <p style="margin: 0 0 10px 0; color: #9ca3af; font-size: 13px; line-height: 1.5;">
+                                © {current_year} {company_name}. All rights reserved.
+                            </p>
+                            <p style="margin: 0 0 15px 0; color: #9ca3af; font-size: 12px; line-height: 1.5;">
+                                {company_address}
+                            </p>
+                            <p style="margin: 0; color: #9ca3af; font-size: 12px;">
+                                <a href="{privacy_policy_url}" style="color: #9ca3af; text-decoration: underline;">Privacy Policy</a> |
+                                <a href="{terms_url}" style="color: #9ca3af; text-decoration: underline;">Terms of Service</a>
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+
+            </td>
+        </tr>
+    </table>
+
+</body>
+</html>"""
+
+        # Send the email with HTML content
+        email_sent = send_email(email, subject, message, html_message)
+
+        if email_sent:
+            logger.info("Welcome email sent successfully to %s", email)
+            return True
+        logger.error("Failed to send welcome email to %s", email)
+        return False
+
+    except Exception as error:
+        logger.error("Error sending welcome email: %s", str(error))
         return False

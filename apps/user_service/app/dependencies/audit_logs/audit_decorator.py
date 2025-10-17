@@ -55,8 +55,8 @@ def audit_api_call(
                 raise ValueError("Request must be passed as a keyword argument")
 
             request.state.audit_metadata = func.audit_metadata
+            
             result = await func(**kwargs)
-
             if not _should_log_audit(request):
                 return result
 
@@ -200,16 +200,9 @@ async def maybe_log_audit_on_error(
         user_email = user_context.get("user_email")
 
         if not all([organization_id, user_id, user_email]) or user_email == "unknown":
-            print(
-                "organization_id, user_id, user_email empty",
-                organization_id,
-                user_id,
-                user_email,
-            )
             return  # Skip audit logging
 
         if not user_context or user_context.get("user_email") == "unknown":
-            print(f"[Audit Skipped] Incomplete user context for {request.url.path}")
             return
 
         record_id = str(uuid4())

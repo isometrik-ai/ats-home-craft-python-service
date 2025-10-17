@@ -30,8 +30,8 @@ def app():
     app = FastAPI()
     app.include_router(sessions_router, prefix="/v1/admin")
     app.dependency_overrides[get_user_from_auth] = lambda: {
-        "user_id": "u",
-        "organization_id": "o",
+        "user_id": str(uuid.uuid4()),
+        "organization_id": str(uuid.uuid4()),
         "email": "e@e.com",
         "role": "admin",
         "permissions": ["*"],
@@ -58,9 +58,19 @@ class TestSessionEndpoints:
         """Test successful session creation."""
         session_id = str(uuid.uuid4())
         user_id = str(uuid.uuid4())
+        
+        from apps.user_service.app.dependencies.common_utils import UserContext
+        
+        mock_user_context = UserContext(
+            organization_id="o",
+            user_id=user_id,
+            email="e@e.com",
+            user_type="organization_member"
+        )
 
         # Mock session existence check
-        with patch('apps.user_service.app.api.admin_management.sessions.sessions.check_session_exists',
+        with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.sessions.sessions.check_session_exists',
                   AsyncMock(return_value=False)):
 
             # Mock session creation
@@ -99,8 +109,18 @@ class TestSessionEndpoints:
     @pytest.mark.asyncio
     async def test_start_session_already_exists(self, client):
         """Test session creation when session already exists."""
+        from apps.user_service.app.dependencies.common_utils import UserContext
+        
+        mock_user_context = UserContext(
+            organization_id="o",
+            user_id="u",
+            email="e@e.com",
+            user_type="organization_member"
+        )
+        
         # Mock session existence check to return True
-        with patch('apps.user_service.app.api.admin_management.sessions.sessions.check_session_exists',
+        with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.sessions.sessions.check_session_exists',
                   AsyncMock(return_value=True)):
 
             response = client.post("/v1/admin/sessions", headers={
@@ -117,10 +137,20 @@ class TestSessionEndpoints:
     async def test_start_session_missing_session_id(self, client):
         """Test session creation with missing session_id in token."""
         user_id = str(uuid.uuid4())
+        
+        from apps.user_service.app.dependencies.common_utils import UserContext
+        
+        mock_user_context = UserContext(
+            organization_id="o",
+            user_id=user_id,
+            email="e@e.com",
+            user_type="organization_member"
+        )
 
         # Mock the JWT token without session_id
         with patch('libs.shared_middleware.jwt_auth.get_user_from_auth',
-                  return_value={"user_id": user_id, "organization_id": "o", "email": "e@e.com", "role": "admin", "permissions": ["*"]}):
+                  return_value={"user_id": user_id, "organization_id": "o", "email": "e@e.com", "role": "admin", "permissions": ["*"]}), \
+             patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)):
 
             # Mock extract_session_id_from_token to raise HTTPException
             with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_session_id_from_token',
@@ -139,10 +169,20 @@ class TestSessionEndpoints:
     async def test_start_session_database_error(self, client):
         """Test session creation with database error."""
         session_id = "test-session-id"
+        
+        from apps.user_service.app.dependencies.common_utils import UserContext
+        
+        mock_user_context = UserContext(
+            organization_id="o",
+            user_id="u",
+            email="e@e.com",
+            user_type="organization_member"
+        )
 
         # Mock extract_session_id_from_token to return session_id
         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_session_id_from_token',
-                  return_value=session_id):
+                  return_value=session_id), \
+             patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)):
 
             # Mock check_session_exists to raise error
             with patch('apps.user_service.app.api.admin_management.sessions.sessions.check_session_exists',
@@ -163,6 +203,15 @@ class TestSessionEndpoints:
         """Test successful session logout."""
         session_id = "test-session-id"
         user_id = str(uuid.uuid4())
+        
+        from apps.user_service.app.dependencies.common_utils import UserContext
+        
+        mock_user_context = UserContext(
+            organization_id="o",
+            user_id=user_id,
+            email="e@e.com",
+            user_type="organization_member"
+        )
 
         # Mock existing session
         mock_existing_session = {
@@ -188,7 +237,8 @@ class TestSessionEndpoints:
             "logout_timestamp": datetime.now(timezone.utc)
         }
 
-        with patch('apps.user_service.app.api.admin_management.sessions.sessions.get_session_by_id',
+        with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.sessions.sessions.get_session_by_id',
                   AsyncMock(return_value=mock_existing_session)):
 
             with patch('apps.user_service.app.api.admin_management.sessions.sessions.update_session',
@@ -221,8 +271,18 @@ class TestSessionEndpoints:
     @pytest.mark.asyncio
     async def test_update_session_logout_session_not_found(self, client):
         """Test session logout when session not found."""
+        from apps.user_service.app.dependencies.common_utils import UserContext
+        
+        mock_user_context = UserContext(
+            organization_id="o",
+            user_id="u",
+            email="e@e.com",
+            user_type="organization_member"
+        )
+        
         # Mock session not found
-        with patch('apps.user_service.app.api.admin_management.sessions.sessions.get_session_by_id',
+        with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.sessions.sessions.get_session_by_id',
                   AsyncMock(return_value=None)):
 
             response = client.put("/v1/admin/sessions/logout", headers={
@@ -237,10 +297,20 @@ class TestSessionEndpoints:
     async def test_update_session_logout_database_error(self, client):
         """Test session logout with database error."""
         session_id = "test-session-id"
+        
+        from apps.user_service.app.dependencies.common_utils import UserContext
+        
+        mock_user_context = UserContext(
+            organization_id="o",
+            user_id="u",
+            email="e@e.com",
+            user_type="organization_member"
+        )
 
         # Mock extract_session_id_from_token to return session_id
         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_session_id_from_token',
-                  return_value=session_id):
+                  return_value=session_id), \
+             patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)):
 
             # Mock get_session_by_id to raise error
             with patch('apps.user_service.app.api.admin_management.sessions.sessions.get_session_by_id',
@@ -258,11 +328,13 @@ def test_sessions_list_success(client):
     """Test successful sessions list API endpoint."""
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     later = datetime(2025, 1, 2, tzinfo=timezone.utc)
-    with patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_list", AsyncMock(return_value=[
-        {
-            "id": "s",
-            "user_id": "u",
-            "organization_id": "o",
+    test_user_id = str(uuid.uuid4())
+    test_org_id = str(uuid.uuid4())
+    with patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count", AsyncMock(return_value={
+        "data": [{
+            "id": str(uuid.uuid4()),
+            "user_id": test_user_id,
+            "organization_id": test_org_id,
             "ip_address": "127.0.0.1",
             "user_agent": "agent",
             "device_fingerprint": None,
@@ -273,8 +345,9 @@ def test_sessions_list_success(client):
             "login_method": "password",
             "accessed_phi": False,
             "phi_access_purpose": None,
-        }
-    ])), patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_count", AsyncMock(return_value=1)):
+        }],
+        "total_count": 1
+    })):
         res = client.get("/v1/admin/sessions")
         assert res.status_code == 200
         assert res.json()["total_count"] == 1
@@ -282,9 +355,10 @@ def test_sessions_list_success(client):
 
 def test_sessions_list_with_filters(client):
     """Test sessions list API with query parameters."""
-    with patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_list", AsyncMock(return_value=[])), \
-         patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_count", AsyncMock(return_value=0)):
-
+    with patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count", AsyncMock(return_value={
+        "data": [],
+        "total_count": 0
+    })):
         res = client.get("/v1/admin/sessions?status=active&limit=10&offset=0")
         assert res.status_code == 200
         assert res.json()["total_count"] == 0
@@ -292,7 +366,7 @@ def test_sessions_list_with_filters(client):
 
 def test_sessions_list_database_error(client):
     """Test sessions list API with database error."""
-    with patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_list",
+    with patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count",
                AsyncMock(side_effect=DatabaseOperationError("Database connection failed"))):
         # The API doesn't have error handling, so it will raise the exception
         with pytest.raises(DatabaseOperationError):
@@ -632,7 +706,7 @@ class TestGetSessionsList:
         mock_query.range.return_value = mock_query
         mock_query.execute = AsyncMock(return_value=mock_result)
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
             result = await get_sessions_list(organization_id, user_id, filters)
@@ -657,7 +731,7 @@ class TestGetSessionsList:
         mock_query.range.return_value = mock_query
         mock_query.execute = AsyncMock(return_value=mock_result)
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
             result = await get_sessions_list(organization_id, user_id, filters)
@@ -670,7 +744,7 @@ class TestGetSessionsList:
         user_id = str(uuid.uuid4())
         filters = SessionFilter()
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(side_effect=Exception("Database connection failed"))):
 
             with pytest.raises(DatabaseOperationError):
@@ -697,7 +771,7 @@ class TestGetSessionsCount:
         mock_query.eq.return_value = mock_query
         mock_query.execute = AsyncMock(return_value=mock_result)
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
             result = await get_sessions_count(organization_id, user_id, filters)
@@ -720,7 +794,7 @@ class TestGetSessionsCount:
         mock_query.eq.return_value = mock_query
         mock_query.execute = AsyncMock(return_value=mock_result)
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
             result = await get_sessions_count(organization_id, user_id, filters)
@@ -733,7 +807,7 @@ class TestGetSessionsCount:
         user_id = str(uuid.uuid4())
         filters = SessionFilter()
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(side_effect=Exception("Database connection failed"))):
 
             with pytest.raises(DatabaseOperationError):
@@ -1022,7 +1096,7 @@ class TestSessionOperationsIntegration:
         mock_list_query.range.return_value = mock_list_query
         mock_list_query.execute = AsyncMock(return_value=mock_list_result)
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_list_table)))):
             filters = SessionFilter(
                 session_status="active",
@@ -1041,7 +1115,7 @@ class TestSessionOperationsIntegration:
         mock_count_query.eq.return_value = mock_count_query
         mock_count_query.execute = AsyncMock(return_value=mock_count_result)
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_count_table)))):
             count = await get_sessions_count(organization_id, user_id, filters)
             assert count == 2
@@ -1258,8 +1332,8 @@ class TestSessionOperationsCoverage:
     @pytest.mark.asyncio
     async def test_get_sessions_list_with_search(self):
         """Test get_sessions_list with search filter - covers lines 188, 191"""
-        organization_id = "org123"
-        user_id = "user123"
+        organization_id = str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
         filters = SessionFilter(
             search="test@example.com",
             limit=10,
@@ -1284,7 +1358,7 @@ class TestSessionOperationsCoverage:
         mock_query.execute = AsyncMock(return_value=mock_list_result)
         mock_supabase.table.return_value = mock_table
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=mock_supabase)):
             sessions = await get_sessions_list(organization_id, user_id, filters)
             assert len(sessions) == 2
@@ -1294,8 +1368,8 @@ class TestSessionOperationsCoverage:
     @pytest.mark.asyncio
     async def test_get_sessions_count_with_search(self):
         """Test get_sessions_count with search filter - covers lines 221, 225"""
-        organization_id = "org123"
-        user_id = "user123"
+        organization_id = str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
         filters = SessionFilter(
             search="test@example.com",
             limit=10,
@@ -1307,15 +1381,15 @@ class TestSessionOperationsCoverage:
         mock_count_result = MagicMock()
         mock_count_result.count = 2
 
-        # Create a more complex mock chain for the search case
+        # Create a mock chain that handles the double select call
         mock_table = MagicMock()
         mock_initial_query = MagicMock()
         mock_search_query = MagicMock()
-
+    
         # First select call (initial)
         mock_table.select.return_value = mock_initial_query
         mock_initial_query.eq.return_value = mock_initial_query
-
+    
         # Second select call (for search) - this returns a new query object
         mock_initial_query.select.return_value = mock_search_query
         mock_search_query.or_.return_value = mock_search_query
@@ -1323,7 +1397,7 @@ class TestSessionOperationsCoverage:
 
         mock_supabase.table.return_value = mock_table
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=mock_supabase)):
             count = await get_sessions_count(organization_id, user_id, filters)
             assert count == 2

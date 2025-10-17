@@ -109,11 +109,9 @@ class TestPerformanceTimer:
 
             timer = PerformanceTimer("test_operation")
 
-            with patch('builtins.print') as mock_print:
-                elapsed = timer.checkpoint("step1")
+            elapsed = timer.checkpoint()
 
-                assert abs(elapsed - 100.0) < 0.001  # Allow small floating-point differences
-                mock_print.assert_called_once_with("step1 took 100.00ms")
+            assert abs(elapsed - 100.0) < 0.001  # Allow small floating-point differences
 
     def test_performance_timer_total_time(self):
         """Test PerformanceTimer total_time functionality."""
@@ -123,11 +121,9 @@ class TestPerformanceTimer:
 
             timer = PerformanceTimer("test_operation")
 
-            with patch('builtins.print') as mock_print:
-                elapsed = timer.total_time()
+            elapsed = timer.total_time()
 
-                assert abs(elapsed - 200.0) < 0.001  # Allow small floating-point differences
-                mock_print.assert_called_once_with("Total test_operation time: 200.00ms")
+            assert abs(elapsed - 200.0) < 0.001  # Allow small floating-point differences
 
     def test_performance_timer_checkpoint_without_start_time(self):
         """Test PerformanceTimer checkpoint when start_time is None."""
@@ -135,7 +131,7 @@ class TestPerformanceTimer:
         timer.start_time = None
 
         with pytest.raises(AssertionError, match="Timer not initialized"):
-            timer.checkpoint("step1")
+            timer.checkpoint()
 
     def test_performance_timer_total_time_without_start_time(self):
         """Test PerformanceTimer total_time when start_time is None."""
@@ -212,9 +208,9 @@ class TestFormatPermissionsData:
                 "created_at": "2024-01-01T00:00:00Z"
             }
         ]
-        
+
         result = format_permissions_data(permissions_data)
-        
+
         assert len(result) == 1
         assert result[0].id == "perm1"
         assert result[0].created_at == "2024-01-01T00:00:00Z"
@@ -223,7 +219,8 @@ class TestFormatPermissionsData:
 class TestExtractUserContext:
     """Tests for extract_user_context function."""
 
-    def test_extract_user_context_success(self):
+    @pytest.mark.asyncio
+    async def test_extract_user_context_success(self):
         """Test successful user context extraction."""
         current_user = {
             "sub": "user123",
@@ -234,7 +231,7 @@ class TestExtractUserContext:
             }
         }
 
-        result = extract_user_context(current_user)
+        result = await extract_user_context(current_user)
 
         assert isinstance(result, UserContext)
         assert result.user_id == "user123"
@@ -242,7 +239,8 @@ class TestExtractUserContext:
         assert result.organization_id == "org123"
         assert result.user_type == "organization_member"
 
-    def test_extract_user_context_minimal_data(self):
+    @pytest.mark.asyncio
+    async def test_extract_user_context_minimal_data(self):
         """Test user context extraction with minimal data."""
         current_user = {
             "sub": "user123",
@@ -250,15 +248,19 @@ class TestExtractUserContext:
             "user_metadata": {}
         }
 
-        result = extract_user_context(current_user)
+        with patch('apps.user_service.app.dependencies.common_utils.get_user_by_id', AsyncMock(return_value=MagicMock(
+            user=MagicMock(user_metadata={})
+        ))):
+            result = await extract_user_context(current_user)
 
-        assert isinstance(result, UserContext)
-        assert result.user_id == "user123"
-        assert result.email == "test@example.com"
-        assert result.organization_id is None
-        assert result.user_type is None
+            assert isinstance(result, UserContext)
+            assert result.user_id == "user123"
+            assert result.email == "test@example.com"
+            assert result.organization_id is None
+            assert result.user_type is None
 
-    def test_extract_user_context_missing_user_id(self):
+    @pytest.mark.asyncio
+    async def test_extract_user_context_missing_user_id(self):
         """Test user context extraction with missing user ID."""
         current_user = {
             "email": "test@example.com",
@@ -266,12 +268,13 @@ class TestExtractUserContext:
         }
 
         with pytest.raises(HTTPException) as exc_info:
-            extract_user_context(current_user)
+            await extract_user_context(current_user)
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         assert "Invalid token: user ID not found" in str(exc_info.value.detail)
 
-    def test_extract_user_context_missing_email(self):
+    @pytest.mark.asyncio
+    async def test_extract_user_context_missing_email(self):
         """Test user context extraction with missing email."""
         current_user = {
             "sub": "user123",
@@ -279,26 +282,31 @@ class TestExtractUserContext:
         }
 
         with pytest.raises(HTTPException) as exc_info:
-            extract_user_context(current_user)
+            await extract_user_context(current_user)
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         assert "Invalid token: email not found" in str(exc_info.value.detail)
 
-    def test_extract_user_context_empty_user_metadata(self):
+    @pytest.mark.asyncio
+    async def test_extract_user_context_empty_user_metadata(self):
         """Test user context extraction with empty user_metadata."""
         current_user = {
             "sub": "user123",
             "email": "test@example.com"
         }
 
-        result = extract_user_context(current_user)
+        with patch('apps.user_service.app.dependencies.common_utils.get_user_by_id', AsyncMock(return_value=MagicMock(
+            user=MagicMock(user_metadata={})
+        ))):
+            result = await extract_user_context(current_user)
 
-        assert result.user_id == "user123"
-        assert result.email == "test@example.com"
-        assert result.organization_id is None
-        assert result.user_type is None
+            assert result.user_id == "user123"
+            assert result.email == "test@example.com"
+            assert result.organization_id is None
+            assert result.user_type is None
 
-    def test_extract_user_context_none_user_metadata(self):
+    @pytest.mark.asyncio
+    async def test_extract_user_context_none_user_metadata(self):
         """Test user context extraction with None user_metadata."""
         current_user = {
             "sub": "user123",
@@ -307,7 +315,7 @@ class TestExtractUserContext:
         }
 
         with pytest.raises(AttributeError):
-            extract_user_context(current_user)
+            await extract_user_context(current_user)
 
 
 class TestRequirePermission:
@@ -324,8 +332,7 @@ class TestRequirePermission:
 
         with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
                   AsyncMock(return_value=True)) as mock_check, \
-             patch('time.time', side_effect=[1000.0, 1000.1]), \
-             patch('builtins.print') as mock_print:
+             patch('time.time', side_effect=[1000.0, 1000.1]):
 
             await require_permission("users.manage", user_context, "manage users")
 
@@ -334,7 +341,6 @@ class TestRequirePermission:
                 user_id="user123",
                 organisation_id=None
             )
-            mock_print.assert_called_once_with("Permission check took 100.00ms")
 
     @pytest.mark.asyncio
     async def test_require_permission_success_multiple(self):
@@ -369,18 +375,13 @@ class TestRequirePermission:
 
         with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
                   AsyncMock(return_value=False)) as mock_check, \
-             patch('time.time', side_effect=[1000.0, 1000.1]), \
-             patch('builtins.print') as mock_print:
+             patch('time.time', side_effect=[1000.0, 1000.1, 1000.2]):
 
             with pytest.raises(HTTPException) as exc_info:
                 await require_permission("users.manage", user_context, "manage users")
 
             assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
             assert "Insufficient permissions to manage users" in str(exc_info.value.detail)
-            mock_print.assert_has_calls([
-                call("Permission check took 100.00ms"),
-                call("Permission denied - manage users")
-            ])
 
     @pytest.mark.asyncio
     async def test_require_permission_without_timing(self):
@@ -676,13 +677,11 @@ class TestHandleApiExceptions:
         async def test_func():
             raise DatabaseOperationError("Database connection failed")
 
-        with patch('builtins.print') as mock_print:
-            with pytest.raises(HTTPException) as exc_info:
-                await test_func()
+        with pytest.raises(HTTPException) as exc_info:
+            await test_func()
 
         assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert "Database error during test operation" in str(exc_info.value.detail)
-        mock_print.assert_called_once_with("Database error in test operation: Database connection failed")
 
     @pytest.mark.asyncio
     async def test_handle_api_exceptions_generic_exception(self):
@@ -691,13 +690,11 @@ class TestHandleApiExceptions:
         async def test_func():
             raise ValueError("Something went wrong")
 
-        with patch('builtins.print') as mock_print:
-            with pytest.raises(HTTPException) as exc_info:
-                await test_func()
+        with pytest.raises(HTTPException) as exc_info:
+            await test_func()
 
         assert exc_info.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
         assert "Value error during test operation" in str(exc_info.value.detail)
-        mock_print.assert_called_once_with("Value error in test operation: Something went wrong")
 
     @pytest.mark.asyncio
     async def test_handle_api_exceptions_with_args_and_kwargs(self):
@@ -729,7 +726,7 @@ class TestFormatIsoDatetime:
     def test_format_iso_datetime_with_string(self):
         """Test formatting string datetime (should return as-is)."""
         dt_str = "2024-01-01T12:30:45Z"
-        
+
         result = format_iso_datetime(dt_str)
         assert result == dt_str
 
@@ -1021,7 +1018,7 @@ class TestIntegration:
                   AsyncMock(return_value=True)) as mock_check:
 
             # Test the complete workflow
-            user_context = extract_user_context(current_user)
+            user_context = await extract_user_context(current_user)
             await require_permission("users.manage", user_context, "manage users")
 
             assert user_context.user_id == "user123"

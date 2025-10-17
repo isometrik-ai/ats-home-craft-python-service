@@ -162,27 +162,21 @@ async def get_audit_logs_list(filter_params: AuditLogFilter) -> List[Dict[str, A
     """Get paginated list of audit logs with optional search and filtering."""
     supabase = await _get_supabase_client()
 
-    # Build the query with filters
+    # Build the query with mandatory filters for RLS compliance
     query = supabase.table("audit_logs").select(
         "id, organization_id, user_id, user_email, user_role, "
         "action_type, data_classification, table_name, record_id, "
         "old_values, new_values, changed_fields, compliance_tags, "
         "risk_level, ip_address, description, timestamp, "
         "status_code, category"
-    )  #.eq("organization_id", organization_id).eq("user_id", user_id)
+    ).eq("organization_id", filter_params.organization_id).eq("user_id", filter_params.user_id)
 
-    # Apply filters
-    if filter_params.organization_id:
-        query = query.eq("organization_id", filter_params.organization_id)
-
+    # Apply additional optional filters
     if filter_params.action_type:
         query = query.eq("action_type", filter_params.action_type)
 
     if filter_params.table_name:
         query = query.eq("table_name", filter_params.table_name)
-
-    if filter_params.user_id:
-        query = query.eq("user_id", filter_params.user_id)
 
     if filter_params.start_date:
         query = query.gte("timestamp", filter_params.start_date.isoformat())
@@ -209,27 +203,21 @@ async def get_audit_logs_list(filter_params: AuditLogFilter) -> List[Dict[str, A
     "get_audit_logs_count",
     custom_messages=create_error_messages("get_audit_logs_count", "getting"))
 async def get_audit_logs_count(
-    organization_id: str, user_id: str, 
+    organization_id: str, user_id: str,
     filter_params: AuditLogFilter) -> int:
     """Get total count of audit logs matching search criteria."""
     supabase = await _get_supabase_client()
 
-    # Build the count query with filters
+    # Build the count query with mandatory filters for RLS compliance
     query = supabase.table("audit_logs").select("id", count="exact").eq(
         "organization_id", organization_id).eq("user_id", user_id)
 
-    # Apply filters
-    if filter_params.organization_id:
-        query = query.eq("organization_id", filter_params.organization_id)
-
+    # Apply additional optional filters
     if filter_params.action_type:
         query = query.eq("action_type", filter_params.action_type)
 
     if filter_params.table_name:
         query = query.eq("table_name", filter_params.table_name)
-
-    if filter_params.user_id:
-        query = query.eq("user_id", filter_params.user_id)
 
     if filter_params.start_date:
         query = query.gte("timestamp", filter_params.start_date.isoformat())
@@ -303,5 +291,4 @@ async def bulk_create_audit_logs(audit_logs_data: List[Dict[str, Any]]) -> List[
 
     # Bulk insert all records
     result = await supabase.table("audit_logs").insert(audit_records).execute()
-    print(f"Bulk create audit logs result: {result}")
     return _get_result_data(result)

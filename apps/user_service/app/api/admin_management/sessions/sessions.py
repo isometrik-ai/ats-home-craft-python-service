@@ -53,7 +53,8 @@ from libs.shared_db.postgres_db.user_service_operations.session_operations impor
     update_session,
     check_session_exists,
     get_sessions_list,
-    get_sessions_count
+    get_sessions_count,
+    get_sessions_with_count
 )
 
 
@@ -254,7 +255,7 @@ async def start_session(
     request_id = str(uuid.uuid4())
 
     # Extract and validate user context from JWT token
-    user_context = extract_user_context(current_user)
+    user_context = await extract_user_context(current_user)
 
     try:
         # Extract session ID from JWT token
@@ -402,21 +403,14 @@ async def _fetch_sessions_data(
         offset=offset,
     )
 
-    # Get sessions using centralized operations
-    sessions_data = await get_sessions_list(
+    # Get sessions and count in a single optimized database call
+    result = await get_sessions_with_count(
         organization_id=user_context.organization_id,
         user_id=user_context.user_id,
         filters=filters
     )
 
-    # Get total count using centralized operation
-    total_count = await get_sessions_count(
-        organization_id=user_context.organization_id,
-        user_id=user_context.user_id,
-        filters=filters
-    )
-
-    return sessions_data, total_count
+    return result["data"], result["total_count"]
 
 
 @router.put(
@@ -447,7 +441,7 @@ async def update_session_logout(
         session_id = extract_session_id_from_token(current_user)
 
         # Extract and validate user context from JWT token
-        user_context = extract_user_context(current_user)
+        user_context = await extract_user_context(current_user)
     except HTTPException as e:
         if "Session ID not found" in str(e.detail):
             e.detail = "Session ID not found in token"
@@ -620,6 +614,13 @@ async def get_sessions_details(
         permission_codes=SETTINGS_SYSTEM_MANAGE,
         action_description="view sessions list"
     )
+
+    if not user_context.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not a member of any organization",
+        )
+
     # Set audit context for session list access
     request.state.audit_table = "user_sessions"
     request.state.audit_description = (

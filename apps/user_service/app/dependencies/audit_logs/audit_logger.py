@@ -91,7 +91,6 @@ class AuditLogger:
             self._processing_task = asyncio.create_task(
                 self._process_audit_queue()
             )
-            print("Audit processing started")
 
     async def shutdown(self):
         """
@@ -100,14 +99,12 @@ class AuditLogger:
         Waits for the processing task to complete with a timeout,
         then cancels it if necessary.
         """
-        print("Shutting down audit processing...")
         self._shutdown_event.set()
 
         if self._processing_task:
             try:
                 await asyncio.wait_for(self._processing_task, timeout=10.0)
             except asyncio.TimeoutError:
-                print("Audit processing shutdown timeout")
                 self._processing_task.cancel()
 
     async def log_audit_event(self, event_data: AuditEventData, request: Request):
@@ -120,27 +117,22 @@ class AuditLogger:
         """
         try:
             audit_event = self._create_audit_event_dict(event_data, request)
-            print("ADDING IN QUEUE log_audit_event")
 
             try:
                 self._queue.put_nowait(audit_event)
             except asyncio.QueueFull:
                 try:
                     await asyncio.wait_for(self._queue.put(audit_event), timeout=0.1)
-                except asyncio.TimeoutError:
-                    print(f"Audit queue full, dropping {event_data.action_type} event")
-
+                except asyncio.TimeoutError as e:
+                    logger.warning("Queue timeout error in audit logging: %s", str(e), exc_info=True)
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             # Handle data validation and access errors
-            print(f"Audit logging error - invalid data: {e}")
             logger.warning("Data validation error in audit logging: %s", str(e))
         except (asyncio.QueueFull, asyncio.TimeoutError) as e:
             # Handle queue operation errors
-            print(f"Audit logging error - queue issue: {e}")
             logger.warning("Queue operation error in audit logging: %s", str(e))
         except (RuntimeError, IOError) as e:
             # Handle runtime and I/O errors (e.g., event loop issues)
-            print(f"Audit logging error - runtime error: {e}")
             logger.error("Runtime error in audit logging: %s", str(e), exc_info=True)
 
     def _create_audit_event_dict(
@@ -215,7 +207,6 @@ class AuditLogger:
             error_type = "data access"
 
         prefix = "Failed to write final audit batch" if is_final else "Error processing audit batch"
-        print(f"{prefix} ({error_type}): {error}")
         logger.error(f"{prefix} ({error_type}): %s", error, exc_info=True)
 
     async def _process_audit_queue(self):
@@ -233,13 +224,11 @@ class AuditLogger:
                     continue
 
                 consecutive_empty_batches = 0
-                print("PROCESSING AUDIT LOGS")
                 await self._write_audit_batch_with_retry(batch)
                 batch.clear()
                 await asyncio.sleep(5)
 
             except (asyncio.CancelledError, asyncio.TimeoutError) as e:
-                print(f"Audit processing interrupted: {e}")
                 break
             except (
                 DatabaseOperationError,
@@ -264,7 +253,6 @@ class AuditLogger:
 
     def _handle_write_error(self, error: Exception, attempt: int, error_type: str) -> None:
         """Handle errors during audit batch write attempts."""
-        print(f"Audit write attempt {attempt + 1} failed ({error_type}): {error}")
         logger.error(
             "%s error in audit write attempt %d: %s",
             error_type.title(),
@@ -287,8 +275,6 @@ class AuditLogger:
                     break
 
                 await asyncio.sleep(2**attempt)
-
-        print(f"Failed to write {len(events)} audit events after {self._max_retries} attempts")
 
     def _categorize_error(self, error: Exception) -> str:
         """Categorize error type for consistent handling."""
@@ -317,15 +303,12 @@ class AuditLogger:
             org_id = organization_id or "default"
             return await get_last_audit_log_hash(org_id)
         except DatabaseOperationError as e:
-            print(f"Error fetching last hash from database: {e}")
             logger.error("Database error fetching last hash: %s", e, exc_info=True)
             return None
         except (json.JSONDecodeError, UnicodeError) as e:
-            print(f"Serialization error fetching last hash: {e}")
             logger.error("Serialization error fetching last hash: %s", e, exc_info=True)
             return None
         except (LookupError, AttributeError) as e:
-            print(f"Data access error fetching last hash: {e}")
             logger.error("Data access error fetching last hash: %s", e, exc_info=True)
             return None
 
@@ -377,20 +360,18 @@ class AuditLogger:
 
             # Use centralized bulk create operation
             await bulk_create_audit_logs(batch_data)
-            print(f"Successfully wrote {len(events)} audit events")
-            print(f"AUDIT LOGS: Successfully wrote {len(events)} audit events")
 
         except DatabaseOperationError as e:
-            print(f"Database write error: {e}")
             logger.error("Database write error: %s", e, exc_info=True)
             raise
         except (json.JSONDecodeError, UnicodeError) as e:
-            print(f"Serialization error: {e}")
             logger.error("Serialization error: %s", e, exc_info=True)
             raise
         except (LookupError, AttributeError) as e:
-            print(f"Data access error: {e}")
             logger.error("Data access error: %s", e, exc_info=True)
+            raise
+        except Exception as e:
+            logger.error("Unknown error: %s", e, exc_info=True)
             raise
 
     def _generate_hash(self, event: Dict) -> str:

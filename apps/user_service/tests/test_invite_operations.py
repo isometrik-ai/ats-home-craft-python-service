@@ -731,7 +731,9 @@ class TestAddUserToOrganization:
         mock_result = MagicMock()
         mock_result.data = [mock_member_data]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client, \
+             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={"full_name": "Test User", "first_name": "Test", "last_name": "User", "phone": None, "timezone": "UTC"})))) as mock_get_user, \
+             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value=mock_member_data)) as mock_create_user:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -762,7 +764,9 @@ class TestAddUserToOrganization:
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client, \
+             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={"full_name": "Test User", "first_name": "Test", "last_name": "User", "phone": None, "timezone": "UTC"})))) as mock_get_user, \
+             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value={})) as mock_create_user:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
