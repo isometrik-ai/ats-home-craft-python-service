@@ -731,7 +731,7 @@ class TestGetSessionsList:
         mock_query.range.return_value = mock_query
         mock_query.execute = AsyncMock(return_value=mock_result)
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
             result = await get_sessions_list(organization_id, user_id, filters)
@@ -794,7 +794,7 @@ class TestGetSessionsCount:
         mock_query.eq.return_value = mock_query
         mock_query.execute = AsyncMock(return_value=mock_result)
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(table=MagicMock(return_value=mock_table)))):
 
             result = await get_sessions_count(organization_id, user_id, filters)
