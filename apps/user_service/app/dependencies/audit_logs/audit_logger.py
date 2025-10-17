@@ -392,6 +392,10 @@ class AuditLogger:
             print(f"Data access error: {e}")
             logger.error("Data access error: %s", e, exc_info=True)
             raise
+        except Exception as e:
+            print(f"Unknown error: {e}")
+            logger.error("Unknown error: %s", e, exc_info=True)
+            raise
 
     def _generate_hash(self, event: Dict) -> str:
         hash_data = (

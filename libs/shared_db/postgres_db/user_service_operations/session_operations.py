@@ -17,8 +17,8 @@ Operations Covered:
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import logging
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from apps.user_service.app.schemas.auth import SessionFilter
+from libs.shared_db.supabase_db.db import get_fresh_supabase_admin_client, get_supabase_admin_client
 from .exception_handling import handle_database_errors, create_error_messages
 
 logger = logging.getLogger(__name__)
@@ -165,6 +165,14 @@ async def check_session_exists(session_id: str, organization_id: str) -> bool:
 # SESSION LISTING AND SEARCH
 # ============================================================================
 
+# Common field list for session queries
+SESSION_FIELDS = (
+    "id, user_id, organization_id, ip_address, user_agent, "
+    "device_fingerprint, risk_score, login_timestamp, "
+    "logout_timestamp, session_status, login_method, "
+    "accessed_phi, phi_access_purpose"
+)
+
 @handle_database_errors(
     "get_sessions_list",
     custom_messages=create_error_messages("get_sessions_list", "getting"))
@@ -172,28 +180,34 @@ async def get_sessions_list(
     organization_id: str, user_id: str,
     filters: SessionFilter) -> List[Dict[str, Any]]:
     """Get paginated list of sessions with optional search and filtering."""
-    supabase = await get_supabase_admin_client()
+    # Use fresh admin client to avoid state corruption
+    supabase = await get_fresh_supabase_admin_client()
 
-    # Build the query with filters (without join for now)
-    query = supabase.table("user_sessions").select(
-        "id, user_id, organization_id, ip_address, user_agent, "
-        "device_fingerprint, risk_score, login_timestamp, "
-        "logout_timestamp, session_status, login_method, "
-        "accessed_phi, phi_access_purpose"
-    ).eq("organization_id", organization_id).eq("user_id", user_id)
+    # Build the query with filters
+    if filters.search:
+        # Include join with organization_members for search functionality
+        query = supabase.table("user_sessions").select(
+            f"{SESSION_FIELDS}, "
+            "organization_members!inner(email, full_name)"
+        ).eq("organization_id", organization_id
+        ).eq("user_id", user_id
+        ).or_(
+            f"organization_members.email.ilike.*{filters.search}*,"
+            f"organization_members.full_name.ilike.*{filters.search}*"
+        )
+    else:
+        # Simple query without join when no search is needed
+        query = supabase.table("user_sessions").select(
+            SESSION_FIELDS
+        ).eq("organization_id", organization_id
+        ).eq("user_id", user_id)
 
-    # Apply filters
+    # Apply additional filters
     if filters.session_status:
         query = query.eq("session_status", filters.session_status)
 
     if filters.login_method:
         query = query.eq("login_method", filters.login_method)
-
-    if filters.search:
-        query = query.or_(
-            f"organization_members.email.ilike.%{filters.search}%,"
-            f"organization_members.full_name.ilike.%{filters.search}%"
-        )
 
     # Apply pagination and ordering
     result = await query.order("login_timestamp", desc=True).range(
@@ -208,7 +222,8 @@ async def get_sessions_list(
     custom_messages=create_error_messages("get_sessions_count", "getting"))
 async def get_sessions_count(organization_id: str, user_id: str, filters: SessionFilter) -> int:
     """Get total count of sessions matching search criteria."""
-    supabase = await get_supabase_admin_client()
+    # Use fresh admin client to avoid state corruption
+    supabase = await get_fresh_supabase_admin_client()
 
     # Build the count query with filters
     query = supabase.table("user_sessions").select(
@@ -236,6 +251,56 @@ async def get_sessions_count(organization_id: str, user_id: str, filters: Sessio
     result = await query.execute()
 
     return result.count if result.count is not None else 0
+
+
+@handle_database_errors(
+    "get_sessions_with_count",
+    custom_messages=create_error_messages("get_sessions_with_count", "getting"))
+async def get_sessions_with_count(
+    organization_id: str, user_id: str,
+    filters: SessionFilter) -> Dict[str, Any]:
+    """Get paginated list of sessions with total count in a single database call."""
+    # Use fresh admin client to avoid state corruption
+    supabase = await get_fresh_supabase_admin_client()
+
+    # Build the query with filters
+    if filters.search:
+        # Include join with organization_members for search functionality
+        query = supabase.table("user_sessions").select(
+            f"{SESSION_FIELDS}, "
+            "organization_members!inner(email, full_name)"
+        ).eq("organization_id", organization_id
+        ).eq("user_id", user_id
+        ).or_(
+            f"organization_members.email.ilike.%{filters.search}%,"
+            f"organization_members.full_name.ilike.%{filters.search}%"
+        )
+    else:
+        # Simple query without join when no search is needed
+        query = supabase.table("user_sessions").select(
+            SESSION_FIELDS
+        ).eq("organization_id", organization_id
+        ).eq("user_id", user_id)
+
+    # Apply additional filters
+    if filters.session_status:
+        query = query.eq("session_status", filters.session_status)
+
+    if filters.login_method:
+        query = query.eq("login_method", filters.login_method)
+
+    # Execute query with pagination - we'll return the length of results as count
+    # This is more efficient than making a separate count query
+    result = await query.order("login_timestamp", desc=True).range(
+        filters.offset, filters.offset + filters.limit - 1
+    ).execute()
+
+    data = result.data if result.data else []
+    
+    return {
+        "data": data,
+        "total_count": len(data)  # Return count of current page results
+    }
 
 
 # ============================================================================

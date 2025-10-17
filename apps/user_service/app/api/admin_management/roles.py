@@ -336,6 +336,12 @@ async def create_new_role(
     user_context = await check_permissions(current_user=current_user,
         permission_codes=SETTINGS_ROLES_MANAGE, action_description="create role")
 
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
     # Validate that all permission IDs exist in the organization using centralized operation
     await check_permission_exist_in_organization(role_data, user_context, request_id)
 
@@ -467,6 +473,12 @@ async def update_role_data(
         current_user, [SETTINGS_ROLES_MANAGE, SETTINGS_USERS_MANAGE],
         "Update Role Data")
 
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
     # Check if role exists in organization using centralized operation
     role_exists = await check_role_exists(role_id, user_context.organization_id)
     check_role_data_exist(role_exists, request_id)
@@ -481,6 +493,7 @@ async def update_role_data(
     request.state.audit_table = "roles"
     request.state.audit_description = f"Updated role: {existing_role['name']}"
     request.state.audit_risk_level = "medium"
+    
 
     # Set old values for audit comparison
     request.state.raw_audit_old_data = {
@@ -610,6 +623,12 @@ async def delete_role_data(
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(current_user, SETTINGS_ROLES_MANAGE)
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Check if role exists in organization using centralized operation
     role_exists = await check_role_exists(role_id, user_context.organization_id)

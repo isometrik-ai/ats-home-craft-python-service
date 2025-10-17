@@ -118,6 +118,12 @@ async def check_user_access_async(
 
         print(permission_code,user_id,organisation_id,sep='\n\n')
 
+        if not organisation_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not a member of any organization",
+            )
+
         # Use Supabase RPC function for permission checking
         rpc_result = supabase.rpc(
             "check_permission",
@@ -132,6 +138,8 @@ async def check_user_access_async(
 
         return response.data if response.data is not None else False
 
+    except HTTPException as error:
+        raise error
     except Exception as error:
         print(f"Async permission check error: {error}")
         raise HTTPException(

@@ -134,6 +134,8 @@ async def get_audit_logs(
     # Get audit logs using centralized database operations
     audit_logs_data = await get_audit_logs_list(filter_params)
 
+    print(f"audit_logs_data: {audit_logs_data}")
+
     # Get total count using centralized database operations
     total_count = await get_audit_logs_count(
         user_context.organization_id,
@@ -357,7 +359,7 @@ async def delete_all_audit_logs_data(
     - Transaction rollback on failures
     """
     # Extract and validate user context from JWT token
-    # user_context = extract_user_context(current_user)
+    # user_context = await extract_user_context(current_user)
 
     # Check permission using utility function
     # await require_permission(

@@ -66,6 +66,11 @@ from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USER
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 
+# Audit logging import
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
+    audit_api_call,
+)
+
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.invite_operations import (
     create_organization_invite,
@@ -234,6 +239,18 @@ async def _process_invite_list_request(
     status_code=status.HTTP_200_OK,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Accepting invitation involves personal information
+        "pii",  # Invitation acceptance contains personally identifiable information
+        "soc2_audit",  # Invitation management is critical for SOC2 compliance
+        "audit_required",  # Invitation acceptance requires audit trail
+    ],
+    table_name="organization_invites",
+    category="INVITATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def accept_invitation(
     request: Request,
@@ -254,8 +271,19 @@ async def accept_invitation(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for invitation acceptance
+    request.state.audit_table = "organization_invites"
+    request.state.audit_description = f"Accepted invitation for token: {body.token}"
+    request.state.audit_risk_level = "medium"
+
     # Extract user context
-    user_context = extract_user_context(current_user)
+    user_context = await extract_user_context(current_user)
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Get invitation details by token
     invitation_data = await get_invite_by_token(body.token)
@@ -286,13 +314,16 @@ async def accept_invitation(
             detail="User is already a member of this organization"
         )
 
+    role_name = await get_role_by_id(invitation_data['role_id'], invitation_data["organization_id"])
+
     try:
         # Add user to organization
         await add_user_to_organization(
             invitation_data["organization_id"],
             user_context.user_id,
             invitation_data["email"],
-            invitation_data["role"],
+            invitation_data['role_id'],
+            role_name["name"],
             invitation_data["invited_by"]
         )
 
@@ -328,6 +359,18 @@ async def accept_invitation(
     status_code=status.HTTP_200_OK,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Rejecting invitation involves personal information
+        "pii",  # Invitation rejection contains personally identifiable information
+        "soc2_audit",  # Invitation management is critical for SOC2 compliance
+        "audit_required",  # Invitation rejection requires audit trail
+    ],
+    table_name="organization_invites",
+    category="INVITATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def reject_invitation(
     request: Request,
@@ -348,8 +391,19 @@ async def reject_invitation(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for invitation rejection
+    request.state.audit_table = "organization_invites"
+    request.state.audit_description = f"Rejected invitation for token: {body.token}"
+    request.state.audit_risk_level = "low"
+
     # Extract user context
-    user_context = extract_user_context(current_user)
+    user_context = await extract_user_context(current_user)
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Get invitation details by token
     invitation_data = await get_invite_by_token(body.token)
@@ -393,6 +447,18 @@ async def reject_invitation(
     status_code=status.HTTP_202_ACCEPTED,
 )
 @limiter.limit("10/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Cleanup involves personal information
+        "pii",  # Invitation cleanup contains personally identifiable information
+        "soc2_audit",  # Invitation management is critical for SOC2 compliance
+        "audit_required",  # Invitation cleanup requires audit trail
+    ],
+    table_name="organization_invites",
+    category="INVITATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def cleanup_expired_invitations(
     request: Request,
@@ -411,11 +477,22 @@ async def cleanup_expired_invitations(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for invitation cleanup
+    request.state.audit_table = "organization_invites"
+    request.state.audit_description = "Cleaned up expired invitations"
+    request.state.audit_risk_level = "low"
+
     # Extract user context
-    await check_permissions(current_user=current_user,
+    user_context = await check_permissions(current_user=current_user,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
         action_description="cleanup expired invitations",
     )
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     try:
         # Cleanup expired invitations
@@ -445,6 +522,18 @@ async def cleanup_expired_invitations(
     status_code=status.HTTP_201_CREATED,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Creating invitation involves personal information
+        "pii",  # Invitation contains personally identifiable information
+        "soc2_audit",  # Invitation management is critical for SOC2 compliance
+        "audit_required",  # Invitation creation requires audit trail
+    ],
+    table_name="organization_invites",
+    category="INVITATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def create_invitation(
     organization_id: str,
@@ -469,6 +558,11 @@ async def create_invitation(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for invitation creation
+    request.state.audit_table = "organization_invites"
+    request.state.audit_description = f"Created invitation for email: {body.email} in organization: {organization_id}"
+    request.state.audit_risk_level = "medium"
+
     # Validate organization ID format
     validate_uuid_format(organization_id, "organization ID")
 
@@ -479,6 +573,12 @@ async def create_invitation(
         organization_id=organization_id,
         action_description="create organization invitations"
     )
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Validate organization access
     if not await validate_organization_access(user_context, organization_id):
@@ -602,6 +702,11 @@ async def get_organization_invitations(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for invitation listing
+    request.state.audit_table = "organization_invites"
+    request.state.audit_description = f"Retrieved invitations for organization: {organization_id}"
+    request.state.audit_risk_level = "low"
+
     # Validate organization ID format
     validate_uuid_format(organization_id, "organization ID")
 
@@ -633,6 +738,18 @@ async def get_organization_invitations(
     status_code=status.HTTP_200_OK,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Rejecting invitation involves personal information
+        "pii",  # Invitation rejection contains personally identifiable information
+        "soc2_audit",  # Invitation management is critical for SOC2 compliance
+        "audit_required",  # Invitation rejection requires audit trail
+    ],
+    table_name="organization_invites",
+    category="INVITATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def reject_invitation(
     request: Request,
@@ -654,7 +771,18 @@ async def reject_invitation(
     request_id = str(uuid.uuid4())
 
     # Extract user context
-    user_context = extract_user_context(current_user)
+    user_context = await extract_user_context(current_user)
+
+    # Set audit context for invitation rejection
+    request.state.audit_table = "organization_invites"
+    request.state.audit_description = f"Rejected invitation for token: {body.token}"
+    request.state.audit_risk_level = "low"
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Get invitation details by token
     invitation_data = await get_invite_by_token(body.token)
@@ -708,6 +836,18 @@ async def reject_invitation(
     status_code=status.HTTP_200_OK,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Resending invitation involves personal information
+        "pii",  # Invitation resend contains personally identifiable information
+        "soc2_audit",  # Invitation management is critical for SOC2 compliance
+        "audit_required",  # Invitation resend requires audit trail
+    ],
+    table_name="organization_invites",
+    category="INVITATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def resend_invitation(
     invite_id: str,
@@ -728,6 +868,12 @@ async def resend_invitation(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for invitation resend
+    request.state.audit_table = "organization_invites"
+    request.state.audit_requested_id = invite_id
+    request.state.audit_description = f"Resent invitation for ID: {invite_id}"
+    request.state.audit_risk_level = "low"
+
     # Validate invitation ID format
     validate_uuid_format(invite_id, INVITATION_ID_LABEL)
 
@@ -735,6 +881,12 @@ async def resend_invitation(
     user_context = await check_permissions(current_user=current_user,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
         action_description="resend organization invitations")
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Get invitation details
     invitation_data = await get_invite_by_id(invite_id)
@@ -810,6 +962,18 @@ async def resend_invitation(
     status_code=status.HTTP_202_ACCEPTED,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Revoking invitation involves personal information
+        "pii",  # Invitation revocation contains personally identifiable information
+        "soc2_audit",  # Invitation management is critical for SOC2 compliance
+        "audit_required",  # Invitation revocation requires audit trail
+    ],
+    table_name="organization_invites",
+    category="INVITATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def revoke_invitation(
     invite_id: str,
@@ -830,6 +994,12 @@ async def revoke_invitation(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for invitation revocation
+    request.state.audit_table = "organization_invites"
+    request.state.audit_requested_id = invite_id
+    request.state.audit_description = f"Revoked invitation for ID: {invite_id}"
+    request.state.audit_risk_level = "medium"
+
     # Validate invitation ID format
     validate_uuid_format(invite_id, INVITATION_ID_LABEL)
 
@@ -839,6 +1009,12 @@ async def revoke_invitation(
         permission_codes=SETTINGS_SYSTEM_MANAGE,
         action_description="revoke organization invitations",
     )
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Get invitation details
     invitation_data = await get_invite_by_id(invite_id)
@@ -887,6 +1063,18 @@ async def revoke_invitation(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Deleting invitation involves personal information
+        "pii",  # Invitation deletion contains personally identifiable information
+        "soc2_audit",  # Invitation management is critical for SOC2 compliance
+        "audit_required",  # Invitation deletion requires audit trail
+    ],
+    table_name="organization_invites",
+    category="INVITATION",
+)
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def delete_invitation(
     invite_id: str,
@@ -907,6 +1095,12 @@ async def delete_invitation(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
+    # Set audit context for invitation deletion
+    request.state.audit_table = "organization_invites"
+    request.state.audit_requested_id = invite_id
+    request.state.audit_description = f"Deleted invitation for ID: {invite_id}"
+    request.state.audit_risk_level = "high"
+
     # Validate invitation ID format
     validate_uuid_format(invite_id, INVITATION_ID_LABEL)
 
@@ -916,6 +1110,12 @@ async def delete_invitation(
         permission_codes=SETTINGS_SYSTEM_MANAGE,
         action_description="delete organization invitations",
     )
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Get invitation details
     invitation_data = await get_invite_by_id(invite_id)

@@ -6,6 +6,7 @@ All Supabase Auth admin API operations for user management should be centralized
 """
 
 import traceback
+import asyncio
 from postgrest import APIError
 from httpx import HTTPError, HTTPStatusError, RequestError, TimeoutException
 from fastapi import HTTPException
@@ -172,15 +173,26 @@ async def update_password_with_link_identity(user_id: str, password: str) -> boo
 
 async def get_user_by_id(user_id: str) -> dict:
     """Get user by id from auth.users table."""
-    try:
-        supabase = await get_supabase_admin_client()
-        return await supabase.auth.admin.get_user_by_id(user_id)
-    except AuthApiError as e:
-        logger.error("Supabase API error getting user by id: %s", e, exc_info=True)
-        raise
-    except (HTTPError, RequestError, TimeoutException) as e:
-        logger.error("Network error getting user by id: %s", e, exc_info=True)
-        raise
-    except (KeyError, TypeError, ValueError) as e:
-        logger.error("Data validation error getting user by id: %s", e, exc_info=True)
-        raise
+    max_retries = 2
+    retry_delay = 1  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            supabase = await get_supabase_admin_client()
+            return await supabase.auth.admin.get_user_by_id(user_id)
+        except AuthApiError as e:
+            if "User not allowed" in str(e) and attempt < max_retries - 1:
+                # Clear the cached admin client and retry
+                logger.warning(f"Admin client auth failed (attempt {attempt + 1}), retrying...")
+                from libs.shared_db.supabase_db.db import _cache
+                _cache._supabase_admin_client = None  # Clear cache
+                await asyncio.sleep(retry_delay)
+                continue
+            logger.error("Supabase API error getting user by id: %s", e, exc_info=True)
+            raise
+        except (HTTPError, RequestError, TimeoutException) as e:
+            logger.error("Network error getting user by id: %s", e, exc_info=True)
+            raise
+        except (KeyError, TypeError, ValueError) as e:
+            logger.error("Data validation error getting user by id: %s", e, exc_info=True)
+            raise

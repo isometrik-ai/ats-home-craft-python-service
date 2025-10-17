@@ -50,14 +50,17 @@ def audit_api_call(
 
         @wraps(func)
         async def wrapper(**kwargs):
+            print("Audit Decorator wrapper Starts\n\n")
             request: Request = kwargs.get("request")
             if request is None:
                 raise ValueError("Request must be passed as a keyword argument")
 
             request.state.audit_metadata = func.audit_metadata
+            
             result = await func(**kwargs)
-
+            print("Audit Decorator wrapper Ends\n\n")
             if not _should_log_audit(request):
+                print("Audit Decorator wrapper Skips\n\n")
                 return result
 
             await _log_audit_event(request, result, action_type, data_classification,

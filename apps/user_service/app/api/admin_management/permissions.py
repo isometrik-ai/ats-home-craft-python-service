@@ -286,6 +286,12 @@ async def create_permission(
         action_description="create permission"
     )
 
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
     try:
         permission = await create_new_permission(
             permission_data=permission_data,
@@ -374,6 +380,12 @@ async def delete_permission_by_id(
         current_user=current_user, permission_codes=SETTINGS_SYSTEM_MANAGE,
         action_description="delete permission"
     )
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     permission = await get_permission_details_by_id(permission_id, user_context.organization_id)
     if not permission:

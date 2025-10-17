@@ -107,13 +107,24 @@ class TestSupabaseClientCache:
 
         cache = SupabaseClientCache()
 
-        # Mock create_async_client
+        # Mock create_async_client and auth.admin.list_users
         mock_admin_client = AsyncMock(spec=AsyncClient)
+        mock_auth = AsyncMock()
+        mock_admin = AsyncMock()
+        mock_list_users = AsyncMock()
+        
+        mock_admin_client.auth = mock_auth
+        mock_auth.admin = mock_admin
+        mock_admin.list_users = mock_list_users
+        
         with patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client) as mock_create:
             result = await cache.get_admin_client()
 
             # Verify admin client was created with correct parameters
             mock_create.assert_called_once_with(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+            # Verify auth.admin.list_users was called for warm-up
+            mock_list_users.assert_called_once()
 
             # Verify admin client is cached
             assert cache._supabase_admin_client is mock_admin_client
@@ -128,8 +139,16 @@ class TestSupabaseClientCache:
 
         cache = SupabaseClientCache()
 
-        # Mock create_async_client
+        # Mock create_async_client and auth.admin.list_users
         mock_admin_client = AsyncMock(spec=AsyncClient)
+        mock_auth = AsyncMock()
+        mock_admin = AsyncMock()
+        mock_list_users = AsyncMock()
+        
+        mock_admin_client.auth = mock_auth
+        mock_auth.admin = mock_admin
+        mock_admin.list_users = mock_list_users
+        
         with patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client) as mock_create:
             # First call
             result1 = await cache.get_admin_client()
@@ -139,6 +158,9 @@ class TestSupabaseClientCache:
 
             # Should only create admin client once
             assert mock_create.call_count == 1
+            
+            # Should only call auth.admin.list_users once (during first call)
+            mock_list_users.assert_called_once()
 
             # Both calls should return same admin client
             assert result1 is mock_admin_client
@@ -158,6 +180,15 @@ class TestSupabaseClientCache:
         # Mock create_async_client
         mock_client = AsyncMock(spec=AsyncClient)
         mock_admin_client = AsyncMock(spec=AsyncClient)
+        
+        # Mock auth.admin.list_users for admin client
+        mock_auth = AsyncMock()
+        mock_admin = AsyncMock()
+        mock_list_users = AsyncMock()
+        
+        mock_admin_client.auth = mock_auth
+        mock_auth.admin = mock_admin
+        mock_admin.list_users = mock_list_users
 
         with patch('libs.shared_db.supabase_db.db.create_async_client') as mock_create:
             mock_create.side_effect = [mock_client, mock_admin_client]
@@ -175,6 +206,9 @@ class TestSupabaseClientCache:
                 call(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
             ]
             mock_create.assert_has_calls(expected_calls)
+
+            # Verify auth.admin.list_users was called for admin client warm-up
+            mock_list_users.assert_called_once()
 
             # Verify clients are different
             assert regular_client is mock_client
@@ -194,6 +228,15 @@ class TestSupabaseClientCache:
         # Mock create_async_client and print
         mock_client = AsyncMock(spec=AsyncClient)
         mock_admin_client = AsyncMock(spec=AsyncClient)
+        
+        # Mock auth.admin.list_users for admin client
+        mock_auth = AsyncMock()
+        mock_admin = AsyncMock()
+        mock_list_users = AsyncMock()
+        
+        mock_admin_client.auth = mock_auth
+        mock_auth.admin = mock_admin
+        mock_admin.list_users = mock_list_users
 
         with patch('libs.shared_db.supabase_db.db.create_async_client') as mock_create, \
              patch('builtins.print') as mock_print:
@@ -207,7 +250,8 @@ class TestSupabaseClientCache:
             # Verify print statements
             expected_prints = [
                 call("Supabase client created and cached"),
-                call("Supabase admin client created and cached")
+                call("Supabase admin client created and cached"),
+                call("Supabase admin client authenticated successfully")
             ]
             mock_print.assert_has_calls(expected_prints)
 
@@ -420,8 +464,15 @@ class TestConcurrency:
 
         cache = SupabaseClientCache()
 
-        # Mock create_async_client
+        # Mock create_async_client and auth.admin.list_users
         mock_admin_client = AsyncMock(spec=AsyncClient)
+        mock_auth = AsyncMock()
+        mock_admin = AsyncMock()
+        mock_list_users = AsyncMock()
+        
+        mock_admin_client.auth = mock_auth
+        mock_auth.admin = mock_admin
+        mock_admin.list_users = mock_list_users
 
         with patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client) as mock_create:
             # Simulate concurrent calls
@@ -439,6 +490,9 @@ class TestConcurrency:
 
             # Should only create admin client once
             assert mock_create.call_count == 1
+            
+            # Should only call auth.admin.list_users once (during first call)
+            mock_list_users.assert_called_once()
 
             # All results should be the same admin client
             for result in results:
@@ -459,6 +513,15 @@ class TestIntegration:
         # Mock create_async_client
         mock_client = AsyncMock(spec=AsyncClient)
         mock_admin_client = AsyncMock(spec=AsyncClient)
+        
+        # Mock auth.admin.list_users for admin client
+        mock_auth = AsyncMock()
+        mock_admin = AsyncMock()
+        mock_list_users = AsyncMock()
+        
+        mock_admin_client.auth = mock_auth
+        mock_auth.admin = mock_admin
+        mock_admin.list_users = mock_list_users
 
         with patch('libs.shared_db.supabase_db.db.create_async_client') as mock_create, \
              patch('builtins.print') as mock_print:
@@ -476,10 +539,14 @@ class TestIntegration:
             assert regular_client is mock_client
             assert admin_client is mock_admin_client
 
+            # Verify auth.admin.list_users was called for admin client warm-up
+            mock_list_users.assert_called_once()
+
             # Verify print statements
             expected_prints = [
                 call("Supabase client created and cached"),
-                call("Supabase admin client created and cached")
+                call("Supabase admin client created and cached"),
+                call("Supabase admin client authenticated successfully")
             ]
             mock_print.assert_has_calls(expected_prints)
 

@@ -55,7 +55,7 @@ from apps.user_service.app.app_instance import limiter
 from libs.shared_middleware.jwt_auth import get_user_from_token, get_user_from_auth
 
 # Email utilities
-from libs.shared_utils.email_utils import send_password_reset_confirmation_email
+from libs.shared_utils.email_utils import send_password_reset_confirmation_email, send_welcome_email
 
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_auth_user_by_email,
@@ -434,6 +434,20 @@ async def signup(
         )
 
     user_id = await sign_up_supabase_user(signup_data)
+
+    # Send welcome email to the newly signed up user
+    try:
+        email_sent = send_welcome_email(
+            email=signup_data.email,
+            first_name=signup_data.first_name
+        )
+        if not email_sent:
+            logger.warning("Failed to send welcome email to %s", signup_data.email)
+            # Note: We don't fail the entire operation if email fails
+            # The signup was successful, only the welcome email failed
+    except Exception as email_error:
+        logger.error("Error sending welcome email: %s", str(email_error))
+        # Note: We don't fail the entire operation if email fails
 
     return SignupResponse(
         message="Account created successfully! Please check your email for verification.",

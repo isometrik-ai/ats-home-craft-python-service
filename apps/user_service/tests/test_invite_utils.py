@@ -512,14 +512,14 @@ class TestValidateOrganizationAccess:
     async def test_validate_organization_access_valid(self):
         """Test organization access validation with valid access."""
         from apps.user_service.app.dependencies.common_utils import UserContext
-        
+
         user_context = UserContext(
             organization_id="org123",
             user_id="user123",
             email="test@example.com",
             user_type="organization_member"
         )
-        
+
         result = await validate_organization_access(user_context, "org123")
         assert result is True
 
@@ -527,14 +527,14 @@ class TestValidateOrganizationAccess:
     async def test_validate_organization_access_invalid(self):
         """Test organization access validation with invalid access."""
         from apps.user_service.app.dependencies.common_utils import UserContext
-        
+
         user_context = UserContext(
             organization_id="org123",
             user_id="user123",
             email="test@example.com",
             user_type="organization_member"
         )
-        
+
         result = await validate_organization_access(user_context, "different_org")
         assert result is False
 
@@ -542,7 +542,7 @@ class TestValidateOrganizationAccess:
     async def test_validate_organization_access_coroutine(self):
         """Test organization access validation with coroutine user context."""
         from apps.user_service.app.dependencies.common_utils import UserContext
-        
+
         async def get_user_context():
             return UserContext(
                 organization_id="org123",
@@ -550,7 +550,7 @@ class TestValidateOrganizationAccess:
                 email="test@example.com",
                 user_type="organization_member"
             )
-        
+
         user_context_coroutine = get_user_context()
         result = await validate_organization_access(user_context_coroutine, "org123")
         assert result is True
