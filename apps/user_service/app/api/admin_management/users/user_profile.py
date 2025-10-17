@@ -77,7 +77,7 @@ async def get_user_profile(
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
-    user_context = extract_user_context(current_user)
+    user_context = await extract_user_context(current_user)
 
     # Set audit context for profile access
     request.state.audit_table = "organization_members"

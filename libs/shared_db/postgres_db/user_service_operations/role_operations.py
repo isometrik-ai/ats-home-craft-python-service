@@ -218,8 +218,7 @@ async def get_roles_list(
             },
         )
 
-        result = await rpc_builder.execute()
-        print("----------------\n\n\nresult", result)
+        await rpc_builder.execute()
 
         # Execute may be sync or async depending on test mocks; handle both
         execute_fn = getattr(rpc_builder, "execute", None)
@@ -352,8 +351,6 @@ async def get_role_permissions(role_id: str, organization_id: str) -> List[Dict[
         ).eq("role_id", role_id
         ).eq("organization_id", organization_id
         ).execute()
-
-    print("----------------\n\n\nresult :", result,end='\n\n\n')
 
     return result.data if result.data else []
 

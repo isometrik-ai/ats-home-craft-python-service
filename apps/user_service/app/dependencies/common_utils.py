@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, status
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
+from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
 from libs.shared_middleware.jwt_auth import check_user_access_async
 
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
@@ -37,6 +38,7 @@ from libs.shared_db.postgres_db.user_service_operations.exception_handling impor
     DatabaseOperationError
 )
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
+from libs.shared_utils.common_query import log_exception
 
 # ============================================================================
 # DATA CLASSES
@@ -63,18 +65,17 @@ class PerformanceTimer:
     def __post_init__(self):
         self.start_time = time.time()
 
-    def checkpoint(self, step_name: str) -> float:
+    def checkpoint(self) -> float:
         """Log a timing checkpoint and return elapsed time in ms."""
         assert self.start_time is not None, "Timer not initialized"
         elapsed = (time.time() - self.start_time) * 1000
-        print(f"{step_name} took {elapsed:.2f}ms")
+        
         return elapsed
 
     def total_time(self) -> float:
         """Return total elapsed time in ms."""
         assert self.start_time is not None, "Timer not initialized"
         elapsed = (time.time() - self.start_time) * 1000
-        print(f"Total {self.operation_name} time: {elapsed:.2f}ms")
         return elapsed
 
 
@@ -100,7 +101,7 @@ def format_permissions_data(permissions_data: List[Dict[str, Any]]) -> List[Perm
 # ============================================================================
 
 
-def extract_user_context(current_user: dict) -> UserContext:
+async def extract_user_context(current_user: dict) -> UserContext:
     """
     Extract and validate user context from JWT token.
 
@@ -120,7 +121,7 @@ def extract_user_context(current_user: dict) -> UserContext:
         HTTPException: 400 for missing or invalid token data
 
     Usage:
-        user_context = extract_user_context(current_user)
+        user_context = await extract_user_context(current_user)
         print(f"User: {user_context.email} in org: {user_context.organization_id}")
     """
     user_id = current_user.get("sub")
@@ -141,6 +142,10 @@ def extract_user_context(current_user: dict) -> UserContext:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid token: email not found",
         )
+
+    if not organization_id:
+        user_data = await get_user_by_id(user_id)
+        organization_id = user_data.user.user_metadata.get("organization_id", None)
 
     return UserContext(
         user_id=user_id,
@@ -181,33 +186,39 @@ async def require_permission(
     Usage:
         await require_permission("settings.roles.manage", user_context, "manage roles")
     """
-    if with_timing:
-        permission_start = time.time()
+    try:
+        if with_timing:
+            permission_start = time.time()
 
-    if isinstance(permission_code, str):
-        permission_codes = [permission_code]
-    else:
-        permission_codes = permission_code
+        if isinstance(permission_code, str):
+            permission_codes = [permission_code]
+        else:
+            permission_codes = permission_code
 
-    has_permission = await check_user_access_async(
-        permission_code=permission_codes,
-        user_id=user_context.user_id,
-        organisation_id=organization_id
-    )
-
-    if with_timing:
-        permission_end = time.time()
-        print(
-            f"Permission check took {(permission_end - permission_start) * 1000:.2f}ms"
+        has_permission = await check_user_access_async(
+            permission_code=permission_codes,
+            user_id=user_context.user_id,
+            organisation_id=organization_id
         )
 
-    if not has_permission:
-        print(f"Permission denied - {action_description}")
+        if with_timing:
+            permission_end = time.time()
+
+        if not has_permission:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Insufficient permissions to {action_description}",
+            )
+
+    except HTTPException as error:
+        log_exception()
+        raise error
+    except Exception as error:
+        log_exception()
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Insufficient permissions to {action_description}",
-        )
-
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to check permission",
+        ) from error
 
 # ============================================================================
 # PERMISSION CHECKING
@@ -223,7 +234,7 @@ async def check_permissions(
     """
     Extracts user context and checks if the user has 'settings.roles.manage' permission.
     """
-    user_context = extract_user_context(current_user)
+    user_context = await extract_user_context(current_user)
     await require_permission(
         permission_code=permission_codes,
         user_context=user_context,
@@ -336,21 +347,18 @@ def handle_api_exceptions(operation_name: str):
                 raise
             except DatabaseOperationError as error:
                 # Convert database operation errors to HTTP exceptions
-                print(f"Database error in {operation_name}: {error}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Database error during {operation_name}: {str(error)}",
                 ) from error
             except ValueError as error:
                 # Convert ValueError to HTTP exceptions
-                print(f"Value error in {operation_name}: {error}")
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Value error during {operation_name}: {str(error)}",
                 ) from error
             except Exception as error:
                 # Handle any other unexpected errors
-                print(f"Error in {operation_name}: {error}")
                 traceback.print_exc()
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

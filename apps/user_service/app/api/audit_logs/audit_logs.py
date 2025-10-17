@@ -357,7 +357,7 @@ async def delete_all_audit_logs_data(
     - Transaction rollback on failures
     """
     # Extract and validate user context from JWT token
-    # user_context = extract_user_context(current_user)
+    # user_context = await extract_user_context(current_user)
 
     # Check permission using utility function
     # await require_permission(

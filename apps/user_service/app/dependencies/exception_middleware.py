@@ -198,7 +198,6 @@ async def unified_exception_handler(request: Request, exc: Exception):
     """
     Middleware to handle ALL Exceptions with comprehensive logging.
     """
-    print("unified_exception_handler")
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())
 
@@ -302,7 +301,6 @@ async def unified_exception_handler(request: Request, exc: Exception):
     logger.error("Error in %s: %s", operation_name, error_message)
 
     await _handle_audit_logging(request, error_message, 500, "unexpected error")
-    print("JSONResponse 500")
     return JSONResponse(
         status_code=500,
         content={"detail": f"Internal server error during {str(exc)}"},

@@ -80,12 +80,22 @@ def test_users_list_success(client):
 
 def test_get_user_profile_success(client):
     """Test successful user profile retrieval."""
-    with patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
-        "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
-        "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
-        "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
-        "joined_at": None, "last_active_at": None
-    })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    
+    mock_user_context = UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id="current-user-id",
+        email="test@example.com",
+        user_type="organization_member"
+    )
+    
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
+            "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
+            "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
+            "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
+            "joined_at": None, "last_active_at": None
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200
         body = res.json()
@@ -95,7 +105,17 @@ def test_get_user_profile_success(client):
 
 def test_get_user_profile_not_found(client):
     """Test user profile not found."""
-    with patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)):
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    
+    mock_user_context = UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id="current-user-id",
+        email="test@example.com",
+        user_type="organization_member"
+    )
+    
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 404
         assert "User profile not found or access denied to organization" in res.json()["detail"]
@@ -103,12 +123,22 @@ def test_get_user_profile_not_found(client):
 
 def test_get_user_profile_email_mismatch(client):
     """Test user profile email mismatch."""
-    with patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
-        "user_id": "u1", "email": "different@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
-        "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
-        "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
-        "joined_at": None, "last_active_at": None
-    })):
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    
+    mock_user_context = UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id="current-user-id",
+        email="test@example.com",
+        user_type="organization_member"
+    )
+    
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
+            "user_id": "u1", "email": "different@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
+            "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
+            "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
+            "joined_at": None, "last_active_at": None
+        })):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 403
         assert "Token email does not match user profile" in res.json()["detail"]
@@ -116,12 +146,22 @@ def test_get_user_profile_email_mismatch(client):
 
 def test_get_user_profile_invalid_user_type(client):
     """Test user profile with invalid user type."""
-    with patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
-        "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active", "user_type": "invalid",
-        "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
-        "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
-        "joined_at": None, "last_active_at": None
-    })):
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    
+    mock_user_context = UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id="current-user-id",
+        email="test@example.com",
+        user_type="organization_member"
+    )
+    
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
+            "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active", "user_type": "invalid",
+            "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
+            "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
+            "joined_at": None, "last_active_at": None
+        })):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200  # This endpoint doesn't check user_type
         body = res.json()
@@ -642,8 +682,6 @@ def test_ban_user_self_ban(client):
          patch("apps.user_service.app.dependencies.common_utils.check_user_access_async", lambda *a, **k: True):
 
         res = client.post(f"/v1/admin/users/ban/{user_id}")
-        print(f"Response status: {res.status_code}")
-        print(f"Response body: {res.json()}")
         assert res.status_code == 400
         assert "You cannot ban yourself" in res.json()["detail"]
 
@@ -739,8 +777,6 @@ def test_unban_user_self_unban(client):
          patch("apps.user_service.app.dependencies.common_utils.check_user_access_async", lambda *a, **k: True):
 
         res = client.post(f"/v1/admin/users/unban/{user_id}")
-        print(f"Response status: {res.status_code}")
-        print(f"Response body: {res.json()}")
         assert res.status_code == 400
         assert "You cannot Unban yourself" in res.json()["detail"]
 

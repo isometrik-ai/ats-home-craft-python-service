@@ -19,7 +19,7 @@ uvicorn==0.34.3
 openai==1.91.0
 slowapi==0.1.9
 
-supabase==2.18.1
+supabase
 psycopg2-binary==2.9.10
 SQLAlchemy==2.0.41
 

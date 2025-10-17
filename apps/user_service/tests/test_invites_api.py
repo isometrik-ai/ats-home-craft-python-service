@@ -15,11 +15,11 @@ from libs.shared_db.postgres_db.user_service_operations.exception_handling impor
 def mock_permission_system():
     """Mock the entire permission system to prevent real database calls."""
     with patch("apps.user_service.app.dependencies.common_utils.check_user_access_async", return_value=True), \
-         patch("apps.user_service.app.dependencies.common_utils.extract_user_context") as mock_extract, \
-         patch("apps.user_service.app.dependencies.common_utils.require_permission") as mock_require, \
-         patch("apps.user_service.app.dependencies.common_utils.check_permissions") as mock_check_permissions, \
-         patch("apps.user_service.app.api.invites.check_permissions") as mock_invites_check_permissions, \
-         patch("apps.user_service.app.api.invites.require_permission") as mock_invites_require_permission, \
+         patch("apps.user_service.app.dependencies.common_utils.extract_user_context", new_callable=AsyncMock) as mock_extract, \
+         patch("apps.user_service.app.dependencies.common_utils.require_permission", new_callable=AsyncMock) as mock_require, \
+         patch("apps.user_service.app.dependencies.common_utils.check_permissions", new_callable=AsyncMock) as mock_check_permissions, \
+         patch("apps.user_service.app.api.invites.check_permissions", new_callable=AsyncMock) as mock_invites_check_permissions, \
+         patch("apps.user_service.app.api.invites.require_permission", new_callable=AsyncMock) as mock_invites_require_permission, \
          patch("apps.user_service.app.dependencies.invite_utils.validate_organization_access", return_value=True) as mock_validate_org_access, \
          patch("apps.user_service.app.api.invites.validate_organization_access", return_value=True) as mock_invites_validate_org_access, \
          patch("apps.user_service.app.dependencies.invite_utils.build_invite_list_item") as mock_build_invite_list_item, \
@@ -77,7 +77,7 @@ def app():
             "user_metadata": {"organization_id": "550e8400-e29b-41d4-a716-446655440001"}
         }
 
-    def mock_extract_user_context(current_user):
+    async def mock_extract_user_context(current_user):
         from apps.user_service.app.dependencies.common_utils import UserContext
         return UserContext(
             organization_id="550e8400-e29b-41d4-a716-446655440001",
@@ -91,7 +91,7 @@ def app():
         pass
 
     async def mock_check_permissions(current_user, permission_codes, action_description=None, organization_id=None):
-        return mock_extract_user_context(current_user)
+        return await mock_extract_user_context(current_user)
 
     app.dependency_overrides[get_user_from_auth] = mock_get_user_from_auth
     app.dependency_overrides[check_user_access_async] = lambda *a, **k: True
@@ -154,8 +154,10 @@ class TestAcceptInvitation:
         # Update mock data to match the current user's email
         mock_invite_data["email"] = "test@example.com"
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)), \
+        with patch("libs.shared_db.supabase_db.db.get_supabase_admin_client") as mock_get_client, \
+             patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
+             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
              patch("apps.user_service.app.api.invites.add_user_to_organization", AsyncMock(return_value=True)), \
              patch("apps.user_service.app.api.invites.update_invite_status", AsyncMock(return_value=True)):
 
@@ -164,7 +166,6 @@ class TestAcceptInvitation:
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is True
-            assert data["organization_id"] == mock_invite_data["organization_id"]
             assert "accepted successfully" in data["message"]
 
     def test_accept_invitation_invalid_token(self, client):
@@ -195,7 +196,7 @@ class TestAcceptInvitation:
     def test_accept_invitation_email_mismatch(self, client, mock_invite_data):
         """Test invitation acceptance when user email doesn't match invitation email."""
         request_data = {"token": "valid-token-123"}
-        
+
         # Set invitation email to different email
         mock_invite_data["email"] = "different@example.com"
 
@@ -330,7 +331,7 @@ class TestCreateInvitation:
             "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
             "role_id": str(uuid.uuid4())
         }
-        
+
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
              patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
@@ -868,10 +869,10 @@ class TestInvitePermissions:
             "role_id": str(uuid.uuid4()),
             "expires_in_days": 7
         }
-        
+
         with patch("apps.user_service.app.api.invites.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
-            
+
             assert response.status_code == 403
 
     def test_get_invitations_permission_denied(self, client):
@@ -932,7 +933,7 @@ class TestInviteEdgeCases:
             "token_hash": "abc123xyz456",
             "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
         }
-        
+
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
              patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
@@ -959,7 +960,7 @@ class TestInviteEdgeCases:
             "token_hash": "abc123xyz456",
             "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         }
-        
+
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
              patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \

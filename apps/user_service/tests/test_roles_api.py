@@ -158,7 +158,7 @@ class TestCreateRole:
     def test_create_role_invalid_role_type(self, client):
         """Test role creation with invalid role type (role_type field is ignored by API)."""
         payload = {"name": "TestRole", "description": "", "role_type": "invalid_type", "permission_ids": []}
-        
+
         with patch("apps.user_service.app.api.admin_management.roles.create_role", AsyncMock(return_value={"id": str(uuid.uuid4()), "created_at": "2023-01-01T00:00:00Z"})):
             res = client.post("/v1/admin/roles", json=payload)
             # The API ignores the role_type field since it's not part of the schema

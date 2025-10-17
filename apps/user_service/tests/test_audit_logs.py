@@ -1190,84 +1190,72 @@ class TestAuditLogger:
         """Test _handle_batch_error with DatabaseOperationError."""
         logger = AuditLogger()
 
-        # Mock print and logger.error
-        with patch('builtins.print') as mock_print, \
-             patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
+        # Mock logger.error
+        with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
 
             error = DatabaseOperationError("Database error")
             logger._handle_batch_error(error)
 
-            mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_batch_error_system(self):
         """Test _handle_batch_error with system errors."""
         logger = AuditLogger()
 
-        # Mock print and logger.error
-        with patch('builtins.print') as mock_print, \
-             patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
+        # Mock logger.error
+        with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
 
             error = OSError("OS error")
             logger._handle_batch_error(error)
 
-            mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_batch_error_serialization(self):
         """Test _handle_batch_error with serialization errors."""
         logger = AuditLogger()
 
-        # Mock print and logger.error
-        with patch('builtins.print') as mock_print, \
-             patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
+        # Mock logger.error
+        with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
 
             error = json.JSONDecodeError("Invalid JSON", "doc", 0)
             logger._handle_batch_error(error)
 
-            mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_batch_error_data_access(self):
         """Test _handle_batch_error with data access errors."""
         logger = AuditLogger()
 
-        # Mock print and logger.error
-        with patch('builtins.print') as mock_print, \
-             patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
+        # Mock logger.error
+        with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
 
             error = AttributeError("Attribute error")
             logger._handle_batch_error(error)
 
-            mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_batch_error_final(self):
         """Test _handle_batch_error with is_final=True."""
         logger = AuditLogger()
 
-        # Mock print and logger.error
-        with patch('builtins.print') as mock_print, \
-             patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
+        # Mock logger.error
+        with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
 
             error = DatabaseOperationError("Database error")
             logger._handle_batch_error(error, is_final=True)
 
-            mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     def test_handle_write_error(self):
         """Test _handle_write_error."""
         logger = AuditLogger()
 
-        # Mock print and logger.error
-        with patch('builtins.print') as mock_print, \
-             patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
+        # Mock logger.error
+        with patch('apps.user_service.app.dependencies.audit_logs.audit_logger.logger') as mock_logger:
 
             error = DatabaseOperationError("Database error")
             logger._handle_write_error(error, 0, "database")
 
-            mock_print.assert_called_once()
             mock_logger.error.assert_called_once()
 
     @pytest.mark.asyncio

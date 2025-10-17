@@ -48,10 +48,6 @@ class InviteAcceptResponse(BaseModel):
     Response model for invitation acceptance operations
     """
     success: bool
-    organization_id: Optional[str] = None
-    organization_name: Optional[str] = None
-    role: Optional[str] = None
-    already_member: Optional[bool] = None
     message: Optional[str] = None
     error: Optional[str] = None
 

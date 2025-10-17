@@ -5,11 +5,12 @@ This module contains all organisation-related database operations.
 All SQL queries for organisation management should be centralized here.
 """
 from datetime import datetime, timedelta
+import uuid
 from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
 from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_metadata_of_user
 from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_supabase_client
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     handle_database_errors, create_error_messages
 )
@@ -57,6 +58,7 @@ def _apply_pagination(query, limit: int, offset: int):
 async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str, Any]:
     """Create a new organisation."""
     supabase = await get_supabase_admin_client()
+
     org_record = {
         "id": organisation_data["organization_id"],
         "name": organisation_data["name"],
@@ -77,12 +79,29 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
     }
 
     table = supabase.table("organizations")
-    insert_query = table.insert(org_record)
-    result = await insert_query.execute()
+    # Use returning: 'minimal' to avoid SELECT permission requirements
+    insert_query = table.insert(org_record, returning="minimal")
+    await insert_query.execute()
 
-    if _has_result_data(result):
-        return result.data[0]
-    return {}
+    # Since we used returning="minimal", we don't get the inserted data back
+    # Return the organization data we just inserted
+    return {
+        "id": organisation_data["organization_id"],
+        "name": organisation_data["name"],
+        "slug": organisation_data["slug"],
+        "domain": organisation_data.get("domain"),
+        "logo_url": organisation_data.get("logo_url"),
+        "plan_type": organisation_data.get("plan_type", "starter"),
+        "status": organisation_data.get("status", "trial"),
+        "industry": organisation_data.get("industry"),
+        "company_size": organisation_data.get("company_size"),
+        "description": organisation_data.get("description"),
+        "referral_source": organisation_data.get("referral_source"),
+        "max_users": organisation_data.get("max_users"),
+        "created_at": NOW_CONSTANT,
+        "updated_at": NOW_CONSTANT,
+        "created_by_id": organisation_data.get("user_id")
+    }
 
 
 @handle_database_errors(
@@ -768,7 +787,9 @@ async def create_super_admin_role(organisation_id: str) -> Dict[str, Any]:
     """Create super admin role for organisation."""
     supabase = await get_supabase_admin_client()
 
+    role_id = str(uuid.uuid4())
     role_record = {
+        "id": role_id,
         "name": "admin",
         "description": "Full administrative access to all system features",
         "organization_id": organisation_id,
@@ -778,12 +799,20 @@ async def create_super_admin_role(organisation_id: str) -> Dict[str, Any]:
     }
 
     table = supabase.table("roles")
-    query = table.insert(role_record)
-    result = await query.execute()
+    # Use returning: 'minimal' to avoid SELECT permission requirements
+    query = table.insert(role_record, returning="minimal")
+    await query.execute()
 
-    if result.data and len(result.data) > 0:
-        return result.data[0]
-    return {}
+    # Since we used returning="minimal", return the role data we just inserted
+    return {
+        "id": role_id,
+        "name": role_record["name"],
+        "description": role_record["description"],
+        "organization_id": role_record["organization_id"],
+        "is_default": role_record["is_default"],
+        "created_at": role_record["created_at"],
+        "updated_at": role_record["updated_at"]
+    }
 
 
 @handle_database_errors(
