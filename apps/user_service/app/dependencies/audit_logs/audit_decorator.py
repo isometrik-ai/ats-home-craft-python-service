@@ -50,7 +50,6 @@ def audit_api_call(
 
         @wraps(func)
         async def wrapper(**kwargs):
-            print("Audit Decorator wrapper Starts\n\n")
             request: Request = kwargs.get("request")
             if request is None:
                 raise ValueError("Request must be passed as a keyword argument")
@@ -58,9 +57,7 @@ def audit_api_call(
             request.state.audit_metadata = func.audit_metadata
             
             result = await func(**kwargs)
-            print("Audit Decorator wrapper Ends\n\n")
             if not _should_log_audit(request):
-                print("Audit Decorator wrapper Skips\n\n")
                 return result
 
             await _log_audit_event(request, result, action_type, data_classification,
@@ -203,16 +200,9 @@ async def maybe_log_audit_on_error(
         user_email = user_context.get("user_email")
 
         if not all([organization_id, user_id, user_email]) or user_email == "unknown":
-            print(
-                "organization_id, user_id, user_email empty",
-                organization_id,
-                user_id,
-                user_email,
-            )
             return  # Skip audit logging
 
         if not user_context or user_context.get("user_email") == "unknown":
-            print(f"[Audit Skipped] Incomplete user context for {request.url.path}")
             return
 
         record_id = str(uuid4())

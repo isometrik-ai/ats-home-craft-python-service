@@ -291,5 +291,4 @@ async def bulk_create_audit_logs(audit_logs_data: List[Dict[str, Any]]) -> List[
 
     # Bulk insert all records
     result = await supabase.table("audit_logs").insert(audit_records).execute()
-    print(f"Bulk create audit logs result: {result}")
     return _get_result_data(result)

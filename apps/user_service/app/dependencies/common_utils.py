@@ -65,18 +65,17 @@ class PerformanceTimer:
     def __post_init__(self):
         self.start_time = time.time()
 
-    def checkpoint(self, step_name: str) -> float:
+    def checkpoint(self) -> float:
         """Log a timing checkpoint and return elapsed time in ms."""
         assert self.start_time is not None, "Timer not initialized"
         elapsed = (time.time() - self.start_time) * 1000
-        print(f"{step_name} took {elapsed:.2f}ms")
+        
         return elapsed
 
     def total_time(self) -> float:
         """Return total elapsed time in ms."""
         assert self.start_time is not None, "Timer not initialized"
         elapsed = (time.time() - self.start_time) * 1000
-        print(f"Total {self.operation_name} time: {elapsed:.2f}ms")
         return elapsed
 
 
@@ -204,12 +203,8 @@ async def require_permission(
 
         if with_timing:
             permission_end = time.time()
-            print(
-                f"Permission check took {(permission_end - permission_start) * 1000:.2f}ms"
-            )
 
         if not has_permission:
-            print(f"Permission denied - {action_description}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient permissions to {action_description}",
@@ -219,7 +214,6 @@ async def require_permission(
         log_exception()
         raise error
     except Exception as error:
-        print(f"Permission check error: {error}")
         log_exception()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -353,21 +347,18 @@ def handle_api_exceptions(operation_name: str):
                 raise
             except DatabaseOperationError as error:
                 # Convert database operation errors to HTTP exceptions
-                print(f"Database error in {operation_name}: {error}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Database error during {operation_name}: {str(error)}",
                 ) from error
             except ValueError as error:
                 # Convert ValueError to HTTP exceptions
-                print(f"Value error in {operation_name}: {error}")
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Value error during {operation_name}: {str(error)}",
                 ) from error
             except Exception as error:
                 # Handle any other unexpected errors
-                print(f"Error in {operation_name}: {error}")
                 traceback.print_exc()
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

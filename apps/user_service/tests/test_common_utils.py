@@ -109,11 +109,9 @@ class TestPerformanceTimer:
 
             timer = PerformanceTimer("test_operation")
 
-            with patch('builtins.print') as mock_print:
-                elapsed = timer.checkpoint("step1")
+            elapsed = timer.checkpoint()
 
-                assert abs(elapsed - 100.0) < 0.001  # Allow small floating-point differences
-                mock_print.assert_called_once_with("step1 took 100.00ms")
+            assert abs(elapsed - 100.0) < 0.001  # Allow small floating-point differences
 
     def test_performance_timer_total_time(self):
         """Test PerformanceTimer total_time functionality."""
@@ -123,11 +121,9 @@ class TestPerformanceTimer:
 
             timer = PerformanceTimer("test_operation")
 
-            with patch('builtins.print') as mock_print:
-                elapsed = timer.total_time()
+            elapsed = timer.total_time()
 
-                assert abs(elapsed - 200.0) < 0.001  # Allow small floating-point differences
-                mock_print.assert_called_once_with("Total test_operation time: 200.00ms")
+            assert abs(elapsed - 200.0) < 0.001  # Allow small floating-point differences
 
     def test_performance_timer_checkpoint_without_start_time(self):
         """Test PerformanceTimer checkpoint when start_time is None."""
@@ -135,7 +131,7 @@ class TestPerformanceTimer:
         timer.start_time = None
 
         with pytest.raises(AssertionError, match="Timer not initialized"):
-            timer.checkpoint("step1")
+            timer.checkpoint()
 
     def test_performance_timer_total_time_without_start_time(self):
         """Test PerformanceTimer total_time when start_time is None."""
@@ -336,8 +332,7 @@ class TestRequirePermission:
 
         with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
                   AsyncMock(return_value=True)) as mock_check, \
-             patch('time.time', side_effect=[1000.0, 1000.1]), \
-             patch('builtins.print') as mock_print:
+             patch('time.time', side_effect=[1000.0, 1000.1]):
 
             await require_permission("users.manage", user_context, "manage users")
 
@@ -346,7 +341,6 @@ class TestRequirePermission:
                 user_id="user123",
                 organisation_id=None
             )
-            mock_print.assert_called_once_with("Permission check took 100.00ms")
 
     @pytest.mark.asyncio
     async def test_require_permission_success_multiple(self):
@@ -381,18 +375,13 @@ class TestRequirePermission:
 
         with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
                   AsyncMock(return_value=False)) as mock_check, \
-             patch('time.time', side_effect=[1000.0, 1000.1, 1000.2]), \
-             patch('builtins.print') as mock_print:
+             patch('time.time', side_effect=[1000.0, 1000.1, 1000.2]):
 
             with pytest.raises(HTTPException) as exc_info:
                 await require_permission("users.manage", user_context, "manage users")
 
             assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
             assert "Insufficient permissions to manage users" in str(exc_info.value.detail)
-            mock_print.assert_has_calls([
-                call("Permission check took 100.00ms"),
-                call("Permission denied - manage users")
-            ])
 
     @pytest.mark.asyncio
     async def test_require_permission_without_timing(self):
@@ -688,13 +677,11 @@ class TestHandleApiExceptions:
         async def test_func():
             raise DatabaseOperationError("Database connection failed")
 
-        with patch('builtins.print') as mock_print:
-            with pytest.raises(HTTPException) as exc_info:
-                await test_func()
+        with pytest.raises(HTTPException) as exc_info:
+            await test_func()
 
         assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert "Database error during test operation" in str(exc_info.value.detail)
-        mock_print.assert_called_once_with("Database error in test operation: Database connection failed")
 
     @pytest.mark.asyncio
     async def test_handle_api_exceptions_generic_exception(self):
@@ -703,13 +690,11 @@ class TestHandleApiExceptions:
         async def test_func():
             raise ValueError("Something went wrong")
 
-        with patch('builtins.print') as mock_print:
-            with pytest.raises(HTTPException) as exc_info:
-                await test_func()
+        with pytest.raises(HTTPException) as exc_info:
+            await test_func()
 
         assert exc_info.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
         assert "Value error during test operation" in str(exc_info.value.detail)
-        mock_print.assert_called_once_with("Value error in test operation: Something went wrong")
 
     @pytest.mark.asyncio
     async def test_handle_api_exceptions_with_args_and_kwargs(self):

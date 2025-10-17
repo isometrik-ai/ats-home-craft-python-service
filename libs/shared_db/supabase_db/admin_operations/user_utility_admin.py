@@ -256,7 +256,6 @@ async def send_admin_update_email(user: dict) -> bool:
 #         return supabase_response.user.id
 
 #     except (ConnectionError, TimeoutError, ValueError) as supabase_error:
-#         print(f"Supabase user creation failed: {supabase_error}")
 #         if (
 #             "already_exists" in str(supabase_error).lower()
 #             or "duplicate" in str(supabase_error).lower()
@@ -301,7 +300,6 @@ organization_id: Organization ID to associate with user
                 }
             }
         )
-        print(f"Supabase user signup response: {supabase_response}")
         if not supabase_response.user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -311,7 +309,6 @@ organization_id: Organization ID to associate with user
         return supabase_response.user.id
 
     except (ConnectionError, TimeoutError, ValueError, AuthApiError) as supabase_error:
-        print(f"Supabase user signup failed: {supabase_error}")
         if (
             "already_exists" in str(supabase_error).lower()
             or "duplicate" in str(supabase_error).lower()
@@ -399,7 +396,6 @@ async def invite_user_with_email(body: CreateUserRequest, user_context: UserCont
                 detail="User with this email already exists in the organization",
             ) from e
 
-        # logger.error("Supabase invitation error - Request ID: %s, ",request_id)
         logger.error("Email: %s, Error: %s",body.email,str(e))
         raise HTTPException(
             status_code=409,

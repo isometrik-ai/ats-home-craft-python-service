@@ -39,7 +39,6 @@ class SupabaseClientCache:
         """Get or create a cached Supabase client instance."""
         if self._supabase_client is None:
             self._supabase_client = await create_async_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-            print("Supabase client created and cached")
         return self._supabase_client
 
     async def get_admin_client(self) -> AsyncClient:
@@ -59,13 +58,11 @@ class SupabaseClientCache:
             self._supabase_admin_client = await create_async_client(
                 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
             )
-            print("Supabase admin client created and cached")
 
             # Warm up the admin client to ensure proper authentication
             try:
                 # Test the admin client with a simple operation
                 await self._supabase_admin_client.auth.admin.list_users()
-                print("Supabase admin client authenticated successfully")
             except Exception as e:
                 # Surface a clearer message if the provided key is not a service-role key
                 raise RuntimeError(
@@ -86,7 +83,6 @@ class SupabaseClientCache:
     def reset_admin_client(self):
         """Reset the admin client cache to force recreation."""
         self._supabase_admin_client = None
-        print("Supabase admin client cache reset")
 
 
 # Global cache instance

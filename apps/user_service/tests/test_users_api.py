@@ -682,8 +682,6 @@ def test_ban_user_self_ban(client):
          patch("apps.user_service.app.dependencies.common_utils.check_user_access_async", lambda *a, **k: True):
 
         res = client.post(f"/v1/admin/users/ban/{user_id}")
-        print(f"Response status: {res.status_code}")
-        print(f"Response body: {res.json()}")
         assert res.status_code == 400
         assert "You cannot ban yourself" in res.json()["detail"]
 
@@ -779,8 +777,6 @@ def test_unban_user_self_unban(client):
          patch("apps.user_service.app.dependencies.common_utils.check_user_access_async", lambda *a, **k: True):
 
         res = client.post(f"/v1/admin/users/unban/{user_id}")
-        print(f"Response status: {res.status_code}")
-        print(f"Response body: {res.json()}")
         assert res.status_code == 400
         assert "You cannot Unban yourself" in res.json()["detail"]
 

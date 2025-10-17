@@ -478,10 +478,6 @@ async def create_organisation(
         user_context.user_id,organization_name, AccountType.BUSINESS.value
     )
 
-    print(f"Generated organization_id: {organization_id}")
-    print(f"Organization name: {organization_name}")
-    print(f"Organization slug: {slug}")
-
     # Validate slug uniqueness
     result = await check_organisation_slug_unique(slug)
     if not result:
@@ -523,7 +519,6 @@ async def create_organisation(
         log_exception()
         logger.error("Database transaction failed - Request ID: %s, ",request_id)
         logger.error("Error: %s",str(db_error))
-        print(f"Database transaction failed: {db_error}")
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -708,7 +703,6 @@ async def delete_organisation_by_id(
     except Exception as db_error:
         log_exception()
         logger.error("Error: %s",str(db_error))
-        print(f"Database transaction failed: {db_error}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete organization",
