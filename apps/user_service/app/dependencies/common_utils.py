@@ -146,6 +146,37 @@ async def extract_user_context(current_user: dict) -> UserContext:
     if not organization_id:
         user_data = await get_user_by_id(user_id)
         organization_id = user_data.user.user_metadata.get("organization_id", None)
+        
+        # If organization_id is still None, try to get it from organization_members table
+        if not organization_id:
+            try:
+                from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
+                from libs.shared_db.supabase_db.db import get_supabase_admin_client
+                
+                # Query organization_members table to find user's organization
+                supabase = await get_supabase_admin_client()
+                result = await supabase.table("organization_members").select(
+                    "organization_id"
+                ).eq("user_id", user_id).limit(1).execute()
+                
+                if result.data and len(result.data) > 0:
+                    # Use the first organization found
+                    organization_id = result.data[0]["organization_id"]
+                    
+                    # Update user metadata with the found organization_id
+                    await update_metadata_of_user(user_id, {
+                        "organization_id": organization_id,
+                        "type": "organization_member"
+                    })
+                    print(f"Updated user metadata with organization_id: {organization_id} for user: {user_id}")
+                else:
+                    # Organization ID not found, but allow user to proceed
+                    print(f"Warning: No organization found for user {user_id}, proceeding without organization_id")
+                    organization_id = None
+            except Exception as e:
+                print(f"Failed to retrieve organization_id for user {user_id}: {str(e)}")
+                # Allow user to proceed even if organization lookup fails
+                organization_id = None
 
     return UserContext(
         user_id=user_id,

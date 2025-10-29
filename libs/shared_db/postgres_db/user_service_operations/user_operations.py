@@ -37,16 +37,39 @@ logger = get_logger("user_operations")
     custom_messages=create_error_messages("get_user_profile_by_id", "getting"))
 async def get_user_profile_by_id(user_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
     """Get user profile by user ID and organization ID."""
+    # Validate user_id
+    if not user_id or user_id == "None":
+        logger.error("Invalid user_id provided: %s", user_id)
+        return None
+
     supabase = await get_supabase_admin_client()
 
-    result = await supabase.table("organization_members").select(
+    # Build query based on whether organization_id is provided
+    query = supabase.table("organization_members").select(
         "id, user_id, email, full_name, first_name, last_name,avatar_url, "
         "phone, timezone, role_id, status, created_at, updated_at, last_active_at, joined_at, "
         "organization_id, roles(id, name, description)"
-    ).eq("user_id", user_id).eq("organization_id", organization_id).execute()
+    ).eq("user_id", user_id)
+    
+    # Only add organization_id filter if it's provided and not None
+    if organization_id and organization_id != "None":
+        query = query.eq("organization_id", organization_id)
+
+    result = await query.execute()
 
     if result.data and len(result.data) > 0:
         return result.data[0]
+    else:
+        # If no results found, try to find the user in any organization
+        if organization_id and organization_id != "None":
+            fallback_query = supabase.table("organization_members").select(
+                "id, user_id, email, full_name, first_name, last_name,avatar_url, "
+                "phone, timezone, role_id, status, created_at, updated_at, last_active_at, joined_at, "
+                "organization_id, roles(id, name, description)"
+            ).eq("user_id", user_id)
+            fallback_result = await fallback_query.execute()
+            if fallback_result.data and len(fallback_result.data) > 0:
+                return fallback_result.data[0]
     return None
 
 
@@ -55,12 +78,21 @@ async def get_user_profile_by_id(user_id: str, organization_id: str) -> Optional
     custom_messages=create_error_messages("get_user_permissions", "getting"))
 async def get_user_permissions(user_id: str, organization_id: str) -> List[Dict[str, Any]]:
     """Get user permissions through their role."""
+    # Validate user_id
+    if not user_id or user_id == "None":
+        logger.error("Invalid user_id provided: %s", user_id)
+        return []
+
     supabase = await get_supabase_admin_client()
 
     # First get the user's role
-    user_result = await supabase.table("organization_members").select(
-        "role_id"
-    ).eq("user_id", user_id).eq("organization_id", organization_id).execute()
+    user_query = supabase.table("organization_members").select("role_id").eq("user_id", user_id)
+    
+    # Only add organization_id filter if it's provided and not None
+    if organization_id and organization_id != "None":
+        user_query = user_query.eq("organization_id", organization_id)
+
+    user_result = await user_query.execute()
 
     if not user_result.data or len(user_result.data) == 0:
         return []
@@ -68,9 +100,15 @@ async def get_user_permissions(user_id: str, organization_id: str) -> List[Dict[
     role_id = user_result.data[0]["role_id"]
 
     # Get permissions for the role
-    result = await supabase.table("role_permissions").select(
+    permissions_query = supabase.table("role_permissions").select(
         "permissions(id, name, code, category, description)"
-    ).eq("role_id", role_id).eq("organization_id", organization_id).execute()
+    ).eq("role_id", role_id)
+    
+    # Only add organization_id filter if it's provided and not None
+    if organization_id and organization_id != "None":
+        permissions_query = permissions_query.eq("organization_id", organization_id)
+
+    result = await permissions_query.execute()
 
     permissions = []
     if result.data:

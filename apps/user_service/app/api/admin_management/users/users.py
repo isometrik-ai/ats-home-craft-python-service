@@ -42,7 +42,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
+from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user, update_metadata_of_user
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     invite_user_with_email
 )
@@ -211,6 +211,18 @@ async def create_user(
 
     result = await create_new_user(user_data)
     new_user_id = str(result["user_id"]) if result else "unknown"
+
+    # Update user metadata with organization_id
+    if new_user_id != "unknown":
+        try:
+            await update_metadata_of_user(new_user_id, {
+                "organization_id": user_context.organization_id,
+                "type": "organization_member"
+            })
+            logger.info("Updated user metadata with organization_id for user: %s", new_user_id)
+        except Exception as e:
+            logger.error("Failed to update user metadata for user %s: %s", new_user_id, str(e))
+            # Don't fail the entire operation if metadata update fails
 
     # Set audit data for user creation
     request.state.raw_audit_new_data = {

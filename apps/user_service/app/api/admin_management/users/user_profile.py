@@ -79,6 +79,7 @@ async def get_user_profile(
 
     user_context = await extract_user_context(current_user)
 
+    print("user_context______", user_context)
     # Set audit context for profile access
     request.state.audit_table = "organization_members"
     request.state.audit_description = (
@@ -92,17 +93,47 @@ async def get_user_profile(
             user_context.user_id,
             user_context.organization_id
         )
-
         if not user_profile:
-            logger.warning("User profile not found - Request ID: %s, ",request_id)
-            logger.warning(
-                "User ID: %s, Organization ID: %s",
-                user_context.user_id,user_context.organization_id
+            # User is not linked to any organization, create a basic profile from JWT token
+            logger.info("User not linked to any organization - Request ID: %s, ",request_id)
+            logger.info(
+                "User ID: %s, Email: %s - Creating basic profile",
+                user_context.user_id, user_context.email
             )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User profile not found or access denied to organization",
-            )
+            
+            # Get user metadata from JWT token
+            from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
+            user_data = await get_user_by_id(user_context.user_id)
+            user_metadata = user_data.user.user_metadata if user_data and user_data.user else {}
+            
+            # Extract fields from user metadata
+            first_name = user_metadata.get("first_name", "")
+            last_name = user_metadata.get("last_name", "")
+            full_name = user_metadata.get("full_name", f"{first_name} {last_name}".strip() or user_context.email.split('@')[0])
+            avatar_url = user_metadata.get("avatar_url")
+            phone = user_metadata.get("phone")
+            timezone = user_metadata.get("timezone", "UTC")
+            
+            # Create a basic profile for users without organization membership
+            user_profile = {
+                "user_id": user_context.user_id,
+                "email": user_context.email,
+                "full_name": full_name,
+                "first_name": first_name,
+                "last_name": last_name,
+                "avatar_url": avatar_url,
+                "phone": phone,
+                "timezone": timezone,
+                "role_id": None,
+                "status": "active",
+                "created_at": None,
+                "updated_at": None,
+                "last_active_at": None,
+                "joined_at": None,
+                "organization_id": None,
+                "roles": None
+            }
+            print("Created basic profile for user without organization:", user_profile)
 
         if user_profile["email"].lower() != user_context.email.lower():
             logger.warning("Token email does not match user profile - Request ID: %s, ",request_id)
@@ -121,25 +152,41 @@ async def get_user_profile(
 
     async def _fetch_permissions() -> list:
         """Fetch user permissions and update activity."""
-
+        
+        # If user has no organization, return empty permissions
+        if not user_context.organization_id:
+            logger.info("User has no organization, returning empty permissions")
+            return []
+        
         permissions_data = await get_user_permissions(
             user_context.user_id,
             user_context.organization_id
         )
-        await update_user_activity(
-            user_context.user_id,
-            user_context.organization_id
-        )
+        
+        # Only update activity if user has organization
+        if user_context.organization_id:
+            await update_user_activity(
+                user_context.user_id,
+                user_context.organization_id
+            )
         return permissions_data
 
     permissions_data = await _fetch_permissions()
 
     def _format_org_member_data(user_profile: dict, permissions_data: list) -> UserProfileData:
         """Format organization member profile data."""
-        role_info = RoleInfoWithDescription(
-            role_id=str(user_profile["role_id"]),
-            description=user_profile.get("role_description", ""),
-        )
+        # Handle users without organization
+        if user_profile.get("role_id") is None:
+            role_info = RoleInfoWithDescription(
+                role_id="",
+                description="No organization assigned",
+            )
+        else:
+            role_info = RoleInfoWithDescription(
+                role_id=str(user_profile["role_id"]),
+                description=user_profile.get("role_description", ""),
+            )
+        
         permissions = [
             PermissionInfo(
                 permission_id=str(p["id"]),
@@ -156,8 +203,8 @@ async def get_user_profile(
             "user_id": str(user_profile["user_id"]),
             "email": user_profile["email"],
             "full_name": user_profile["full_name"],
-            "organization_id": str(user_profile["organization_id"]),
-            "role_id": str(user_profile["role_id"]),
+            "organization_id": str(user_profile.get("organization_id", "")),
+            "role_id": str(user_profile.get("role_id", "")),
             # "role_name": user_profile["role_name"],
             "status": user_profile["status"],
             "permission_count": len(permissions),
