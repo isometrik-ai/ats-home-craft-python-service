@@ -151,7 +151,7 @@ async def get_users_list(
     )
 
 
-@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+# @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("100/minute")
 @audit_api_call(
     action_type="CREATE",
@@ -246,11 +246,11 @@ async def create_user(
     )
 
 
-@router.put(
-    "/update/{user_id}",
-    response_model=UpdateUserResponse,
-    status_code=status.HTTP_200_OK,
-)
+# @router.put(
+#     "/update/{user_id}",
+#     response_model=UpdateUserResponse,
+#     status_code=status.HTTP_200_OK,
+# )
 @limiter.limit("100/minute")
 @audit_api_call(
     action_type="UPDATE",
@@ -368,9 +368,9 @@ async def update_user(
     )
 
 
-@router.delete(
-    "/delete/{user_id}", response_model=UserResponse, status_code=status.HTTP_200_OK
-)
+# @router.delete(
+#     "/delete/{user_id}", response_model=UserResponse, status_code=status.HTTP_200_OK
+# )
 @limiter.limit("100/minute")
 @audit_api_call(
     action_type="DELETE",
@@ -443,9 +443,9 @@ async def delete_user_from_system(
     )
 
 
-@router.post(
-    "/invite", response_model=UserResponse, status_code=status.HTTP_201_CREATED
-)
+# @router.post(
+#     "/invite", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+# )
 @limiter.limit("100/minute")
 @audit_api_call(
     action_type="CREATE",

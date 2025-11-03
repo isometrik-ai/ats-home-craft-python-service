@@ -1724,17 +1724,13 @@ class TestAuditLogsAPI:
         """Test successful delete all audit logs API endpoint - covers lines 369-371."""
         with patch("apps.user_service.app.api.audit_logs.audit_logs.delete_all_audit_logs", AsyncMock(return_value=5)):
             res = client.delete("/v1/admin/audit-logs")
-            assert res.status_code == 200
-            assert res.json()["deleted_count"] == 5
-            assert res.json()["message"] == "All audit logs deleted successfully"
+            assert res.status_code == 204
 
     def test_delete_all_audit_logs_zero_count(self, client):
         """Test delete all audit logs when no logs exist - covers lines 369-371."""
         with patch("apps.user_service.app.api.audit_logs.audit_logs.delete_all_audit_logs", AsyncMock(return_value=0)):
             res = client.delete("/v1/admin/audit-logs")
-            assert res.status_code == 200
-            assert res.json()["deleted_count"] == 0
-            assert res.json()["message"] == "All audit logs deleted successfully"
+            assert res.status_code == 204
 
     # Additional comprehensive test cases for maximum coverage
     def test_audit_logs_list_with_search(self, client):
@@ -1877,9 +1873,7 @@ class TestAuditLogsAPI:
         """Test delete all audit logs with large count."""
         with patch("apps.user_service.app.api.audit_logs.audit_logs.delete_all_audit_logs", AsyncMock(return_value=1000)):
             res = client.delete("/v1/admin/audit-logs")
-            assert res.status_code == 200
-            assert res.json()["deleted_count"] == 1000
-            assert res.json()["message"] == "All audit logs deleted successfully"
+            assert res.status_code == 204
 
     def test_audit_log_response_default_status(self):
         """Test AuditLogResponse with default status."""

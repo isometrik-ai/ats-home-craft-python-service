@@ -71,7 +71,10 @@ def patch_operations_to_use_mock_supabase():
         import libs.shared_db.postgres_db.user_service_operations.organisation_operations as org_ops
         import libs.shared_db.postgres_db.user_service_operations.session_operations as session_ops
         import libs.shared_db.postgres_db.user_service_operations.audit_operations as audit_ops
+        # Import Supabase admin operations where real admin client is used by common_utils
+        import libs.shared_db.supabase_db.admin_operations.user as supa_admin_user
         import apps.user_service.app.dependencies.common_utils as common_utils
+        import libs.shared_db.supabase_db.db as supa_db
         import apps.user_service.app.api.admin_management.roles as roles_api
         import apps.user_service.app.api.admin_management.users.users as users_api
         import apps.user_service.app.api.admin_management.users.user_profile as user_profile_api
@@ -87,6 +90,11 @@ def patch_operations_to_use_mock_supabase():
 
     for module in [user_ops, role_ops, perm_ops, org_ops, session_ops, audit_ops]:
         setattr(module, "get_supabase_admin_client", _get_supabase_mock_async)
+    # Also patch common_utils and the core supabase db module to avoid real client creation
+    setattr(common_utils, "get_supabase_admin_client", _get_supabase_mock_async)
+    setattr(supa_db, "get_supabase_admin_client", _get_supabase_mock_async)
+    # Patch Supabase admin operations module used by extract_user_context (get_user_by_id)
+    setattr(supa_admin_user, "get_supabase_admin_client", _get_supabase_mock_async)
 
     # Patch common_utils references used by endpoints to avoid stale symbols
     if hasattr(user_ops, "get_user_profile_by_id"):

@@ -11,7 +11,7 @@ Last Updated: 2024-12-19
 """
 from ipaddress import IPv4Address
 
-from fastapi import APIRouter, HTTPException, status, Depends, Request
+from fastapi import APIRouter, HTTPException, status, Depends, Request, Response
 from pydantic import BaseModel
 
 # Utility imports
@@ -301,7 +301,7 @@ async def get_audit_log_from_id(
 
 @handle_api_exceptions("delete all audit logs")
 @router.delete(
-    "", response_model=DeleteAuditLogsResponse, status_code=status.HTTP_200_OK
+    "", status_code=status.HTTP_204_NO_CONTENT
 )
 @limiter.limit("10/minute")
 # @audit_api_call(
@@ -368,9 +368,6 @@ async def delete_all_audit_logs_data(
     # )
 
     # Delete all audit logs using centralized database operations
-    deleted_count = await delete_all_audit_logs()
+    await delete_all_audit_logs()
 
-    return DeleteAuditLogsResponse(
-        message="All audit logs deleted successfully",
-        deleted_count=deleted_count,
-    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

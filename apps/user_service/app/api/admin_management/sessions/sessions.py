@@ -221,9 +221,9 @@ def _extract_session_data_from_request(request: Request) -> dict:
     }
 
 
-@router.post(
-    "", response_model=CreateSessionResponse, status_code=status.HTTP_201_CREATED
-)
+# @router.post(
+#     "", response_model=CreateSessionResponse, status_code=status.HTTP_201_CREATED
+# )
 @limiter.limit("100/minute")
 @audit_api_call(
     action_type="CREATE",
@@ -413,11 +413,11 @@ async def _fetch_sessions_data(
     return result["data"], result["total_count"]
 
 
-@router.put(
-    "/logout",
-    response_model=UpdateSessionResponse,
-    status_code=status.HTTP_200_OK,
-)
+# @router.put(
+#     "/logout",
+#     response_model=UpdateSessionResponse,
+#     status_code=status.HTTP_200_OK,
+# )
 @limiter.limit("100/minute")
 @audit_api_call(
     action_type="UPDATE",

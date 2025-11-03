@@ -102,10 +102,9 @@ async def get_user_profile(
             )
             
             # Get user metadata from JWT token
-            from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
             user_data = await get_user_by_id(user_context.user_id)
             user_metadata = user_data.user.user_metadata if user_data and user_data.user else {}
-            
+
             # Extract fields from user metadata
             first_name = user_metadata.get("first_name", "")
             last_name = user_metadata.get("last_name", "")
@@ -158,18 +157,15 @@ async def get_user_profile(
             logger.info("User has no organization, returning empty permissions")
             return []
         
-        permissions_data = await get_user_permissions(
+        # When organization exists, update activity and fetch permissions
+        await update_user_activity(
             user_context.user_id,
             user_context.organization_id
         )
-        
-        # Only update activity if user has organization
-        if user_context.organization_id:
-            await update_user_activity(
-                user_context.user_id,
-                user_context.organization_id
-            )
-        return permissions_data
+        return await get_user_permissions(
+            user_context.user_id,
+            user_context.organization_id
+        )
 
     permissions_data = await _fetch_permissions()
 
@@ -228,9 +224,9 @@ async def get_user_profile(
         data=profile_data,
     )
 
-@router.get(
-    "/{user_id}", response_model=UserProfileResponse, status_code=status.HTTP_200_OK
-)
+# @router.get(
+#     "/{user_id}", response_model=UserProfileResponse, status_code=status.HTTP_200_OK
+# )
 @limiter.limit("100/minute")
 # @audit_api_call(
 #     action_type="READ",
