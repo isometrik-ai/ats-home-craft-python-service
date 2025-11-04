@@ -28,15 +28,15 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, status
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
-from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
-from libs.shared_middleware.jwt_auth import check_user_access_async
-
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_user_profile_by_id
 )
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     DatabaseOperationError
 )
+from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user, get_user_by_id
+from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 from libs.shared_utils.common_query import log_exception
 
@@ -149,8 +149,6 @@ async def extract_user_context(current_user: dict) -> UserContext:
         # If organization_id is still None, try to get it from organization_members table
         if not organization_id:
             try:
-                from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
-                from libs.shared_db.supabase_db.db import get_supabase_admin_client
 
                 # Query organization_members table to find user's organization
                 supabase = await get_supabase_admin_client()
@@ -170,7 +168,7 @@ async def extract_user_context(current_user: dict) -> UserContext:
                 else:
                     # Organization ID not found, but allow user to proceed
                     organization_id = None
-            except Exception as e:
+            except Exception:
                 # Allow user to proceed even if organization lookup fails
                 organization_id = None
 

@@ -173,3 +173,33 @@ Thumbs.db
 
 # Coverage reports
 coverage_html_report/
+
+# ----------------------------------------------------------------------------
+# Security hardening: exclude secrets, credentials, DB files, and dumps
+# ----------------------------------------------------------------------------
+
+# Secrets and environment
+.env*
+secrets/
+**/*.pem
+**/*.key
+**/*.crt
+**/*.p12
+**/*.pfx
+
+# Cloud/tool credentials
+.aws/
+.kube/
+.terraform/
+.gcloud/
+azure/
+
+# Databases and dumps
+**/*.sqlite*
+**/*.db
+**/*.sql
+backups/
+
+# Misc
+*.keystore
+*.jks
