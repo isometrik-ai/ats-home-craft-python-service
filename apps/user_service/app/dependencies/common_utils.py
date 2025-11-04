@@ -122,7 +122,6 @@ async def extract_user_context(current_user: dict) -> UserContext:
 
     Usage:
         user_context = await extract_user_context(current_user)
-        print(f"User: {user_context.email} in org: {user_context.organization_id}")
     """
     user_id = current_user.get("sub")
     user_metadata = current_user.get("user_metadata", {})
@@ -168,17 +167,10 @@ async def extract_user_context(current_user: dict) -> UserContext:
                         "organization_id": organization_id,
                         "type": "organization_member"
                     })
-                    print(
-                        "Updated user metadata with organization_id:",
-                        f"{organization_id} for user: {user_id}")
                 else:
                     # Organization ID not found, but allow user to proceed
-                    print(
-                        f"Warning: No organization found for user {user_id}, "
-                        "proceeding without organization_id")
                     organization_id = None
             except Exception as e:
-                print(f"Failed to retrieve organization_id for user {user_id}: {str(e)}")
                 # Allow user to proceed even if organization lookup fails
                 organization_id = None
 

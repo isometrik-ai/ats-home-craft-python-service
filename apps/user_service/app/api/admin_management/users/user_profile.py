@@ -81,7 +81,6 @@ async def get_user_profile(
 
     user_context = await extract_user_context(current_user)
 
-    print("user_context______", user_context)
     # Set audit context for profile access
     request.state.audit_table = "organization_members"
     request.state.audit_description = (
@@ -136,7 +135,6 @@ async def get_user_profile(
                 "organization_id": None,
                 "roles": None
             }
-            print("Created basic profile for user without organization:", user_profile)
 
         if user_profile["email"].lower() != user_context.email.lower():
             logger.warning("Token email does not match user profile - Request ID: %s, ",request_id)
