@@ -78,19 +78,19 @@ class TestUserOperations:
 
         with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
-            
+
             # Mock the first query (with organization_id filter)
             mock_first_result = MagicMock()
             mock_first_result.data = []
-            
+
             # Mock the fallback query (without organization_id filter)
             mock_fallback_result = MagicMock()
             mock_fallback_result.data = []
-            
+
             # Set up side_effect to return different results for different calls
             mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_first_result)
             mock_supabase.table.return_value.select.return_value.eq.return_value.execute = AsyncMock(return_value=mock_fallback_result)
-            
+
             mock_get_client.return_value = mock_supabase
 
             result = await get_user_profile_by_id(user_id, organization_id)

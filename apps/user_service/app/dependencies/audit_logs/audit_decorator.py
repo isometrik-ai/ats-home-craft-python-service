@@ -55,7 +55,7 @@ def audit_api_call(
                 raise ValueError("Request must be passed as a keyword argument")
 
             request.state.audit_metadata = func.audit_metadata
-            
+
             result = await func(**kwargs)
             if not _should_log_audit(request):
                 return result

@@ -50,7 +50,7 @@ async def get_user_profile_by_id(user_id: str, organization_id: str) -> Optional
         "phone, timezone, role_id, status, created_at, updated_at, last_active_at, joined_at, "
         "organization_id, roles(id, name, description)"
     ).eq("user_id", user_id)
-    
+
     # Only add organization_id filter if it's provided and not None
     if organization_id and organization_id != "None":
         query = query.eq("organization_id", organization_id)
@@ -64,8 +64,8 @@ async def get_user_profile_by_id(user_id: str, organization_id: str) -> Optional
         if organization_id and organization_id != "None":
             fallback_query = supabase.table("organization_members").select(
                 "id, user_id, email, full_name, first_name, last_name,avatar_url, "
-                "phone, timezone, role_id, status, created_at, updated_at, last_active_at, joined_at, "
-                "organization_id, roles(id, name, description)"
+                "phone, timezone, role_id, status, created_at, updated_at,"
+                "last_active_at, joined_at, organization_id, roles(id, name, description)"
             ).eq("user_id", user_id)
             fallback_result = await fallback_query.execute()
             if fallback_result.data and len(fallback_result.data) > 0:
@@ -87,7 +87,7 @@ async def get_user_permissions(user_id: str, organization_id: str) -> List[Dict[
 
     # First get the user's role
     user_query = supabase.table("organization_members").select("role_id").eq("user_id", user_id)
-    
+
     # Only add organization_id filter if it's provided and not None
     if organization_id and organization_id != "None":
         user_query = user_query.eq("organization_id", organization_id)
@@ -103,7 +103,7 @@ async def get_user_permissions(user_id: str, organization_id: str) -> List[Dict[
     permissions_query = supabase.table("role_permissions").select(
         "permissions(id, name, code, category, description)"
     ).eq("role_id", role_id)
-    
+
     # Only add organization_id filter if it's provided and not None
     if organization_id and organization_id != "None":
         permissions_query = permissions_query.eq("organization_id", organization_id)

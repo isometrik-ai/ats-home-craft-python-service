@@ -396,7 +396,7 @@ class TestRequirePermission:
                   AsyncMock(return_value=True)) as mock_check, \
              patch('builtins.print') as mock_print:
 
-            await require_permission("users.manage", user_context, "manage users", with_timing=False)
+            await require_permission("users.manage", user_context, "manage users")
 
             mock_check.assert_called_once()
             # Should not print timing information

@@ -113,11 +113,11 @@ class TestSupabaseClientCache:
         mock_auth = AsyncMock()
         mock_admin = AsyncMock()
         mock_list_users = AsyncMock()
-        
+
         mock_admin_client.auth = mock_auth
         mock_auth.admin = mock_admin
         mock_admin.list_users = mock_list_users
-        
+
         with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
              patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
              patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client) as mock_create:
@@ -129,7 +129,7 @@ class TestSupabaseClientCache:
 
             # Should only create admin client once
             assert mock_create.call_count == 1
-            
+
             # Should only call auth.admin.list_users once (during first call)
             mock_list_users.assert_called_once()
 
@@ -357,7 +357,7 @@ class TestConcurrency:
         mock_auth = AsyncMock()
         mock_admin = AsyncMock()
         mock_list_users = AsyncMock()
-        
+
         mock_admin_client.auth = mock_auth
         mock_auth.admin = mock_admin
         mock_admin.list_users = mock_list_users
@@ -380,7 +380,7 @@ class TestConcurrency:
 
             # Should only create admin client once
             assert mock_create.call_count == 1
-            
+
             # Should only call auth.admin.list_users once (during first call)
             mock_list_users.assert_called_once()
 

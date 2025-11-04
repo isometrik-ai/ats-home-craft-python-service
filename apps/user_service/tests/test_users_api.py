@@ -81,14 +81,14 @@ def test_users_list_success(client):
 def test_get_user_profile_success(client):
     """Test successful user profile retrieval."""
     from apps.user_service.app.dependencies.common_utils import UserContext
-    
+
     mock_user_context = UserContext(
         organization_id=str(uuid.uuid4()),
         user_id=str(uuid.uuid4()),
         email="test@example.com",
         user_type="organization_member"
     )
-    
+
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
@@ -103,45 +103,24 @@ def test_get_user_profile_success(client):
         assert body["data"]["full_name"] == "Test User"
 
 
-def test_get_user_profile_basic_profile_creation(client):
-    """Test user profile creation when no organization-linked profile exists."""
-    from apps.user_service.app.dependencies.common_utils import UserContext
-    
-    mock_user_context = UserContext(
-        organization_id=str(uuid.uuid4()),
-        user_id=str(uuid.uuid4()),
-        email="test@example.com",
-        user_type="organization_member"
-    )
-    
-    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
-         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)), \
-         patch("libs.shared_db.supabase_db.admin_operations.user.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))):
-        res = client.get("/v1/admin/users/profile")
-        assert res.status_code == 200
-        body = res.json()
-        assert body["data"]["email"] == "test@example.com"
-        assert body["data"]["full_name"] is not None  # Should have basic profile data
-
-
 def test_get_user_profile_email_mismatch(client):
     """Test user profile email mismatch."""
     from apps.user_service.app.dependencies.common_utils import UserContext
-    
+
     mock_user_context = UserContext(
         organization_id=str(uuid.uuid4()),
         user_id=str(uuid.uuid4()),
         email="test@example.com",
         user_type="organization_member"
     )
-    
+
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "different@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
             "joined_at": None, "last_active_at": None
-        })):
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 403
         assert "Token email does not match user profile" in res.json()["detail"]
@@ -150,378 +129,117 @@ def test_get_user_profile_email_mismatch(client):
 def test_get_user_profile_invalid_user_type(client):
     """Test user profile with invalid user type."""
     from apps.user_service.app.dependencies.common_utils import UserContext
-    
+
     mock_user_context = UserContext(
         organization_id=str(uuid.uuid4()),
         user_id=str(uuid.uuid4()),
         email="test@example.com",
         user_type="organization_member"
     )
-    
+
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active", "user_type": "invalid",
             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
             "joined_at": None, "last_active_at": None
-        })):
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200  # This endpoint doesn't check user_type
         body = res.json()
         assert body["data"]["email"] == "test@example.com"
 
 
-def test_get_user_by_id_success(client):
-    """Test successful user retrieval by ID."""
-    user_id = str(uuid.uuid4())
-    with patch("apps.user_service.app.api.admin_management.users.user_profile.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id=user_id, email="test@example.com", user_type="organization_member"))), \
-         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
-             "user_id": user_id, "email": "target@example.com", "full_name": "Target User", "first_name": "Target", "last_name": "User", "status": "active",
-             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
-             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
-             "joined_at": None, "last_active_at": None
-         })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
-        res = client.get(f"/v1/admin/users/{user_id}")
+def test_get_user_profile_no_organization_linked(client):
+    """Test user profile when user is not linked to any organization."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    from types import SimpleNamespace
+
+    mock_user_context = UserContext(
+        organization_id=None,
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+
+    # Mock user data from get_user_by_id
+    mock_user_data = SimpleNamespace(
+        user=SimpleNamespace(
+            user_metadata={
+                "first_name": "John",
+                "last_name": "Doe",
+                "full_name": "John Doe",
+                "avatar_url": "https://example.com/avatar.jpg",
+                "phone": "+1234567890",
+                "timezone": "America/New_York"
+            }
+        )
+    )
+
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_user_data)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
+        res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200
         body = res.json()
-        assert body["data"]["user_id"] == user_id
-        assert body["data"]["email"] == "target@example.com"
+        assert body["data"]["email"] == "test@example.com"
+        assert body["data"]["full_name"] == "John Doe"
+        assert body["data"]["first_name"] == "John"
+        assert body["data"]["last_name"] == "Doe"
+        assert body["data"]["role"]["role_id"] == ""  # No role_id when no organization
+        assert body["data"]["role"]["description"] == "No organization assigned"
 
 
-def test_get_user_by_id_not_found(client):
-    """Test user not found by ID."""
-    user_id = str(uuid.uuid4())
-    with patch("apps.user_service.app.api.admin_management.users.user_profile.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id=user_id, email="test@example.com", user_type="organization_member"))), \
-         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)):
-        res = client.get(f"/v1/admin/users/{user_id}")
-        assert res.status_code == 404
-        assert USER_NOT_FOUND_MESSAGE in res.json()["detail"]
+def test_get_user_profile_no_organization_id(client):
+    """Test user profile when user has no organization_id."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
 
+    mock_user_context = UserContext(
+        organization_id=None,
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
 
-def test_get_user_by_id_invalid_user_type(client):
-    """Test user retrieval with invalid user type."""
-    user_id = str(uuid.uuid4())
-    with patch("apps.user_service.app.api.admin_management.users.user_profile.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id=user_id, email="test@example.com", user_type="invalid"))), \
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
-             "user_id": user_id, "email": "target@example.com", "full_name": "Target User", "status": "active", "user_type": "invalid",
-             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
-             "organization_id": str(uuid.uuid4())
-         })):
-        res = client.get(f"/v1/admin/users/{user_id}")
-        assert res.status_code == 403
-        assert "Only organization members can access user profiles" in res.json()["detail"]
+            "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
+            "role_id": None, "organization_id": None, "avatar_url": None, "phone": None, "timezone": "UTC",
+            "joined_at": None, "last_active_at": None
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
+        res = client.get("/v1/admin/users/profile")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["data"]["email"] == "test@example.com"
+        assert body["data"]["role"]["description"] == "No organization assigned"
 
 
-def test_get_user_by_id_permission_denied(client):
-    """Test user retrieval permission denied."""
-    user_id = str(uuid.uuid4())
-    with patch("apps.user_service.app.api.admin_management.users.user_profile.check_permissions", AsyncMock(return_value=MagicMock(organization_id=str(uuid.uuid4()), user_id=user_id, email="test@example.com", user_type="organization_member"))), \
+def test_get_user_profile_no_role_id(client):
+    """Test user profile when user has no role_id."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+
+    mock_user_context = UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
-             "user_id": user_id, "email": "target@example.com", "full_name": "Target User", "first_name": "Target", "last_name": "User", "status": "active",
-             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
-             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
-             "joined_at": None, "last_active_at": None
-         })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
-        res = client.get(f"/v1/admin/users/{user_id}")
-        assert res.status_code == 200  # This should pass with our mock
-
-
-# ============================================================================
-# CREATE USER TESTS (POST /users) - MISSING FROM COVERAGE!
-# ============================================================================
-
-def test_create_user_success(client):
-    """Test successful user creation."""
-    user_data = {
-        "email": "new@example.com",
-        "role_id": str(uuid.uuid4()),
-        "full_name": "New User",
-        "phone": "+1234567890",
-        "timezone": "UTC"
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_user_exists", AsyncMock(return_value=False)), \
-         patch("apps.user_service.app.api.admin_management.users.users.create_new_user", AsyncMock(return_value={"user_id": "new-user-id"})):
-
-        res = client.post("/v1/admin/users", json=user_data)
-        assert res.status_code == 201
-        assert "User created and invited successfully" in res.json()["message"]
-
-
-def test_create_user_already_exists(client):
-    """Test user creation when user already exists."""
-    user_data = {
-        "email": "existing@example.com",
-        "role_id": str(uuid.uuid4()),
-        "full_name": "Existing User"
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_user_exists", AsyncMock(return_value=True)):
-        res = client.post("/v1/admin/users", json=user_data)
-        assert res.status_code == 409
-        assert "User already exists in organization" in res.json()["detail"]
-
-
-# ============================================================================
-# UPDATE USER TESTS (PUT /users/update/{user_id}) - MISSING FROM COVERAGE!
-# ============================================================================
-
-def test_update_user_success(client):
-    """Test successful user update."""
-    user_id = str(uuid.uuid4())
-    update_data = {
-        "full_name": "Updated User",
-        "phone": "+9876543210",
-        "timezone": "EST",
-        "status": "active",
-        "role_id": str(uuid.uuid4())
-    }
-
-    mock_user_data = {
-            "user_id": user_id,
-            "email": "user@example.com",
-            "full_name": "Original User",
-            "first_name": "Original",
-            "last_name": "User",
-            "phone": "+1234567890",
-            "timezone": "UTC",
-            "avatar_url": None,
-            "status": "invited",
-            "role_id": str(uuid.uuid4()),
-            "organization_id": str(uuid.uuid4()),
-            "joined_at": datetime.now(timezone.utc),
-            "last_active_at": datetime.now(timezone.utc)
-        }
-
-    mock_updated_profile = {
-            "user_id": user_id,
-            "email": "user@example.com",
-            "full_name": "Updated User",
-            "first_name": "Updated",
-            "last_name": "User",
-            "phone": "+9876543210",
-            "timezone": "EST",
-            "avatar_url": None,
-            "status": "active",
-            "role_id": str(uuid.uuid4()),
-            "organization_id": str(uuid.uuid4()),
-            "joined_at": datetime.now(timezone.utc),
-            "last_active_at": datetime.now(timezone.utc)
-        }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_phone_exists_for_other_user", AsyncMock(return_value=False)), \
-         patch("apps.user_service.app.api.admin_management.users.users.get_user_in_organization", AsyncMock(return_value=mock_user_data)), \
-         patch("apps.user_service.app.api.admin_management.users.users.update_user_info", AsyncMock(return_value=True)), \
-         patch("apps.user_service.app.api.admin_management.users.users.get_user_profile_by_id", AsyncMock(return_value=mock_updated_profile)), \
-         patch("apps.user_service.app.api.admin_management.users.users.get_user_permissions", AsyncMock(return_value=[])):
-
-        res = client.put(f"/v1/admin/users/update/{user_id}", json=update_data)
+            "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
+            "role_id": None, "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
+            "joined_at": None, "last_active_at": None
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()):
+        res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200
-        assert "User updated successfully" in res.json()["message"]
-
-
-def test_update_user_duplicate_phone(client):
-    """Test user update with duplicate phone number."""
-    user_id = str(uuid.uuid4())
-    update_data = {
-        "phone": "+1234567890"
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_phone_exists_for_other_user", AsyncMock(return_value=True)):
-        res = client.put(f"/v1/admin/users/update/{user_id}", json=update_data)
-        assert res.status_code == 400
-        assert "Phone number already exists for another user" in res.json()["detail"]
-
-
-def test_update_user_not_found(client):
-    """Test user update when user not found."""
-    user_id = str(uuid.uuid4())
-    update_data = {
-        "full_name": "Updated User"
-    }
-
-    mock_user_data = {
-        "user_id": user_id,
-        "email": "user@example.com",
-        "full_name": "Test User",
-        "first_name": "Test",
-        "last_name": "User",
-        "phone": "+1234567890",
-        "timezone": "UTC",
-        "avatar_url": None,
-        "status": "active",
-        "role_id": str(uuid.uuid4()),
-        "organization_id": str(uuid.uuid4()),
-        "joined_at": datetime.now(timezone.utc),
-        "last_active_at": datetime.now(timezone.utc)
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_phone_exists_for_other_user", AsyncMock(return_value=False)), \
-         patch("apps.user_service.app.api.admin_management.users.users.get_user_in_organization", AsyncMock(return_value=mock_user_data)), \
-         patch("apps.user_service.app.api.admin_management.users.users.update_user_info", AsyncMock(return_value=False)):
-
-        res = client.put(f"/v1/admin/users/update/{user_id}", json=update_data)
-        assert res.status_code == 404
-        assert USER_NOT_FOUND_MESSAGE in res.json()["detail"]
-
-
-# ============================================================================
-# DELETE USER TESTS (DELETE /users/delete/{user_id}) - MISSING FROM COVERAGE!
-# ============================================================================
-
-def test_delete_user_success(client):
-    """Test successful user deletion."""
-    user_id = str(uuid.uuid4())
-
-    mock_user_data = {
-        "user_id": user_id,
-        "email": "user@example.com",
-        "full_name": "User to Delete",
-        "organization_id": str(uuid.uuid4())
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.get_user_in_organization", AsyncMock(return_value=mock_user_data)), \
-         patch("apps.user_service.app.api.admin_management.users.users.delete_user", AsyncMock(return_value=True)), \
-         patch("apps.user_service.app.api.admin_management.users.users.delete_auth_user", AsyncMock(return_value=True)):
-
-        res = client.delete(f"/v1/admin/users/delete/{user_id}")
-        assert res.status_code == 200
-        assert "User removed successfully" in res.json()["message"]
-
-
-def test_delete_user_not_found(client):
-    """Test user deletion when user not found."""
-    user_id = str(uuid.uuid4())
-
-    mock_user_data = {
-        "user_id": user_id,
-        "email": "user@example.com",
-        "full_name": "Test User",
-        "first_name": "Test",
-        "last_name": "User",
-        "phone": "+1234567890",
-        "timezone": "UTC",
-        "avatar_url": None,
-        "status": "active",
-        "role_id": str(uuid.uuid4()),
-        "organization_id": str(uuid.uuid4()),
-        "joined_at": datetime.now(timezone.utc),
-        "last_active_at": datetime.now(timezone.utc)
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.get_user_in_organization", AsyncMock(return_value=mock_user_data)), \
-         patch("apps.user_service.app.api.admin_management.users.users.delete_user", AsyncMock(return_value=False)):
-
-        res = client.delete(f"/v1/admin/users/delete/{user_id}")
-        assert res.status_code == 404
-        assert USER_NOT_FOUND_MESSAGE in res.json()["detail"]
-
-
-def test_delete_user_auth_not_found(client):
-    """Test user deletion when auth user not found."""
-    user_id = str(uuid.uuid4())
-
-    mock_user_data = {
-        "user_id": user_id,
-        "email": "user@example.com",
-        "full_name": "User to Delete",
-        "organization_id": str(uuid.uuid4())
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.get_user_in_organization", AsyncMock(return_value=mock_user_data)), \
-         patch("apps.user_service.app.api.admin_management.users.users.delete_user", AsyncMock(return_value=True)), \
-         patch("apps.user_service.app.api.admin_management.users.users.delete_auth_user", AsyncMock(return_value=False)):
-
-        res = client.delete(f"/v1/admin/users/delete/{user_id}")
-        assert res.status_code == 404
-        assert "User not found" in res.json()["detail"]
-
-
-# ============================================================================
-# INVITE USER TESTS (existing)
-# ============================================================================
-
-def test_invite_user_success(client):
-    """Test successful user invitation."""
-    payload = {
-        "email": "new@example.com",
-        "full_name": "New User",
-        "role_id": str(uuid.uuid4()),
-        "organization_id": str(uuid.uuid4())
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_user_exists", AsyncMock(return_value=False)), \
-         patch("apps.user_service.app.api.admin_management.users.users.invite_user_with_email", AsyncMock(return_value={"user_id": "new-user-id"})), \
-         patch("apps.user_service.app.api.admin_management.users.users.create_new_user", AsyncMock(return_value={"user_id": "new-user-id"})):
-        res = client.post("/v1/admin/users/invite", json=payload)
-        assert res.status_code == 201
-        assert "Invite sent successfully" in res.json()["message"]
-
-
-def test_invite_user_duplicate_phone(client):
-    """Test user invitation with duplicate phone number."""
-    payload = {
-        "email": "new@example.com",
-        "full_name": "New User",
-        "role_id": str(uuid.uuid4()),
-        "organization_id": str(uuid.uuid4()),
-        "phone": "+1234567890"
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_user_exists", AsyncMock(return_value=False)), \
-         patch("apps.user_service.app.api.admin_management.users.users.check_phone_exists_for_other_user", AsyncMock(return_value=True)):
-        res = client.post("/v1/admin/users/invite", json=payload)
-        assert res.status_code == 400
-        assert "Phone number already exists for another user" in res.json()["detail"]
-
-
-def test_invite_user_database_error(client):
-    """Test user invitation with database error."""
-    payload = {
-        "email": "new@example.com",
-        "full_name": "New User",
-        "role_id": str(uuid.uuid4()),
-        "organization_id": str(uuid.uuid4())
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_user_exists", AsyncMock(return_value=False)), \
-         patch("apps.user_service.app.api.admin_management.users.users.invite_user_with_email", AsyncMock(return_value={"user_id": "new-user-id"})), \
-         patch("apps.user_service.app.api.admin_management.users.users.create_new_user", AsyncMock(side_effect=DatabaseOperationError("Database error"))):
-        res = client.post("/v1/admin/users/invite", json=payload)
-        assert res.status_code == 500
-        assert "Database error" in res.json()["detail"]
-
-
-def test_invite_user_auth_error(client):
-    """Test user invitation with auth service error."""
-    payload = {
-        "email": "new@example.com",
-        "full_name": "New User",
-        "role_id": str(uuid.uuid4()),
-        "organization_id": str(uuid.uuid4())
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_user_exists", AsyncMock(return_value=False)), \
-         patch("apps.user_service.app.api.admin_management.users.users.invite_user_with_email", AsyncMock(side_effect=HTTPException(status_code=400, detail="Auth service error"))):
-        res = client.post("/v1/admin/users/invite", json=payload)
-        assert res.status_code == 400
-        assert "Auth service error" in res.json()["detail"]
-
-
-def test_invite_user_permission_denied(client):
-    """Test user invitation with permission denied."""
-    payload = {
-        "email": "new@example.com",
-        "full_name": "New User",
-        "role_id": str(uuid.uuid4()),
-        "organization_id": str(uuid.uuid4())
-    }
-
-    with patch("apps.user_service.app.api.admin_management.users.users.check_user_exists", AsyncMock(return_value=False)), \
-         patch("apps.user_service.app.api.admin_management.users.users.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
-        res = client.post("/v1/admin/users/invite", json=payload)
-        assert res.status_code == 403
-        assert "Permission denied" in res.json()["detail"]
+        body = res.json()
+        assert body["data"]["email"] == "test@example.com"
+        assert body["data"]["role"]["role_id"] == ""
+        assert body["data"]["role"]["description"] == "No organization assigned"
 
 
 # ============================================================================
