@@ -349,7 +349,6 @@ async def check_organisation_slug_unique(slug: str, exclude_org_id: Optional[str
     Args:
         slug (str): Organisation slug to check
         exclude_org_id (Optional[str]): Organisation ID to exclude from check (for updates)
-        with_timing (bool): Whether to log timing information
 
     Raises:
         HTTPException: 409 for slug conflicts

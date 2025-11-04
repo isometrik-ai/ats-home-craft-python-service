@@ -100,7 +100,7 @@ async def get_user_profile(
                 "User ID: %s, Email: %s - Creating basic profile",
                 user_context.user_id, user_context.email
             )
-            
+
             # Get user metadata from JWT token
             user_data = await get_user_by_id(user_context.user_id)
             user_metadata = user_data.user.user_metadata if user_data and user_data.user else {}
@@ -108,11 +108,12 @@ async def get_user_profile(
             # Extract fields from user metadata
             first_name = user_metadata.get("first_name", "")
             last_name = user_metadata.get("last_name", "")
-            full_name = user_metadata.get("full_name", f"{first_name} {last_name}".strip() or user_context.email.split('@')[0])
+            full_name = user_metadata.get(
+                "full_name", f"{first_name} {last_name}".strip() or user_context.email.split('@')[0])
             avatar_url = user_metadata.get("avatar_url")
             phone = user_metadata.get("phone")
             timezone = user_metadata.get("timezone", "UTC")
-            
+
             # Create a basic profile for users without organization membership
             user_profile = {
                 "user_id": user_context.user_id,
@@ -151,12 +152,12 @@ async def get_user_profile(
 
     async def _fetch_permissions() -> list:
         """Fetch user permissions and update activity."""
-        
+
         # If user has no organization, return empty permissions
         if not user_context.organization_id:
             logger.info("User has no organization, returning empty permissions")
             return []
-        
+
         # When organization exists, update activity and fetch permissions
         await update_user_activity(
             user_context.user_id,
@@ -182,7 +183,7 @@ async def get_user_profile(
                 role_id=str(user_profile["role_id"]),
                 description=user_profile.get("role_description", ""),
             )
-        
+
         permissions = [
             PermissionInfo(
                 permission_id=str(p["id"]),

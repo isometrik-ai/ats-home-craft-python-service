@@ -42,7 +42,10 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user, update_metadata_of_user
+from libs.shared_db.supabase_db.admin_operations.user import (
+    delete_auth_user,
+    update_metadata_of_user,
+)
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     invite_user_with_email
 )

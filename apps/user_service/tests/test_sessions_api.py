@@ -109,14 +109,14 @@ class TestSessionEndpoints:
 #     async def test_start_session_already_exists(self, client):
 #         """Test session creation when session already exists."""
 #         from apps.user_service.app.dependencies.common_utils import UserContext
-        
+
 #         mock_user_context = UserContext(
 #             organization_id="o",
 #             user_id="u",
 #             email="e@e.com",
 #             user_type="organization_member"
 #         )
-        
+
 #         # Mock session existence check to return True
 #         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
 #              patch('apps.user_service.app.api.admin_management.sessions.sessions.check_session_exists',
@@ -265,14 +265,14 @@ class TestSessionEndpoints:
 #     async def test_update_session_logout_session_not_found(self, client):
 #         """Test session logout when session not found."""
 #         from apps.user_service.app.dependencies.common_utils import UserContext
-        
+
 #         mock_user_context = UserContext(
 #             organization_id="o",
 #             user_id="u",
 #             email="e@e.com",
 #             user_type="organization_member"
 #         )
-        
+
 #         # Mock session not found
 #         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
 #              patch('apps.user_service.app.api.admin_management.sessions.sessions.get_session_by_id',
@@ -1376,11 +1376,11 @@ class TestSessionOperationsCoverage:
         mock_table = MagicMock()
         mock_initial_query = MagicMock()
         mock_search_query = MagicMock()
-    
+
         # First select call (initial)
         mock_table.select.return_value = mock_initial_query
         mock_initial_query.eq.return_value = mock_initial_query
-    
+
         # Second select call (for search) - this returns a new query object
         mock_initial_query.select.return_value = mock_search_query
         mock_search_query.or_.return_value = mock_search_query

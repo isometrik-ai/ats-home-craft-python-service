@@ -184,7 +184,12 @@ async def get_roles(
             is_default=role["is_default"],
             created_at=format_iso_datetime(role["created_at"]) or "",
             user_count=role["user_count"],
-            permission_ids=[str(perm["id"]) for perm in await get_role_permissions(role["id"], user_context.organization_id)],
+            permission_ids=[
+                str(perm["id"])
+                for perm in await get_role_permissions(
+                    role["id"], user_context.organization_id
+                )
+            ],
             permission_count=role["permission_count"],
             permission_categories=safe_json_loads(role["permission_categories"], {}),
         )
@@ -494,7 +499,7 @@ async def update_role_data(
     request.state.audit_table = "roles"
     request.state.audit_description = f"Updated role: {existing_role['name']}"
     request.state.audit_risk_level = "medium"
-    
+
 
     # Set old values for audit comparison
     request.state.raw_audit_old_data = {

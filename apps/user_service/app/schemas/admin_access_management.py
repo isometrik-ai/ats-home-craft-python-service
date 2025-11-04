@@ -105,7 +105,9 @@ class RoleItem(BaseModel):
     )
     created_at: str = Field(..., description="ISO timestamp when role was created")
     user_count: int = Field(..., description="Number of users assigned to this role")
-    permission_ids: List[str] = Field(..., description="List of permission IDs assigned to this role")
+    permission_ids: List[str] = Field(
+        ..., description="List of permission IDs assigned to this role"
+    )
     permission_count: int = Field(
         ..., description="Total number of permissions assigned to this role"
     )
