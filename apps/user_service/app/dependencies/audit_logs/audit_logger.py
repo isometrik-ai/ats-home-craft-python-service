@@ -124,7 +124,7 @@ class AuditLogger:
                 try:
                     await asyncio.wait_for(self._queue.put(audit_event), timeout=0.1)
                 except asyncio.TimeoutError as e:
-                    logger.warning("Queue timeout error in audit logging: %s", str(e), exc_info=True)
+                    logger.warning("Queue timeout error in audit logging: %s",str(e),exc_info=True)
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             # Handle data validation and access errors
             logger.warning("Data validation error in audit logging: %s", str(e))

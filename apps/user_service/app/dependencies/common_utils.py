@@ -69,7 +69,7 @@ class PerformanceTimer:
         """Log a timing checkpoint and return elapsed time in ms."""
         assert self.start_time is not None, "Timer not initialized"
         elapsed = (time.time() - self.start_time) * 1000
-        
+
         return elapsed
 
     def total_time(self) -> float:
@@ -147,6 +147,37 @@ async def extract_user_context(current_user: dict) -> UserContext:
         user_data = await get_user_by_id(user_id)
         organization_id = user_data.user.user_metadata.get("organization_id", None)
 
+        # If organization_id is still None, try to get it from organization_members table
+        if not organization_id:
+            try:
+                from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
+                from libs.shared_db.supabase_db.db import get_supabase_admin_client
+
+                # Query organization_members table to find user's organization
+                supabase = await get_supabase_admin_client()
+                result = await supabase.table("organization_members").select(
+                    "organization_id"
+                ).eq("user_id", user_id).limit(1).execute()
+
+                if result.data and len(result.data) > 0:
+                    # Use the first organization found
+                    organization_id = result.data[0]["organization_id"]
+
+                    # Update user metadata with the found organization_id
+                    await update_metadata_of_user(user_id, {
+                        "organization_id": organization_id,
+                        "type": "organization_member"
+                    })
+                    print(f"Updated user metadata with organization_id: {organization_id} for user: {user_id}")
+                else:
+                    # Organization ID not found, but allow user to proceed
+                    print(f"Warning: No organization found for user {user_id}, proceeding without organization_id")
+                    organization_id = None
+            except Exception as e:
+                print(f"Failed to retrieve organization_id for user {user_id}: {str(e)}")
+                # Allow user to proceed even if organization lookup fails
+                organization_id = None
+
     return UserContext(
         user_id=user_id,
         email=email,
@@ -163,7 +194,6 @@ async def require_permission(
     permission_code: Union[str, List[str]],
     user_context: UserContext,
     action_description: str = "perform this action",
-    with_timing: bool = True,
     organization_id: str = None
 ) -> None:
     """
@@ -178,7 +208,6 @@ async def require_permission(
         permission_code (str): Permission code to check (e.g., "settings.roles.manage")
         user_context (UserContext): Validated user context
         action_description (str): Description for error message (default: "perform this action")
-        with_timing (bool): Whether to log timing information (default: True)
 
     Raises:
         HTTPException: 403 for insufficient permissions
@@ -187,9 +216,6 @@ async def require_permission(
         await require_permission("settings.roles.manage", user_context, "manage roles")
     """
     try:
-        if with_timing:
-            permission_start = time.time()
-
         if isinstance(permission_code, str):
             permission_codes = [permission_code]
         else:
@@ -200,9 +226,6 @@ async def require_permission(
             user_id=user_context.user_id,
             organisation_id=organization_id
         )
-
-        if with_timing:
-            permission_end = time.time()
 
         if not has_permission:
             raise HTTPException(

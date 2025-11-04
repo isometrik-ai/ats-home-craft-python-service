@@ -74,7 +74,7 @@ class SupabaseClientCache:
 
     async def get_fresh_admin_client(self) -> AsyncClient:
         """Get a fresh admin client instance, bypassing cache.
-        
+
         Useful when the cached client gets into a corrupted state.
         """
         self.reset_admin_client()

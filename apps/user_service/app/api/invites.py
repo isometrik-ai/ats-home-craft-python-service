@@ -560,7 +560,8 @@ async def create_invitation(
 
     # Set audit context for invitation creation
     request.state.audit_table = "organization_invites"
-    request.state.audit_description = f"Created invitation for email: {body.email} in organization: {organization_id}"
+    temp_string = f"Created invitation for email: {body.email} in organization: {organization_id}"
+    request.state.audit_description = temp_string
     request.state.audit_risk_level = "medium"
 
     # Validate organization ID format

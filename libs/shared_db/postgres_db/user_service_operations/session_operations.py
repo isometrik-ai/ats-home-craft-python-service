@@ -296,7 +296,7 @@ async def get_sessions_with_count(
     ).execute()
 
     data = result.data if result.data else []
-    
+
     return {
         "data": data,
         "total_count": len(data)  # Return count of current page results
