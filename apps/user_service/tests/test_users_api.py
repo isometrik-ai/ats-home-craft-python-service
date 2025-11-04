@@ -120,7 +120,7 @@ def test_get_user_profile_email_mismatch(client):
             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
             "joined_at": None, "last_active_at": None
-        })):
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 403
         assert "Token email does not match user profile" in res.json()["detail"]
@@ -143,11 +143,103 @@ def test_get_user_profile_invalid_user_type(client):
             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
             "joined_at": None, "last_active_at": None
-        })):
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200  # This endpoint doesn't check user_type
         body = res.json()
         assert body["data"]["email"] == "test@example.com"
+
+
+def test_get_user_profile_no_organization_linked(client):
+    """Test user profile when user is not linked to any organization."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    from types import SimpleNamespace
+
+    mock_user_context = UserContext(
+        organization_id=None,
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+
+    # Mock user data from get_user_by_id
+    mock_user_data = SimpleNamespace(
+        user=SimpleNamespace(
+            user_metadata={
+                "first_name": "John",
+                "last_name": "Doe",
+                "full_name": "John Doe",
+                "avatar_url": "https://example.com/avatar.jpg",
+                "phone": "+1234567890",
+                "timezone": "America/New_York"
+            }
+        )
+    )
+
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_user_data)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
+        res = client.get("/v1/admin/users/profile")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["data"]["email"] == "test@example.com"
+        assert body["data"]["full_name"] == "John Doe"
+        assert body["data"]["first_name"] == "John"
+        assert body["data"]["last_name"] == "Doe"
+        assert body["data"]["role"]["role_id"] == ""  # No role_id when no organization
+        assert body["data"]["role"]["description"] == "No organization assigned"
+
+
+def test_get_user_profile_no_organization_id(client):
+    """Test user profile when user has no organization_id."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+
+    mock_user_context = UserContext(
+        organization_id=None,
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
+            "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
+            "role_id": None, "organization_id": None, "avatar_url": None, "phone": None, "timezone": "UTC",
+            "joined_at": None, "last_active_at": None
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
+        res = client.get("/v1/admin/users/profile")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["data"]["email"] == "test@example.com"
+        assert body["data"]["role"]["description"] == "No organization assigned"
+
+
+def test_get_user_profile_no_role_id(client):
+    """Test user profile when user has no role_id."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+
+    mock_user_context = UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
+            "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
+            "role_id": None, "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
+            "joined_at": None, "last_active_at": None
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()):
+        res = client.get("/v1/admin/users/profile")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["data"]["email"] == "test@example.com"
+        assert body["data"]["role"]["role_id"] == ""
+        assert body["data"]["role"]["description"] == "No organization assigned"
 
 
 # ============================================================================

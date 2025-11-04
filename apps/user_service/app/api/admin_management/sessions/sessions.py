@@ -18,7 +18,6 @@ from apps.user_service.app.dependencies.logger import get_logger
 
 # Utility imports
 from apps.user_service.app.dependencies.common_utils import (
-    extract_user_context,
     format_iso_datetime,
     validate_pagination_params,
     check_permissions,
@@ -26,34 +25,20 @@ from apps.user_service.app.dependencies.common_utils import (
 
 # Schema imports
 from apps.user_service.app.schemas.admin_access_management import (
-    CreateSessionResponse,
     SessionItem,
     SessionQueryParams,
-    SessionsResponse,
-    UpdateSessionRequest,
-    UpdateSessionResponse
+    SessionsResponse
 )
 
 from apps.user_service.app.schemas.auth import SessionFilter
 
 from apps.user_service.app.app_instance import limiter
-from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
-    audit_api_call,
-)
+
 
 # Local imports
 from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
-    DatabaseOperationError
-)
 from libs.shared_db.postgres_db.user_service_operations.session_operations import (
-    create_session,
-    get_session_by_id,
-    update_session,
-    check_session_exists,
-    get_sessions_list,
-    get_sessions_count,
     get_sessions_with_count
 )
 
@@ -210,159 +195,6 @@ def build_session_filter_message(
     return f"Sessions retrieved successfully (page {page}, {page_size} per page){filter_text}"
 
 
-def _extract_session_data_from_request(request: Request) -> dict:
-    """Extract all session data from request headers."""
-    return {
-        "ip_address": get_client_ip(request),
-        "user_agent": get_user_agent(request),
-        "device_fingerprint": get_device_fingerprint(request),
-        "risk_score": get_risk_score(request),
-        "login_method": get_login_method(request),
-    }
-
-
-# @router.post(
-#     "", response_model=CreateSessionResponse, status_code=status.HTTP_201_CREATED
-# )
-@limiter.limit("100/minute")
-@audit_api_call(
-    action_type="CREATE",
-    data_classification="confidential",
-    compliance_tags=[
-        "hipaa",  # Session tracking is critical for HIPAA compliance and audit trails
-        "soc2_audit",  # Session management is essential for SOC2 compliance
-        "audit_required",  # Session creation must be logged for security audits
-    ],
-    table_name="user_sessions",
-    category="SESSION",
-)
-async def start_session(
-    request: Request,
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """
-    Create a new user session (Optimized & Truly Async)
-
-    Args:
-        request (Request): The FastAPI request object (contains headers with session data)
-        current_user (dict): Decoded JWT token containing user information
-
-    Returns:
-        CreateSessionResponse: Created session information with all details
-
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Extract and validate user context from JWT token
-    user_context = await extract_user_context(current_user)
-
-    try:
-        # Extract session ID from JWT token
-        session_id = extract_session_id_from_token(current_user)
-
-        # Set audit context for session creation
-        request.state.audit_table = "user_sessions"
-        request.state.audit_requested_id = session_id
-        request.state.audit_description = (
-            f"Created new session for user: {user_context.email}"
-        )
-        request.state.audit_risk_level = "medium"
-    except HTTPException as e:
-        # Set audit data for failed attempt
-        request.state.raw_audit_new_data = {
-            "user_id": user_context.user_id,
-            "organization_id": user_context.organization_id,
-            "error": str(e.detail)
-        }
-        raise
-
-    # Check if session already exists
-    try:
-        session_exists = await check_session_exists(session_id, user_context.organization_id)
-
-        if session_exists:
-            logger.warning("Session already exists - Request ID: %s, ",request_id)
-            logger.warning("Session ID: %s, ",session_id)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Session already exists",
-            )
-    except DatabaseOperationError as e:
-        # Set audit data for database error
-        request.state.raw_audit_new_data = {
-            "session_id": session_id,
-            "user_id": user_context.user_id,
-            "organization_id": user_context.organization_id,
-            "error": str(e)
-        }
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        ) from e
-
-    # Extract client information from request headers
-    session_data = _extract_session_data_from_request(request)
-
-    # Prepare session data for centralized operation
-    session_data["session_id"] = session_id
-    session_data["user_id"] = user_context.user_id
-    session_data["user_email"] = user_context.email
-
-    try:
-        # Create the session using centralized operation
-        created_session = await create_session(session_data, user_context.organization_id)
-
-        # Set audit context with new session data
-        request.state.raw_audit_new_data = {
-            "session_id": session_id,  # Use the session_id we already have
-            "user_id": user_context.user_id,
-            "organization_id": user_context.organization_id,
-            "ip_address": session_data["ip_address"],
-            "user_agent": session_data["user_agent"],
-            "device_fingerprint": session_data["device_fingerprint"],
-            "risk_score": session_data["risk_score"],
-            "login_method": session_data["login_method"],
-            "accessed_phi": False,
-            "phi_access_purpose": None,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-    except DatabaseOperationError as e:
-        # Set audit data for database error
-        request.state.raw_audit_new_data = {
-            "session_id": session_id,
-            "user_id": user_context.user_id,
-            "organization_id": user_context.organization_id,
-            "error": str(e)
-        }
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        ) from e
-
-    # Format session data for response
-    session_item = SessionItem(
-        id=str(created_session["id"]),
-        user_id=str(created_session["user_id"]),
-        organization_id=str(created_session["organization_id"]),
-        ip_address=str(created_session["ip_address"]),
-        user_agent=created_session["user_agent"],
-        device_fingerprint=created_session["device_fingerprint"],
-        risk_score=created_session["risk_score"],
-        login_timestamp=format_iso_datetime(created_session["login_timestamp"]) or "",
-        logout_timestamp=format_iso_datetime(created_session["logout_timestamp"]),
-        session_status=created_session["session_status"],
-        login_method=created_session["login_method"],
-        accessed_phi=created_session["accessed_phi"],
-        phi_access_purpose=created_session["phi_access_purpose"],
-    )
-
-    return CreateSessionResponse(
-        message="Session created successfully",
-        session=session_item,
-    )
-
-
 def _format_session_item(session_data: dict) -> SessionItem:
     """Format session data into SessionItem."""
     return SessionItem(
@@ -411,167 +243,6 @@ async def _fetch_sessions_data(
     )
 
     return result["data"], result["total_count"]
-
-
-# @router.put(
-#     "/logout",
-#     response_model=UpdateSessionResponse,
-#     status_code=status.HTTP_200_OK,
-# )
-@limiter.limit("100/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="confidential",
-    compliance_tags=[
-        "hipaa",
-        "soc2_audit",
-        "audit_required",
-    ],
-    table_name="user_sessions",
-    category="SESSION",
-)
-async def update_session_logout(
-    request: Request,
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """
-    Update session logout information (Optimized & Truly Async)
-    """
-    try:
-        session_id = extract_session_id_from_token(current_user)
-
-        # Extract and validate user context from JWT token
-        user_context = await extract_user_context(current_user)
-    except HTTPException as e:
-        if "Session ID not found" in str(e.detail):
-            e.detail = "Session ID not found in token"
-            raise
-
-    # Check permission using utility function
-    # await require_permission(
-    #     permission_code="settings.sessions.manage",
-    #     user_context=user_context,
-    #     db_conn=db_conn,
-    #     action_description="update sessions",
-    # )
-
-    # Set audit context for session update
-    request.state.audit_table = "user_sessions"
-    request.state.audit_requested_id = session_id
-    request.state.audit_description = "Updated session logout information"
-    request.state.audit_risk_level = "medium"
-
-    # Check if session exists in organization and get current data
-    try:
-        existing_session = await get_session_by_id(session_id, user_context.organization_id)
-
-        if not existing_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found or access denied",
-            )
-    except DatabaseOperationError as e:
-        # Set audit data for database error
-        request.state.raw_audit_new_data = {
-            "session_id": session_id,
-            "user_id": user_context.user_id,
-            "organization_id": user_context.organization_id,
-            "error": str(e)
-        }
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        ) from e
-
-    # Set old values for audit comparison
-    # Extract logout timestamp formatting
-    logout_timestamp_value = None
-    if existing_session["logout_timestamp"]:
-        if isinstance(existing_session["logout_timestamp"], str):
-            logout_timestamp_value = existing_session["logout_timestamp"]
-        else:
-            logout_timestamp_value = format_iso_datetime(existing_session["logout_timestamp"]) or ""
-
-    request.state.raw_audit_old_data = {
-        "session_id": session_id,
-        "session_status": existing_session["session_status"],
-        "logout_timestamp": logout_timestamp_value,
-        "accessed_phi": existing_session["accessed_phi"],
-        "phi_access_purpose": existing_session["phi_access_purpose"],
-        "organization_id": user_context.organization_id,
-    }
-
-    # Create default logout data
-    logout_data = UpdateSessionRequest(
-        session_status="inactive",
-        accessed_phi=False,  # Default to False, can be updated later if needed
-        phi_access_purpose=None,
-        logout_reason="user_logout",
-    )
-
-    try:
-        # Build update query using utility function
-        # Update session using centralized operation
-        updated_session = await update_session(
-            session_id, user_context.organization_id, logout_data
-        )
-
-        # Set new values for audit comparison
-        request.state.raw_audit_new_data = {
-            "session_id": session_id,
-            "session_status": "inactive",
-            "logout_timestamp": datetime.now(timezone.utc).isoformat(),
-            "accessed_phi": False,
-            "phi_access_purpose": None,
-            "logout_reason": "user_logout",
-            "organization_id": user_context.organization_id,
-        }
-    except DatabaseOperationError as e:
-        # Set audit data for database error
-        request.state.raw_audit_new_data = {
-            "session_id": session_id,
-            "session_status": existing_session.get("session_status", "active"),
-            "organization_id": user_context.organization_id,
-            "error": str(e)
-        }
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        ) from e
-
-    # Format updated session data for response
-    # Extract timestamp formatting
-    login_timestamp_value = (
-        updated_session["login_timestamp"]
-        if isinstance(updated_session["login_timestamp"], str)
-        else format_iso_datetime(updated_session["login_timestamp"]) or ""
-    )
-
-    session_item = SessionItem(
-        id=str(updated_session["id"]),
-        user_id=str(updated_session["user_id"]),
-        organization_id=str(updated_session["organization_id"]),
-        ip_address=str(updated_session["ip_address"]),
-        user_agent=updated_session["user_agent"],
-        device_fingerprint=updated_session["device_fingerprint"],
-        risk_score=updated_session["risk_score"],
-        login_timestamp=login_timestamp_value,
-        logout_timestamp=(
-            updated_session["logout_timestamp"]
-            if isinstance(updated_session["logout_timestamp"], str)
-            else format_iso_datetime(updated_session["logout_timestamp"])
-        ),
-        session_status=updated_session["session_status"],
-        login_method=updated_session["login_method"],
-        accessed_phi=updated_session["accessed_phi"],
-        phi_access_purpose=updated_session["phi_access_purpose"],
-    )
-
-
-    return UpdateSessionResponse(
-        message="Session logout updated successfully",
-        session=session_item,
-    )
 
 
 @router.get("", response_model=SessionsResponse, status_code=status.HTTP_200_OK)

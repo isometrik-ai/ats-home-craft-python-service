@@ -50,270 +50,6 @@ def client(app):
 # # API LAYER TESTS (existing + expanded)
 # # ============================================================================
 
-class TestSessionEndpoints:
-    pass
-#     """Test cases for session API endpoints."""
-
-#     @pytest.mark.asyncio
-#     async def test_start_session_success(self, client):
-#         """Test successful session creation."""
-#         session_id = str(uuid.uuid4())
-#         user_id = str(uuid.uuid4())
-
-#         mock_user_context = UserContext(
-#             organization_id="o",
-#             user_id=user_id,
-#             email="e@e.com",
-#             user_type="organization_member"
-#         )
-
-#         # Mock session existence check
-#         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
-#              patch('apps.user_service.app.api.admin_management.sessions.sessions.check_session_exists',
-#                   AsyncMock(return_value=False)):
-
-#             # Mock session creation
-#             mock_created_session = {
-#                 "id": session_id,
-#                 "user_id": user_id,
-#                 "organization_id": "o",
-#                 "ip_address": "127.0.0.1",
-#                 "user_agent": "test-agent",
-#                 "device_fingerprint": "fp123",
-#                 "risk_score": 0,
-#                 "login_timestamp": datetime.now(timezone.utc),
-#                 "logout_timestamp": None,
-#                 "session_status": "active",
-#                 "login_method": "password",
-#                 "accessed_phi": False,
-#                 "phi_access_purpose": None
-#             }
-
-#             with patch('apps.user_service.app.api.admin_management.sessions.sessions.create_session',
-#                       AsyncMock(return_value=mock_created_session)):
-
-#                     response = client.post("/v1/admin/sessions", headers={
-#                         "User-Agent": "test-agent",
-#                         "X-Device-Fingerprint": "fp123",
-#                         "Authorization": f"Bearer {session_id}"
-#                     })
-
-#                     assert response.status_code == 201
-#                     data = response.json()
-#                     assert data["message"] == "Session created successfully"
-#                     assert data["session"]["id"] == session_id
-#                     assert data["session"]["user_id"] == user_id
-#                     assert data["session"]["session_status"] == "active"
-
-#     @pytest.mark.asyncio
-#     async def test_start_session_already_exists(self, client):
-#         """Test session creation when session already exists."""
-#         from apps.user_service.app.dependencies.common_utils import UserContext
-
-#         mock_user_context = UserContext(
-#             organization_id="o",
-#             user_id="u",
-#             email="e@e.com",
-#             user_type="organization_member"
-#         )
-
-#         # Mock session existence check to return True
-#         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
-#              patch('apps.user_service.app.api.admin_management.sessions.sessions.check_session_exists',
-#                   AsyncMock(return_value=True)):
-
-#             response = client.post("/v1/admin/sessions", headers={
-#                 "User-Agent": "test-agent",
-#                 "X-Device-Fingerprint": "fp123",
-#                 "Authorization": "Bearer test-session-id"
-#             })
-
-#             assert response.status_code == 409
-#             data = response.json()
-#             assert data["detail"] == "Session already exists"
-
-#     @pytest.mark.asyncio
-#     async def test_start_session_missing_session_id(self, client):
-#         """Test session creation with missing session_id in token."""
-#         user_id = str(uuid.uuid4())
-
-#         mock_user_context = UserContext(
-#             organization_id="o",
-#             user_id=user_id,
-#             email="e@e.com",
-#             user_type="organization_member"
-#         )
-
-#         # Mock the JWT token without session_id
-#         with patch('libs.shared_middleware.jwt_auth.get_user_from_auth',
-#                   return_value={"user_id": user_id, "organization_id": "o", "email": "e@e.com", "role": "admin", "permissions": ["*"]}), \
-#              patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)):
-
-#             # Mock extract_session_id_from_token to raise HTTPException
-#             with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_session_id_from_token',
-#                       side_effect=HTTPException(status_code=400, detail="Session ID not found in token")):
-
-#                 response = client.post("/v1/admin/sessions", headers={
-#                     "User-Agent": "test-agent",
-#                     "X-Device-Fingerprint": "fp123"
-#                 })
-
-#                 assert response.status_code == 400
-#                 data = response.json()
-#                 assert data["detail"] == "Session ID not found in token"
-
-#     @pytest.mark.asyncio
-#     async def test_start_session_database_error(self, client):
-#         """Test session creation with database error."""
-#         session_id = "test-session-id"
-
-#         mock_user_context = UserContext(
-#             organization_id="o",
-#             user_id="u",
-#             email="e@e.com",
-#             user_type="organization_member"
-#         )
-
-#         # Mock extract_session_id_from_token to return session_id
-#         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_session_id_from_token',
-#                   return_value=session_id), \
-#              patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)):
-
-#             # Mock check_session_exists to raise error
-#             with patch('apps.user_service.app.api.admin_management.sessions.sessions.check_session_exists',
-#                       AsyncMock(side_effect=DatabaseOperationError("Database error"))):
-
-#                 response = client.post("/v1/admin/sessions", headers={
-#                     "User-Agent": "test-agent",
-#                     "X-Device-Fingerprint": "fp123",
-#                     "Authorization": "Bearer test-session-id"
-#                 })
-
-#                 assert response.status_code == 500
-#                 data = response.json()
-#                 assert "Database error" in data["detail"]
-
-#     @pytest.mark.asyncio
-#     async def test_update_session_logout_success(self, client):
-#         """Test successful session logout."""
-#         session_id = "test-session-id"
-#         user_id = str(uuid.uuid4())
-
-#         mock_user_context = UserContext(
-#             organization_id="o",
-#             user_id=user_id,
-#             email="e@e.com",
-#             user_type="organization_member"
-#         )
-
-#         # Mock existing session
-#         mock_existing_session = {
-#             "id": session_id,
-#             "user_id": user_id,
-#             "organization_id": "o",
-#             "ip_address": "127.0.0.1",
-#             "user_agent": "test-agent",
-#             "device_fingerprint": "fp123",
-#             "risk_score": 0,
-#             "login_timestamp": datetime.now(timezone.utc),
-#             "logout_timestamp": None,
-#             "session_status": "active",
-#             "login_method": "password",
-#             "accessed_phi": False,
-#             "phi_access_purpose": None
-#         }
-
-#         # Mock updated session
-#         mock_updated_session = {
-#             **mock_existing_session,
-#             "session_status": "inactive",
-#             "logout_timestamp": datetime.now(timezone.utc)
-#         }
-
-#         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
-#              patch('apps.user_service.app.api.admin_management.sessions.sessions.get_session_by_id',
-#                   AsyncMock(return_value=mock_existing_session)):
-
-#             with patch('apps.user_service.app.api.admin_management.sessions.sessions.update_session',
-#                       AsyncMock(return_value=mock_updated_session)):
-
-#                 response = client.put("/v1/admin/sessions/logout", headers={
-#                     "Authorization": "Bearer test-session-id"
-#                 })
-
-#                 assert response.status_code == 200
-#                 data = response.json()
-#                 assert data["message"] == "Session logout updated successfully"
-#                 assert data["session"]["session_status"] == "inactive"
-
-#     @pytest.mark.asyncio
-#     async def test_update_session_logout_missing_session_id(self, client):
-#         """Test session logout with missing session_id in token."""
-#         # Mock extract_session_id_from_token to raise HTTPException
-#         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_session_id_from_token',
-#                   side_effect=HTTPException(status_code=400, detail="Session ID not found in token")):
-
-#             response = client.put("/v1/admin/sessions/logout", headers={
-#                 "Authorization": "Bearer test-session-id"
-#             })
-
-#             assert response.status_code == 400
-#             data = response.json()
-#             assert data["detail"] == "Session ID not found in token"
-
-#     @pytest.mark.asyncio
-#     async def test_update_session_logout_session_not_found(self, client):
-#         """Test session logout when session not found."""
-#         from apps.user_service.app.dependencies.common_utils import UserContext
-
-#         mock_user_context = UserContext(
-#             organization_id="o",
-#             user_id="u",
-#             email="e@e.com",
-#             user_type="organization_member"
-#         )
-
-#         # Mock session not found
-#         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)), \
-#              patch('apps.user_service.app.api.admin_management.sessions.sessions.get_session_by_id',
-#                   AsyncMock(return_value=None)):
-
-#             response = client.put("/v1/admin/sessions/logout", headers={
-#                 "Authorization": "Bearer test-session-id"
-#             })
-
-#             assert response.status_code == 404
-#             data = response.json()
-#             assert data["detail"] == "Session not found or access denied"
-
-#     @pytest.mark.asyncio
-#     async def test_update_session_logout_database_error(self, client):
-#         """Test session logout with database error."""
-#         session_id = "test-session-id"
-
-#         mock_user_context = UserContext(
-#             organization_id="o",
-#             user_id="u",
-#             email="e@e.com",
-#             user_type="organization_member"
-#         )
-
-#         # Mock extract_session_id_from_token to return session_id
-#         with patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_session_id_from_token',
-#                   return_value=session_id), \
-#              patch('apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context', AsyncMock(return_value=mock_user_context)):
-
-#             # Mock get_session_by_id to raise error
-#             with patch('apps.user_service.app.api.admin_management.sessions.sessions.get_session_by_id',
-#                       AsyncMock(side_effect=DatabaseOperationError("Database error"))):
-
-#                 response = client.put("/v1/admin/sessions/logout", headers={
-#                     "Authorization": "Bearer test-session-id"
-#                 })
-
-#                 assert response.status_code == 500
-#                 data = response.json()
-#                 assert "Database error" in data["detail"]
 
 def test_sessions_list_success(client):
     """Test successful sessions list API endpoint."""
@@ -362,6 +98,87 @@ def test_sessions_list_database_error(client):
         # The API doesn't have error handling, so it will raise the exception
         with pytest.raises(DatabaseOperationError):
             client.get("/v1/admin/sessions")
+
+
+def test_sessions_list_no_organization_id(client):
+    """Test sessions list API when user has no organization_id."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    
+    mock_user_context = UserContext(
+        organization_id=None,
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+    
+    with patch("apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+               AsyncMock(return_value=mock_user_context)):
+        res = client.get("/v1/admin/sessions")
+        assert res.status_code == 400
+        assert "User is not a member of any organization" in res.json()["detail"]
+
+
+def test_session_response_to_dict():
+    """Test SessionResponse.to_dict() method."""
+    from apps.user_service.app.api.admin_management.sessions.sessions import SessionResponse
+    
+    response = SessionResponse(message="Test message", status="success")
+    result = response.to_dict()
+    
+    assert result == {"message": "Test message", "status": "success"}
+
+
+def test_extract_session_id_from_token_missing():
+    """Test extract_session_id_from_token when session_id is missing."""
+    from apps.user_service.app.api.admin_management.sessions.sessions import extract_session_id_from_token
+    from fastapi import HTTPException
+    
+    current_user = {"user_id": "123", "email": "test@example.com"}
+    
+    with pytest.raises(HTTPException) as exc_info:
+        extract_session_id_from_token(current_user)
+    
+    assert exc_info.value.status_code == 400
+    assert "Session ID not found in token" in exc_info.value.detail
+
+
+def test_extract_session_id_from_token_empty():
+    """Test extract_session_id_from_token when session_id is empty string."""
+    from apps.user_service.app.api.admin_management.sessions.sessions import extract_session_id_from_token
+    from fastapi import HTTPException
+    
+    current_user = {"user_id": "123", "email": "test@example.com", "session_id": ""}
+    
+    with pytest.raises(HTTPException) as exc_info:
+        extract_session_id_from_token(current_user)
+    
+    assert exc_info.value.status_code == 400
+    assert "Session ID not found in token" in exc_info.value.detail
+
+
+def test_extract_session_id_from_token_none():
+    """Test extract_session_id_from_token when session_id is None."""
+    from apps.user_service.app.api.admin_management.sessions.sessions import extract_session_id_from_token
+    from fastapi import HTTPException
+    
+    current_user = {"user_id": "123", "email": "test@example.com", "session_id": None}
+    
+    with pytest.raises(HTTPException) as exc_info:
+        extract_session_id_from_token(current_user)
+    
+    assert exc_info.value.status_code == 400
+    assert "Session ID not found in token" in exc_info.value.detail
+
+
+def test_extract_session_id_from_token_success():
+    """Test extract_session_id_from_token when session_id is valid."""
+    from apps.user_service.app.api.admin_management.sessions.sessions import extract_session_id_from_token
+    
+    session_id = str(uuid.uuid4())
+    current_user = {"user_id": "123", "email": "test@example.com", "session_id": session_id}
+    
+    result = extract_session_id_from_token(current_user)
+    assert result == session_id
 
 
 # ============================================================================
@@ -962,28 +779,6 @@ class TestSessionUtilities:
         expected = "Sessions retrieved successfully (page 2, 10 per page) with filters: search='test', status='active', login_method='mfa'"
         assert result == expected
 
-    @pytest.mark.asyncio
-    async def test_extract_session_data_from_request(self):
-        """Test complete session data extraction from request."""
-        mock_request = MagicMock()
-        mock_request.headers = {
-            "X-Forwarded-For": "192.168.1.1",
-            "User-Agent": "Mozilla/5.0",
-            "X-Device-Fingerprint": "fp123",
-            "X-MFA-Token": "token123"
-        }
-        mock_request.client = None
-
-        from apps.user_service.app.api.admin_management.sessions.sessions import _extract_session_data_from_request
-        result = _extract_session_data_from_request(mock_request)
-
-        assert result == {
-            "ip_address": "192.168.1.1",
-            "user_agent": "Mozilla/5.0",
-            "device_fingerprint": "fp123",
-            "risk_score": 10,  # 10 for proxy
-            "login_method": "mfa"
-        }
 
 # ============================================================================
 # INTEGRATION TESTS
