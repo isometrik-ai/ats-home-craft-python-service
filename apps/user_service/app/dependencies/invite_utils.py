@@ -18,10 +18,10 @@ Utilities Covered:
 
 import re
 import hashlib
-from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-from apps.user_service.app.dependencies.common_utils import UserContext
+from datetime import datetime, timezone
 from fastapi import HTTPException, status
+from apps.user_service.app.dependencies.common_utils import UserContext
 from apps.user_service.app.dependencies.logger import get_logger
 
 # Initialize logger

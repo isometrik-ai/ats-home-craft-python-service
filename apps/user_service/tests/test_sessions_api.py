@@ -194,7 +194,7 @@ class TestCreateSession:
         session_data = {
             "session_id": str(uuid.uuid4()),
             "user_id": str(uuid.uuid4()),
-            "ip_address": "192.168.1.1",
+            "ip_address": "192.0.2.1",
             "user_agent": "Mozilla/5.0",
             "device_fingerprint": "fp123",
             "risk_score": 0.5,
@@ -225,7 +225,7 @@ class TestCreateSession:
         session_data = {
             "session_id": str(uuid.uuid4()),
             "user_id": str(uuid.uuid4()),
-            "ip_address": "192.168.1.1",
+            "ip_address": "192.0.2.1",
             "user_agent": "Mozilla/5.0",
             "device_fingerprint": "fp123",
             "risk_score": 0.5,
@@ -256,7 +256,7 @@ class TestCreateSession:
         session_data = {
             "session_id": str(uuid.uuid4()),
             "user_id": str(uuid.uuid4()),
-            "ip_address": "192.168.1.1",
+            "ip_address": "192.0.2.1",
             "user_agent": "Mozilla/5.0",
             "device_fingerprint": "fp123",
             "risk_score": 0.5,
@@ -286,7 +286,7 @@ class TestGetSessionById:
             "id": session_id,
             "user_id": str(uuid.uuid4()),
             "organization_id": organization_id,
-            "ip_address": "192.168.1.1",
+            "ip_address": "192.0.2.1",
             "user_agent": "Mozilla/5.0",
             "session_status": "active"
         }
@@ -498,7 +498,7 @@ class TestGetSessionsList:
                 "user_id": user_id,
                 "organization_id": organization_id,
                 "session_status": "active",
-                "ip_address": "192.168.1.1"
+                "ip_address": "192.0.2.1"
             }
         ]
 
@@ -633,12 +633,12 @@ class TestSessionUtilities:
     async def test_get_client_ip_with_x_forwarded_for(self):
         """Test client IP extraction with X-Forwarded-For header."""
         mock_request = MagicMock()
-        mock_request.headers = {"X-Forwarded-For": "192.168.1.1, 10.0.0.1"}
+        mock_request.headers = {"X-Forwarded-For": "192.0.2.1, 10.0.0.1"}
         mock_request.client = None
 
         from apps.user_service.app.api.admin_management.sessions.sessions import get_client_ip
         result = get_client_ip(mock_request)
-        assert result == "192.168.1.1"
+        assert result == "192.0.2.1"
 
     @pytest.mark.asyncio
     async def test_get_client_ip_with_x_real_ip(self):
@@ -707,7 +707,7 @@ class TestSessionUtilities:
         """Test risk score calculation for high-risk scenario."""
         mock_request = MagicMock()
         mock_request.headers = {
-            "X-Forwarded-For": "192.168.1.1",
+            "X-Forwarded-For": "192.0.2.1",
             "User-Agent": None
         }
 
@@ -793,7 +793,7 @@ class TestSessionOperationsIntegration:
         session_data = {
             "session_id": str(uuid.uuid4()),
             "user_id": str(uuid.uuid4()),
-            "ip_address": "192.168.1.1",
+            "ip_address": "192.0.2.1",
             "user_agent": "Mozilla/5.0",
             "device_fingerprint": "fp123",
             "risk_score": 0.5,
