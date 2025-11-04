@@ -114,7 +114,7 @@ async def get_user_profile(
             )
             avatar_url = user_metadata.get("avatar_url")
             phone = user_metadata.get("phone")
-            timezone = user_metadata.get("timezone", "UTC")
+            tzone = user_metadata.get("timezone", "UTC")
 
             # Create a basic profile for users without organization membership
             user_profile = {
@@ -125,7 +125,7 @@ async def get_user_profile(
                 "last_name": last_name,
                 "avatar_url": avatar_url,
                 "phone": phone,
-                "timezone": timezone,
+                "timezone": tzone,
                 "role_id": None,
                 "status": "active",
                 "created_at": None,

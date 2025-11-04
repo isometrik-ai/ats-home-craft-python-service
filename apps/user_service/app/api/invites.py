@@ -415,8 +415,18 @@ async def reject_invitation(
             detail=INVALID_INVITATION_TOKEN_MESSAGE
         )
 
+    # Check if invitation is valid
+    details = build_invite_details_response(invitation_data)
+    if not details["valid"]:
+        logger.warning("Invalid invitation - Request ID: %s, Error: %s",
+                     request_id, details.get("error"))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=details["error"]
+        )
+
+    # Update invitation status
     try:
-        # Update invitation status
         await update_invite_status(
             invitation_data["id"],
             "rejected",
@@ -464,8 +474,8 @@ async def cleanup_expired_invitations(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
 ):
-    f"""
-    Cleanup expired invitations (Requires: {SETTINGS_SYSTEM_MANAGE})
+    """
+    Cleanup expired invitations (Requires: "settings.system.manage")
 
     Args:
         request (Request): FastAPI request object for rate limiting
@@ -731,103 +741,6 @@ async def get_organization_invitations(
         page=page,
         page_size=page_size,
     )
-
-@handle_api_exceptions("reject invitation")
-@router.post(
-    "/reject",
-    response_model=InviteResponse,
-    status_code=status.HTTP_200_OK,
-)
-@limiter.limit("100/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="confidential",
-    compliance_tags=[
-        "gdpr",  # Rejecting invitation involves personal information
-        "pii",  # Invitation rejection contains personally identifiable information
-        "soc2_audit",  # Invitation management is critical for SOC2 compliance
-        "audit_required",  # Invitation rejection requires audit trail
-    ],
-    table_name="organization_invites",
-    category="INVITATION",
-)
-# pylint: disable=unused-argument  # Required by @limiter.limit
-async def reject_invitation(
-    request: Request,
-    current_user: dict = Depends(get_user_from_auth),
-    body: InviteAcceptRequest = Body(...),
-):
-    """
-    Reject an organization invitation
-
-    Args:
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-        body (InviteAcceptRequest): Invitation rejection data
-
-    Returns:
-        InviteResponse: Success response
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Extract user context
-    user_context = await extract_user_context(current_user)
-
-    # Set audit context for invitation rejection
-    request.state.audit_table = "organization_invites"
-    request.state.audit_description = f"Rejected invitation for token: {body.token}"
-    request.state.audit_risk_level = "low"
-
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-
-    # Get invitation details by token
-    invitation_data = await get_invite_by_token(body.token)
-
-    if not invitation_data:
-        logger.warning(INVALID_INVITATION_REQUEST_MESSAGE, request_id)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=INVALID_INVITATION_TOKEN_MESSAGE
-        )
-
-    # Check if invitation is valid
-    details = build_invite_details_response(invitation_data)
-    if not details["valid"]:
-        logger.warning("Invalid invitation - Request ID: %s, Error: %s",
-                     request_id, details.get("error"))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=details["error"]
-        )
-
-    # Update invitation status
-    try:
-        await update_invite_status(
-            invitation_data["id"],
-            "rejected",
-            user_context.user_id
-        )
-
-        logger.info("Invitation rejected successfully - Request ID: %s, User: %s",
-                   request_id, user_context.email)
-
-        return InviteResponse(
-            success=True,
-            message="Invitation rejected successfully"
-        )
-
-    except Exception as db_error:
-        log_exception()
-        logger.error(DATABASE_ERROR_MESSAGE, request_id, str(db_error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to reject invitation"
-        ) from db_error
 
 
 @handle_api_exceptions("resend invitation")

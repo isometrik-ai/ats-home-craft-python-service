@@ -228,7 +228,7 @@ class AuditLogger:
                 batch.clear()
                 await asyncio.sleep(5)
 
-            except (asyncio.CancelledError, asyncio.TimeoutError) as e:
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 break
             except (
                 DatabaseOperationError,
