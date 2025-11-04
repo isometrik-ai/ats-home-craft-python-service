@@ -26,6 +26,12 @@ from apps.user_service.app.dependencies.common_utils import (
     validate_uuid_format,
     check_permissions,
 )
+
+# Audit logging import
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
+    audit_api_call,
+)
+
 from apps.user_service.app.dependencies.organisation_utils import (
     validate_organisation_status,
     validate_organisation_name_filter,
@@ -49,11 +55,6 @@ from apps.user_service.app.schemas.auth import CompanyData, AccountType
 from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-
-# Audit logging import
-from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
-    audit_api_call,
-)
 # from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (

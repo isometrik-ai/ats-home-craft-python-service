@@ -7,8 +7,6 @@ This module provides CRUD operations for user session management.
 
 """
 from typing import Optional
-import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 from pydantic import BaseModel
