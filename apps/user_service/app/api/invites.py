@@ -36,6 +36,7 @@ from apps.user_service.app.dependencies.common_utils import (
     handle_api_exceptions,
     validate_pagination_params,
     validate_uuid_format,
+    require_permission,
     check_permissions,
 )
 from apps.user_service.app.dependencies.invite_utils import (
