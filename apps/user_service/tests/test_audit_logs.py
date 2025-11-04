@@ -405,8 +405,8 @@ class TestAuditLogger:
         assert logger._get_client_ip(mock_request) == "10.0.0.1"
 
         # Test X-Real-IP
-        mock_request.headers = {"x-real-ip": "192.168.1.1"}
-        assert logger._get_client_ip(mock_request) == "192.168.1.1"
+        mock_request.headers = {"x-real-ip": "192.0.2.1"}
+        assert logger._get_client_ip(mock_request) == "192.0.2.1"
 
         # Test direct client IP
         mock_request.headers = {}

@@ -527,7 +527,7 @@ class SessionQueryParams(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "search": "192.168.1.1",
+                "search": "192.0.2.1",
                 "page": 1,
                 "page_size": 20,
                 "session_status": "active",
@@ -654,7 +654,7 @@ class CreateSessionResponse(ResponseModel):
                     "id": "550e8400-e29b-41d4-a716-446655440000",
                     "user_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                     "organization_id": "7ba7b810-9dad-11d1-80b4-00c04fd430c9",
-                    "ip_address": "192.168.1.1",
+                    "ip_address": "192.0.2.1",
                     "user_agent": "Mozilla/5.0...",
                     "device_fingerprint": "abc123def456",
                     "risk_score": 25,
@@ -727,7 +727,7 @@ class UpdateSessionResponse(ResponseModel):
                     "id": "550e8400-e29b-41d4-a716-446655440000",
                     "user_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                     "organization_id": "7ba7b810-9dad-11d1-80b4-00c04fd430c9",
-                    "ip_address": "192.168.1.1",
+                    "ip_address": "192.0.2.1",
                     "user_agent": "Mozilla/5.0...",
                     "device_fingerprint": "abc123def456",
                     "risk_score": 25,

@@ -93,7 +93,7 @@ class TestCreateAuditLog:
             "table_name": "organizations",
             "record_id": str(uuid.uuid4()),
             "risk_level": "medium",
-            "ip_address": "192.168.1.1",
+            "ip_address": "192.0.2.1",
             "timestamp": datetime.now(timezone.utc),
             "hash_signature": "xyz789",
             "description": "Organization updated"
@@ -613,7 +613,7 @@ class TestBulkCreateAuditLogs:
                 "table_name": "profiles",
                 "record_id": str(uuid.uuid4()),
                 "risk_level": "medium",
-                "ip_address": "192.168.1.1",
+                "ip_address": "192.0.2.1",
                 "timestamp": datetime.now(timezone.utc),
                 "hash_signature": "hash2",
                 "description": "Profile 2 updated",
