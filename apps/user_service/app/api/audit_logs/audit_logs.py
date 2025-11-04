@@ -34,7 +34,6 @@ from apps.user_service.app.schemas.audit_logs import (
     AuditLogItem,
     AuditLogDetailResponse,
     AuditLogDetailItem,
-    DeleteAuditLogsResponse
 )
 
 from apps.user_service.app.schemas.common import (

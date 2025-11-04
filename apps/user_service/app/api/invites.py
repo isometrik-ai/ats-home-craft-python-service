@@ -33,7 +33,6 @@ from apps.user_service.app.app_instance import limiter
 # Local imports - app dependencies and schemas
 from apps.user_service.app.dependencies.common_utils import (
     extract_user_context,
-    require_permission,
     handle_api_exceptions,
     validate_pagination_params,
     validate_uuid_format,
@@ -52,6 +51,11 @@ from apps.user_service.app.dependencies.invite_utils import (
     validate_organization_access,
 )
 
+# Audit logging import
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
+    audit_api_call,
+)
+
 # Schema imports
 from apps.user_service.app.schemas.invites import (
     InviteCreateRequest,
@@ -62,14 +66,7 @@ from apps.user_service.app.schemas.invites import (
 )
 
 # Third-party imports
-from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USERS_MANAGE
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
-from libs.shared_middleware.jwt_auth import get_user_from_auth
-
-# Audit logging import
-from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
-    audit_api_call,
-)
 
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.invite_operations import (
@@ -92,6 +89,8 @@ from libs.shared_db.postgres_db.user_service_operations.role_operations import (
     get_role_by_id,
 )
 
+from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USERS_MANAGE
+from libs.shared_middleware.jwt_auth import get_user_from_auth
 
 # Email service import
 from libs.shared_utils.email_utils import send_organization_invitation_email

@@ -110,8 +110,9 @@ async def get_user_profile(
             # Extract fields from user metadata
             first_name = user_metadata.get("first_name", "")
             last_name = user_metadata.get("last_name", "")
-            full_name = user_metadata.get(
-                "full_name", f"{first_name} {last_name}".strip() or user_context.email.split('@')[0])
+            full_name = user_metadata.get("full_name",
+                f"{first_name} {last_name}".strip() or user_context.email.split('@')[0]
+            )
             avatar_url = user_metadata.get("avatar_url")
             phone = user_metadata.get("phone")
             timezone = user_metadata.get("timezone", "UTC")

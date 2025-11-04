@@ -168,10 +168,14 @@ async def extract_user_context(current_user: dict) -> UserContext:
                         "organization_id": organization_id,
                         "type": "organization_member"
                     })
-                    print(f"Updated user metadata with organization_id: {organization_id} for user: {user_id}")
+                    print(
+                        "Updated user metadata with organization_id:",
+                        f"{organization_id} for user: {user_id}")
                 else:
                     # Organization ID not found, but allow user to proceed
-                    print(f"Warning: No organization found for user {user_id}, proceeding without organization_id")
+                    print(
+                        f"Warning: No organization found for user {user_id}, "
+                        "proceeding without organization_id")
                     organization_id = None
             except Exception as e:
                 print(f"Failed to retrieve organization_id for user {user_id}: {str(e)}")

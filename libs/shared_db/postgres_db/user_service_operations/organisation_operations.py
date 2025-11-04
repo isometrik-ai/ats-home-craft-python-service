@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
 from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_metadata_of_user
 from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
-from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_supabase_client
+from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     handle_database_errors, create_error_messages
 )
