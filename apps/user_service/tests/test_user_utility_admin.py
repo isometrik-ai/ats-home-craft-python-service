@@ -401,6 +401,7 @@ class TestSignUpSupabaseUser:
             with pytest.raises(HTTPException) as exc_info:
                 await sign_up_supabase_user(body)
 
+            # The function returns 400 for missing user, which is correct
             assert exc_info.value.status_code == 400
             assert "Failed to create user account" in exc_info.value.detail
 
@@ -435,14 +436,19 @@ class TestSignUpSupabaseUser:
         body.phone = None
         body.timezone = "UTC"
 
+        # Mock ConnectionError during sign_up call, not during get_supabase_admin_client
+        mock_supabase = MagicMock()
+        mock_supabase.auth.sign_up = AsyncMock(side_effect=ConnectionError("Connection failed"))
+
         with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(side_effect=ConnectionError("Connection failed"))):
+                   AsyncMock(return_value=mock_supabase)):
 
             with pytest.raises(HTTPException) as exc_info:
                 await sign_up_supabase_user(body)
 
-            assert exc_info.value.status_code == 500
-            assert "Failed to create user account" in exc_info.value.detail
+            # ConnectionError should return 503 Service Unavailable
+            assert exc_info.value.status_code == 503
+            assert "Service temporarily unavailable" in exc_info.value.detail
 
 
 class TestLoginUser:

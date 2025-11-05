@@ -308,6 +308,9 @@ organization_id: Organization ID to associate with user
 
         return supabase_response
 
+    except HTTPException:
+        # Re-raise HTTPExceptions as-is (e.g., from the user=None check above)
+        raise
     except Exception as supabase_error:
         # Check for duplicate email/user errors FIRST, regardless of exception type
         error_message = str(supabase_error).lower()
