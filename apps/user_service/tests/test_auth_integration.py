@@ -145,12 +145,18 @@ def test_signup_endpoint_success(auth_client):
         "last_name": "User"
     }
 
+    # Mock the signup response with user and session (same as login)
+    mock_result = MagicMock()
+    mock_result.user.id = "new-user-id"
+    mock_result.session.access_token = "test-access-token"
+
     with patch('apps.user_service.app.api.auth.sign_up_supabase_user',
-               AsyncMock(return_value="new-user-id")):
+               AsyncMock(return_value=mock_result)):
         response = auth_client.post("/auth/signup", json=signup_data)
         assert response.status_code == 201
         data = response.json()
         assert "Account created successfully" in data["message"]
+        assert data["access_token"] == "test-access-token"
         assert data["data"]["user_id"] == "new-user-id"
 
 @pytest.mark.asyncio
@@ -165,13 +171,19 @@ async def test_signup_endpoint_success_async(async_auth_client):
         "last_name": "User"
     }
 
+    # Mock the signup response with user and session (same as login)
+    mock_result = MagicMock()
+    mock_result.user.id = "new-user-id"
+    mock_result.session.access_token = "test-access-token"
+
     with patch('apps.user_service.app.api.auth.sign_up_supabase_user',
-               AsyncMock(return_value="new-user-id")):
+               AsyncMock(return_value=mock_result)):
         with TestClient(async_auth_client) as client:
             response = client.post("/auth/signup", json=signup_data)
             assert response.status_code == 201
             data = response.json()
             assert "Account created successfully" in data["message"]
+            assert data["access_token"] == "test-access-token"
             assert data["data"]["user_id"] == "new-user-id"
 
 def test_signup_endpoint_weak_password(auth_client):

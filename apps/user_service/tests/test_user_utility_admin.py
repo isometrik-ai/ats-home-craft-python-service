@@ -371,12 +371,15 @@ class TestSignUpSupabaseUser:
         user_id = str(uuid.uuid4())
         mock_response = MagicMock()
         mock_response.user.id = user_id
+        mock_response.session = MagicMock()
+        mock_response.session.access_token = "test-token"
 
         with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(auth=MagicMock(sign_up=AsyncMock(return_value=mock_response))))):
 
             result = await sign_up_supabase_user(body)
-            assert result == user_id
+            assert result.user.id == user_id
+            assert result.session.access_token == "test-token"
 
     @pytest.mark.asyncio
     async def test_sign_up_supabase_user_no_user_response(self):

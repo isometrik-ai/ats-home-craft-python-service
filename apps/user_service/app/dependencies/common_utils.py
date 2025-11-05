@@ -39,6 +39,9 @@ from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 from libs.shared_utils.common_query import log_exception
+from apps.user_service.app.dependencies.logger import get_logger
+
+logger = get_logger("common_utils")
 
 # ============================================================================
 # DATA CLASSES
@@ -143,13 +146,19 @@ async def extract_user_context(current_user: dict) -> UserContext:
         )
 
     if not organization_id:
-        user_data = await get_user_by_id(user_id)
-        organization_id = user_data.user.user_metadata.get("organization_id", None)
+        # Try to get organization_id from Supabase user data, but handle errors gracefully
+        try:
+            user_data = await get_user_by_id(user_id)
+            organization_id = user_data.user.user_metadata.get("organization_id", None)
+        except Exception as e:
+            # If get_user_by_id fails (e.g., "User not allowed"), log and continue
+            # This is expected for new users creating their first organization
+            logger.warning("Could not fetch user data to get organization_id: %s", str(e))
+            organization_id = None
 
         # If organization_id is still None, try to get it from organization_members table
         if not organization_id:
             try:
-
                 # Query organization_members table to find user's organization
                 supabase = await get_supabase_admin_client()
                 result = await supabase.table("organization_members").select(
@@ -167,6 +176,7 @@ async def extract_user_context(current_user: dict) -> UserContext:
                     })
                 else:
                     # Organization ID not found, but allow user to proceed
+                    # This is normal for new users creating their first organization
                     organization_id = None
             except Exception:
                 # Allow user to proceed even if organization lookup fails
