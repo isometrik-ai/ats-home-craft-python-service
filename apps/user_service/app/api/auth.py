@@ -433,7 +433,22 @@ async def signup(
             detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
         )
 
-    user_id = await sign_up_supabase_user(signup_data)
+    signup_result = await sign_up_supabase_user(signup_data)
+    user_id = signup_result.user.id
+    
+    # Extract access token from session if available
+    access_token = None
+    if signup_result.session and hasattr(signup_result.session, 'access_token'):
+        access_token = signup_result.session.access_token
+    else:
+        # If no session from signup, try to log in to get a token
+        try:
+            login_result = await login_user(signup_data.email, signup_data.password)
+            if login_result.session and hasattr(login_result.session, 'access_token'):
+                access_token = login_result.session.access_token
+        except Exception as login_error:
+            # If login fails (e.g., email not confirmed), continue without token
+            logger.warning("Could not get access token after signup for %s: %s", signup_data.email, str(login_error))
 
     # Send welcome email to the newly signed up user
     try:
@@ -449,16 +464,22 @@ async def signup(
         logger.error("Error sending welcome email: %s", str(email_error))
         # Note: We don't fail the entire operation if email fails
 
+    response_data = {
+        "user_id": user_id,
+        "email": signup_data.email,
+        "first_name": signup_data.first_name,
+        "last_name": signup_data.last_name,
+        "phone": signup_data.phone,
+        "timezone": signup_data.timezone,
+    }
+    
+    # Add access token to response if available
+    if access_token:
+        response_data["access_token"] = access_token
+
     return SignupResponse(
         message="Account created successfully! Please check your email for verification.",
-        data={
-            "user_id": user_id,
-            "email": signup_data.email,
-            "first_name": signup_data.first_name,
-            "last_name": signup_data.last_name,
-            "phone": signup_data.phone,
-            "timezone": signup_data.timezone,
-        }
+        data=response_data
     )
 
 

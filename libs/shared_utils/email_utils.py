@@ -17,7 +17,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 
-def send_email(email: str, subject: str, message: str, html: str = None) -> bool:
+def send_email(email: str, subject: str, message: str, html: str = None, from_name: str = None) -> bool:
     """
     Send an email using Supabase Edge Function with Resend.
 
@@ -26,6 +26,7 @@ def send_email(email: str, subject: str, message: str, html: str = None) -> bool
         subject (str): Email subject
         message (str): Email message content (plain text)
         html (str, optional): HTML version of the email
+        from_name (str, optional): Sender name to display in the email
 
     Returns:
         bool: True if email was sent successfully, False otherwise
@@ -39,6 +40,9 @@ def send_email(email: str, subject: str, message: str, html: str = None) -> bool
 
         if html:
             payload["html"] = html
+        
+        if from_name:
+            payload["from_name"] = from_name
         response = httpx.post(
             f"{SUPABASE_URL}/functions/v1/custom-email",
             headers={
@@ -350,7 +354,7 @@ def send_welcome_email(
     email: str,
     first_name: str,
     company_name: str = "House of App AI",
-    dashboard_url: str = "https://app.houseofapp.ai/dashboard",
+    dashboard_url: str = "https://house-of-apps-legal-ai-front-end.vercel.app/",
     support_email: str = "support@houseofapp.ai",
     company_address: str = "123 Main Street, City, State 12345",
     privacy_policy_url: str = "https://houseofapp.ai/privacy",
@@ -509,8 +513,8 @@ The {company_name} Team"""
 </body>
 </html>"""
 
-        # Send the email with HTML content
-        email_sent = send_email(email, subject, message, html_message)
+        # Send the email with HTML content and sender name "Ross.Ai"
+        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
 
         if email_sent:
             logger.info("Welcome email sent successfully to %s", email)
