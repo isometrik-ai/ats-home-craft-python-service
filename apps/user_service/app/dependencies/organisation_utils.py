@@ -20,6 +20,7 @@ Organisation-Specific Operations Covered:
 from typing import Optional, Any, Dict
 
 from fastapi import HTTPException, status
+from postgrest import APIError
 
 # Local imports
 from apps.user_service.app.dependencies.common_utils import ORG_STATUSES
@@ -164,6 +165,82 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> Dict
 
     except Exception as db_error:
         log_exception()
+        
+        # Check for duplicate key errors (e.g., duplicate slug)
+        error_message = str(db_error).lower()
+        error_code = None
+        
+        # Check if it's an APIError with code 23505 (PostgreSQL duplicate key violation)
+        if isinstance(db_error, APIError):
+            # APIError might have message as dict or string
+            error_details = getattr(db_error, 'message', {})
+            if isinstance(error_details, dict):
+                error_code = error_details.get('code')
+                error_message = str(error_details.get('message', '')).lower()
+            elif isinstance(error_details, str):
+                error_message = error_details.lower()
+            
+            # Also check args and other attributes
+            if hasattr(db_error, 'args') and db_error.args:
+                for arg in db_error.args:
+                    if isinstance(arg, dict):
+                        error_code = arg.get('code') or error_code
+                        if 'message' in arg:
+                            error_message += " " + str(arg.get('message', '')).lower()
+        
+        # Check error message string for duplicate key patterns
+        error_str = str(db_error).lower()
+        if hasattr(db_error, '__dict__'):
+            error_str += " " + str(db_error.__dict__).lower()
+        
+        # Check for duplicate key violations in error message or code
+        if (
+            error_code == '23505'
+            or str(error_code) == '23505'
+            or 'duplicate key' in error_message
+            or 'duplicate key' in error_str
+            or 'organizations_slug_key' in error_message
+            or 'organizations_slug_key' in error_str
+            or ('slug' in error_message and 'duplicate' in error_message)
+            or ('slug' in error_str and 'duplicate' in error_str)
+        ):
+            # Try to delete the Supabase user if organization creation failed due to duplicate slug
+            try:
+                await delete_auth_user(org_data["user_id"])
+            except Exception:
+                # Ignore cleanup errors for duplicate slug case
+                pass
+            
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Organisation slug already exists. Please choose a different name.",
+            ) from db_error
+        
+        # Check for Row Level Security (RLS) policy violations
+        if (
+            error_code == '42501'
+            or str(error_code) == '42501'
+            or 'row-level security policy' in error_message
+            or 'row-level security policy' in error_str
+            or 'violates row-level security' in error_message
+            or 'violates row-level security' in error_str
+        ):
+            # Try to delete the Supabase user if organization creation failed due to RLS
+            try:
+                await delete_auth_user(org_data["user_id"])
+            except Exception:
+                # Ignore cleanup errors for RLS case
+                pass
+            
+            logger.error(
+                "RLS policy violation during organization creation - Organization ID: %s, User ID: %s, Error: %s",
+                org_data.get("organization_id"), org_data.get("user_id"), str(db_error)
+            )
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database security policy error. Please contact support. Error: Row-level security policy violation.",
+            ) from db_error
 
         # Try to delete the Supabase user if database transaction fails
         try:

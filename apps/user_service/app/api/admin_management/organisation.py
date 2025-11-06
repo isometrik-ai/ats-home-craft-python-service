@@ -516,6 +516,9 @@ async def create_organisation(
             "user_email": user_context.email,
             "organization_id": organization_id,
         }
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 409 Conflict for duplicate slug)
+        raise
     except (ConnectionError, TimeoutError, ValueError) as db_error:
         log_exception()
         logger.error("Database transaction failed - Request ID: %s, ",request_id)

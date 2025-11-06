@@ -451,7 +451,6 @@ class CompanyData(BaseModel):
                 solo_fields = [
                     ("need_help_importing_data", False),
                     ("need_migration_assistance", False),
-                    ("compliance_security", None),
                     ("preferred_integration", None),
                     ("team_setup", None),
                     ("enterprise_features", None),
@@ -462,19 +461,19 @@ class CompanyData(BaseModel):
             case FirmSize.SMALL_FIRM:
                 small_firm_fields = [
                     ("enterprise_features", None),
-                    ("compliance_security", None),
                 ]
                 check_field_applicability(small_firm_fields, FirmSize.SMALL_FIRM)
 
             # Mid-Size/Large Firm (11-100 attorneys) validations
             case FirmSize.MID_SIZE_LARGE_FIRM:
-                mid_size_large_firm_fields = [("compliance_security", None)]
-                check_field_applicability(mid_size_large_firm_fields, FirmSize.MID_SIZE_LARGE_FIRM)
+                # No restrictions - compliance_security is optional for all firm types
+                pass
 
             # Enterprise Firm validations
             case FirmSize.ENTERPRISE_FIRM:
-                enterprise_firm_fields = [("enterprise_features", None)]
-                check_field_applicability(enterprise_firm_fields, FirmSize.ENTERPRISE_FIRM)
+                # enterprise_features is allowed and optional for Enterprise Firms
+                # No restrictions needed
+                pass
 
             case _:
                 _bad_request('Invalid firm size')

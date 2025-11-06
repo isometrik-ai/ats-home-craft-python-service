@@ -279,7 +279,7 @@ async def sign_up_supabase_user(body):
 organization_id: Organization ID to associate with user
 
     Returns:
-        str: Created user ID
+        dict: Supabase auth response containing user and session information
 
     Raises:
         HTTPException: For duplicate email or Supabase errors
@@ -306,17 +306,55 @@ organization_id: Organization ID to associate with user
                 detail="Failed to create user account"
             )
 
-        return supabase_response.user.id
+        return supabase_response
 
-    except (ConnectionError, TimeoutError, ValueError, AuthApiError) as supabase_error:
+    except HTTPException:
+        # Re-raise HTTPExceptions as-is (e.g., from the user=None check above)
+        raise
+    except Exception as supabase_error:
+        # Check for duplicate email/user errors FIRST, regardless of exception type
+        error_message = str(supabase_error).lower()
+        error_type = type(supabase_error).__name__
+        
+        # Log for debugging
+        logger.warning("Signup error - Type: %s, Message: %s", error_type, error_message)
+        
+        # Check error message and also check error attributes if available
+        error_str_lower = error_message
+        if hasattr(supabase_error, 'message'):
+            error_str_lower += " " + str(supabase_error.message).lower()
+        if hasattr(supabase_error, 'detail'):
+            error_str_lower += " " + str(supabase_error.detail).lower()
+        if hasattr(supabase_error, 'args') and supabase_error.args:
+            error_str_lower += " " + " ".join(str(arg).lower() for arg in supabase_error.args)
+        
         if (
-            "already_exists" in str(supabase_error).lower()
-            or "duplicate" in str(supabase_error).lower()
-            or "already registered" in str(supabase_error).lower()
+            "already_exists" in error_str_lower
+            or "duplicate" in error_str_lower
+            or "already registered" in error_str_lower
+            or "user already registered" in error_str_lower
+            or "email already" in error_str_lower
+            or "user already exists" in error_str_lower
+            or "already been registered" in error_str_lower
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
             ) from supabase_error
+        
+        # Handle specific exception types for better error messages
+        if isinstance(supabase_error, (ConnectionError, TimeoutError)):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Service temporarily unavailable. Please try again later.",
+            ) from supabase_error
+        
+        if isinstance(supabase_error, (ValueError, AuthApiError)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid request: {str(supabase_error)}",
+            ) from supabase_error
+        
+        # Default to 500 for unexpected errors
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create user account",

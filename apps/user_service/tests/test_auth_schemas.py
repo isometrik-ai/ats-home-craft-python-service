@@ -376,7 +376,7 @@ class TestComplexValidation:
         assert exc_info.value.status_code == 400
         assert "need_migration_assistance is not applicable for Solo Practitioner" in exc_info.value.detail
 
-        # Test that compliance_security is not allowed
+        # Test that compliance_security is now optional (no longer raises error)
         compliance_security = ComplianceSecurity(
             required_compliance_standards=[ComplianceStandard.HIPAA],
             data_retention_period="7 years",
@@ -384,15 +384,14 @@ class TestComplexValidation:
             encryption_requirements=[EncryptionRequirement.AES_256_ENCRYPTION],
             compliance_officer_email="compliance@test.com"
         )
-        with pytest.raises(HTTPException) as exc_info:
-            CompanyData(
-                company_name="Solo Practice",
-                company_size=FirmSize.SOLO_PRACTITIONER,
-                compliance_security=compliance_security,
-                primary_practice_areas=[PracticeArea.LITIGATION]
-            )
-        assert exc_info.value.status_code == 400
-        assert "compliance_security is not applicable for Solo Practitioner" in exc_info.value.detail
+        # compliance_security is now optional for all firm types
+        company_data = CompanyData(
+            company_name="Solo Practice",
+            company_size=FirmSize.SOLO_PRACTITIONER,
+            compliance_security=compliance_security,
+            primary_practice_areas=[PracticeArea.LITIGATION]
+        )
+        assert company_data.compliance_security == compliance_security
 
         # Test that preferred_integration is not allowed
         with pytest.raises(HTTPException) as exc_info:
@@ -466,7 +465,7 @@ class TestComplexValidation:
         assert exc_info.value.status_code == 400
         assert "enterprise_features is not applicable for Small Firm (2-10 attorneys)" in exc_info.value.detail
 
-        # Test that compliance_security is not allowed
+        # Test that compliance_security is now optional (no longer raises error)
         compliance_security = ComplianceSecurity(
             required_compliance_standards=[ComplianceStandard.HIPAA],
             data_retention_period="7 years",
@@ -474,15 +473,14 @@ class TestComplexValidation:
             encryption_requirements=[EncryptionRequirement.AES_256_ENCRYPTION],
             compliance_officer_email="compliance@test.com"
         )
-        with pytest.raises(HTTPException) as exc_info:
-            CompanyData(
-                company_name="Small Firm",
-                company_size=FirmSize.SMALL_FIRM,
-                compliance_security=compliance_security,
-                primary_practice_areas=[PracticeArea.LITIGATION]
-            )
-        assert exc_info.value.status_code == 400
-        assert "compliance_security is not applicable for Small Firm (2-10 attorneys)" in exc_info.value.detail
+        # compliance_security is now optional for all firm types
+        company_data = CompanyData(
+            company_name="Small Firm",
+            company_size=FirmSize.SMALL_FIRM,
+            compliance_security=compliance_security,
+            primary_practice_areas=[PracticeArea.LITIGATION]
+        )
+        assert company_data.compliance_security == compliance_security
 
     def test_mid_size_large_firm_restrictions(self):
         """Test Mid-Size/Large Firm restrictions - covers lines 501-502."""
