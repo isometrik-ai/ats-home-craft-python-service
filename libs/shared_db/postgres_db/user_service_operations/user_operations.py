@@ -21,7 +21,7 @@ from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.users import UserListItem
 from libs import NOW_CONSTANT
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client
 from .exception_handling import handle_database_errors, create_error_messages
 #
 # Initialize logger
@@ -394,7 +394,7 @@ async def update_user_email(user_id: str, organization_id: str, new_email: str) 
     custom_messages=create_error_messages("get_auth_user_by_email", "getting"))
 async def get_auth_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     """Get user from auth.users table by email."""
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
 
     result = await supabase.auth.admin.list_users()
 
