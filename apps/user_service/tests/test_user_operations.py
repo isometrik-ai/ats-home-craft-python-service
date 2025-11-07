@@ -696,7 +696,7 @@ class TestUserOperations:
         mock_auth_user.email = "other@example.com"
         mock_auth_user.id = "auth_user_id"
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.list_users = AsyncMock(return_value=[mock_auth_user])
             mock_get_client.return_value = mock_supabase
