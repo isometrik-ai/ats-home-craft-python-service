@@ -19,7 +19,7 @@ from apps.user_service.app.schemas.auth import CODE_VERIFIER, CODE_CHALLENGE
 from libs.shared_utils.email_utils import send_email
 from libs.shared_utils.common_query import log_exception
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client
 from libs.shared_db.supabase_db.admin_operations.user import update_email_of_user
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_user_profile_by_id,
@@ -445,7 +445,7 @@ async def reset_the_password_email(email: str):
     Reset password email using Supabase Auth Admin API.
     """
     try:
-        supabase = await get_supabase_admin_client()
+        supabase = await get_fresh_supabase_admin_client()
         return await supabase.auth.reset_password_email(email)
 
     except (AttributeError, TypeError) as e:

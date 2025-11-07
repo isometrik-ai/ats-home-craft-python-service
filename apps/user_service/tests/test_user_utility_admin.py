@@ -575,7 +575,7 @@ class TestResetThePasswordEmail:
         email = "test@example.com"
         mock_response = {"success": True}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
                    AsyncMock(return_value=MagicMock(auth=MagicMock(reset_password_email=AsyncMock(return_value=mock_response))))):
 
             result = await reset_the_password_email(email)
@@ -586,7 +586,7 @@ class TestResetThePasswordEmail:
         """Test password reset email with AttributeError."""
         email = "test@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
                    AsyncMock(side_effect=AttributeError("No attribute"))):
 
             with pytest.raises(HTTPException) as exc_info:
@@ -600,7 +600,7 @@ class TestResetThePasswordEmail:
         """Test password reset email with ValueError."""
         email = "invalid-email"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
                    AsyncMock(side_effect=ValueError("Invalid email"))):
 
             with pytest.raises(HTTPException) as exc_info:
@@ -614,7 +614,7 @@ class TestResetThePasswordEmail:
         """Test password reset email with AuthApiError."""
         email = "test@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
                    AsyncMock(side_effect=AuthApiError("Auth service error", 502, "AUTH_SERVICE_ERROR"))):
 
             with pytest.raises(HTTPException) as exc_info:
@@ -628,7 +628,7 @@ class TestResetThePasswordEmail:
         """Test password reset email with general exception."""
         email = "test@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
                    AsyncMock(side_effect=Exception("Unexpected error"))):
 
             with pytest.raises(HTTPException) as exc_info:
