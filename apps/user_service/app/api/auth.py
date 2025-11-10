@@ -75,6 +75,9 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     get_oauth_link_url
 )
 from libs.shared_db.supabase_db.admin_operations.session import get_session_by_id_admin
+from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
+    get_verification_code_by_id,
+)
 
 # Modify sys.path to support monorepo imports
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -381,7 +384,6 @@ async def reset_password(
     # - Complete permission system setup
 
     # X- Organization slug uniqueness validation
-@handle_api_exceptions("signup")
 @router.post(
     "/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED
 )
@@ -397,6 +399,7 @@ async def reset_password(
     table_name="organizations",
     category="USER_SIGNUP",
 )
+@handle_api_exceptions("signup")
 async def signup(
     request: Request, # pylint: disable=unused-argument
     signup_data: SignupRequest = Body(...),
@@ -431,6 +434,40 @@ async def signup(
         raise HTTPException(
             status_code=400,
             detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
+        )
+
+    # Verify verification code before signup (cross-security check)
+    verification_record = await get_verification_code_by_id(signup_data.verificationId)
+    
+    if not verification_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Verification code not found"
+        )
+    
+    # Check if verification code is already verified (must be true for signup)
+    if not verification_record.get("verified", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code must be verified before signup. Please verify your email first."
+        )
+    
+    # Validate email matches verification record (cross-security check)
+    stored_given_input = verification_record.get("given_input")
+    if stored_given_input != signup_data.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Email '{signup_data.email}' does not match the verification record. Expected: '{stored_given_input}'"
+        )
+    
+    # Verify the code matches (cross-security check)
+    stored_code = verification_record.get("verification_code")
+    code_matched = (signup_data.verificationCode == stored_code)
+    
+    if not code_matched:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code"
         )
 
     signup_result = await sign_up_supabase_user(signup_data)
