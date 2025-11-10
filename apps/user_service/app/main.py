@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # Local application imports
 from apps.user_service.app.app_instance import app
 from apps.user_service.app.api.routes import router as api_router
+from apps.user_service.app.api.verification_codes import router as verification_codes_router
 from apps.user_service.app.dependencies.exception_middleware import (
     unified_exception_handler,
     CacheRequestBodyMiddleware,
@@ -92,3 +93,4 @@ app.add_middleware(TraceMiddleware, tracer=tracer)
 
 app.add_middleware(JWTAuthMiddleware)
 app.include_router(api_router)
+app.include_router(verification_codes_router)

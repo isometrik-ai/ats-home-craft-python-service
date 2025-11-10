@@ -54,3 +54,4 @@ from .organisation_operations import *
 from .permission_operations import *
 from .session_operations import *
 from .audit_operations import *
+from .verification_operations import *
