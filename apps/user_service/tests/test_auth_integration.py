@@ -142,7 +142,18 @@ def test_signup_endpoint_success(auth_client):
         "email": "newuser@example.com",
         "password": "NewPass123!",
         "first_name": "New",
-        "last_name": "User"
+        "last_name": "User",
+        "verificationId": "test-verification-id",
+        "verificationCode": "1111"
+    }
+
+    # Mock verification code record (verified and matching)
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "newuser@example.com",
+        "verification_code": "1111",
+        "verified": True
     }
 
     # Mock the signup response with user and session (same as login)
@@ -150,7 +161,9 @@ def test_signup_endpoint_success(auth_client):
     mock_result.user.id = "new-user-id"
     mock_result.session.access_token = "test-access-token"
 
-    with patch('apps.user_service.app.api.auth.sign_up_supabase_user',
+    with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)), \
+         patch('apps.user_service.app.api.auth.sign_up_supabase_user',
                AsyncMock(return_value=mock_result)), \
          patch('apps.user_service.app.api.auth.send_welcome_email',
                return_value=True):
@@ -170,7 +183,18 @@ async def test_signup_endpoint_success_async(async_auth_client):
         "email": "newuser@example.com",
         "password": "NewPass123!",
         "first_name": "New",
-        "last_name": "User"
+        "last_name": "User",
+        "verificationId": "test-verification-id",
+        "verificationCode": "1111"
+    }
+
+    # Mock verification code record (verified and matching)
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "newuser@example.com",
+        "verification_code": "1111",
+        "verified": True
     }
 
     # Mock the signup response with user and session (same as login)
@@ -178,7 +202,9 @@ async def test_signup_endpoint_success_async(async_auth_client):
     mock_result.user.id = "new-user-id"
     mock_result.session.access_token = "test-access-token"
 
-    with patch('apps.user_service.app.api.auth.sign_up_supabase_user',
+    with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)), \
+         patch('apps.user_service.app.api.auth.sign_up_supabase_user',
                AsyncMock(return_value=mock_result)), \
          patch('apps.user_service.app.api.auth.send_welcome_email',
                return_value=True):
