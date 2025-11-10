@@ -46,6 +46,7 @@ from libs.shared_db.postgres_db.user_service_operations.verification_operations 
 
 # Shared library imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.email_utils import send_verification_code_email
 
 # Create router for verification code endpoints
 router = APIRouter(prefix="/v1/verification-code", tags=["Verification Codes"])
@@ -168,6 +169,22 @@ async def send_verification_code(
             user_id=user_id,
             ip_address=ip_address
         )
+        
+        # Send verification code email if type is EMAIL
+        if data.type == VerificationType.EMAIL:
+            verification_code = verification_record.get("verification_code")
+            try:
+                email_sent = send_verification_code_email(
+                    email=given_input,
+                    otp_code=verification_code,
+                    expiry_minutes=VERIFICATION_CODE_EXPIRY_MINUTES
+                )
+                if not email_sent:
+                    logger.warning(f"Failed to send verification code email to {given_input}")
+                    # Note: We don't fail the operation if email fails, code is still created
+            except Exception as email_error:
+                logger.error(f"Error sending verification code email: {str(email_error)}")
+                # Note: We don't fail the operation if email fails, code is still created
         
         logger.info(f"Verification code sent for {data.type.value}: {given_input}")
         
