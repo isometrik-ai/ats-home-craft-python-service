@@ -17,7 +17,6 @@ from fastapi import APIRouter, HTTPException, status, Request, Depends
 from fastapi.responses import JSONResponse
 
 # Utility imports
-from apps.user_service.app.dependencies.common_utils import handle_api_exceptions
 from apps.user_service.app.dependencies.logger import get_logger
 
 # Schema imports
@@ -199,7 +198,10 @@ async def send_verification_code(
         raise
     except Exception as e:
         logger.error(f"Error sending verification code: {str(e)}")
-        return handle_api_exceptions(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error while sending verification code"
+        ) from e
 
 
 @router.post("/verify", response_model=VerifyVerificationCodeResponse, status_code=status.HTTP_200_OK)
@@ -329,5 +331,8 @@ async def verify_verification_code(
         raise
     except Exception as e:
         logger.error(f"Error verifying verification code: {str(e)}")
-        return handle_api_exceptions(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error while verifying verification code"
+        ) from e
 
