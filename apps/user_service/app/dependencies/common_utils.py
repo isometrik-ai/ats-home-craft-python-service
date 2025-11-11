@@ -22,11 +22,12 @@ import time
 import uuid
 import json
 import traceback
-from typing import Optional, List, Callable, Union, Dict, Any
 from functools import wraps
 from dataclasses import dataclass
+from typing import Optional, List, Callable, Union, Dict, Any
 
 from fastapi import HTTPException, status
+from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_user_profile_by_id
@@ -39,7 +40,6 @@ from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 from libs.shared_utils.common_query import log_exception
-from apps.user_service.app.dependencies.logger import get_logger
 
 logger = get_logger("common_utils")
 

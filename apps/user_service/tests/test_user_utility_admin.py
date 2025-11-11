@@ -1122,6 +1122,52 @@ class TestEmailUtils:
             assert "html" in payload
             assert payload["html"] == "<p>HTML content</p>"
 
+    def test_send_email_with_from_name(self):
+        """Test email sending with from_name parameter - covers line 52."""
+        from libs.shared_utils.email_utils import send_email
+
+        with patch("libs.shared_utils.email_utils.httpx.post") as mock_post:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.text = "Email sent successfully"
+            mock_post.return_value = mock_response
+
+            result = send_email(
+                "test@example.com",
+                "Test Subject",
+                "Test message",
+                from_name="Test Sender"
+            )
+
+            assert result is True
+            call_args = mock_post.call_args
+            payload = call_args[1]["json"]
+            assert "from_name" in payload
+            assert payload["from_name"] == "Test Sender"
+
+    def test_send_email_with_from_email(self):
+        """Test email sending with from_email parameter."""
+        from libs.shared_utils.email_utils import send_email
+
+        with patch("libs.shared_utils.email_utils.httpx.post") as mock_post:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.text = "Email sent successfully"
+            mock_post.return_value = mock_response
+
+            result = send_email(
+                "test@example.com",
+                "Test Subject",
+                "Test message",
+                from_email="sender@example.com"
+            )
+
+            assert result is True
+            call_args = mock_post.call_args
+            payload = call_args[1]["json"]
+            # Note: from_email is not currently used in the implementation
+            # This test ensures the function doesn't break when it's provided
+
 
 class TestSendPasswordResetConfirmationEmail:
     """Test cases for send_password_reset_confirmation_email function."""
@@ -1434,6 +1480,129 @@ class TestSendOrganizationInvitationEmail:
 
                 assert role_name in message
                 assert role_name in html_message
+
+
+class TestSendWelcomeEmail:
+    """Test cases for send_welcome_email function - covers lines 386-534."""
+
+    def test_send_welcome_email_success(self):
+        """Test successful welcome email sending."""
+        from libs.shared_utils.email_utils import send_welcome_email
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+            result = send_welcome_email(
+                email="test@example.com",
+                first_name="John"
+            )
+
+            assert result is True
+            mock_send_email.assert_called_once()
+            call_args = mock_send_email.call_args
+            assert call_args[0][0] == "test@example.com"
+            assert "Welcome to" in call_args[0][1]  # Subject
+            assert "John" in call_args[0][2]  # Message
+            assert "John" in call_args[0][3]  # HTML message
+            assert call_args[1]["from_name"] == "Ross.Ai"  # from_name is a keyword argument
+
+    def test_send_welcome_email_with_custom_parameters(self):
+        """Test welcome email with custom parameters."""
+        from libs.shared_utils.email_utils import send_welcome_email
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+            result = send_welcome_email(
+                email="test@example.com",
+                first_name="Jane",
+                company_name="Custom Company",
+                dashboard_url="https://custom-dashboard.com",
+                support_email="custom@support.com",
+                company_address="456 Custom St",
+                privacy_policy_url="https://custom.com/privacy",
+                terms_url="https://custom.com/terms"
+            )
+
+            assert result is True
+            mock_send_email.assert_called_once()
+            call_args = mock_send_email.call_args
+            assert "Custom Company" in call_args[0][1]  # Subject
+            assert "Custom Company" in call_args[0][2]  # Message
+            assert "https://custom-dashboard.com" in call_args[0][3]  # HTML message
+            assert "custom@support.com" in call_args[0][3]  # HTML message
+
+    def test_send_welcome_email_failure(self):
+        """Test welcome email sending failure."""
+        from libs.shared_utils.email_utils import send_welcome_email
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=False) as mock_send_email:
+            result = send_welcome_email(
+                email="test@example.com",
+                first_name="John"
+            )
+
+            assert result is False
+            mock_send_email.assert_called_once()
+
+    def test_send_welcome_email_exception(self):
+        """Test welcome email sending with exception."""
+        from libs.shared_utils.email_utils import send_welcome_email
+
+        with patch("libs.shared_utils.email_utils.send_email", side_effect=Exception("Email service error")):
+            result = send_welcome_email(
+                email="test@example.com",
+                first_name="John"
+            )
+
+            assert result is False
+
+    def test_send_welcome_email_content_validation(self):
+        """Test welcome email content validation."""
+        from libs.shared_utils.email_utils import send_welcome_email
+        from datetime import datetime
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+            send_welcome_email(
+                email="test@example.com",
+                first_name="Alice"
+            )
+
+            call_args = mock_send_email.call_args
+            message = call_args[0][2]  # Plain text message
+            html_message = call_args[0][3]  # HTML message
+            current_year = datetime.now().year
+
+            # Check plain text message content
+            assert "Alice" in message
+            assert "Thank you for signing up" in message
+            assert "dashboard" in message.lower()
+
+            # Check HTML message content
+            assert "Alice" in html_message
+            assert "Welcome to" in html_message
+            assert "Go to Dashboard" in html_message
+            assert str(current_year) in html_message
+            assert "Privacy Policy" in html_message
+            assert "Terms of Service" in html_message
+
+    def test_send_welcome_email_html_structure(self):
+        """Test welcome email HTML structure."""
+        from libs.shared_utils.email_utils import send_welcome_email
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+            send_welcome_email(
+                email="test@example.com",
+                first_name="Bob"
+            )
+
+            call_args = mock_send_email.call_args
+            html_message = call_args[0][3]
+
+            # Check HTML structure elements
+            assert "<!DOCTYPE html>" in html_message
+            assert "<html" in html_message
+            assert "<head>" in html_message
+            assert "<body" in html_message
+            assert "<table" in html_message
+            assert "role=\"presentation\"" in html_message
+            assert "mobile-responsive" in html_message.lower() or "@media" in html_message
 
 
 class TestUpdateMetadataOfUser:

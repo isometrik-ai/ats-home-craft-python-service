@@ -17,6 +17,8 @@ from libs.shared_db.supabase_db.db import (
     SupabaseClientCache,
     get_supabase_client,
     get_supabase_admin_client,
+    reset_supabase_admin_client,
+    get_fresh_supabase_admin_client,
     SUPABASE_URL,
     SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY
@@ -211,6 +213,44 @@ class TestGlobalFunctions:
             # Verify correct clients returned
             assert regular_client is mock_client
             assert admin_client is mock_admin_client
+
+    @pytest.mark.asyncio
+    async def test_reset_supabase_admin_client(self):
+        """Test reset_supabase_admin_client() function - covers line 113."""
+        # Reset singleton state
+        SupabaseClientCache._instance = None
+        SupabaseClientCache._supabase_admin_client = None
+
+        # Mock the cache instance
+        mock_cache = MagicMock()
+        mock_cache.reset_admin_client = MagicMock()
+
+        with patch('libs.shared_db.supabase_db.db._cache', mock_cache):
+            reset_supabase_admin_client()
+
+            # Verify cache.reset_admin_client was called
+            mock_cache.reset_admin_client.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_fresh_supabase_admin_client(self):
+        """Test get_fresh_supabase_admin_client() function - covers line 121."""
+        # Reset singleton state
+        SupabaseClientCache._instance = None
+        SupabaseClientCache._supabase_admin_client = None
+
+        # Mock the cache instance
+        mock_cache = MagicMock()
+        mock_admin_client = AsyncMock(spec=AsyncClient)
+        mock_cache.get_fresh_admin_client = AsyncMock(return_value=mock_admin_client)
+
+        with patch('libs.shared_db.supabase_db.db._cache', mock_cache):
+            result = await get_fresh_supabase_admin_client()
+
+            # Verify cache.get_fresh_admin_client was called
+            mock_cache.get_fresh_admin_client.assert_called_once()
+
+            # Verify correct admin client returned
+            assert result is mock_admin_client
 
 
 class TestEnvironmentVariables:
@@ -422,3 +462,109 @@ class TestIntegration:
             # Both instances should have the same cached client
             assert cache1._supabase_client is mock_client
             assert cache2._supabase_client is mock_client
+
+    @pytest.mark.asyncio
+    async def test_get_admin_client_warmup_failure(self):
+        """Test admin client warm-up failure - covers lines 66-68."""
+        # Reset singleton state
+        SupabaseClientCache._instance = None
+        SupabaseClientCache._supabase_admin_client = None
+
+        cache = SupabaseClientCache()
+
+        # Mock create_async_client and auth.admin.list_users to raise exception
+        mock_admin_client = AsyncMock(spec=AsyncClient)
+        mock_auth = AsyncMock()
+        mock_admin = AsyncMock()
+        mock_list_users = AsyncMock(side_effect=Exception("Invalid service key"))
+
+        mock_admin_client.auth = mock_auth
+        mock_auth.admin = mock_admin
+        mock_admin.list_users = mock_list_users
+
+        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
+             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
+             patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client):
+            with pytest.raises(RuntimeError, match="Supabase admin client warm-up failed"):
+                await cache.get_admin_client()
+
+            # Note: The client is cached before warm-up, so it remains cached even if warm-up fails
+            # This is the current implementation behavior - the client is assigned on line 58
+            # before the warm-up check on line 65
+            assert cache._supabase_admin_client is mock_admin_client
+
+    @pytest.mark.asyncio
+    async def test_reset_admin_client(self):
+        """Test reset_admin_client() method - covers line 85."""
+        # Reset singleton state
+        SupabaseClientCache._instance = None
+        SupabaseClientCache._supabase_admin_client = None
+
+        cache = SupabaseClientCache()
+
+        # Mock create_async_client and auth.admin.list_users
+        mock_admin_client = AsyncMock(spec=AsyncClient)
+        mock_auth = AsyncMock()
+        mock_admin = AsyncMock()
+        mock_list_users = AsyncMock()
+
+        mock_admin_client.auth = mock_auth
+        mock_auth.admin = mock_admin
+        mock_admin.list_users = mock_list_users
+
+        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
+             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
+             patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client):
+            # Create and cache admin client
+            await cache.get_admin_client()
+            assert cache._supabase_admin_client is not None
+
+            # Reset admin client
+            cache.reset_admin_client()
+            assert cache._supabase_admin_client is None
+
+    @pytest.mark.asyncio
+    async def test_get_fresh_admin_client(self):
+        """Test get_fresh_admin_client() method - covers lines 80-81."""
+        # Reset singleton state
+        SupabaseClientCache._instance = None
+        SupabaseClientCache._supabase_admin_client = None
+
+        cache = SupabaseClientCache()
+
+        # Mock create_async_client and auth.admin.list_users
+        mock_admin_client1 = AsyncMock(spec=AsyncClient)
+        mock_admin_client2 = AsyncMock(spec=AsyncClient)
+        mock_auth1 = AsyncMock()
+        mock_auth2 = AsyncMock()
+        mock_admin1 = AsyncMock()
+        mock_admin2 = AsyncMock()
+        mock_list_users1 = AsyncMock()
+        mock_list_users2 = AsyncMock()
+
+        mock_admin_client1.auth = mock_auth1
+        mock_auth1.admin = mock_admin1
+        mock_admin1.list_users = mock_list_users1
+
+        mock_admin_client2.auth = mock_auth2
+        mock_auth2.admin = mock_admin2
+        mock_admin2.list_users = mock_list_users2
+
+        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
+             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
+             patch('libs.shared_db.supabase_db.db.create_async_client') as mock_create:
+            # First call returns first client
+            mock_create.return_value = mock_admin_client1
+            result1 = await cache.get_admin_client()
+            assert result1 is mock_admin_client1
+            assert cache._supabase_admin_client is mock_admin_client1
+
+            # Get fresh admin client (should reset and create new one)
+            mock_create.return_value = mock_admin_client2
+            result2 = await cache.get_fresh_admin_client()
+            assert result2 is mock_admin_client2
+            assert cache._supabase_admin_client is mock_admin_client2
+            assert result2 is not result1
+
+            # Verify create_async_client was called twice (once for initial, once for fresh)
+            assert mock_create.call_count == 2

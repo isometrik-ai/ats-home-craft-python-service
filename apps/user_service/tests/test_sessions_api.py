@@ -103,14 +103,14 @@ def test_sessions_list_database_error(client):
 def test_sessions_list_no_organization_id(client):
     """Test sessions list API when user has no organization_id."""
     from apps.user_service.app.dependencies.common_utils import UserContext
-    
+
     mock_user_context = UserContext(
         organization_id=None,
         user_id=str(uuid.uuid4()),
         email="test@example.com",
         user_type="organization_member"
     )
-    
+
     with patch("apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
                AsyncMock(return_value=mock_user_context)):
         res = client.get("/v1/admin/sessions")
@@ -121,10 +121,10 @@ def test_sessions_list_no_organization_id(client):
 def test_session_response_to_dict():
     """Test SessionResponse.to_dict() method."""
     from apps.user_service.app.api.admin_management.sessions.sessions import SessionResponse
-    
+
     response = SessionResponse(message="Test message", status="success")
     result = response.to_dict()
-    
+
     assert result == {"message": "Test message", "status": "success"}
 
 
@@ -132,12 +132,12 @@ def test_extract_session_id_from_token_missing():
     """Test extract_session_id_from_token when session_id is missing."""
     from apps.user_service.app.api.admin_management.sessions.sessions import extract_session_id_from_token
     from fastapi import HTTPException
-    
+
     current_user = {"user_id": "123", "email": "test@example.com"}
-    
+
     with pytest.raises(HTTPException) as exc_info:
         extract_session_id_from_token(current_user)
-    
+
     assert exc_info.value.status_code == 400
     assert "Session ID not found in token" in exc_info.value.detail
 
@@ -146,12 +146,12 @@ def test_extract_session_id_from_token_empty():
     """Test extract_session_id_from_token when session_id is empty string."""
     from apps.user_service.app.api.admin_management.sessions.sessions import extract_session_id_from_token
     from fastapi import HTTPException
-    
+
     current_user = {"user_id": "123", "email": "test@example.com", "session_id": ""}
-    
+
     with pytest.raises(HTTPException) as exc_info:
         extract_session_id_from_token(current_user)
-    
+
     assert exc_info.value.status_code == 400
     assert "Session ID not found in token" in exc_info.value.detail
 
@@ -160,12 +160,12 @@ def test_extract_session_id_from_token_none():
     """Test extract_session_id_from_token when session_id is None."""
     from apps.user_service.app.api.admin_management.sessions.sessions import extract_session_id_from_token
     from fastapi import HTTPException
-    
+
     current_user = {"user_id": "123", "email": "test@example.com", "session_id": None}
-    
+
     with pytest.raises(HTTPException) as exc_info:
         extract_session_id_from_token(current_user)
-    
+
     assert exc_info.value.status_code == 400
     assert "Session ID not found in token" in exc_info.value.detail
 
@@ -173,10 +173,10 @@ def test_extract_session_id_from_token_none():
 def test_extract_session_id_from_token_success():
     """Test extract_session_id_from_token when session_id is valid."""
     from apps.user_service.app.api.admin_management.sessions.sessions import extract_session_id_from_token
-    
+
     session_id = str(uuid.uuid4())
     current_user = {"user_id": "123", "email": "test@example.com", "session_id": session_id}
-    
+
     result = extract_session_id_from_token(current_user)
     assert result == session_id
 

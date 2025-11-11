@@ -315,10 +315,10 @@ organization_id: Organization ID to associate with user
         # Check for duplicate email/user errors FIRST, regardless of exception type
         error_message = str(supabase_error).lower()
         error_type = type(supabase_error).__name__
-        
+
         # Log for debugging
         logger.warning("Signup error - Type: %s, Message: %s", error_type, error_message)
-        
+
         # Check error message and also check error attributes if available
         error_str_lower = error_message
         if hasattr(supabase_error, 'message'):
@@ -327,7 +327,7 @@ organization_id: Organization ID to associate with user
             error_str_lower += " " + str(supabase_error.detail).lower()
         if hasattr(supabase_error, 'args') and supabase_error.args:
             error_str_lower += " " + " ".join(str(arg).lower() for arg in supabase_error.args)
-        
+
         if (
             "already_exists" in error_str_lower
             or "duplicate" in error_str_lower
@@ -340,20 +340,20 @@ organization_id: Organization ID to associate with user
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
             ) from supabase_error
-        
+
         # Handle specific exception types for better error messages
         if isinstance(supabase_error, (ConnectionError, TimeoutError)):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Service temporarily unavailable. Please try again later.",
             ) from supabase_error
-        
+
         if isinstance(supabase_error, (ValueError, AuthApiError)):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid request: {str(supabase_error)}",
             ) from supabase_error
-        
+
         # Default to 500 for unexpected errors
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
