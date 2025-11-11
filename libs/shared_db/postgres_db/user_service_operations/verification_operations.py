@@ -16,12 +16,12 @@ Operations Covered:
 """
 
 import os
-import random
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from apps.user_service.app.dependencies.logger import get_logger
 from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client
-from .exception_handling import handle_database_errors, create_error_messages
+from .exception_handling import handle_database_errors, create_error_messages, DatabaseOperationError
 
 # Initialize logger
 logger = get_logger("verification_operations")
@@ -68,8 +68,9 @@ async def create_verification_code(
     
     # Generate verification code
     if OTP_ENABLED:
-        # Generate random 4-digit code (1000-9999)
-        verification_code = str(random.randint(1000, 9999))
+        # Generate cryptographically secure random 4-digit code (1000-9999)
+        # Using secrets.randbelow for secure random number generation
+        verification_code = str(secrets.randbelow(9000) + 1000)
     else:
         # Use default OTP from config
         verification_code = DEFAULT_OTP
@@ -100,7 +101,10 @@ async def create_verification_code(
     
     if not result.data or len(result.data) == 0:
         logger.error("Failed to create verification code")
-        raise Exception("Failed to create verification code")
+        raise DatabaseOperationError(
+            "Failed to create verification code",
+            operation="create_verification_code"
+        )
     
     logger.info(f"Verification code created: {result.data[0]['id']}")
     return result.data[0]
@@ -209,7 +213,10 @@ async def update_verification_code(
     
     if not result.data or len(result.data) == 0:
         logger.error(f"Failed to update verification code: {verification_id}")
-        raise Exception("Failed to update verification code")
+        raise DatabaseOperationError(
+            f"Failed to update verification code: {verification_id}",
+            operation="update_verification_code"
+        )
     
     return result.data[0]
 
