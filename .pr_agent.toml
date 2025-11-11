@@ -1,8 +1,11 @@
 [github_app]
-pr_commands = ["/review"]
+pr_commands = ["/review", "/compliance"]
 handle_push_trigger = true
-push_commands = ["/review"]
+push_commands = ["/review", "/compliance"]
 feedback_on_draft_pr = false
+
+[pr_implement]
+allow_agent_implementation=true
 
 # keep RAG if you want richer answers
 [rag_arguments]
@@ -19,7 +22,15 @@ ensure_ticket_compliance = false
 enable_security_section = true      # keep
 enable_codebase_duplication_section = true
 enable_security_compliance = false  # don't force it every PR
+new_diff_format=true
+new_diff_format_line_numbers=true
+new_diff_format_add_external_references=true
 
 [pr_reviewer]
 require_security_review = false
 require_ticket_analysis_review = false
+
+
+[best_practices]
+enable_global_best_practices = true
+organization_name="Qodo"
