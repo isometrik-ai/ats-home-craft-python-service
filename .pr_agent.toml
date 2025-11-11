@@ -1,7 +1,7 @@
 [github_app]
 pr_commands = ["/review"]
 handle_push_trigger = true
-push_commands = ["/review"]
+push_commands = ["/review --incremental"]
 feedback_on_draft_pr = false
 
 # keep RAG if you want richer answers
