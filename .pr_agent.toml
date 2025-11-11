@@ -1,0 +1,25 @@
+[github_app]
+pr_commands = ["/review"]
+handle_push_trigger = true
+push_commands = ["/review --incremental"]
+feedback_on_draft_pr = false
+
+# keep RAG if you want richer answers
+[rag_arguments]
+enable_rag = true
+
+# run compliance only when you ask for it in the PR
+[pr_compliance]
+enable_global_pr_compliance = false
+
+[config]
+enable_auto_approval = false
+enable_comment_approval = false
+ensure_ticket_compliance = false
+enable_security_section = true      # keep
+enable_codebase_duplication_section = true
+enable_security_compliance = false  # don't force it every PR
+
+[pr_reviewer]
+require_security_review = false
+require_ticket_analysis_review = false
