@@ -1,0 +1,23 @@
+[github_app]
+# run when a PR is opened
+pr_commands = [
+  "/review"
+]
+
+# ALSO run when new commits are pushed to an open PR
+handle_push_trigger = true
+push_commands = [
+  "/review"
+]
+
+# set to true if you want it even on drafts
+feedback_on_draft_pr = false
+
+[config]
+enable_auto_approval = false
+enable_comment_approval = false
+ensure_ticket_compliance = false
+
+[pr_reviewer]
+require_security_review = false
+require_ticket_analysis_review = false
