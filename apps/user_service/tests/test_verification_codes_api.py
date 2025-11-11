@@ -46,6 +46,29 @@ def app():
 
 
 @pytest.fixture
+def app_with_auth():
+    """Create FastAPI app with verification codes router for testing with authenticated user."""
+    app = FastAPI()
+    app.include_router(verification_codes_router)
+
+    # Mock optional authentication with authenticated user
+    def mock_get_optional_user():
+        return {"id": "test-user-id-123", "email": "test@example.com"}  # Authenticated user
+
+    # Override the optional user dependency
+    from apps.user_service.app.api.verification_codes import get_optional_user
+    app.dependency_overrides[get_optional_user] = mock_get_optional_user
+
+    return app
+
+
+@pytest.fixture
+def client_with_auth(app_with_auth):
+    """Test client for verification codes endpoints with authenticated user."""
+    return TestClient(app_with_auth)
+
+
+@pytest.fixture
 def client(app):
     """Test client for verification codes endpoints."""
     return TestClient(app)
@@ -245,6 +268,36 @@ class TestSendVerificationCode:
             
             assert response.status_code == 200
             mock_send_email.assert_not_called()
+
+    def test_send_verification_code_with_authenticated_user(self, client_with_auth, mock_verification_record):
+        """Test send verification code with authenticated user (covers user_id branch)."""
+        request_data = {
+            "type": "EMAIL",
+            "email": "test@example.com"
+        }
+
+        # Mock record with user_id to verify it's being set
+        record_with_user = mock_verification_record.copy()
+        record_with_user["user_id"] = "test-user-id-123"
+
+        with patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+                   AsyncMock(return_value=[])), \
+             patch('apps.user_service.app.api.verification_codes.create_verification_code',
+                   AsyncMock(return_value=record_with_user)) as mock_create, \
+             patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
+                   return_value=True):
+            
+            response = client_with_auth.post("/v1/verification-code/send", json=request_data)
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert "verificationId" in data
+            assert "expiryAt" in data
+            
+            # Verify create_verification_code was called with user_id
+            mock_create.assert_called_once()
+            call_kwargs = mock_create.call_args[1]
+            assert call_kwargs.get("user_id") == "test-user-id-123"
 
 
 # ============================================================================
