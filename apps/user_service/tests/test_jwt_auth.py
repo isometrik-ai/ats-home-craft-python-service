@@ -372,12 +372,11 @@ class TestJWTAuthMiddleware:
 
             call_next = AsyncMock()
 
-            response = await middleware.dispatch(request, call_next)
+            with pytest.raises(HTTPException) as exc:
+                await middleware.dispatch(request, call_next)
 
-            assert response.status_code == status.HTTP_401_UNAUTHORIZED
-            # Check the response body content
-            response_body = response.body.decode()
-            assert "Token expired" in response_body
+            assert exc.value.status_code == status.HTTP_401_UNAUTHORIZED
+            assert "Token expired" in exc.value.detail
             call_next.assert_not_called()
 
     @pytest.mark.asyncio
@@ -395,12 +394,11 @@ class TestJWTAuthMiddleware:
 
             call_next = AsyncMock()
 
-            response = await middleware.dispatch(request, call_next)
+            with pytest.raises(HTTPException) as exc:
+                await middleware.dispatch(request, call_next)
 
-            assert response.status_code == status.HTTP_401_UNAUTHORIZED
-            # Check the response body content
-            response_body = response.body.decode()
-            assert "Invalid token" in response_body
+            assert exc.value.status_code == status.HTTP_401_UNAUTHORIZED
+            assert "Invalid token" in exc.value.detail
             call_next.assert_not_called()
 
 
