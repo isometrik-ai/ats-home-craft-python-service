@@ -1,7 +1,7 @@
 [github_app]
 pr_commands = ["/review", "/compliance"]
 handle_push_trigger = true
-push_commands = ["/review"]
+push_commands = ["/review", "/compliance"]
 feedback_on_draft_pr = false
 
 [pr_implement]
