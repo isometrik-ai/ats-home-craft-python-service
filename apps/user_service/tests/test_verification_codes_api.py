@@ -149,15 +149,20 @@ class TestSendVerificationCode:
             "email": "test@example.com"
         }
 
-        # Mock recent codes that haven't expired
+        # Mock recent codes that haven't expired (5 unverified codes = max attempts reached, default MAX_ATTEMPT_VERIFICATION=5)
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         recent_codes = [
             {"verified": False, "expiry_at": current_time_ms + 60000},
             {"verified": False, "expiry_at": current_time_ms + 60000},
             {"verified": False, "expiry_at": current_time_ms + 60000},
+            {"verified": False, "expiry_at": current_time_ms + 60000},
+            {"verified": False, "expiry_at": current_time_ms + 60000},
         ]
 
-        with patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+        # Patch where it's used in the API module (patch both import locations)
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_recent_verification_codes',
+                   AsyncMock(return_value=recent_codes)), \
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
                    AsyncMock(return_value=recent_codes)):
             
             response = client.post("/v1/verification-code/send", json=request_data)
