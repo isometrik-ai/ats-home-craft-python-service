@@ -249,7 +249,21 @@ async def unified_exception_handler(request: Request, exc: Exception):
         )
 
         await _handle_audit_logging(request, str(detail), status_code, "HTTP exception")
-        return JSONResponse(status_code=status_code, content={"detail": detail})
+
+        # Return detailed error response with request ID for tracking
+        error_response = {
+            "detail": detail,
+            "status_code": status_code,
+            "request_id": request_id,
+            "error_type": exception_context['exception_type'],
+        }
+
+        # Include additional context for client errors (4xx) but not for server errors (5xx)
+        if 400 <= status_code < 500:
+            error_response["path"] = request_context['path']
+            error_response["method"] = request_context['method']
+
+        return JSONResponse(status_code=status_code, content=error_response)
 
     # Handle Request Validation Errors (422)
     if isinstance(exc, RequestValidationError):
@@ -272,12 +286,23 @@ async def unified_exception_handler(request: Request, exc: Exception):
         await _handle_audit_logging(request, str(exc), 422, "validation error")
         return JSONResponse(
             status_code=422,
-            content={"detail": "Validation error", "errors": validation_errors},
+            content={
+                "detail": "Validation error",
+                "errors": validation_errors,
+                "status_code": 422,
+                "request_id": request_id,
+                "error_type": "RequestValidationError",
+                "path": request_context['path'],
+                "method": request_context['method'],
+            },
         )
 
     # Handle Unhandled/Generic Exceptions
     error_message = str(exc)
-    traceback.format_exc()
+    try:
+        full_traceback = traceback.format_exc()
+    except Exception:
+        full_traceback = "Unable to generate traceback"
 
     log_msg = (
         "Unexpected exception occurred - Error: %s, Exception Type: %s, "
@@ -297,11 +322,30 @@ async def unified_exception_handler(request: Request, exc: Exception):
         exception_context.get('function_name', 'unknown'),
     )
 
+    # Log full traceback for debugging
+    exception_logger.debug("Full traceback for request %s:\n%s", request_id, full_traceback)
+
     # Also log to the audit logger for backward compatibility
     logger.error("Error in %s: %s", operation_name, error_message)
 
     await _handle_audit_logging(request, error_message, 500, "unexpected error")
+
+    # Return detailed error response (but don't expose internal details in production)
+    error_response = {
+        "detail": "Internal server error. Please contact support if this issue persists.",
+        "status_code": 500,
+        "request_id": request_id,
+        "error_type": exception_context['exception_type'],
+    }
+
+    # In development, include more details
+    import os
+    if os.getenv("ENVIRONMENT", "production").lower() in ["development", "dev", "local"]:
+        error_response["error_message"] = error_message
+        error_response["path"] = request_context['path']
+        error_response["method"] = request_context['method']
+
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error during {str(exc)}"},
+        content=error_response,
     )

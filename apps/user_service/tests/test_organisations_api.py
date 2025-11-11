@@ -66,7 +66,7 @@ class TestOrganisationList:
 
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
              patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=2)), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
 
             response = client.get("/v1/admin/organisation/list")
 
@@ -81,7 +81,7 @@ class TestOrganisationList:
         """Test organisation list when no organisations exist."""
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=[])), \
              patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=0)), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
 
             response = client.get("/v1/admin/organisation/list")
 
@@ -104,7 +104,7 @@ class TestOrganisationList:
 
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
              patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=1)), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
 
             response = client.get("/v1/admin/organisation/list?name=Test&status=active&page=1&page_size=10")
 
@@ -127,7 +127,7 @@ class TestOrganisationList:
 
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
              patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=1)), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
 
             response = client.get("/v1/admin/organisation/list?org_status=active")
 
@@ -150,7 +150,7 @@ class TestOrganisationList:
 
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
              patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value=1)), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
 
             response = client.get("/v1/admin/organisation/list")
 
@@ -174,7 +174,7 @@ class TestOrganisationList:
         # Mock _process_organisations_data to test the else branch
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
              patch("apps.user_service.app.api.admin_management.organisation.get_organisations_count", AsyncMock(return_value="unexpected_type")), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))), \
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))), \
              patch("apps.user_service.app.api.admin_management.organisation._process_organisations_data") as mock_process:
             # Create properly formatted organizations list for the mock
             formatted_orgs = [
@@ -286,7 +286,7 @@ class TestCreateOrganisation:
 
         with patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(return_value=mock_result)), \
              patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client, \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_query = MagicMock()
@@ -410,7 +410,7 @@ class TestCreateOrganisation:
         # So this test should actually succeed (201) since there's no permission validation
         with patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(return_value={"organization": {}, "user": {}, "super_admin_role_id": "test"})), \
              patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client, \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_query = MagicMock()
@@ -451,7 +451,7 @@ class TestCreateOrganisation:
         }
 
         # Mock extract_user_context to return None user_id
-        with patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id=None, email="test@example.com", organization_id="test-org-id"))):
+        with patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id=None, email="test@example.com", organization_id=None))):
             response = client.post("/v1/admin/organisation/", json=request_data)
 
             assert response.status_code == 403
@@ -479,7 +479,7 @@ class TestCreateOrganisation:
 
         # Mock check_organisation_slug_unique to return False (slug exists)
         with patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
             response = client.post("/v1/admin/organisation/", json=request_data)
 
             assert response.status_code == 409
@@ -508,7 +508,7 @@ class TestCreateOrganisation:
         # Mock slug check to pass, but database operation to fail
         with patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=True)), \
              patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(side_effect=ConnectionError("Database connection failed"))), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
             response = client.post("/v1/admin/organisation/", json=request_data)
 
             assert response.status_code == 500
@@ -537,7 +537,7 @@ class TestCreateOrganisation:
         # Mock slug check to pass, but database operation to fail with timeout
         with patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=True)), \
              patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(side_effect=TimeoutError("Database timeout"))), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
             response = client.post("/v1/admin/organisation/", json=request_data)
 
             assert response.status_code == 500
@@ -566,7 +566,7 @@ class TestCreateOrganisation:
         # Mock slug check to pass, but database operation to fail with value error
         with patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=True)), \
              patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(side_effect=ValueError("Invalid data format"))), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))):
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))):
             response = client.post("/v1/admin/organisation/", json=request_data)
 
             assert response.status_code == 500
@@ -621,7 +621,7 @@ class TestCreateOrganisation:
         # Mock the functions to test personal account type logic
         with patch("apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin", AsyncMock(return_value=mock_result)), \
              patch("apps.user_service.app.api.admin_management.organisation.check_organisation_slug_unique", AsyncMock(return_value=True)), \
-             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id="test-org-id"))), \
+             patch("apps.user_service.app.api.admin_management.organisation.extract_user_context", AsyncMock(return_value=MagicMock(user_id="test-user-id", email="test@example.com", organization_id=None))), \
              patch("apps.user_service.app.api.admin_management.organisation._determine_organization_name") as mock_determine_name:
             mock_determine_name.return_value = "John Doe"  # Simulate personal account type
 

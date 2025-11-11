@@ -19,7 +19,7 @@ from typing import List, Tuple, Optional
 
 import jwt
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi import Request, HTTPException, status, responses
+from fastapi import Request, HTTPException, status
 
 from libs.shared_db.supabase_db.db import get_supabase_client
 
@@ -237,8 +237,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             if token validation fails
 
         Raises:
-            No exceptions are raised directly, but various JWT validation errors
-            are caught and converted to appropriate HTTP responses
+            HTTPException: When JWT validation fails (expired or invalid token)
         """
         auth_header = request.headers.get("Authorization")
 
@@ -256,12 +255,31 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             request.state.user = payload
             request.state.access_token = token
         except jwt.ExpiredSignatureError:
-            return responses.JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Token expired"}
+            # Setup audit context before raising exception
+            request.state.audit_description = "JWT token expired"
+            request.state.audit_risk_level = "high"
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token expired. Please refresh your authentication token.",
+                headers={"WWW-Authenticate": "Bearer"},
             )
-        except jwt.InvalidTokenError:
-            return responses.JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"}
+        except jwt.InvalidTokenError as e:
+            # Setup audit context before raising exception
+            request.state.audit_description = f"Invalid JWT token: {str(e)}"
+            request.state.audit_risk_level = "high"
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid token. Please provide a valid authentication token. Error: {str(e)}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except Exception as e:
+            # Setup audit context before raising exception
+            request.state.audit_description = f"JWT validation error: {str(e)}"
+            request.state.audit_risk_level = "high"
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Authentication failed. Error: {str(e)}",
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
         return await call_next(request)

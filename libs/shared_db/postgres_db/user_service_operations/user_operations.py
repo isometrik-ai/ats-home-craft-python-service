@@ -396,8 +396,7 @@ async def get_auth_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     """Get user from auth.users table by email."""
     supabase = await get_fresh_supabase_admin_client()
 
-    result = await supabase.auth.admin.list_users()
-
+    result = await supabase.auth.admin.list_users(per_page=1000)
     for user in result:
         if user.email == email:
             return user

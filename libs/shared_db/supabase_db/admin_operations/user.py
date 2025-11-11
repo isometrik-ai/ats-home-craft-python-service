@@ -183,7 +183,7 @@ async def get_user_by_id(user_id: str) -> dict:
         except AuthApiError as e:
             if "User not allowed" in str(e) and attempt < max_retries - 1:
                 # Clear the cached admin client and retry
-                logger.warning(f"Admin client auth failed (attempt {attempt + 1}), retrying...")
+                logger.warning("Admin client auth failed (attempt %s), retrying...", attempt + 1)
                 from libs.shared_db.supabase_db.db import _cache
                 _cache._supabase_admin_client = None  # Clear cache
                 await asyncio.sleep(retry_delay)

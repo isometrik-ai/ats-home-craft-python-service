@@ -10,6 +10,7 @@ This module contains tests for:
 - Unified exception handler
 """
 
+import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI, Request, HTTPException
@@ -224,7 +225,11 @@ class TestUnifiedExceptionHandler:
         response = await unified_exception_handler(mock_request, exc)
 
         assert response.status_code == 400
-        assert response.body == b'{"detail":"Test error"}'
+        body = json.loads(response.body)
+        assert body["detail"] == "Test error"
+        assert body["status_code"] == 400
+        assert body["path"] == mock_request.url.path
+        assert body["method"] == mock_request.method
 
     @pytest.mark.asyncio
     async def test_handle_validation_error(self, mock_request):

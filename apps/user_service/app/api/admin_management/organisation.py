@@ -161,7 +161,7 @@ def _process_organisations_data(organizations_data, count_result: dict | int) ->
 # ============================================================================
 
 
-def _generate_organization_slug(user_id: str, name: str, account_type: str) -> str:
+def _generate_organization_slug(name: str, account_type: str) -> str:
     """
     Generate organization slug from name and account type.
 
@@ -182,10 +182,7 @@ def _generate_organization_slug(user_id: str, name: str, account_type: str) -> s
     # Add account type prefix
     prefix = "personal" if account_type == AccountType.PERSONAL else "business"
 
-    # Generate unique suffix
-    unique_suffix = str(user_id)[:8]
-
-    return f"{prefix}-{clean_name3}-{unique_suffix}"
+    return f"{prefix}-{clean_name3}"
 
 
 def _determine_organization_name(acc_type: AccountType, company_data: CompanyData) -> str:
@@ -472,12 +469,16 @@ async def create_organisation(
             detail="User ID is required"
         )
 
+    if user_context.organization_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User already belongs to an organization"
+        )
+
     # Generate organization details
     organization_id = str(uuid.uuid4())
     organization_name = _determine_organization_name(AccountType.BUSINESS, body.company_data)
-    slug = _generate_organization_slug(
-        user_context.user_id,organization_name, AccountType.BUSINESS.value
-    )
+    slug = _generate_organization_slug(organization_name, AccountType.BUSINESS.value)
 
     # Validate slug uniqueness
     result = await check_organisation_slug_unique(slug)

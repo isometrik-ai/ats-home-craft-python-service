@@ -17,7 +17,14 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 
-def send_email(email: str, subject: str, message: str, html: str = None, from_name: str = None) -> bool:
+def send_email(
+    email: str,
+    subject: str,
+    message: str,
+    html: str = None,
+    from_name: str = None,
+    from_email: str = None
+) -> bool:
     """
     Send an email using Supabase Edge Function with Resend.
 
@@ -40,7 +47,7 @@ def send_email(email: str, subject: str, message: str, html: str = None, from_na
 
         if html:
             payload["html"] = html
-        
+
         if from_name:
             payload["from_name"] = from_name
         response = httpx.post(
