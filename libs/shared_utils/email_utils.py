@@ -525,3 +525,117 @@ The {company_name} Team"""
     except Exception as error:
         logger.error("Error sending welcome email: %s", str(error))
         return False
+
+
+def send_verification_code_email(
+    email: str,
+    otp_code: str,
+    expiry_minutes: int = 10,
+    company_name: str = "House of App AI",
+    company_address: str = "123 Main Street, City, State 12345",
+    privacy_policy_url: str = "https://houseofapp.ai/privacy",
+    terms_url: str = "https://houseofapp.ai/terms"
+) -> bool:
+    """
+    Send a verification code (OTP) email to the user.
+
+    Args:
+        email (str): User's email address
+        otp_code (str): The OTP verification code to send
+        expiry_minutes (int): Expiry time in minutes (default: 10)
+        company_name (str): Company name (default: "House of App AI")
+        company_address (str): Company address for footer
+        privacy_policy_url (str): Privacy policy URL
+        terms_url (str): Terms of service URL
+
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    try:
+        current_year = datetime.now().year
+
+        subject = "Your Verification Code"
+
+        # Plain text message
+        message = f"""Hello 👋,
+
+Use the following One-Time Password (OTP) to verify your email or complete your signup:
+
+{otp_code}
+
+This code will expire in {expiry_minutes} minutes.
+
+If you didn't request this, please ignore this email.
+
+© {current_year} {company_name}. All rights reserved.
+{company_address}"""
+
+        # HTML message using the provided template
+        html_message = f"""<!DOCTYPE html>
+<html lang="en" style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Your Verification Code</title>
+  </head>
+  <body style="background-color: #f8f9fb; padding: 0; margin: 0;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fb; padding: 40px 0;">
+      <tr>
+        <td align="center">
+          <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.05);">
+            <!-- Header -->
+            <tr>
+              <td style="background-color: #1d4ed8; padding: 30px 40px; text-align: center;">
+                <h1 style="color: #ffffff; margin: 0; font-size: 22px;">Verify Your Identity</h1>
+              </td>
+            </tr>
+            <!-- Body -->
+            <tr>
+              <td style="padding: 40px; text-align: center;">
+                <p style="color: #111827; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  Hello 👋,
+                </p>
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">
+                  Use the following One-Time Password (OTP) to verify your email or complete your signup:
+                </p>
+                <div style="margin: 30px 0;">
+                  <div style="display: inline-block; background-color: #f3f4f6; padding: 16px 40px; border-radius: 8px; font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #1d4ed8;">
+                    {otp_code}
+                  </div>
+                </div>
+                <p style="color: #6b7280; font-size: 14px; line-height: 1.5;">
+                  This code will expire in <strong>{expiry_minutes} minutes</strong>.  
+                  If you didn't request this, please ignore this email.
+                </p>
+              </td>
+            </tr>
+            <!-- Footer -->
+            <tr>
+              <td style="background-color: #f3f4f6; text-align: center; padding: 20px; font-size: 13px; color: #6b7280;">
+                <p style="margin: 0;">&copy; {current_year} {company_name}. All rights reserved.</p>
+                <p style="margin: 4px 0;">{company_address}</p>
+                <p style="margin: 0;">
+                  <a href="{privacy_policy_url}" style="color: #6b7280; text-decoration: none;">Privacy Policy</a> |
+                  <a href="{terms_url}" style="color: #6b7280; text-decoration: none;">Terms of Service</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>"""
+
+        # Send the email with HTML content
+        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+
+        if email_sent:
+            logger.info("Verification code email sent successfully to %s", email)
+            return True
+        logger.error("Failed to send verification code email to %s", email)
+        return False
+
+    except Exception as error:
+        logger.error("Error sending verification code email: %s", str(error))
+        return False

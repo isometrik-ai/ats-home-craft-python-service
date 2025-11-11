@@ -75,6 +75,9 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     get_oauth_link_url
 )
 from libs.shared_db.supabase_db.admin_operations.session import get_session_by_id_admin
+from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
+    get_verification_code_by_id,
+)
 
 # Modify sys.path to support monorepo imports
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -94,6 +97,158 @@ logger = get_logger("auth-api")
 # ============================================================================
 # SIGNUP HELPER FUNCTIONS
 # ============================================================================
+
+async def _validate_verification_code_for_signup(
+    verification_id: str,
+    email: str,
+    verification_code: str
+) -> None:
+    """
+    Validate verification code for signup (cross-security check).
+    
+    Args:
+        verification_id: Verification code ID
+        email: Email to validate
+        verification_code: Verification code to validate
+        
+    Raises:
+        HTTPException: If validation fails
+    """
+    verification_record = await get_verification_code_by_id(verification_id)
+    
+    if not verification_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Verification code not found"
+        )
+    
+    if not verification_record.get("verified", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code must be verified before signup. Please verify your email first."
+        )
+    
+    stored_given_input = verification_record.get("given_input")
+    if stored_given_input != email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Email '{email}' does not match the verification record. Expected: '{stored_given_input}'"
+        )
+    
+    stored_code = verification_record.get("verification_code")
+    if verification_code != stored_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code"
+        )
+
+
+def _extract_token_from_session(session) -> str | None:
+    """
+    Extract access token from session if available.
+    
+    Args:
+        session: Session object
+        
+    Returns:
+        Access token if available, None otherwise
+    """
+    if session and hasattr(session, 'access_token'):
+        return session.access_token
+    return None
+
+
+async def _get_access_token_after_signup(
+    signup_result,
+    email: str,
+    password: str
+) -> str | None:
+    """
+    Get access token after signup, trying session first, then login if needed.
+    
+    Args:
+        signup_result: Result from sign_up_supabase_user
+        email: User email
+        password: User password
+        
+    Returns:
+        Access token if available, None otherwise
+    """
+    token = _extract_token_from_session(signup_result.session)
+    if token:
+        return token
+    
+    try:
+        login_result = await login_user(email, password)
+        return _extract_token_from_session(login_result.session)
+    except Exception as login_error:
+        logger.warning("Could not get access token after signup for %s: %s", email, str(login_error))
+    
+    return None
+
+
+def _send_welcome_email_safely(email: str, first_name: str) -> None:
+    """
+    Send welcome email safely without failing the signup operation.
+    
+    Args:
+        email: User email
+        first_name: User first name
+    """
+    try:
+        email_sent = send_welcome_email(email=email, first_name=first_name)
+        if not email_sent:
+            logger.warning("Failed to send welcome email to %s", email)
+    except Exception as email_error:
+        logger.error("Error sending welcome email: %s", str(email_error))
+
+
+def _validate_password_strength(password: str) -> None:
+    """
+    Validate password strength and raise exception if weak.
+    
+    Args:
+        password: Password to validate
+        
+    Raises:
+        HTTPException: If password is weak
+    """
+    if not _is_password_strong(password):
+        raise HTTPException(
+            status_code=400,
+            detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
+        )
+
+
+def _build_signup_response_data(
+    user_id: str,
+    signup_data: SignupRequest,
+    access_token: str | None
+) -> dict:
+    """
+    Build response data for signup endpoint.
+    
+    Args:
+        user_id: User ID from signup
+        signup_data: Original signup request data
+        access_token: Optional access token
+        
+    Returns:
+        Dictionary with response data
+    """
+    response_data = {
+        "user_id": user_id,
+        "email": signup_data.email,
+        "first_name": signup_data.first_name,
+        "last_name": signup_data.last_name,
+        "phone": signup_data.phone,
+        "timezone": signup_data.timezone,
+    }
+    
+    if access_token:
+        response_data["access_token"] = access_token
+    
+    return response_data
 
 
 def _is_password_strong(password: str) -> bool:
@@ -381,7 +536,6 @@ async def reset_password(
     # - Complete permission system setup
 
     # X- Organization slug uniqueness validation
-@handle_api_exceptions("signup")
 @router.post(
     "/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED
 )
@@ -397,6 +551,7 @@ async def reset_password(
     table_name="organizations",
     category="USER_SIGNUP",
 )
+@handle_api_exceptions("signup")
 async def signup(
     request: Request, # pylint: disable=unused-argument
     signup_data: SignupRequest = Body(...),
@@ -427,55 +582,33 @@ async def signup(
     - Proper error handling without exposing internal details
     """
 
-    if not _is_password_strong(signup_data.password):
-        raise HTTPException(
-            status_code=400,
-            detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
-        )
+    _validate_password_strength(signup_data.password)
+
+    await _validate_verification_code_for_signup(
+        verification_id=signup_data.verificationId,
+        email=signup_data.email,
+        verification_code=signup_data.verificationCode
+    )
 
     signup_result = await sign_up_supabase_user(signup_data)
     user_id = signup_result.user.id
     
-    # Extract access token from session if available
-    access_token = None
-    if signup_result.session and hasattr(signup_result.session, 'access_token'):
-        access_token = signup_result.session.access_token
-    else:
-        # If no session from signup, try to log in to get a token
-        try:
-            login_result = await login_user(signup_data.email, signup_data.password)
-            if login_result.session and hasattr(login_result.session, 'access_token'):
-                access_token = login_result.session.access_token
-        except Exception as login_error:
-            # If login fails (e.g., email not confirmed), continue without token
-            logger.warning("Could not get access token after signup for %s: %s", signup_data.email, str(login_error))
+    access_token = await _get_access_token_after_signup(
+        signup_result=signup_result,
+        email=signup_data.email,
+        password=signup_data.password
+    )
 
-    # Send welcome email to the newly signed up user
-    try:
-        email_sent = send_welcome_email(
-            email=signup_data.email,
-            first_name=signup_data.first_name
-        )
-        if not email_sent:
-            logger.warning("Failed to send welcome email to %s", signup_data.email)
-            # Note: We don't fail the entire operation if email fails
-            # The signup was successful, only the welcome email failed
-    except Exception as email_error:
-        logger.error("Error sending welcome email: %s", str(email_error))
-        # Note: We don't fail the entire operation if email fails
+    _send_welcome_email_safely(
+        email=signup_data.email,
+        first_name=signup_data.first_name
+    )
 
-    response_data = {
-        "user_id": user_id,
-        "email": signup_data.email,
-        "first_name": signup_data.first_name,
-        "last_name": signup_data.last_name,
-        "phone": signup_data.phone,
-        "timezone": signup_data.timezone,
-    }
-    
-    # Add access token to response if available
-    if access_token:
-        response_data["access_token"] = access_token
+    response_data = _build_signup_response_data(
+        user_id=user_id,
+        signup_data=signup_data,
+        access_token=access_token
+    )
 
     return SignupResponse(
         message="Account created successfully! Please check your email for verification.",

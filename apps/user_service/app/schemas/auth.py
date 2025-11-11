@@ -94,6 +94,8 @@ class SignupRequest(BaseModel):
     # job_title: Optional[str] = None
     phone: Optional[str] = None
     timezone: Optional[str] = Field(default="UTC",max_length=3)
+    verificationId: str = Field(..., description="Verification code ID from verification-code/send endpoint")
+    verificationCode: str = Field(..., description="Verification code to verify email")
 
     @classmethod
     @field_validator("first_name")
