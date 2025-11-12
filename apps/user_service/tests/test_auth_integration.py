@@ -178,20 +178,31 @@ def test_signup_endpoint_success(auth_client):
     # Mock the signup response with user and session (same as login)
     mock_result = MagicMock()
     mock_result.user.id = "new-user-id"
-    mock_result.session.access_token = "test-access-token"
+    mock_result.user.email = "newuser@example.com"
+    mock_result.user.user_metadata = {"first_name": "New", "last_name": "User", "timezone": "UTC"}
+    mock_session = SimpleNamespace(
+        access_token="test-access-token",
+        refresh_token="test-refresh-token",
+        expires_in=3600,
+        expires_at=datetime.utcnow()
+    )
+    mock_result.session = mock_session
 
     with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
                AsyncMock(return_value=mock_verification_record)), \
          patch('apps.user_service.app.api.auth.sign_up_supabase_user',
                AsyncMock(return_value=mock_result)), \
+         patch('apps.user_service.app.api.auth._get_session_after_signup',
+               AsyncMock(return_value=mock_session)), \
          patch('apps.user_service.app.api.auth.send_welcome_email',
                return_value=True):
         response = auth_client.post("/auth/signup", json=signup_data)
         assert response.status_code == 201
         data = response.json()
-        assert "Account created successfully" in data["message"]
-        assert data["data"]["access_token"] == "test-access-token"
-        assert data["data"]["user_id"] == "new-user-id"
+        assert data["access_token"] == "test-access-token"
+        assert data["refresh_token"] == "test-refresh-token"
+        assert data["user"]["id"] == "new-user-id"
+        assert data["user"]["email"] == "newuser@example.com"
 
 @pytest.mark.asyncio
 async def test_signup_endpoint_success_async(async_auth_client):
@@ -219,21 +230,32 @@ async def test_signup_endpoint_success_async(async_auth_client):
     # Mock the signup response with user and session (same as login)
     mock_result = MagicMock()
     mock_result.user.id = "new-user-id"
-    mock_result.session.access_token = "test-access-token"
+    mock_result.user.email = "newuser@example.com"
+    mock_result.user.user_metadata = {"first_name": "New", "last_name": "User", "timezone": "UTC"}
+    mock_session = SimpleNamespace(
+        access_token="test-access-token",
+        refresh_token="test-refresh-token",
+        expires_in=3600,
+        expires_at=datetime.utcnow()
+    )
+    mock_result.session = mock_session
 
     with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
                AsyncMock(return_value=mock_verification_record)), \
          patch('apps.user_service.app.api.auth.sign_up_supabase_user',
                AsyncMock(return_value=mock_result)), \
+         patch('apps.user_service.app.api.auth._get_session_after_signup',
+               AsyncMock(return_value=mock_session)), \
          patch('apps.user_service.app.api.auth.send_welcome_email',
                return_value=True):
         with TestClient(async_auth_client) as client:
             response = client.post("/auth/signup", json=signup_data)
             assert response.status_code == 201
             data = response.json()
-            assert "Account created successfully" in data["message"]
-            assert data["data"]["access_token"] == "test-access-token"
-            assert data["data"]["user_id"] == "new-user-id"
+            assert data["access_token"] == "test-access-token"
+            assert data["refresh_token"] == "test-refresh-token"
+            assert data["user"]["id"] == "new-user-id"
+            assert data["user"]["email"] == "newuser@example.com"
 
 def test_signup_endpoint_weak_password(auth_client):
     """Test signup with weak password - covers auth.py password validation"""
@@ -357,62 +379,68 @@ def test_signup_endpoint_invalid_verification_code(auth_client):
         assert response.status_code == 400
         assert "Invalid verification code" in response.json()["detail"]
 
-def test_extract_token_from_session_none():
-    """Test _extract_token_from_session when session has no access_token - covers line 161"""
-    from apps.user_service.app.api.auth import _extract_token_from_session
+def test_extract_session_none():
+    """Test _extract_session when session has no access_token - covers line 161"""
+    from apps.user_service.app.api.auth import _extract_session
     from types import SimpleNamespace
 
     # Test with session without access_token
     session_no_token = SimpleNamespace()
-    result = _extract_token_from_session(session_no_token)
+    result = _extract_session(session_no_token)
     assert result is None
 
     # Test with None session
-    result = _extract_token_from_session(None)
+    result = _extract_session(None)
     assert result is None
 
 @pytest.mark.asyncio
-async def test_get_access_token_after_signup_login_fallback():
-    """Test _get_access_token_after_signup login fallback - covers lines 184-190"""
-    from apps.user_service.app.api.auth import _get_access_token_after_signup
+async def test_get_session_after_signup_login_fallback():
+    """Test _get_session_after_signup login fallback - covers lines 184-190"""
+    from apps.user_service.app.api.auth import _get_session_after_signup
     from types import SimpleNamespace
 
     # Mock signup result without session token
     signup_result = SimpleNamespace(session=SimpleNamespace())  # No access_token
 
-    # Mock login result with token
+    # Mock login result with session
     login_result = SimpleNamespace(
-        session=SimpleNamespace(access_token="login-token")
+        session=SimpleNamespace(
+            access_token="login-token",
+            refresh_token="login-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow()
+        )
     )
 
-    with patch('apps.user_service.app.api.auth._extract_token_from_session',
-               side_effect=[None, "login-token"]), \
+    with patch('apps.user_service.app.api.auth._extract_session',
+               side_effect=[None, login_result.session]), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(return_value=login_result)):
 
-        result = await _get_access_token_after_signup(
+        result = await _get_session_after_signup(
             signup_result=signup_result,
             email="test@example.com",
             password="password"
         )
 
-        assert result == "login-token"
+        assert result is not None
+        assert result.access_token == "login-token"
 
 @pytest.mark.asyncio
-async def test_get_access_token_after_signup_login_fails():
-    """Test _get_access_token_after_signup when login fails - covers lines 184-190"""
-    from apps.user_service.app.api.auth import _get_access_token_after_signup
+async def test_get_session_after_signup_login_fails():
+    """Test _get_session_after_signup when login fails - covers lines 184-190"""
+    from apps.user_service.app.api.auth import _get_session_after_signup
     from types import SimpleNamespace
 
     # Mock signup result without session token
     signup_result = SimpleNamespace(session=SimpleNamespace())  # No access_token
 
-    with patch('apps.user_service.app.api.auth._extract_token_from_session',
+    with patch('apps.user_service.app.api.auth._extract_session',
                return_value=None), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("Login failed"))):
 
-        result = await _get_access_token_after_signup(
+        result = await _get_session_after_signup(
             signup_result=signup_result,
             email="test@example.com",
             password="password"

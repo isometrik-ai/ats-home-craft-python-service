@@ -36,7 +36,6 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 from apps.user_service.app.schemas.auth import (
     AuthLogin,
     SignupRequest,
-    SignupResponse,
     UserInfo,
     AuthResponse,
     VerifyEmailRequest,
@@ -146,28 +145,28 @@ async def _validate_verification_code_for_signup(
         )
 
 
-def _extract_token_from_session(session) -> str | None:
+def _extract_session(session):
     """
-    Extract access token from session if available.
+    Extract session object if available.
 
     Args:
         session: Session object
 
     Returns:
-        Access token if available, None otherwise
+        Session object if available, None otherwise
     """
     if session and hasattr(session, 'access_token'):
-        return session.access_token
+        return session
     return None
 
 
-async def _get_access_token_after_signup(
+async def _get_session_after_signup(
     signup_result,
     email: str,
     password: str
-) -> str | None:
+):
     """
-    Get access token after signup, trying session first, then login if needed.
+    Get session after signup, trying signup session first, then login if needed.
 
     Args:
         signup_result: Result from sign_up_supabase_user
@@ -175,17 +174,17 @@ async def _get_access_token_after_signup(
         password: User password
 
     Returns:
-        Access token if available, None otherwise
+        Session object if available, None otherwise
     """
-    token = _extract_token_from_session(signup_result.session)
-    if token:
-        return token
+    session = _extract_session(signup_result.session)
+    if session:
+        return session
 
     try:
         login_result = await login_user(email, password)
-        return _extract_token_from_session(login_result.session)
+        return _extract_session(login_result.session)
     except Exception as login_error:
-        logger.warning("Could not get access token after signup for %s: %s", email, str(login_error))
+        logger.warning("Could not get session after signup for %s: %s", email, str(login_error))
 
     return None
 
@@ -223,35 +222,6 @@ def _validate_password_strength(password: str) -> None:
         )
 
 
-def _build_signup_response_data(
-    user_id: str,
-    signup_data: SignupRequest,
-    access_token: str | None
-) -> dict:
-    """
-    Build response data for signup endpoint.
-
-    Args:
-        user_id: User ID from signup
-        signup_data: Original signup request data
-        access_token: Optional access token
-
-    Returns:
-        Dictionary with response data
-    """
-    response_data = {
-        "user_id": user_id,
-        "email": signup_data.email,
-        "first_name": signup_data.first_name,
-        "last_name": signup_data.last_name,
-        "phone": signup_data.phone,
-        "timezone": signup_data.timezone,
-    }
-
-    if access_token:
-        response_data["access_token"] = access_token
-
-    return response_data
 
 
 def _is_password_strong(password: str) -> bool:
@@ -585,7 +555,7 @@ async def reset_password(
 
     # X- Organization slug uniqueness validation
 @router.post(
-    "/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED
+    "/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -639,28 +609,36 @@ async def signup(
     )
 
     signup_result = await sign_up_supabase_user(signup_data)
-    user_id = signup_result.user.id
 
-    access_token = await _get_access_token_after_signup(
+    session = await _get_session_after_signup(
         signup_result=signup_result,
         email=signup_data.email,
         password=signup_data.password
     )
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create session after signup"
+        )
 
     _send_welcome_email_safely(
         email=signup_data.email,
         first_name=signup_data.first_name
     )
 
-    response_data = _build_signup_response_data(
-        user_id=user_id,
-        signup_data=signup_data,
-        access_token=access_token
-    )
-
-    return SignupResponse(
-        message="Account created successfully! Please check your email for verification.",
-        data=response_data
+    return AuthResponse(
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        expires_in=session.expires_in,
+        expires_at=session.expires_at,
+        user=UserInfo(
+            id=signup_result.user.id,
+            email=signup_result.user.email,
+            first_name=signup_result.user.user_metadata.get("first_name", None),
+            last_name=signup_result.user.user_metadata.get("last_name", None),
+            timezone=signup_result.user.user_metadata.get("timezone", None),
+        ),
     )
 
 
