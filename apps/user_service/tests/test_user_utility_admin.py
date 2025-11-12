@@ -701,9 +701,9 @@ class TestUserAdminOperations:
         mock_response = MagicMock()
         mock_response.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.return_value = mock_response
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(return_value=mock_response)
             mock_get_client.return_value = mock_supabase
 
             result = await ban_the_user(user_id)
@@ -717,9 +717,9 @@ class TestUserAdminOperations:
         """Test user ban with API error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = APIError({"message": "API Error", "code": "23505"})
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=APIError({"message": "API Error", "code": "23505"}))
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(APIError):
@@ -730,9 +730,9 @@ class TestUserAdminOperations:
         """Test user ban with network error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = HTTPError("Network Error")
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=HTTPError("Network Error"))
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(HTTPError):
@@ -743,9 +743,9 @@ class TestUserAdminOperations:
         """Test user ban with validation error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = ValueError("Invalid user ID")
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=ValueError("Invalid user ID"))
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(ValueError):
@@ -758,9 +758,9 @@ class TestUserAdminOperations:
         mock_response = MagicMock()
         mock_response.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.return_value = mock_response
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(return_value=mock_response)
             mock_get_client.return_value = mock_supabase
 
             result = await unban_the_user(user_id)
@@ -774,9 +774,9 @@ class TestUserAdminOperations:
         """Test user unban with API error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = APIError({"message": "API Error", "code": "23505"})
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=APIError({"message": "API Error", "code": "23505"}))
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(APIError):
@@ -787,9 +787,9 @@ class TestUserAdminOperations:
         """Test user unban with network error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = HTTPError("Network Error")
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=HTTPError("Network Error"))
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(HTTPError):
@@ -800,9 +800,9 @@ class TestUserAdminOperations:
         """Test user unban with validation error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = ValueError("Invalid user ID")
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=ValueError("Invalid user ID"))
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(ValueError):
@@ -813,13 +813,13 @@ class TestUserAdminOperations:
         """Test successful auth user deletion."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.delete_user = AsyncMock(return_value=MagicMock())
             mock_get_client.return_value = mock_supabase
 
             result = await delete_auth_user(user_id)
-            assert result is None
+            assert result is True
             mock_supabase.auth.admin.delete_user.assert_called_once_with(id=user_id)
 
     @pytest.mark.asyncio
@@ -827,12 +827,12 @@ class TestUserAdminOperations:
         """Test auth user deletion with API error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=APIError({"message": "API Error", "code": "23505"}))
+            mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=AuthApiError("User not found", status=404, code="user_not_found"))
             mock_get_client.return_value = mock_supabase
 
-            with pytest.raises(APIError):
+            with pytest.raises(AuthApiError):
                 await delete_auth_user(user_id)
 
     @pytest.mark.asyncio
@@ -840,7 +840,7 @@ class TestUserAdminOperations:
         """Test auth user deletion with network error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=HTTPError("Network Error"))
             mock_get_client.return_value = mock_supabase
@@ -853,7 +853,7 @@ class TestUserAdminOperations:
         """Test auth user deletion with validation error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=ValueError("Invalid user ID"))
             mock_get_client.return_value = mock_supabase
@@ -869,9 +869,9 @@ class TestUserAdminOperations:
         mock_response = MagicMock()
         mock_response.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.return_value = mock_response
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(return_value=mock_response)
             mock_get_client.return_value = mock_supabase
 
             result = await update_email_of_user(user_id, new_email)
@@ -886,9 +886,9 @@ class TestUserAdminOperations:
         user_id = str(uuid.uuid4())
         new_email = "new@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = APIError({"message": "API Error", "code": "23505"})
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=APIError({"message": "API Error", "code": "23505"}))
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(APIError):
@@ -900,9 +900,9 @@ class TestUserAdminOperations:
         user_id = str(uuid.uuid4())
         new_email = "new@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = HTTPError("Network Error")
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=HTTPError("Network Error"))
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(HTTPError):
@@ -914,9 +914,9 @@ class TestUserAdminOperations:
         user_id = str(uuid.uuid4())
         new_email = "invalid-email"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = ValueError("Invalid email")
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=ValueError("Invalid email"))
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(ValueError):
@@ -1619,11 +1619,11 @@ class TestUpdateMetadataOfUser:
             "timezone": "UTC"
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.user = {"id": user_id, "email": "test@example.com"}
-            mock_supabase.auth.admin.update_user_by_id.return_value = mock_result
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
@@ -1641,9 +1641,9 @@ class TestUpdateMetadataOfUser:
         metadata = {"first_name": "John"}
         api_error = APIError({"message": "Invalid user ID"})
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = api_error
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=api_error)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
@@ -1657,9 +1657,9 @@ class TestUpdateMetadataOfUser:
         metadata = {"first_name": "John"}
         network_error = HTTPError("Connection failed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = network_error
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=network_error)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
@@ -1673,9 +1673,9 @@ class TestUpdateMetadataOfUser:
         metadata = {"first_name": "John"}
         validation_error = ValueError("Invalid metadata format")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id.side_effect = validation_error
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=validation_error)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
@@ -1700,7 +1700,7 @@ class TestUpdatePasswordWithLinkIdentity:
         mock_update_result = MagicMock()
         mock_update_result.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_update_result)
@@ -1729,7 +1729,7 @@ class TestUpdatePasswordWithLinkIdentity:
         mock_update_result = MagicMock()
         mock_update_result.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_update_result)
@@ -1762,7 +1762,7 @@ class TestUpdatePasswordWithLinkIdentity:
         password = "new_password123"
         auth_error = AuthApiError("Invalid user", status=400, code="invalid_user")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=auth_error)
             mock_get_client.return_value = mock_supabase
@@ -1783,7 +1783,7 @@ class TestUpdatePasswordWithLinkIdentity:
         mock_user_data.user.email = "test@example.com"
         mock_user_data.user.user_metadata = {}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(side_effect=api_error)
@@ -1800,7 +1800,7 @@ class TestUpdatePasswordWithLinkIdentity:
         password = "new_password123"
         network_error = HTTPError("Connection failed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=network_error)
             mock_get_client.return_value = mock_supabase
@@ -1821,7 +1821,7 @@ class TestUpdatePasswordWithLinkIdentity:
         mock_user_data.user.email = "test@example.com"
         mock_user_data.user.user_metadata = {}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(side_effect=validation_error)
@@ -1846,7 +1846,7 @@ class TestGetUserById:
             "app_metadata": {"providers": ["email"]}
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_get_client.return_value = mock_supabase
@@ -1863,7 +1863,7 @@ class TestGetUserById:
         user_id = str(uuid.uuid4())
         auth_error = AuthApiError("User not found", status=404, code="user_not_found")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=auth_error)
             mock_get_client.return_value = mock_supabase
@@ -1878,7 +1878,7 @@ class TestGetUserById:
         user_id = str(uuid.uuid4())
         network_error = HTTPError("Connection failed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=network_error)
             mock_get_client.return_value = mock_supabase
@@ -1893,9 +1893,9 @@ class TestGetUserById:
         user_id = str(uuid.uuid4())
         validation_error = ValueError("Invalid user ID format")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.get_user_by_id.side_effect = validation_error
+            mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=validation_error)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
@@ -1913,7 +1913,7 @@ class TestDeleteAuthUserErrorHandling:
         http_status_error = HTTPStatusError("User not found", request=None, response=MagicMock())
         http_status_error.response.status_code = 404
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=http_status_error)
             mock_get_client.return_value = mock_supabase

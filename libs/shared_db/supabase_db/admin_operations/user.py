@@ -63,6 +63,7 @@ async def delete_auth_user(user_id: str) -> bool:
     supabase = await get_supabase_admin_client()
     try:
         await supabase.auth.admin.delete_user(id=user_id)
+        return True
     except HTTPStatusError as e:
         raise HTTPException(
             status_code=e.response.status_code,
