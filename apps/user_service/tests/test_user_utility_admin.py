@@ -703,7 +703,7 @@ class TestUserAdminOperations:
 
         with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(return_value=mock_response)
+            mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_response)
             mock_get_client.return_value = mock_supabase
 
             result = await ban_the_user(user_id)
@@ -760,7 +760,7 @@ class TestUserAdminOperations:
 
         with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(return_value=mock_response)
+            mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_response)
             mock_get_client.return_value = mock_supabase
 
             result = await unban_the_user(user_id)
@@ -871,7 +871,7 @@ class TestUserAdminOperations:
 
         with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(return_value=mock_response)
+            mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_response)
             mock_get_client.return_value = mock_supabase
 
             result = await update_email_of_user(user_id, new_email)
@@ -1623,7 +1623,7 @@ class TestUpdateMetadataOfUser:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.user = {"id": user_id, "email": "test@example.com"}
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(return_value=mock_result)
+            mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user

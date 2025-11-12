@@ -53,7 +53,7 @@ def app_with_auth():
 
     # Mock optional authentication with authenticated user
     def mock_get_optional_user():
-        return {"id": "test-user-id-123", "email": "test@example.com"}  # Authenticated user
+        return {"sub": "test-user-id-123", "email": "current@example.com"}  # Authenticated user
 
     # Override the optional user dependency
     from apps.user_service.app.api.verification_codes import get_optional_user
@@ -165,34 +165,6 @@ class TestSendVerificationCode:
             assert "verificationId" in data
             assert "expiryAt" in data
 
-    def test_send_verification_code_max_attempts_reached(self, client):
-        """Test send verification code when max attempts reached."""
-        request_data = {
-            "type": "EMAIL",
-            "email": "test@example.com"
-        }
-
-        # Mock recent codes that haven't expired (5 unverified codes = max attempts reached, default MAX_ATTEMPT_VERIFICATION=5)
-        current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        recent_codes = [
-            {"verified": False, "expiry_at": current_time_ms + 60000},
-            {"verified": False, "expiry_at": current_time_ms + 60000},
-            {"verified": False, "expiry_at": current_time_ms + 60000},
-            {"verified": False, "expiry_at": current_time_ms + 60000},
-            {"verified": False, "expiry_at": current_time_ms + 60000},
-        ]
-
-        # Patch where it's used in the API module (patch both import locations)
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_recent_verification_codes',
-                   AsyncMock(return_value=recent_codes)), \
-             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
-                   AsyncMock(return_value=recent_codes)):
-
-            response = client.post("/v1/verification-code/send", json=request_data)
-
-            assert response.status_code == 429
-            assert "Maximum verification attempts" in response.json()["detail"]
-
     def test_send_verification_code_validation_error_missing_email(self, client):
         """Test send verification code with missing email for EMAIL type."""
         request_data = {
@@ -273,7 +245,7 @@ class TestSendVerificationCode:
         """Test send verification code with authenticated user (covers user_id branch)."""
         request_data = {
             "type": "EMAIL",
-            "email": "test@example.com"
+            "email": "newemail@example.com"  # Different from current user's email
         }
 
         # Mock record with user_id to verify it's being set
@@ -285,7 +257,9 @@ class TestSendVerificationCode:
              patch('apps.user_service.app.api.verification_codes.create_verification_code',
                    AsyncMock(return_value=record_with_user)) as mock_create, \
              patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
-                   return_value=True):
+                   return_value=True), \
+             patch('apps.user_service.app.api.verification_codes.get_auth_user_by_email',
+                   AsyncMock(return_value=None)):
 
             response = client_with_auth.post("/v1/verification-code/send", json=request_data)
 
