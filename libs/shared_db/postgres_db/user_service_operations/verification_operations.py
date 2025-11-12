@@ -20,7 +20,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from apps.user_service.app.dependencies.logger import get_logger
-from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client
+from libs.shared_db.supabase_db.db import get_fresh_supabase_admin_client
 from .exception_handling import handle_database_errors, create_error_messages, DatabaseOperationError
 
 # Initialize logger
@@ -64,7 +64,7 @@ async def create_verification_code(
     Returns:
         Dict containing the created verification code record
     """
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
 
     # Generate verification code
     if OTP_ENABLED:
@@ -123,7 +123,7 @@ async def get_verification_code_by_id(verification_id: str) -> Optional[Dict[str
     Returns:
         Dict containing the verification code record or None if not found
     """
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
 
     result = await supabase.table("verification_codes").select("*").eq("id", verification_id).execute()
 
@@ -154,7 +154,7 @@ async def get_recent_verification_codes(
     Returns:
         List of verification code records
     """
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
 
     query = (
         supabase.table("verification_codes")
@@ -197,7 +197,7 @@ async def update_verification_code(
     Returns:
         Dict containing the updated verification code record
     """
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
 
     update_data = {
         "verified": verified,

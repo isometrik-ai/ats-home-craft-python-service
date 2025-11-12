@@ -47,7 +47,7 @@ class TestVerificationOperations:
         mock_table.insert.return_value = mock_insert
         mock_insert.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             result = await create_verification_code(
@@ -90,7 +90,7 @@ class TestVerificationOperations:
         mock_table.insert.return_value = mock_insert
         mock_insert.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             result = await create_verification_code(
@@ -132,7 +132,7 @@ class TestVerificationOperations:
         mock_table.insert.return_value = mock_insert
         mock_insert.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             result = await create_verification_code(
@@ -172,7 +172,7 @@ class TestVerificationOperations:
         mock_select.eq.return_value = mock_eq
         mock_eq.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             result = await get_verification_code_by_id(verification_id)
@@ -196,7 +196,7 @@ class TestVerificationOperations:
         mock_select.eq.return_value = mock_eq
         mock_eq.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             result = await get_verification_code_by_id(verification_id)
@@ -226,7 +226,7 @@ class TestVerificationOperations:
         mock_table.insert.return_value = mock_insert
         mock_insert.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)), \
              patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.OTP_ENABLED', False), \
              patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.DEFAULT_OTP', "1111"):
@@ -257,7 +257,7 @@ class TestVerificationOperations:
         mock_table.insert.return_value = mock_insert
         mock_insert.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             with pytest.raises(DatabaseOperationError) as exc_info:
@@ -302,7 +302,7 @@ class TestVerificationOperations:
         mock_order.limit.return_value = mock_limit
         mock_limit.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             result = await get_recent_verification_codes(
@@ -348,7 +348,7 @@ class TestVerificationOperations:
         mock_order.limit.return_value = mock_limit
         mock_limit.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             result = await get_recent_verification_codes(
@@ -382,7 +382,7 @@ class TestVerificationOperations:
         mock_order.limit.return_value = mock_limit
         mock_limit.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             result = await get_recent_verification_codes(
@@ -417,7 +417,7 @@ class TestVerificationOperations:
         mock_update.eq.return_value = mock_eq
         mock_eq.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             result = await update_verification_code(
@@ -448,7 +448,7 @@ class TestVerificationOperations:
         mock_update.eq.return_value = mock_eq
         mock_eq.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
             with pytest.raises(DatabaseOperationError) as exc_info:
