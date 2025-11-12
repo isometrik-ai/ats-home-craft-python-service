@@ -387,6 +387,9 @@ async def login_user(email: str, password: str) -> dict:
             {"email": email, "password": password}
         )
         return result
+    except AuthApiError as error:
+        if error.status == 400 and error.message == "Email not confirmed":
+            raise HTTPException(status_code=403, detail="Email not confirmed. Please check your email Inbox for the confirmation link.") from error
     except Exception as error:
         log_exception()
         logger.error(error)
@@ -602,3 +605,23 @@ def _provider_validity_check(provider: str):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid provider"
         )
+
+async def refresh_session(refresh_token: str) -> dict:
+    """
+    Refresh user session using Supabase Auth Admin API.
+    """
+    try:
+        # supabase = await get_supabase_client()
+        supabase = await get_supabase_admin_client()
+        return await supabase.auth.refresh_session(refresh_token)
+    except AuthApiError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid request: {str(e)}",
+        ) from e
+    except Exception as e:
+        logger.error("Unexpected error while refreshing session: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error occurred while refreshing session.",
+        ) from e

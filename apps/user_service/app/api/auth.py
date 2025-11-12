@@ -13,6 +13,8 @@ Last Updated: 2024-12-19
 import re
 import os
 import sys
+import jwt
+from datetime import datetime
 
 # Third-party imports
 from fastapi import APIRouter, HTTPException, status, Body, Request, Depends, Response
@@ -72,7 +74,8 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     update_password_with_token,
     log_exception,
     supabase_user_oauth,
-    get_oauth_link_url
+    get_oauth_link_url,
+    refresh_session
 )
 from libs.shared_db.supabase_db.admin_operations.session import get_session_by_id_admin
 from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
@@ -105,36 +108,36 @@ async def _validate_verification_code_for_signup(
 ) -> None:
     """
     Validate verification code for signup (cross-security check).
-    
+
     Args:
         verification_id: Verification code ID
         email: Email to validate
         verification_code: Verification code to validate
-        
+
     Raises:
         HTTPException: If validation fails
     """
     verification_record = await get_verification_code_by_id(verification_id)
-    
+
     if not verification_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Verification code not found"
         )
-    
+
     if not verification_record.get("verified", False):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Verification code must be verified before signup. Please verify your email first."
         )
-    
+
     stored_given_input = verification_record.get("given_input")
     if stored_given_input != email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Email '{email}' does not match the verification record. Expected: '{stored_given_input}'"
         )
-    
+
     stored_code = verification_record.get("verification_code")
     if verification_code != stored_code:
         raise HTTPException(
@@ -146,10 +149,10 @@ async def _validate_verification_code_for_signup(
 def _extract_token_from_session(session) -> str | None:
     """
     Extract access token from session if available.
-    
+
     Args:
         session: Session object
-        
+
     Returns:
         Access token if available, None otherwise
     """
@@ -165,32 +168,32 @@ async def _get_access_token_after_signup(
 ) -> str | None:
     """
     Get access token after signup, trying session first, then login if needed.
-    
+
     Args:
         signup_result: Result from sign_up_supabase_user
         email: User email
         password: User password
-        
+
     Returns:
         Access token if available, None otherwise
     """
     token = _extract_token_from_session(signup_result.session)
     if token:
         return token
-    
+
     try:
         login_result = await login_user(email, password)
         return _extract_token_from_session(login_result.session)
     except Exception as login_error:
         logger.warning("Could not get access token after signup for %s: %s", email, str(login_error))
-    
+
     return None
 
 
 def _send_welcome_email_safely(email: str, first_name: str) -> None:
     """
     Send welcome email safely without failing the signup operation.
-    
+
     Args:
         email: User email
         first_name: User first name
@@ -206,10 +209,10 @@ def _send_welcome_email_safely(email: str, first_name: str) -> None:
 def _validate_password_strength(password: str) -> None:
     """
     Validate password strength and raise exception if weak.
-    
+
     Args:
         password: Password to validate
-        
+
     Raises:
         HTTPException: If password is weak
     """
@@ -227,12 +230,12 @@ def _build_signup_response_data(
 ) -> dict:
     """
     Build response data for signup endpoint.
-    
+
     Args:
         user_id: User ID from signup
         signup_data: Original signup request data
         access_token: Optional access token
-        
+
     Returns:
         Dictionary with response data
     """
@@ -244,10 +247,10 @@ def _build_signup_response_data(
         "phone": signup_data.phone,
         "timezone": signup_data.timezone,
     }
-    
+
     if access_token:
         response_data["access_token"] = access_token
-    
+
     return response_data
 
 
@@ -298,19 +301,64 @@ async def login(request: Request, data: AuthLogin):
         result = await login_user(data.email, data.password)
         return AuthResponse(
             access_token=result.session.access_token,
+            refresh_token=result.session.refresh_token,
+            expires_in=result.session.expires_in,
+            expires_at=result.session.expires_at,
             user=UserInfo(
                 id=result.user.id,
                 email=result.user.email,
                 first_name=result.user.user_metadata.get("first_name", None),
                 last_name=result.user.user_metadata.get("last_name", None),
+                timezone=result.user.user_metadata.get("timezone", None),
             ),
         )
+    except HTTPException:
+        raise
     except Exception as error:
+        log_exception()
         if "Invalid login credentials" in str(error):
             raise HTTPException(
                 status_code=401, detail="Invalid login credentials"
             ) from error
-        raise HTTPException(status_code=500, detail="Authentication failed") from error
+        raise HTTPException(status_code=500, detail="Authentication failed"+str(error)) from error
+
+
+@router.put("/refresh",response_model=AuthResponse,status_code=status.HTTP_200_OK)
+@limiter.limit("100/minute")
+# pylint: disable=unused-argument  # Required by @limiter.limit
+async def refresh(request: Request):
+    """
+    Refresh user session
+    """
+    try:
+        access_token = request.headers.get("Access-Token").strip()
+        refresh_token = request.headers.get("Refresh-Token",None).strip()
+        try:
+            decoded = jwt.decode(access_token,os.getenv("SUPABASE_JWT_SECRET"),algorithms=["HS256"],audience="authenticated")
+            if datetime.fromtimestamp(decoded.get("exp")) >= datetime.now():
+                raise HTTPException(status_code=400, detail="Token is not expired")
+        except jwt.ExpiredSignatureError:
+            res = await refresh_session(refresh_token)
+        res = await refresh_session(refresh_token)
+        # print("\n\nres:\n", res,end="\n\n")
+        return AuthResponse(
+            access_token=res.session.access_token,
+            refresh_token=res.session.refresh_token,
+            expires_in=res.session.expires_in,
+            expires_at=res.session.expires_at,
+            user=UserInfo(
+                id=res.user.id,
+                email=res.user.email,
+                first_name=res.user.user_metadata.get("first_name", None),
+                last_name=res.user.user_metadata.get("last_name", None),
+                timezone=res.user.user_metadata.get("timezone", None),
+            )
+        )
+    except HTTPException as error:
+        raise error
+    except Exception as error:
+        log_exception()
+        raise HTTPException(status_code=500, detail="Authentication failed "+str(error)) from error
 
 
 @router.post(
@@ -592,7 +640,7 @@ async def signup(
 
     signup_result = await sign_up_supabase_user(signup_data)
     user_id = signup_result.user.id
-    
+
     access_token = await _get_access_token_after_signup(
         signup_result=signup_result,
         email=signup_data.email,

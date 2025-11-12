@@ -611,7 +611,7 @@ If you didn't request this, please ignore this email.
                   </div>
                 </div>
                 <p style="color: #6b7280; font-size: 14px; line-height: 1.5;">
-                  This code will expire in <strong>{expiry_minutes} minutes</strong>.  
+                  This code will expire in <strong>{expiry_minutes} minutes</strong>.
                   If you didn't request this, please ignore this email.
                 </p>
               </td>

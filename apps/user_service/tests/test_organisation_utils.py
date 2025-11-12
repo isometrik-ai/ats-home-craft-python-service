@@ -4,12 +4,17 @@ import pytest
 import uuid
 from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException, status
+from postgrest import APIError
 
 from apps.user_service.app.dependencies.organisation_utils import (
     validate_organisation_status,
     validate_organisation_name_filter,
     build_organisation_filter_message,
     create_organisation_with_super_admin
+)
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
+    DatabaseOperationError,
+    SupabaseAPIError,
 )
 
 
@@ -185,7 +190,7 @@ class TestCreateOrganisationWithSuperAdmin:
              patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=True)) as mock_assign_perms, \
              patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(return_value=mock_member_result)) as mock_add_member:
 
-            result = await create_organisation_with_super_admin(org_data)
+            await create_organisation_with_super_admin(org_data)
 
             # Verify all functions were called with correct arguments
             mock_create_org.assert_called_once_with(org_data)
@@ -257,7 +262,6 @@ class TestCreateOrganisationWithSuperAdmin:
         db_error = Exception("Database connection failed")
 
         with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(side_effect=db_error)), \
-             patch("apps.user_service.app.dependencies.organisation_utils.delete_auth_user", AsyncMock(return_value=True)) as mock_delete_user, \
              patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
@@ -267,8 +271,6 @@ class TestCreateOrganisationWithSuperAdmin:
             assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
             assert "Failed to create account. Please try again." in str(exc_info.value.detail)
 
-            # Verify cleanup was attempted
-            mock_delete_user.assert_called_once_with(org_data["user_id"])
             mock_log_exception.assert_called_once()
 
     @pytest.mark.asyncio
@@ -285,10 +287,8 @@ class TestCreateOrganisationWithSuperAdmin:
         }
 
         db_error = Exception("Database connection failed")
-        cleanup_error = Exception("Cleanup failed")
 
         with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(side_effect=db_error)), \
-             patch("apps.user_service.app.dependencies.organisation_utils.delete_auth_user", AsyncMock(side_effect=cleanup_error)) as mock_delete_user, \
              patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
@@ -298,8 +298,6 @@ class TestCreateOrganisationWithSuperAdmin:
             assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
             assert "Failed to create account. Please try again." in str(exc_info.value.detail)
 
-            # Verify cleanup was attempted
-            mock_delete_user.assert_called_once_with(org_data["user_id"])
             mock_log_exception.assert_called_once()
 
     @pytest.mark.asyncio
@@ -320,7 +318,6 @@ class TestCreateOrganisationWithSuperAdmin:
 
         with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(side_effect=role_error)), \
-             patch("apps.user_service.app.dependencies.organisation_utils.delete_auth_user", AsyncMock(return_value=True)) as mock_delete_user, \
              patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
@@ -330,8 +327,6 @@ class TestCreateOrganisationWithSuperAdmin:
             assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
             assert "Failed to create account. Please try again." in str(exc_info.value.detail)
 
-            # Verify cleanup was attempted
-            mock_delete_user.assert_called_once_with(org_data["user_id"])
             mock_log_exception.assert_called_once()
 
     @pytest.mark.asyncio
@@ -354,7 +349,6 @@ class TestCreateOrganisationWithSuperAdmin:
         with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value=mock_role_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(side_effect=permissions_error)), \
-             patch("apps.user_service.app.dependencies.organisation_utils.delete_auth_user", AsyncMock(return_value=True)) as mock_delete_user, \
              patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
@@ -364,8 +358,6 @@ class TestCreateOrganisationWithSuperAdmin:
             assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
             assert "Failed to create account. Please try again." in str(exc_info.value.detail)
 
-            # Verify cleanup was attempted
-            mock_delete_user.assert_called_once_with(org_data["user_id"])
             mock_log_exception.assert_called_once()
 
     @pytest.mark.asyncio
@@ -391,7 +383,6 @@ class TestCreateOrganisationWithSuperAdmin:
              patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(return_value=mock_permissions)), \
              patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=True)), \
              patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(side_effect=member_error)), \
-             patch("apps.user_service.app.dependencies.organisation_utils.delete_auth_user", AsyncMock(return_value=True)) as mock_delete_user, \
              patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
@@ -401,6 +392,115 @@ class TestCreateOrganisationWithSuperAdmin:
             assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
             assert "Failed to create account. Please try again." in str(exc_info.value.detail)
 
-            # Verify cleanup was attempted
-            mock_delete_user.assert_called_once_with(org_data["user_id"])
             mock_log_exception.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_organisation_with_super_admin_duplicate_slug_error(self):
+        """Test organisation creation handles duplicate slug API error."""
+        org_data = {
+            "organization_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "slug": "existing-slug",
+            "email": "admin@test.com",
+        }
+
+        api_error = APIError({
+            "message": 'duplicate key value violates unique constraint "organizations_slug_key"',
+            "code": "23505",
+        })
+
+        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(side_effect=api_error)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception, \
+             patch("apps.user_service.app.dependencies.organisation_utils.logger.warning") as mock_warning:
+
+            with pytest.raises(HTTPException) as exc_info:
+                await create_organisation_with_super_admin(org_data)
+
+            assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+            assert "Organisation slug already exists" in exc_info.value.detail
+            mock_log_exception.assert_called_once()
+            mock_warning.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_organisation_with_super_admin_rls_violation(self):
+        """Test organisation creation handles RLS policy violation from SupabaseAPIError."""
+        org_data = {
+            "organization_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "email": "admin@test.com",
+            "slug": "new-org",
+        }
+
+        underlying_api_error = APIError({
+            "message": "new row violates row-level security policy",
+            "code": "42501",
+        })
+        supabase_error = SupabaseAPIError("Supabase API error", operation="create_super_admin_role")
+        supabase_error.__cause__ = underlying_api_error
+
+        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=None)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(side_effect=supabase_error)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception, \
+             patch("apps.user_service.app.dependencies.organisation_utils.logger.error") as mock_error:
+
+            with pytest.raises(HTTPException) as exc_info:
+                await create_organisation_with_super_admin(org_data)
+
+            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "Row-level security policy violation" in exc_info.value.detail
+            mock_log_exception.assert_called_once()
+            mock_error.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_create_organisation_with_super_admin_generic_api_error(self):
+        """Test organisation creation handles generic Supabase API error."""
+        org_data = {
+            "organization_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "email": "admin@test.com",
+        }
+
+        api_error = APIError({
+            "message": "foreign key constraint violation",
+            "code": "12345",
+        })
+
+        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=None)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(side_effect=api_error)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception, \
+             patch("apps.user_service.app.dependencies.organisation_utils.logger.error") as mock_error:
+
+            with pytest.raises(HTTPException) as exc_info:
+                await create_organisation_with_super_admin(org_data)
+
+            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "Failed to create account" in exc_info.value.detail
+            mock_log_exception.assert_called_once()
+            mock_error.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_create_organisation_with_super_admin_database_operation_error(self):
+        """Test organisation creation handles DatabaseOperationError properly."""
+        org_data = {
+            "organization_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "email": "admin@test.com",
+        }
+
+        db_operation_error = DatabaseOperationError("Database failure", operation="add_member")
+
+        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=None)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value={"id": str(uuid.uuid4())})), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(return_value=None)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=None)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(side_effect=db_operation_error)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception, \
+             patch("apps.user_service.app.dependencies.organisation_utils.logger.error") as mock_error:
+
+            with pytest.raises(HTTPException) as exc_info:
+                await create_organisation_with_super_admin(org_data)
+
+            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "Failed to create account" in exc_info.value.detail
+            mock_log_exception.assert_called_once()
+            mock_error.assert_called()

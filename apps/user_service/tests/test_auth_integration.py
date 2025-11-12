@@ -5,10 +5,13 @@ Async integration tests for authentication endpoints.
 Tests auth.py endpoints with proper AsyncMock usage.
 """
 
+import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock, MagicMock
+from types import SimpleNamespace
+from datetime import datetime, timedelta
 import asyncio
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 
@@ -57,11 +60,19 @@ def test_login_endpoint_success(auth_client):
     }
 
     # Mock the Supabase login response
-    mock_result = MagicMock()
-    mock_result.session.access_token = "test-access-token"
-    mock_result.user.id = "test-user-id"
-    mock_result.user.email = "test@example.com"
-    mock_result.user.user_metadata = {"first_name": "Test", "last_name": "User"}
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={"first_name": "Test", "last_name": "User", "timezone": "UTC"},
+        ),
+    )
 
     with patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
         response = auth_client.post("/auth/login", json=login_data)
@@ -85,11 +96,19 @@ async def test_login_endpoint_success_async(async_auth_client):
     )
 
     # Mock the Supabase login response
-    mock_result = MagicMock()
-    mock_result.session.access_token = "test-access-token"
-    mock_result.user.id = "test-user-id"
-    mock_result.user.email = "test@example.com"
-    mock_result.user.user_metadata = {"first_name": "Test", "last_name": "User"}
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={"first_name": "Test", "last_name": "User", "timezone": "UTC"},
+        ),
+    )
 
     with patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
         # Create a mock request
@@ -245,6 +264,233 @@ async def test_signup_endpoint_weak_password_async(async_auth_client):
         response = client.post("/auth/signup", json=signup_data)
         assert response.status_code == 422  # Pydantic validation happens first
         assert "at least 6 characters" in str(response.json())
+
+def test_signup_endpoint_verification_code_not_found(auth_client):
+    """Test signup when verification code not found - covers line 123"""
+    signup_data = {
+        "email": "newuser@example.com",
+        "password": "NewPass123!",
+        "first_name": "New",
+        "last_name": "User",
+        "verificationId": "non-existent-id",
+        "verificationCode": "1111"
+    }
+
+    with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=None)):
+        response = auth_client.post("/auth/signup", json=signup_data)
+        assert response.status_code == 404
+        assert "Verification code not found" in response.json()["detail"]
+
+def test_signup_endpoint_verification_code_not_verified(auth_client):
+    """Test signup when verification code not verified - covers line 129"""
+    signup_data = {
+        "email": "newuser@example.com",
+        "password": "NewPass123!",
+        "first_name": "New",
+        "last_name": "User",
+        "verificationId": "test-verification-id",
+        "verificationCode": "1111"
+    }
+
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "newuser@example.com",
+        "verification_code": "1111",
+        "verified": False  # Not verified
+    }
+
+    with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)):
+        response = auth_client.post("/auth/signup", json=signup_data)
+        assert response.status_code == 400
+        assert "must be verified before signup" in response.json()["detail"]
+
+def test_signup_endpoint_email_mismatch(auth_client):
+    """Test signup when email doesn't match verification record - covers line 136"""
+    signup_data = {
+        "email": "different@example.com",
+        "password": "NewPass123!",
+        "first_name": "New",
+        "last_name": "User",
+        "verificationId": "test-verification-id",
+        "verificationCode": "1111"
+    }
+
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "newuser@example.com",  # Different email
+        "verification_code": "1111",
+        "verified": True
+    }
+
+    with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)):
+        response = auth_client.post("/auth/signup", json=signup_data)
+        assert response.status_code == 400
+        assert "does not match the verification record" in response.json()["detail"]
+
+def test_signup_endpoint_invalid_verification_code(auth_client):
+    """Test signup with invalid verification code - covers line 143"""
+    signup_data = {
+        "email": "newuser@example.com",
+        "password": "NewPass123!",
+        "first_name": "New",
+        "last_name": "User",
+        "verificationId": "test-verification-id",
+        "verificationCode": "9999"  # Wrong code
+    }
+
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "newuser@example.com",
+        "verification_code": "1111",  # Different code
+        "verified": True
+    }
+
+    with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)):
+        response = auth_client.post("/auth/signup", json=signup_data)
+        assert response.status_code == 400
+        assert "Invalid verification code" in response.json()["detail"]
+
+def test_extract_token_from_session_none():
+    """Test _extract_token_from_session when session has no access_token - covers line 161"""
+    from apps.user_service.app.api.auth import _extract_token_from_session
+    from types import SimpleNamespace
+
+    # Test with session without access_token
+    session_no_token = SimpleNamespace()
+    result = _extract_token_from_session(session_no_token)
+    assert result is None
+
+    # Test with None session
+    result = _extract_token_from_session(None)
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_get_access_token_after_signup_login_fallback():
+    """Test _get_access_token_after_signup login fallback - covers lines 184-190"""
+    from apps.user_service.app.api.auth import _get_access_token_after_signup
+    from types import SimpleNamespace
+
+    # Mock signup result without session token
+    signup_result = SimpleNamespace(session=SimpleNamespace())  # No access_token
+
+    # Mock login result with token
+    login_result = SimpleNamespace(
+        session=SimpleNamespace(access_token="login-token")
+    )
+
+    with patch('apps.user_service.app.api.auth._extract_token_from_session',
+               side_effect=[None, "login-token"]), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=login_result)):
+
+        result = await _get_access_token_after_signup(
+            signup_result=signup_result,
+            email="test@example.com",
+            password="password"
+        )
+
+        assert result == "login-token"
+
+@pytest.mark.asyncio
+async def test_get_access_token_after_signup_login_fails():
+    """Test _get_access_token_after_signup when login fails - covers lines 184-190"""
+    from apps.user_service.app.api.auth import _get_access_token_after_signup
+    from types import SimpleNamespace
+
+    # Mock signup result without session token
+    signup_result = SimpleNamespace(session=SimpleNamespace())  # No access_token
+
+    with patch('apps.user_service.app.api.auth._extract_token_from_session',
+               return_value=None), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=Exception("Login failed"))):
+
+        result = await _get_access_token_after_signup(
+            signup_result=signup_result,
+            email="test@example.com",
+            password="password"
+        )
+
+        assert result is None
+
+def test_send_welcome_email_safely_failure():
+    """Test _send_welcome_email_safely when email fails - covers lines 204-206"""
+    from apps.user_service.app.api.auth import _send_welcome_email_safely
+
+    with patch('apps.user_service.app.api.auth.send_welcome_email',
+               return_value=False):  # Email sending fails
+        # Should not raise exception
+        _send_welcome_email_safely("test@example.com", "Test")
+
+    with patch('apps.user_service.app.api.auth.send_welcome_email',
+               side_effect=Exception("Email error")):
+        # Should not raise exception
+        _send_welcome_email_safely("test@example.com", "Test")
+
+def test_validate_password_strength_weak():
+    """Test _validate_password_strength with weak password - covers line 220"""
+    from apps.user_service.app.api.auth import _validate_password_strength
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_password_strength("weak")
+    
+    assert exc_info.value.status_code == 400
+    assert "Password must be at least 6 characters" in exc_info.value.detail
+
+def test_extract_user_type_strict_app_meta_none():
+    """Test _extract_user_type_strict when app_meta has no type - covers line 689"""
+    from apps.user_service.app.api.auth import _extract_user_type_strict
+
+    mock_row = MagicMock()
+    mock_row.user_metadata = {}  # No type
+    mock_row.app_metadata = {}  # No type either
+    result = _extract_user_type_strict(mock_row)
+    assert result is None
+
+def test_verify_email_non_organization_member(auth_client):
+    """Test verify_email when user_type is not organization_member - covers line 726"""
+    verify_data = {"email": "test@example.com"}
+
+    mock_auth_user = MagicMock()
+    mock_auth_user.user_metadata = {"type": "other_type"}  # Not organization_member
+    mock_auth_user.app_metadata = {}
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_auth_user)):
+        response = auth_client.post("/auth/email/verify", json=verify_data)
+        assert response.status_code == 404
+        assert "Email not found" in response.json()["detail"]["message"]
+
+@pytest.mark.asyncio
+async def test_login_endpoint_http_exception_re_raise():
+    """Test login endpoint re-raising HTTPException - covers line 316"""
+    from fastapi import Request, HTTPException
+    from apps.user_service.app.api.auth import login
+    from apps.user_service.app.schemas.auth import AuthLogin
+
+    login_data = AuthLogin(
+        email="test@example.com",
+        password="TestPass123!"
+    )
+
+    # Mock login_user to raise HTTPException directly
+    with patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=HTTPException(status_code=401, detail="Unauthorized"))):
+        mock_request = MagicMock(spec=Request)
+        
+        with pytest.raises(HTTPException) as exc_info:
+            await login(request=mock_request, data=login_data)
+        
+        assert exc_info.value.status_code == 401
+        assert "Unauthorized" in exc_info.value.detail
 
 def test_forgot_password_endpoint_success(auth_client):
     """Test forgot password - covers auth.py forgot password function"""
@@ -432,6 +678,43 @@ def test_verify_email_endpoint_not_found(auth_client):
         assert data["detail"]["email_found"] == False
         assert data["detail"]["can_login"] == False
 
+
+def test_verify_email_endpoint_unknown_type(auth_client):
+    """Test verify email when user metadata lacks type - covers fallback branch"""
+    verify_data = {"email": "test@example.com"}
+
+    mock_auth_user = MagicMock()
+    mock_auth_user.user_metadata = {}
+    mock_auth_user.app_metadata = {}
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_auth_user)):
+        response = auth_client.post("/auth/email/verify", json=verify_data)
+        assert response.status_code == 404
+        data = response.json()
+        assert data["detail"]["email_found"] is False
+        assert data["detail"]["status"] is None
+
+
+def test_verify_email_endpoint_inactive_member(auth_client):
+    """Test verify email when organization member is suspended - covers suspended flow"""
+    verify_data = {"email": "test@example.com"}
+
+    mock_auth_user = MagicMock()
+    mock_auth_user.user_metadata = {"user_type": "organization_member"}
+    mock_auth_user.app_metadata = {}
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_auth_user)), \
+         patch('apps.user_service.app.api.auth.get_organization_member_status_by_email',
+               AsyncMock(return_value="suspended")):
+        response = auth_client.post("/auth/email/verify", json=verify_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "suspended"
+        assert data["can_login"] is False
+
+
 @pytest.mark.asyncio
 async def test_verify_email_endpoint_not_found_async(async_auth_client):
     """Test verify email with non-existent email asynchronously - covers auth.py error handling"""
@@ -449,6 +732,165 @@ async def test_verify_email_endpoint_not_found_async(async_auth_client):
 
         assert exc_info.value.status_code == 404
         assert "Email not found" in str(exc_info.value.detail)
+
+
+def test_get_oauth_link_url_endpoint_success(auth_client):
+    """Test generating OAuth link - covers success path"""
+    with patch('apps.user_service.app.api.auth.get_oauth_link_url',
+               AsyncMock(return_value={"url": "https://example.com/oauth"})):
+        response = auth_client.get("/auth/link-user-oauth-url/google")
+        assert response.status_code == 200
+        assert response.json() == {"url": "https://example.com/oauth"}
+
+
+def test_get_oauth_link_url_endpoint_provider_already_linked(auth_client):
+    """Test OAuth link endpoint when provider already linked - covers error branch"""
+    from fastapi import FastAPI
+    from apps.user_service.app.api.auth import router as auth_router
+    from libs.shared_middleware.jwt_auth import get_user_from_auth
+
+    # Create a new app with different dependency override
+    app = FastAPI()
+    app.include_router(auth_router)
+
+    def mock_get_user_with_provider():
+        return {
+            "sub": "test-user-id",
+            "email": "test@example.com",
+            "app_metadata": {"providers": ["google"]}
+        }
+
+    app.dependency_overrides[get_user_from_auth] = mock_get_user_with_provider
+
+    with TestClient(app) as client:
+        response = client.get("/auth/link-user-oauth-url/google")
+        assert response.status_code == 400
+        assert "already linked" in response.json()["detail"]
+
+
+def test_get_oauth_link_url_endpoint_failure(auth_client):
+    """Test OAuth link endpoint when underlying call fails - covers exception handling"""
+    with patch('apps.user_service.app.api.auth.get_oauth_link_url',
+               AsyncMock(side_effect=Exception("boom"))):
+        response = auth_client.get("/auth/link-user-oauth-url/google")
+        assert response.status_code == 500
+        assert "Failed to generate" in response.json()["detail"]
+
+
+def test_oauth_connect_success(auth_client):
+    """Test oauth_connect success path"""
+    with patch('apps.user_service.app.api.auth.supabase_user_oauth',
+               AsyncMock(return_value={"url": "https://example.com/oauth"})):
+        response = auth_client.get("/auth/oauth-connect/google")
+        assert response.status_code == 200
+        assert response.json() == {"url": "https://example.com/oauth"}
+
+
+def test_oauth_connect_failure(auth_client):
+    """Test oauth_connect raising exception"""
+    with patch('apps.user_service.app.api.auth.supabase_user_oauth',
+               AsyncMock(side_effect=Exception("failed"))):
+        response = auth_client.get("/auth/oauth-connect/google")
+        assert response.status_code == 500
+        assert "Failed to generate" in response.json()["detail"]
+
+
+def test_oauth_callback_success(auth_client):
+    """Test oauth_callback success flow"""
+    session_mock = SimpleNamespace(session=SimpleNamespace(access_token="token"))
+    with patch('apps.user_service.app.api.auth.get_session_by_id_admin',
+               AsyncMock(return_value=session_mock)):
+        response = auth_client.get("/auth/oauth-callback?code=mycode")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["session"]["access_token"] == "token"
+
+
+def test_oauth_callback_missing_code(auth_client):
+    """Test oauth_callback when code missing"""
+    response = auth_client.get("/auth/oauth-callback")
+    assert response.status_code == 400
+    assert "Missing authorization code" in response.json()["detail"]
+
+
+def test_oauth_callback_invalid_session(auth_client):
+    """Test oauth_callback when session exchange fails"""
+    session_mock = SimpleNamespace(session=None)
+    with patch('apps.user_service.app.api.auth.get_session_by_id_admin',
+               AsyncMock(return_value=session_mock)):
+        response = auth_client.get("/auth/oauth-callback?code=mycode")
+        assert response.status_code == 400
+        assert "Failed to exchange authorization code" in response.json()["detail"]
+
+
+def test_refresh_endpoint_success(auth_client):
+    """Test refresh endpoint success path"""
+    refresh_response = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="new-access",
+            refresh_token="new-refresh",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="user-id",
+            email="user@example.com",
+            user_metadata={"first_name": "Test", "last_name": "User", "timezone": "UTC"},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.refresh_session',
+               AsyncMock(return_value=refresh_response)), \
+         patch('apps.user_service.app.api.auth.jwt.decode',
+               side_effect=jwt.ExpiredSignatureError("Token expired")), \
+         patch('apps.user_service.app.api.auth.os.getenv', return_value="test-secret"):
+        response = auth_client.put(
+            "/auth/refresh",
+            headers={
+                "Access-Token": "expired-token",
+                "Refresh-Token": "refresh-token",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["access_token"] == "new-access"
+        assert data["user"]["email"] == "user@example.com"
+
+
+def test_refresh_endpoint_token_not_expired(auth_client):
+    """Test refresh endpoint when access token not expired"""
+    future_token = jwt.encode(
+        {"exp": int((datetime.now() + timedelta(hours=1)).timestamp()), "aud": "authenticated"},
+        "secret",
+        algorithm="HS256",
+    )
+
+    with patch('apps.user_service.app.api.auth.os.getenv', return_value="secret"):
+        response = auth_client.put(
+            "/auth/refresh",
+            headers={
+                "Access-Token": future_token,
+                "Refresh-Token": "refresh-token",
+            },
+        )
+        assert response.status_code == 400
+        assert "Token is not expired" in response.json()["detail"]
+
+
+def test_refresh_endpoint_handles_exception(auth_client):
+    """Test refresh endpoint when refresh session fails"""
+    with patch('apps.user_service.app.api.auth.refresh_session',
+               AsyncMock(side_effect=Exception("boom"))):
+        response = auth_client.put(
+            "/auth/refresh",
+            headers={
+                "Access-Token": "expired-token",
+                "Refresh-Token": "refresh-token",
+            },
+        )
+        assert response.status_code == 500
+        assert "Authentication failed" in response.json()["detail"]
 
 def test_delete_user_endpoint_success(auth_client):
     """Test delete user - covers auth.py delete user function"""
