@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from supabase_auth.errors import AuthApiError
 
 from libs.shared_utils.common_query import log_exception
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client
 from apps.user_service.app.dependencies.logger import get_logger
 
 logger = get_logger("user_admin_operations")
@@ -120,7 +120,7 @@ async def update_metadata_of_user(user_id: str, metadata: dict) -> bool:
 async def update_password_with_link_identity(user_id: str, password: str) -> bool:
     """Add email/password identity to existing OAuth user using updateUser."""
     try:
-        supabase_admin = await get_supabase_admin_client()
+        supabase_admin = await get_fresh_supabase_admin_client()
 
 
         # First, get the user to check their current providers and email
@@ -159,7 +159,14 @@ async def update_password_with_link_identity(user_id: str, password: str) -> boo
         return result is not None
 
     except AuthApiError as e:
+        error_message = str(e).lower()
         logger.error("Supabase Auth API error updating password of user: %s", e, exc_info=True)
+        # Re-raise with more context for "User not allowed" errors
+        if "user not allowed" in error_message or "not allowed" in error_message:
+            raise HTTPException(
+                status_code=403,
+                detail="User account is restricted. Please contact support if you believe this is an error."
+            ) from e
         raise
     except APIError as e:
         logger.error("Supabase API error updating password of user: %s", e, exc_info=True)

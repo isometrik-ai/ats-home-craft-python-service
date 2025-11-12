@@ -128,6 +128,7 @@ class UserInfo(BaseModel):
     email: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    phone: Optional[str] = None
     tzone: Optional[str] = Field(alias="timezone")
 
 
@@ -195,6 +196,25 @@ class ForgotPasswordRequest(BaseModel):
 
 class ForgotPasswordResponse(ResponseModel):
     """Response model for forgot password operations"""
+
+
+class ChangePasswordRequest(BaseModel):
+    """Request model for change password operations"""
+    
+    current_password: str = Field(..., description="Current password for verification")
+    new_password: str = Field(..., min_length=6, description="New password to set")
+
+    @field_validator("new_password")
+    def validate_password(cls, v):
+        """Validate password meets minimum length requirements"""
+        if len(v) < 6:
+            raise ValueError(PASSWORD_CONDITION_MESSAGE)
+        return v
+
+
+class ChangePasswordResponse(ResponseModel):
+    """Response model for change password operations"""
+    message: str = Field(default="Password changed successfully", description="Response message")
 
 
 # """
