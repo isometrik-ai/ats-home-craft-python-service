@@ -49,7 +49,7 @@ class TestVerificationOperations:
 
         with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
-            
+
             result = await create_verification_code(
                 type_text="EMAIL",
                 given_input="test@example.com",
@@ -92,7 +92,7 @@ class TestVerificationOperations:
 
         with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
-            
+
             result = await create_verification_code(
                 type_text="EMAIL",
                 given_input="test@example.com",
@@ -134,7 +134,7 @@ class TestVerificationOperations:
 
         with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
-            
+
             result = await create_verification_code(
                 type_text="EMAIL",
                 given_input="test@example.com",
@@ -174,7 +174,7 @@ class TestVerificationOperations:
 
         with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
-            
+
             result = await get_verification_code_by_id(verification_id)
 
             assert result["id"] == verification_id
@@ -198,7 +198,7 @@ class TestVerificationOperations:
 
         with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
-            
+
             result = await get_verification_code_by_id(verification_id)
 
             assert result is None

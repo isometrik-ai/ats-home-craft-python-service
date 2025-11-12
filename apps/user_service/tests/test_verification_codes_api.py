@@ -23,7 +23,7 @@ def mock_rate_limiter():
             def decorator(func):
                 return func
             return decorator
-    
+
     with patch('apps.user_service.app.api.verification_codes.limiter', DummyLimiter()):
         yield
 
@@ -79,7 +79,7 @@ def mock_verification_record():
     """Mock verification code record."""
     current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     expiry_at = current_time_ms + (10 * 60 * 1000)  # 10 minutes from now
-    
+
     return {
         "id": str(uuid.uuid4()),
         "type_text": "EMAIL",
@@ -131,9 +131,9 @@ class TestSendVerificationCode:
                    AsyncMock(return_value=mock_verification_record)), \
              patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
                    return_value=True):
-            
+
             response = client.post("/v1/verification-code/send", json=request_data)
-            
+
             assert response.status_code == 200
             data = response.json()
             assert "verificationId" in data
@@ -157,9 +157,9 @@ class TestSendVerificationCode:
                    AsyncMock(return_value=[])), \
              patch('apps.user_service.app.api.verification_codes.create_verification_code',
                    AsyncMock(return_value=phone_record)):
-            
+
             response = client.post("/v1/verification-code/send", json=request_data)
-            
+
             assert response.status_code == 200
             data = response.json()
             assert "verificationId" in data
@@ -187,9 +187,9 @@ class TestSendVerificationCode:
                    AsyncMock(return_value=recent_codes)), \
              patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
                    AsyncMock(return_value=recent_codes)):
-            
+
             response = client.post("/v1/verification-code/send", json=request_data)
-            
+
             assert response.status_code == 429
             assert "Maximum verification attempts" in response.json()["detail"]
 
@@ -200,7 +200,7 @@ class TestSendVerificationCode:
         }
 
         response = client.post("/v1/verification-code/send", json=request_data)
-        
+
         assert response.status_code == 422
 
     def test_send_verification_code_validation_error_missing_phone(self, client):
@@ -210,7 +210,7 @@ class TestSendVerificationCode:
         }
 
         response = client.post("/v1/verification-code/send", json=request_data)
-        
+
         assert response.status_code == 422
 
     def test_send_verification_code_validation_error_wrong_field(self, client):
@@ -221,7 +221,7 @@ class TestSendVerificationCode:
         }
 
         response = client.post("/v1/verification-code/send", json=request_data)
-        
+
         assert response.status_code == 422
 
     def test_send_verification_code_email_sends_email(self, client, mock_verification_record):
@@ -236,11 +236,11 @@ class TestSendVerificationCode:
              patch('apps.user_service.app.api.verification_codes.create_verification_code',
                    AsyncMock(return_value=mock_verification_record)), \
              patch('apps.user_service.app.api.verification_codes.send_verification_code_email') as mock_send_email:
-            
+
             mock_send_email.return_value = True
-            
+
             response = client.post("/v1/verification-code/send", json=request_data)
-            
+
             assert response.status_code == 200
             mock_send_email.assert_called_once()
             call_args = mock_send_email.call_args
@@ -263,9 +263,9 @@ class TestSendVerificationCode:
              patch('apps.user_service.app.api.verification_codes.create_verification_code',
                    AsyncMock(return_value=phone_record)), \
              patch('apps.user_service.app.api.verification_codes.send_verification_code_email') as mock_send_email:
-            
+
             response = client.post("/v1/verification-code/send", json=request_data)
-            
+
             assert response.status_code == 200
             mock_send_email.assert_not_called()
 
@@ -286,14 +286,14 @@ class TestSendVerificationCode:
                    AsyncMock(return_value=record_with_user)) as mock_create, \
              patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
                    return_value=True):
-            
+
             response = client_with_auth.post("/v1/verification-code/send", json=request_data)
-            
+
             assert response.status_code == 200
             data = response.json()
             assert "verificationId" in data
             assert "expiryAt" in data
-            
+
             # Verify create_verification_code was called with user_id
             mock_create.assert_called_once()
             call_kwargs = mock_create.call_args[1]
@@ -321,9 +321,9 @@ class TestVerifyVerificationCode:
                    AsyncMock(return_value=mock_verification_record)), \
              patch('apps.user_service.app.api.verification_codes.update_verification_code',
                    AsyncMock(return_value=mock_verification_record)):
-            
+
             response = client.post("/v1/verification-code/verify", json=request_data)
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["verified"] is True
@@ -340,9 +340,9 @@ class TestVerifyVerificationCode:
 
         with patch('apps.user_service.app.api.verification_codes.get_verification_code_by_id',
                    AsyncMock(return_value=None)):
-            
+
             response = client.post("/v1/verification-code/verify", json=request_data)
-            
+
             assert response.status_code == 404
             assert "Verification code not found" in response.json()["detail"]
 
@@ -358,9 +358,9 @@ class TestVerifyVerificationCode:
 
         with patch('apps.user_service.app.api.verification_codes.get_verification_code_by_id',
                    AsyncMock(return_value=mock_verified_record)):
-            
+
             response = client.post("/v1/verification-code/verify", json=request_data)
-            
+
             assert response.status_code == 400
             assert "already been verified" in response.json()["detail"]
 
@@ -376,9 +376,9 @@ class TestVerifyVerificationCode:
 
         with patch('apps.user_service.app.api.verification_codes.get_verification_code_by_id',
                    AsyncMock(return_value=mock_expired_record)):
-            
+
             response = client.post("/v1/verification-code/verify", json=request_data)
-            
+
             assert response.status_code == 400
             assert "expired" in response.json()["detail"]
 
@@ -396,9 +396,9 @@ class TestVerifyVerificationCode:
                    AsyncMock(return_value=mock_verification_record)), \
              patch('apps.user_service.app.api.verification_codes.update_verification_code',
                    AsyncMock(return_value=mock_verification_record)):
-            
+
             response = client.post("/v1/verification-code/verify", json=request_data)
-            
+
             assert response.status_code == 400
             assert "Invalid verification code" in response.json()["detail"]
             assert "Attempt 1" in response.json()["detail"]
@@ -415,16 +415,16 @@ class TestVerifyVerificationCode:
 
         with patch('apps.user_service.app.api.verification_codes.get_verification_code_by_id',
                    AsyncMock(return_value=mock_verification_record)):
-            
+
             response = client.post("/v1/verification-code/verify", json=request_data)
-            
+
             assert response.status_code == 400
             assert "does not match" in response.json()["detail"]
 
     def test_verify_verification_code_multiple_attempts(self, client, mock_verification_record):
         """Test verify with multiple failed attempts."""
         verification_id = mock_verification_record["id"]
-        
+
         # Add existing attempts
         record_with_attempts = mock_verification_record.copy()
         record_with_attempts["attempts"] = [
@@ -443,9 +443,9 @@ class TestVerifyVerificationCode:
                    AsyncMock(return_value=record_with_attempts)), \
              patch('apps.user_service.app.api.verification_codes.update_verification_code',
                    AsyncMock(return_value=record_with_attempts)):
-            
+
             response = client.post("/v1/verification-code/verify", json=request_data)
-            
+
             assert response.status_code == 400
             assert "Invalid verification code" in response.json()["detail"]
             assert "Attempt 3" in response.json()["detail"]
@@ -469,9 +469,9 @@ class TestVerifyVerificationCode:
                    AsyncMock(return_value=phone_record)), \
              patch('apps.user_service.app.api.verification_codes.update_verification_code',
                    AsyncMock(return_value=phone_record)):
-            
+
             response = client.post("/v1/verification-code/verify", json=request_data)
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["verified"] is True
@@ -483,7 +483,7 @@ class TestVerifyVerificationCode:
         }
 
         response = client.post("/v1/verification-code/verify", json=request_data)
-        
+
         assert response.status_code == 422
 
     def test_verify_verification_code_validation_error_wrong_type(self, client):
@@ -496,7 +496,7 @@ class TestVerifyVerificationCode:
         }
 
         response = client.post("/v1/verification-code/verify", json=request_data)
-        
+
         assert response.status_code == 422
 
     def test_verify_verification_code_database_error(self, client, mock_verification_record):
@@ -513,9 +513,9 @@ class TestVerifyVerificationCode:
                    AsyncMock(return_value=mock_verification_record)), \
              patch('apps.user_service.app.api.verification_codes.update_verification_code',
                    AsyncMock(side_effect=Exception("Database error"))):
-            
+
             response = client.post("/v1/verification-code/verify", json=request_data)
-            
+
             # Should handle error gracefully (500 or handled by exception middleware)
             assert response.status_code in [500, 400]
 
@@ -532,9 +532,9 @@ class TestVerifyVerificationCode:
                    AsyncMock(return_value=mock_verification_record)), \
              patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
                    return_value=False):  # Email fails
-            
+
             response = client.post("/v1/verification-code/send", json=request_data)
-            
+
             # Should still succeed even if email fails
             assert response.status_code == 200
             assert "verificationId" in response.json()
@@ -552,9 +552,9 @@ class TestVerifyVerificationCode:
                    AsyncMock(return_value=mock_verification_record)), \
              patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
                    side_effect=Exception("Email service error")):
-            
+
             response = client.post("/v1/verification-code/send", json=request_data)
-            
+
             # Should still succeed even if email throws exception
             assert response.status_code == 200
             assert "verificationId" in response.json()

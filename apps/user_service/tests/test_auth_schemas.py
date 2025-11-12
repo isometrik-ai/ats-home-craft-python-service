@@ -12,6 +12,7 @@ Last Updated: 2024-12-19
 """
 
 import pytest
+from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from apps.user_service.app.schemas.auth import (
@@ -212,11 +213,18 @@ class TestBasicModels:
 
     def test_user_info_model(self):
         """Test UserInfo model."""
-        user_info = UserInfo(id="123", email="test@example.com", first_name="John", last_name="Doe")
+        user_info = UserInfo(
+            id="123",
+            email="test@example.com",
+            first_name="John",
+            last_name="Doe",
+            timezone="UTC",
+        )
         assert user_info.id == "123"
         assert user_info.email == "test@example.com"
         assert user_info.first_name == "John"
         assert user_info.last_name == "Doe"
+        assert user_info.model_dump(by_alias=True)["timezone"] == "UTC"
 
     def test_organization_info_model(self):
         """Test OrganizationInfo model."""
@@ -237,8 +245,19 @@ class TestBasicModels:
 
     def test_auth_response_model(self):
         """Test AuthResponse model."""
-        user_info = UserInfo(id="123", email="test@example.com", full_name="John Doe")
-        auth_response = AuthResponse(access_token="token123", user=user_info)
+        user_info = UserInfo(
+            id="123",
+            email="test@example.com",
+            full_name="John Doe",
+            timezone="UTC",
+        )
+        auth_response = AuthResponse(
+            access_token="token123",
+            refresh_token="refresh123",
+            expires_in=3600,
+            expires_at=datetime.now(timezone.utc),
+            user=user_info,
+        )
         assert auth_response.access_token == "token123"
         assert auth_response.user == user_info
 

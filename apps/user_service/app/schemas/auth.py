@@ -9,7 +9,7 @@ import secrets
 import hashlib
 from enum import Enum
 from typing import List, Optional, Dict, Any
-
+from datetime import datetime
 from pydantic import BaseModel, Field, model_validator, EmailStr, field_validator
 from fastapi import HTTPException, status
 
@@ -126,9 +126,9 @@ class UserInfo(BaseModel):
 
     id: str
     email: str
-    # full_name: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    tzone: Optional[str] = Field(alias="timezone")
 
 
 class OrganizationInfo(BaseModel):
@@ -146,6 +146,9 @@ class AuthResponse(BaseModel):
     """Response model for authentication operations"""
 
     access_token: str
+    refresh_token: str
+    expires_in: int
+    expires_at: datetime
     user: UserInfo
 
 

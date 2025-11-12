@@ -28,11 +28,11 @@ class VerificationType(str, Enum):
 
 class SendVerificationCodeRequest(BaseModel):
     """Request model for sending verification code"""
-    
+
     type: VerificationType = Field(..., description="Type of verification: EMAIL or PHONE_NUMBER")
     email: Optional[EmailStr] = Field(None, description="Email address for verification")
     phoneNumber: Optional[str] = Field(None, description="Phone number for verification")
-    
+
     @model_validator(mode='after')
     def validate_email_or_phone(self):
         """Validate that either email or phoneNumber is provided based on type"""
@@ -51,13 +51,13 @@ class SendVerificationCodeRequest(BaseModel):
 
 class VerifyVerificationCodeRequest(BaseModel):
     """Request model for verifying verification code"""
-    
+
     type: VerificationType = Field(..., description="Type of verification: EMAIL or PHONE_NUMBER")
     verificationId: str = Field(..., description="ID of the verification code record")
     verificationCode: str = Field(..., description="The verification code to verify")
     email: Optional[EmailStr] = Field(None, description="Email address for verification")
     phoneNumber: Optional[str] = Field(None, description="Phone number for verification")
-    
+
     @model_validator(mode='after')
     def validate_email_or_phone(self):
         """Validate that either email or phoneNumber is provided based on type"""
@@ -80,7 +80,7 @@ class VerifyVerificationCodeRequest(BaseModel):
 
 class SendVerificationCodeResponse(ResponseModel):
     """Response model for sending verification code"""
-    
+
     verificationId: str = Field(..., description="ID of the created verification code")
     expiryAt: int = Field(..., description="Expiry timestamp (Unix timestamp in milliseconds)")
     message: str = Field(default="Verification code sent successfully", description="Response message")
@@ -88,7 +88,7 @@ class SendVerificationCodeResponse(ResponseModel):
 
 class VerifyVerificationCodeResponse(ResponseModel):
     """Response model for verifying verification code"""
-    
+
     verified: bool = Field(..., description="Whether the verification was successful")
     message: str = Field(..., description="Response message")
 

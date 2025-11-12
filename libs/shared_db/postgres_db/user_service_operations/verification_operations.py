@@ -53,19 +53,19 @@ async def create_verification_code(
 ) -> Dict[str, Any]:
     """
     Create a new verification code record.
-    
+
     Args:
         type_text: Type of verification (EMAIL or PHONE_NUMBER)
         given_input: The input value (email or phone number)
         triggered_text: The triggered text (same as given_input for now)
         user_id: Optional user ID
         ip_address: Optional IP address
-    
+
     Returns:
         Dict containing the created verification code record
     """
     supabase = await get_supabase_admin_client()
-    
+
     # Generate verification code
     if OTP_ENABLED:
         # Generate cryptographically secure random 4-digit code (1000-9999)
@@ -74,11 +74,11 @@ async def create_verification_code(
     else:
         # Use default OTP from config
         verification_code = DEFAULT_OTP
-    
+
     # Calculate expiry time (current time + expiry minutes in milliseconds)
     current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     expiry_at = current_time_ms + (VERIFICATION_CODE_EXPIRY_MINUTES * 60 * 1000)
-    
+
     # Prepare data for insertion
     verification_data = {
         "type_text": type_text,
@@ -89,24 +89,24 @@ async def create_verification_code(
         "expiry_at": expiry_at,
         "attempts": []
     }
-    
+
     if user_id:
         verification_data["user_id"] = user_id
-    
+
     if ip_address:
         verification_data["ip_address"] = ip_address
-    
+
     # Insert into database
     result = await supabase.table("verification_codes").insert(verification_data).execute()
-    
+
     if not result.data or len(result.data) == 0:
         logger.error("Failed to create verification code")
         raise DatabaseOperationError(
             "Failed to create verification code",
             operation="create_verification_code"
         )
-    
-    logger.info(f"Verification code created: {result.data[0]['id']}")
+
+    logger.info("Verification code created: %s", result.data[0]['id'])
     return result.data[0]
 
 
@@ -116,17 +116,17 @@ async def create_verification_code(
 async def get_verification_code_by_id(verification_id: str) -> Optional[Dict[str, Any]]:
     """
     Get verification code by ID.
-    
+
     Args:
         verification_id: The verification code record ID
-    
+
     Returns:
         Dict containing the verification code record or None if not found
     """
     supabase = await get_supabase_admin_client()
-    
+
     result = await supabase.table("verification_codes").select("*").eq("id", verification_id).execute()
-    
+
     if result.data and len(result.data) > 0:
         return result.data[0]
     return None
@@ -144,37 +144,37 @@ async def get_recent_verification_codes(
     """
     Get recent verification codes for a given type and input.
     Used to check attempt counts.
-    
+
     Args:
         type_text: Type of verification (EMAIL or PHONE_NUMBER)
         given_input: The input value (email or phone number)
         limit: Maximum number of records to return
         window_hours: Optional time window in hours (e.g., 24 for per-day limit)
-    
+
     Returns:
         List of verification code records
     """
     supabase = await get_supabase_admin_client()
-    
+
     query = (
         supabase.table("verification_codes")
         .select("*")
         .eq("type_text", type_text)
         .eq("given_input", given_input)
     )
-    
+
     # If window_hours is specified, filter by time window
     if window_hours:
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=window_hours)
         query = query.gte("created_at", cutoff_time.isoformat())
-    
+
     result = await (
         query
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
     )
-    
+
     return result.data if result.data else []
 
 
@@ -188,35 +188,35 @@ async def update_verification_code(
 ) -> Dict[str, Any]:
     """
     Update verification code record.
-    
+
     Args:
         verification_id: The verification code record ID
         verified: Whether the code was verified
         attempts: Updated attempts array
-    
+
     Returns:
         Dict containing the updated verification code record
     """
     supabase = await get_supabase_admin_client()
-    
+
     update_data = {
         "verified": verified,
         "attempts": attempts
     }
-    
+
     result = await (
         supabase.table("verification_codes")
         .update(update_data)
         .eq("id", verification_id)
         .execute()
     )
-    
+
     if not result.data or len(result.data) == 0:
-        logger.error(f"Failed to update verification code: {verification_id}")
+        logger.error("Failed to update verification code: %s", verification_id)
         raise DatabaseOperationError(
             f"Failed to update verification code: {verification_id}",
             operation="update_verification_code"
         )
-    
+
     return result.data[0]
 
