@@ -17,7 +17,7 @@ Organisation-Specific Operations Covered:
 6. Default permissions and roles setup
 """
 
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Tuple
 
 from fastapi import HTTPException, status
 from postgrest import APIError
@@ -27,13 +27,16 @@ from apps.user_service.app.dependencies.common_utils import ORG_STATUSES
 from apps.user_service.app.dependencies.logger import get_logger
 
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
-from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
     create_new_organisation,
     create_super_admin_role,
     create_default_permissions_for_organisation,
     assign_all_permissions_to_role,
     add_member_to_organisation,
+)
+from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
+    DatabaseOperationError,
+    SupabaseAPIError,
 )
 
 logger = get_logger("organisation_utils")
@@ -131,27 +134,42 @@ def build_organisation_filter_message(
     return f"All organizations retrieved successfully{filter_text}"
 
 
+async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None:
+    """
+    Create a new organisation with super admin role and default permissions.
 
-async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a new organisation."""
+    This function performs a multi-step operation:
+    1. Creates the organization record
+    2. Creates a super admin role for the organization
+    3. Creates default permissions for the organization
+    4. Assigns all permissions to the super admin role
+    5. Adds the user as an organization member with super admin role
+
+    Args:
+        org_data: Dictionary containing organization and user data
+
+    Returns:
+        None
+    Raises:
+        HTTPException:
+            - 409: If organization slug already exists (duplicate key violation)
+            - 500: For RLS policy violations or other database errors
+    """
     try:
+        # Step 1: Create the organization record
         await create_new_organisation(org_data)
 
-        # Create Super Admin role
+        # Step 2: Create Super Admin role
         super_admin_role_result = await create_super_admin_role(org_data["organization_id"])
         super_admin_role_id = super_admin_role_result['id']
 
-        # Create default permissions
-        await create_default_permissions_for_organisation(
-            org_data["organization_id"]
-        )
+        # Step 3: Create default permissions
+        await create_default_permissions_for_organisation(org_data["organization_id"])
 
-        # Assign all permissions to Super Admin role
-        await assign_all_permissions_to_role(
-            super_admin_role_id, org_data["organization_id"]
-        )
+        # Step 4: Assign all permissions to Super Admin role
+        await assign_all_permissions_to_role(super_admin_role_id, org_data["organization_id"])
 
-        # Create organization member
+        # Step 5: Add user as organization member
         await add_member_to_organisation(org_data["organization_id"], {
             "user_id": org_data["user_id"],
             "email": org_data["email"],
@@ -163,95 +181,125 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> Dict
             "status": "active",
         })
 
-    except Exception as db_error:
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is (preserves status codes)
+        raise
+    except (APIError, SupabaseAPIError) as api_error:
+        """
+        Handle Supabase API errors (PostgreSQL errors wrapped by Supabase).
+        These can include:
+        - Duplicate key violations (error code 23505)
+        - RLS policy violations (error code 42501)
+        - Other database constraint violations
+        """
         log_exception()
 
-        # Check for duplicate key errors (e.g., duplicate slug)
-        error_message = str(db_error).lower()
+        # Extract error code and message from APIError
         error_code = None
+        error_message = ""
 
-        # Check if it's an APIError with code 23505 (PostgreSQL duplicate key violation)
-        if isinstance(db_error, APIError):
-            # APIError might have message as dict or string
-            error_details = getattr(db_error, 'message', {})
+        if isinstance(api_error, APIError):
+            # Direct APIError from postgrest
+            error_details = getattr(api_error, 'message', {})
             if isinstance(error_details, dict):
                 error_code = error_details.get('code')
                 error_message = str(error_details.get('message', '')).lower()
             elif isinstance(error_details, str):
                 error_message = error_details.lower()
+        elif isinstance(api_error, SupabaseAPIError):
+            # SupabaseAPIError - check if original error is accessible
+            original_error = api_error.__cause__
+            if isinstance(original_error, APIError):
+                error_details = getattr(original_error, 'message', {})
+                if isinstance(error_details, dict):
+                    error_code = error_details.get('code')
+                    error_message = str(error_details.get('message', '')).lower()
+                elif isinstance(error_details, str):
+                    error_message = error_details.lower()
 
-            # Also check args and other attributes
-            if hasattr(db_error, 'args') and db_error.args:
-                for arg in db_error.args:
-                    if isinstance(arg, dict):
-                        error_code = arg.get('code') or error_code
-                        if 'message' in arg:
-                            error_message += " " + str(arg.get('message', '')).lower()
+        # Build comprehensive error message for pattern matching
+        error_str = str(api_error).lower()
+        if hasattr(api_error, '__dict__'):
+            error_str += " " + str(api_error.__dict__).lower()
 
-        # Check error message string for duplicate key patterns
-        error_str = str(db_error).lower()
-        if hasattr(db_error, '__dict__'):
-            error_str += " " + str(db_error.__dict__).lower()
-
-        # Check for duplicate key violations in error message or code
-        if (
-            error_code == '23505'
-            or str(error_code) == '23505'
-            or 'duplicate key' in error_message
-            or 'duplicate key' in error_str
-            or 'organizations_slug_key' in error_message
-            or 'organizations_slug_key' in error_str
-            or ('slug' in error_message and 'duplicate' in error_message)
-            or ('slug' in error_str and 'duplicate' in error_str)
-        ):
-            # Try to delete the Supabase user if organization creation failed due to duplicate slug
-            try:
-                await delete_auth_user(org_data["user_id"])
-            except Exception:
-                # Ignore cleanup errors for duplicate slug case
-                pass
-
+        # Check for duplicate key violation (PostgreSQL error code 23505)
+        # This typically occurs when organization slug already exists
+        if any([
+            error_code == '23505',
+            str(error_code) == '23505',
+            'duplicate key' in error_message,
+            'duplicate key' in error_str,
+            'organizations_slug_key' in error_message,
+            'organizations_slug_key' in error_str,
+            all(word in error_message for word in ('slug', 'duplicate')),
+            all(word in error_str for word in ('slug', 'duplicate'))
+        ]):
+            logger.warning(
+                "Duplicate organization slug detected - Organization ID: %s, Slug: %s",
+                org_data.get("organization_id"), org_data.get("slug")
+            )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Organisation slug already exists. Please choose a different name.",
-            ) from db_error
+            ) from api_error
 
-        # Check for Row Level Security (RLS) policy violations
-        if (
-            error_code == '42501'
-            or str(error_code) == '42501'
-            or 'row-level security policy' in error_message
-            or 'row-level security policy' in error_str
-            or 'violates row-level security' in error_message
-            or 'violates row-level security' in error_str
-        ):
-            # Try to delete the Supabase user if organization creation failed due to RLS
-            try:
-                await delete_auth_user(org_data["user_id"])
-            except Exception:
-                # Ignore cleanup errors for RLS case
-                pass
-
+        # Check for Row Level Security (RLS) policy violation (PostgreSQL error code 42501)
+        if any([
+            str(error_code) == '42501',
+            'row-level security policy' in error_message,
+            'row-level security policy' in error_str,
+            'violates row-level security' in error_message,
+            'violates row-level security' in error_str
+        ]):
             logger.error(
-                "RLS policy violation during organization creation - Organization ID: %s, User ID: %s, Error: %s",
-                org_data.get("organization_id"), org_data.get("user_id"), str(db_error)
+                "RLS policy violation during organization creation"
+                "- Organization ID: %s, User ID: %s, Error: %s",
+                org_data.get("organization_id"), org_data.get("user_id"), str(api_error)
             )
-
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database security policy error. Please contact support. Error: Row-level security policy violation.",
-            ) from db_error
+                detail="Database security policy error. Please contact support."
+                " Error: Row-level security policy violation.",
+            ) from api_error
 
-        # Try to delete the Supabase user if database transaction fails
-        try:
-            await delete_auth_user(org_data["user_id"])
-        except Exception as cleanup_error:  # noqa: W0718
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create account. Please try again.",
-            ) from cleanup_error
+        # Other API errors - generic database error
+        logger.error(
+            "Database API error during organization creation - Organization ID: %s, Error: %s",
+            org_data.get("organization_id"), str(api_error)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create account. Please try again.",
+        ) from api_error
 
+    except DatabaseOperationError as db_error:
+        """
+        Handle other database operation errors (network, validation, etc.)
+        These are wrapped by the handle_database_errors decorator.
+        """
+        log_exception()
+        logger.error(
+            "Database operation error during organization creation "
+            "- Organization ID: %s, Error: %s",
+            org_data.get("organization_id"), str(db_error)
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create account. Please try again.",
         ) from db_error
+
+    except Exception as unexpected_error:
+        """
+        Handle any other unexpected errors.
+        This should rarely happen as database operations are wrapped.
+        """
+        log_exception()
+        logger.error(
+            "Unexpected error during organization creation - Organization ID: %s, Error: %s",
+            org_data.get("organization_id"), str(unexpected_error),
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create account. Please try again.",
+        ) from unexpected_error
