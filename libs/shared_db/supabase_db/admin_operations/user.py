@@ -27,7 +27,7 @@ async def ban_the_user(user_id: str) -> bool:
     """Ban a user in the organization."""
     supabase = await get_supabase_admin_client()
     try:
-        result = supabase.auth.admin.update_user_by_id(user_id,{"ban_duration": "365d"})
+        result = await supabase.auth.admin.update_user_by_id(user_id,{"ban_duration": "365d"})
         return result.user is not None
 
     except APIError as e:
@@ -45,7 +45,7 @@ async def unban_the_user(user_id: str) -> bool:
     """Unban a user in the organization."""
     supabase = await get_supabase_admin_client()
     try:
-        result = supabase.auth.admin.update_user_by_id(user_id,{"ban_duration": "none"})
+        result = await supabase.auth.admin.update_user_by_id(user_id,{"ban_duration": "none"})
         return result.user is not None
 
     except APIError as e:
@@ -87,7 +87,7 @@ async def update_email_of_user(user_id: str, email: str) -> bool:
     """Update email of user in auth.users table."""
     supabase = await get_supabase_admin_client()
     try:
-        result = supabase.auth.admin.update_user_by_id(user_id,{"email": email})
+        result = await supabase.auth.admin.update_user_by_id(user_id,{"email": email})
         return result.user is not None
     except APIError as e:
         logger.error("Supabase API error updating email of user: %s", e, exc_info=True)
@@ -104,8 +104,8 @@ async def update_metadata_of_user(user_id: str, metadata: dict) -> bool:
     """Update metadata of user in auth.users table."""
     supabase = await get_supabase_admin_client()
     try:
-        result = supabase.auth.admin.update_user_by_id(user_id,{"user_metadata": metadata})
-        return result is not None
+        result = await supabase.auth.admin.update_user_by_id(user_id,{"user_metadata": metadata})
+        return result.user is not None
     except APIError as e:
         logger.error("Supabase API error updating metadata of user: %s", e, exc_info=True)
         raise
@@ -114,6 +114,39 @@ async def update_metadata_of_user(user_id: str, metadata: dict) -> bool:
         raise
     except (KeyError, TypeError, ValueError) as e:
         logger.error("Data validation error updating metadata of user: %s", e, exc_info=True)
+        raise
+
+
+async def update_phone_of_user(user_id: str, phone: str) -> bool:
+    """Update phone number of user in auth.users table user_metadata."""
+    supabase = await get_supabase_admin_client()
+    try:
+        # First get current user to preserve existing metadata
+        user_data = await get_user_by_id(user_id)
+        if not user_data:
+            logger.error("User not found: %s", user_id)
+            raise ValueError(f"User not found: {user_id}")
+
+        # Get existing user_metadata or create empty dict
+        # get_user_by_id returns a UserResponse object with .user attribute
+        existing_metadata = user_data.user.user_metadata if hasattr(user_data, 'user') and user_data.user else {}
+        if not existing_metadata:
+            existing_metadata = {}
+        
+        # Update phone in metadata
+        updated_metadata = {**existing_metadata, "phone": phone}
+        
+        # Update user with new metadata
+        result = await supabase.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+        return result.user is not None
+    except APIError as e:
+        logger.error("Supabase API error updating phone of user: %s", e, exc_info=True)
+        raise
+    except (HTTPError, RequestError, TimeoutException) as e:
+        logger.error("Network error updating phone of user: %s", e, exc_info=True)
+        raise
+    except (KeyError, TypeError, ValueError) as e:
+        logger.error("Data validation error updating phone of user: %s", e, exc_info=True)
         raise
 
 

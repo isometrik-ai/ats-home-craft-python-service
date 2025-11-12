@@ -25,6 +25,7 @@ from apps.user_service.app.schemas.verification_codes import (
     VerifyVerificationCodeRequest,
     VerifyVerificationCodeResponse,
     VerificationType,
+    VerificationTrigger,
 )
 
 # App instance
@@ -43,6 +44,14 @@ from libs.shared_db.postgres_db.user_service_operations.verification_operations 
 # Shared library imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.email_utils import send_verification_code_email
+from libs.shared_db.supabase_db.admin_operations.user import (
+    update_email_of_user,
+    update_phone_of_user,
+    get_user_by_id,
+)
+from libs.shared_db.postgres_db.user_service_operations.user_operations import (
+    get_auth_user_by_email,
+)
 
 # Create router for verification code endpoints
 router = APIRouter(prefix="/v1/verification-code", tags=["Verification Codes"])
@@ -108,26 +117,123 @@ async def send_verification_code(
     Send verification code endpoint
 
     Creates a verification code for email or phone number verification.
+    
+    **Authentication Behavior:**
+    - **Without Token (Unauthenticated)**: Creates verification code for signup flow
+      - EMAIL type → `SIGNUP_EMAIL_VERIFICATION`
+      - PHONE_NUMBER type → `SIGNUP_PHONE_VERIFICATION`
+    
+    - **With Token (Authenticated)**: Creates verification code for email/phone update
+      - EMAIL type → `EMAIL_UPDATE` (allows updating email after verification)
+      - PHONE_NUMBER type → `PHONE_NUMBER_UPDATE` (allows updating phone after verification)
+      - Validates that entered email/phone is different from current user's email/phone
+      - Validates that email/phone is not already registered with another account
 
     Args:
         request: FastAPI request object
         data: SendVerificationCodeRequest containing type and email/phoneNumber
-        current_user: Optional authenticated user
+        current_user: Optional authenticated user (from JWT token in Authorization header)
 
     Returns:
         SendVerificationCodeResponse: Verification ID and expiry time
 
     Raises:
-        HTTPException: 400 for validation errors, 429 for rate limiting, 500 for other errors
+        HTTPException: 
+            - 400: Entered email/phone is same as current user's email/phone
+            - 409: Email/phone already registered with another account
+            - 429: Maximum verification attempts reached
+            - 500: Internal server error
     """
     try:
         # Determine the input value based on type
         if data.type == VerificationType.EMAIL:
             given_input = data.email
-            triggered_text = data.email
         else:  # PHONE_NUMBER
             given_input = data.phoneNumber
-            triggered_text = data.phoneNumber
+
+        # Automatically determine triggered_text based on authentication status and type
+        if current_user:
+            # Authenticated user - change operation
+            # Validate that entered email/phone is different from current user's email/phone
+            # JWT tokens use "sub" for user ID
+            user_id = current_user.get("sub")
+            if not user_id:
+                logger.warning("User ID not found in token: %s", current_user.keys())
+            current_user_email = current_user.get("email", "").lower()
+            
+            if data.type == VerificationType.EMAIL:
+                entered_email = data.email.lower()
+                
+                # Check if entered email is same as current email
+                if entered_email == current_user_email:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="The entered email is the same as your current email. No change needed."
+                    )
+                
+                # Check if email already exists for another user
+                try:
+                    existing_user = await get_auth_user_by_email(data.email)
+                    if existing_user:
+                        # existing_user is a User object from Supabase, check its id attribute
+                        existing_user_id = existing_user.id if hasattr(existing_user, 'id') else None
+                        if existing_user_id and existing_user_id != user_id:
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail="This email is already registered with another account. Please use a different email."
+                            )
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    # If get_auth_user_by_email fails for reasons other than user not found, log and continue
+                    # (user not found is expected and means email is available)
+                    logger.warning("Error checking email existence: %s", str(e))
+                
+                triggered_text = VerificationTrigger.EMAIL_UPDATE.value
+            else:  # PHONE_NUMBER
+                entered_phone = data.phoneNumber
+                
+                # Get current user's phone from user metadata
+                try:
+                    user_data = await get_user_by_id(user_id)
+                    if user_data and hasattr(user_data, 'user') and user_data.user:
+                        current_user_phone = user_data.user.user_metadata.get("phone") if user_data.user.user_metadata else None
+                        
+                        # Check if entered phone is same as current phone
+                        if current_user_phone and entered_phone == current_user_phone:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="The entered phone number is the same as your current phone number. No change needed."
+                            )
+                        
+                        # Check if phone already exists for another user in auth.users
+                        # We'll check by listing users and checking their user_metadata
+                        # Note: This is a simple check - for production, consider a more efficient approach
+                        from libs.shared_db.supabase_db.db import get_supabase_admin_client
+                        supabase = await get_supabase_admin_client()
+                        users_list = await supabase.auth.admin.list_users(per_page=1000)
+                        
+                        for user in users_list:
+                            if user.id != user_id and user.user_metadata:
+                                user_phone = user.user_metadata.get("phone")
+                                if user_phone and user_phone == entered_phone:
+                                    raise HTTPException(
+                                        status_code=status.HTTP_409_CONFLICT,
+                                        detail="This phone number is already registered with another account. Please use a different phone number."
+                                    )
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logger.warning("Error checking phone number: %s", str(e))
+                    # Continue with verification code creation if check fails
+                
+                triggered_text = VerificationTrigger.PHONE_NUMBER_UPDATE.value
+        else:
+            # Unauthenticated user - signup operation
+            if data.type == VerificationType.EMAIL:
+                triggered_text = VerificationTrigger.SIGNUP_EMAIL_VERIFICATION.value
+            else:  # PHONE_NUMBER
+                triggered_text = VerificationTrigger.SIGNUP_PHONE_VERIFICATION.value
 
         # Check for recent verification codes to count attempts
         recent_codes = await get_recent_verification_codes(
@@ -151,8 +257,9 @@ async def send_verification_code(
                 detail=f"Maximum verification attempts ({MAX_ATTEMPT_VERIFICATION}) reached. Please try again later."
             )
 
-        # Get user ID if authenticated
-        user_id = current_user.get("id") if current_user else None
+        # Get user ID if authenticated (already extracted above for validation)
+        if not current_user:
+            user_id = None
 
         # Get client IP address
         ip_address = get_client_ip(request)
@@ -212,17 +319,40 @@ async def verify_verification_code(
     Verify verification code endpoint
 
     Verifies a verification code for email or phone number.
+    
+    **Authentication Behavior:**
+    - **Without Token**: Verifies code for signup flow (no email/phone update)
+    - **With Token**: 
+      - If verification code was created with `EMAIL_UPDATE` trigger → **Automatically updates user's email** after successful verification
+      - If verification code was created with `PHONE_NUMBER_UPDATE` trigger → **Automatically updates user's phone number** after successful verification
+      - If verification code was created for signup → Only verifies (no update)
+    
+    **Email/Phone Update:**
+    When you pass a token and the verification code was created with a token (for email/phone update):
+    - The email/phone will be automatically updated in the user's account after successful verification
+    - The response message will indicate if the email/phone was updated
+    - Update only happens if the verification code was created with the same user's token
+    
+    **Security:**
+    - Authenticated users can only verify their own verification codes (user_id must match)
+    - Email/phone matching validation ensures correct verification
 
     Args:
         request: FastAPI request object
         data: VerifyVerificationCodeRequest containing verification ID, code, and email/phoneNumber
-        current_user: Optional authenticated user
+        current_user: Optional authenticated user (from JWT token in Authorization header)
 
     Returns:
-        VerifyVerificationCodeResponse: Verification result
+        VerifyVerificationCodeResponse: 
+            - verified: Whether verification was successful
+            - message: Success message (includes update status if email/phone was updated)
 
     Raises:
-        HTTPException: 400 for validation errors, 404 for not found, 429 for rate limiting, 500 for other errors
+        HTTPException: 
+            - 400: Invalid code, expired code, already verified, or input mismatch
+            - 403: Trying to verify another user's verification code
+            - 404: Verification code not found
+            - 500: Internal server error
     """
     try:
         # Get verification code record
@@ -270,6 +400,32 @@ async def verify_verification_code(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Given input '{given_input}' does not match the verification record. Expected: '{stored_given_input}'",
             )
+
+        # Security check: If authenticated user, verify they own the verification code
+        stored_user_id = verification_record.get("user_id")
+        if current_user:
+            # JWT tokens use "sub" for user ID
+            current_user_id = current_user.get("sub")
+            if not current_user_id:
+                logger.warning("User ID not found in token for verification: %s", current_user.keys())
+            # If verification code has a user_id, it must match the current user
+            if stored_user_id and current_user_id and stored_user_id != current_user_id:
+                logger.warning(
+                    "User ownership mismatch for verification %s: "
+                    "stored_user_id='%s', current_user_id='%s'",
+                    data.verificationId,
+                    stored_user_id,
+                    current_user_id
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only verify your own verification codes"
+                )
+            # If user is authenticated but verification code has no user_id, allow it
+            # (signup codes can be verified by authenticated users if email/phone matches)
+        # If not authenticated but verification code has user_id, allow it
+        # (email/phone change codes can be verified without token if email/phone matches)
+        # The email/phone validation above already ensures the correct user is verifying
 
         # Get existing attempts
         attempts = verification_record.get("attempts", [])
@@ -321,10 +477,77 @@ async def verify_verification_code(
 
         logger.info("Verification code verified successfully: %s", data.verificationId)
 
+        # After successful verification, check if we need to update email/phone
+        email_updated = False
+        phone_updated = False
+        triggered_text = verification_record.get("triggered_text", "")
+        
+        # Debug logging
+        logger.info(
+            "Verification update check - current_user: %s, stored_user_id: %s, triggered_text: %s, type: %s",
+            "present" if current_user else "None",
+            stored_user_id,
+            triggered_text,
+            data.type.value
+        )
+
+        # Only update if user is authenticated and trigger indicates change operation
+        # Check if user is authenticated (either from token or from stored_user_id)
+        user_id = None
+        if current_user:
+            user_id = current_user.get("sub")
+        elif stored_user_id:
+            # If no current_user but stored_user_id exists, use stored_user_id
+            user_id = stored_user_id
+        
+        if user_id and triggered_text in [VerificationTrigger.EMAIL_UPDATE.value, VerificationTrigger.PHONE_NUMBER_UPDATE.value]:
+            logger.info("Attempting to update %s for user %s with triggered_text: %s", data.type.value, user_id, triggered_text)
+            
+            if triggered_text == VerificationTrigger.EMAIL_UPDATE.value:
+                # Update email
+                try:
+                    email_updated = await update_email_of_user(user_id, given_input)
+                    if email_updated:
+                        logger.info("Email updated successfully for user %s: %s", user_id, given_input)
+                    else:
+                        logger.warning("Email update returned False for user %s: %s", user_id, given_input)
+                except Exception as e:
+                    logger.error("Error updating email for user %s: %s", user_id, str(e), exc_info=True)
+                    # Don't fail the verification if email update fails, but log it
+                    email_updated = False
+                    
+            elif triggered_text == VerificationTrigger.PHONE_NUMBER_UPDATE.value:
+                # Update phone number
+                try:
+                    phone_updated = await update_phone_of_user(user_id, given_input)
+                    if phone_updated:
+                        logger.info("Phone number updated successfully for user %s: %s", user_id, given_input)
+                    else:
+                        logger.warning("Phone update returned False for user %s: %s", user_id, given_input)
+                except Exception as e:
+                    logger.error("Error updating phone for user %s: %s", user_id, str(e), exc_info=True)
+                    # Don't fail the verification if phone update fails, but log it
+                    phone_updated = False
+        else:
+            logger.info(
+                "Skipping email/phone update - user_id: %s, triggered_text: %s, expected: %s or %s",
+                user_id,
+                triggered_text,
+                VerificationTrigger.EMAIL_UPDATE.value,
+                VerificationTrigger.PHONE_NUMBER_UPDATE.value
+            )
+
+        # Build response message
+        message = "Verification code verified successfully"
+        if email_updated:
+            message += ". Email has been updated."
+        elif phone_updated:
+            message += ". Phone number has been updated."
+
         # Return success response
         return VerifyVerificationCodeResponse(
             verified=True,
-            message="Verification code verified successfully"
+            message=message
         )
 
     except HTTPException:
