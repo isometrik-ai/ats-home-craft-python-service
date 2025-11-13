@@ -392,16 +392,35 @@ async def update_user_profile(
     """
     Update authenticated user's own profile information.
     
-    Updates only the following fields:
-    - first_name
-    - last_name
-    - timezone
-    - avatar_url
+    **Self Profile Update:**
+    - Uses the authenticated user's ID from the JWT token (no user_id parameter needed)
+    - Users can only update their own profile
+    - No admin permissions required
     
-    full_name is automatically calculated from first_name + last_name.
-    Only fields provided in the request will be updated (partial updates supported).
-    Uses the authenticated user's ID from the JWT token (self profile update).
-    No admin permissions required - users can update their own profile.
+    **Updatable Fields:**
+    - `first_name`: Updated first name
+    - `last_name`: Updated last name
+    - `timezone`: Updated timezone preference (e.g., "America/New_York", "UTC")
+    - `avatar_url`: Updated avatar/profile picture URL
+    
+    **Automatic Behavior:**
+    - `full_name` is automatically calculated from `first_name + last_name` when either is updated
+    - Only fields provided in the request will be updated (partial updates supported)
+    - Updates both `organization_members` table (if user is in organization) and Supabase Auth `user_metadata`
+
+    Args:
+        request: FastAPI request object
+        current_user: Authenticated user from JWT token (required)
+        body: UpdateUserProfileRequest containing optional fields to update
+
+    Returns:
+        UpdateUserResponse: Success message with status
+
+    Raises:
+        HTTPException: 
+            - 400: No fields provided for update
+            - 404: User not found in organization
+            - 500: Internal server error
     """
     # Extract user context from JWT token (no permission check needed for self-update)
     user_context = await extract_user_context(current_user)

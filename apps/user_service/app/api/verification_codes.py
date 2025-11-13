@@ -478,20 +478,26 @@ async def send_verification_code(
 
     Creates a verification code for email or phone number verification.
     
-    **Authentication Behavior:**
-    - **Without Token (Unauthenticated)**: Creates verification code for signup flow
-      - EMAIL type → `SIGNUP_EMAIL_VERIFICATION`
-      - PHONE_NUMBER type → `SIGNUP_PHONE_VERIFICATION`
+    **Types:** Only two types are supported:
+    - `EMAIL`: For email verification
+    - `PHONE_NUMBER`: For phone number verification
     
-    - **With Token (Authenticated)**: Creates verification code for email/phone update
-      - EMAIL type → `EMAIL_UPDATE` (allows updating email after verification)
-      - PHONE_NUMBER type → `PHONE_NUMBER_UPDATE` (allows updating phone after verification)
-      - Validates that entered email/phone is different from current user's email/phone
-      - Validates that email/phone is not already registered with another account
+    **Authentication Behavior:**
+    
+    **Without Token (Unauthenticated):**
+    - Sends verification code (OTP) to the provided email or phone number
+    - Works for both EMAIL and PHONE_NUMBER types
+    - Used for signup flow verification
+    
+    **With Token (Authenticated):**
+    - Validates that entered email/phone is different from current user's email/phone
+    - Validates that email/phone is not already registered with another account
+    - If all validations pass, sends OTP to the new email or phone number for update
+    - Works for both EMAIL and PHONE_NUMBER types
 
     Args:
         request: FastAPI request object
-        data: SendVerificationCodeRequest containing type and email/phoneNumber
+        data: SendVerificationCodeRequest containing type (EMAIL or PHONE_NUMBER) and email/phoneNumber
         current_user: Optional authenticated user (from JWT token in Authorization header)
 
     Returns:
@@ -499,8 +505,8 @@ async def send_verification_code(
 
     Raises:
         HTTPException: 
-            - 400: Entered email/phone is same as current user's email/phone
-            - 409: Email/phone already registered with another account
+            - 400: Entered email/phone is same as current user's email/phone (when token provided)
+            - 409: Email/phone already registered with another account (when token provided)
             - 429: Maximum verification attempts reached
             - 500: Internal server error
     """
@@ -596,37 +602,38 @@ async def verify_verification_code(
 
     Verifies a verification code for email or phone number.
     
+    **Types:** Only two types are supported:
+    - `EMAIL`: For email verification
+    - `PHONE_NUMBER`: For phone number verification
+    
     **Authentication Behavior:**
-    - **Without Token**: Verifies code for signup flow (no email/phone update)
-    - **With Token**: 
-      - If verification code was created with `EMAIL_UPDATE` trigger → **Automatically updates user's email** after successful verification
-      - If verification code was created with `PHONE_NUMBER_UPDATE` trigger → **Automatically updates user's phone number** after successful verification
-      - If verification code was created for signup → Only verifies (no update)
     
-    **Email/Phone Update:**
-    When you pass a token and the verification code was created with a token (for email/phone update):
-    - The email/phone will be automatically updated in the user's account after successful verification
-    - The response message will indicate if the email/phone was updated
-    - Update only happens if the verification code was created with the same user's token
-    
-    **Security:**
+    **With Token (Authenticated):**
+    - Validates verification ID and OTP code
+    - If type is `EMAIL` and verification is successful → **Automatically updates user's email** in their account
+    - If type is `PHONE_NUMBER` and verification is successful → **Automatically updates user's phone number** in their account
+    - Only updates if the verification code was created with the same user's token
     - Authenticated users can only verify their own verification codes (user_id must match)
-    - Email/phone matching validation ensures correct verification
+    
+    **Without Token (Unauthenticated):**
+    - Verifies code for signup flow only
+    - No email/phone update is performed
+    - Works for both EMAIL and PHONE_NUMBER types
 
     Args:
         request: FastAPI request object
-        data: VerifyVerificationCodeRequest containing verification ID, code, and email/phoneNumber
+        data: VerifyVerificationCodeRequest containing type (EMAIL or PHONE_NUMBER), verification ID, OTP code, and email/phoneNumber
         current_user: Optional authenticated user (from JWT token in Authorization header)
 
     Returns:
         VerifyVerificationCodeResponse: 
             - verified: Whether verification was successful
-            - message: Success message (includes update status if email/phone was updated)
+            - message: Success message (includes update status if email/phone was updated when token provided)
 
     Raises:
         HTTPException: 
             - 400: Invalid code, expired code, already verified, or input mismatch
-            - 403: Trying to verify another user's verification code
+            - 403: Trying to verify another user's verification code (when token provided)
             - 404: Verification code not found
             - 500: Internal server error
     """
