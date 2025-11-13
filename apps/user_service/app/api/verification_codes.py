@@ -102,6 +102,144 @@ def get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+async def _validate_email_for_update(email: str, user_id: str, current_user_email: str) -> None:
+    """
+    Validate email for authenticated user update.
+    
+    Args:
+        email: Email to validate
+        user_id: Current user ID
+        current_user_email: Current user's email
+        
+    Raises:
+        HTTPException: If email is same as current or already registered
+    """
+    entered_email = email.lower()
+    
+    # Check if entered email is same as current email
+    if entered_email == current_user_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The entered email is the same as your current email. No change needed."
+        )
+    
+    # Check if email already exists for another user
+    try:
+        existing_user = await get_auth_user_by_email(email)
+        if existing_user:
+            existing_user_id = existing_user.id if hasattr(existing_user, 'id') else None
+            if existing_user_id and existing_user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This email is already registered with another account. Please use a different email."
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        # If get_auth_user_by_email fails for reasons other than user not found, log and continue
+        logger.warning("Error checking email existence: %s", str(e))
+
+
+async def _validate_phone_for_update(phone: str, user_id: str) -> None:
+    """
+    Validate phone number for authenticated user update.
+    
+    Args:
+        phone: Phone number to validate
+        user_id: Current user ID
+        
+    Raises:
+        HTTPException: If phone is same as current or already registered
+    """
+    try:
+        user_data = await get_user_by_id(user_id)
+        if user_data and hasattr(user_data, 'user') and user_data.user:
+            current_user_phone = user_data.user.user_metadata.get("phone") if user_data.user.user_metadata else None
+            
+            # Check if entered phone is same as current phone
+            if current_user_phone and phone == current_user_phone:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="The entered phone number is the same as your current phone number. No change needed."
+                )
+            
+            # Check if phone already exists for another user in auth.users
+            from libs.shared_db.supabase_db.db import get_supabase_admin_client
+            supabase = await get_supabase_admin_client()
+            users_list = await supabase.auth.admin.list_users(per_page=1000)
+            
+            for user in users_list:
+                if user.id != user_id and user.user_metadata:
+                    user_phone = user.user_metadata.get("phone")
+                    if user_phone and user_phone == phone:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="This phone number is already registered with another account. Please use a different phone number."
+                        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Error checking phone number: %s", str(e))
+        # Continue with verification code creation if check fails
+
+
+def _determine_triggered_text(data: SendVerificationCodeRequest, current_user: Optional[dict]) -> str:
+    """
+    Determine the triggered_text based on authentication status and type.
+    
+    Args:
+        data: Request data containing type and email/phoneNumber
+        current_user: Optional authenticated user
+        
+    Returns:
+        Triggered text value for the verification code
+    """
+    if current_user:
+        # Authenticated user - change operation
+        if data.type == VerificationType.EMAIL:
+            return VerificationTrigger.EMAIL_UPDATE.value
+        else:  # PHONE_NUMBER
+            return VerificationTrigger.PHONE_NUMBER_UPDATE.value
+    else:
+        # Unauthenticated user - signup operation
+        if data.type == VerificationType.EMAIL:
+            return VerificationTrigger.SIGNUP_EMAIL_VERIFICATION.value
+        else:  # PHONE_NUMBER
+            return VerificationTrigger.SIGNUP_PHONE_VERIFICATION.value
+
+
+async def _validate_authenticated_user_input(
+    data: SendVerificationCodeRequest,
+    current_user: dict
+) -> tuple[str, str]:
+    """
+    Validate input for authenticated user and return user_id and triggered_text.
+    
+    Args:
+        data: Request data containing type and email/phoneNumber
+        current_user: Authenticated user dict
+        
+    Returns:
+        Tuple of (user_id, triggered_text)
+        
+    Raises:
+        HTTPException: If validation fails
+    """
+    user_id = current_user.get("sub")
+    if not user_id:
+        logger.warning("User ID not found in token: %s", current_user.keys())
+    current_user_email = current_user.get("email", "").lower()
+    
+    if data.type == VerificationType.EMAIL:
+        await _validate_email_for_update(data.email, user_id, current_user_email)
+        triggered_text = VerificationTrigger.EMAIL_UPDATE.value
+    else:  # PHONE_NUMBER
+        await _validate_phone_for_update(data.phoneNumber, user_id)
+        triggered_text = VerificationTrigger.PHONE_NUMBER_UPDATE.value
+    
+    return user_id, triggered_text
+
+
 # ============================================================================
 # API ENDPOINTS
 # ============================================================================
@@ -146,94 +284,14 @@ async def send_verification_code(
     """
     try:
         # Determine the input value based on type
-        if data.type == VerificationType.EMAIL:
-            given_input = data.email
-        else:  # PHONE_NUMBER
-            given_input = data.phoneNumber
+        given_input = data.email if data.type == VerificationType.EMAIL else data.phoneNumber
 
-        # Automatically determine triggered_text based on authentication status and type
+        # Validate and determine triggered_text based on authentication status
         if current_user:
-            # Authenticated user - change operation
-            # Validate that entered email/phone is different from current user's email/phone
-            # JWT tokens use "sub" for user ID
-            user_id = current_user.get("sub")
-            if not user_id:
-                logger.warning("User ID not found in token: %s", current_user.keys())
-            current_user_email = current_user.get("email", "").lower()
-            
-            if data.type == VerificationType.EMAIL:
-                entered_email = data.email.lower()
-                
-                # Check if entered email is same as current email
-                if entered_email == current_user_email:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="The entered email is the same as your current email. No change needed."
-                    )
-                
-                # Check if email already exists for another user
-                try:
-                    existing_user = await get_auth_user_by_email(data.email)
-                    if existing_user:
-                        # existing_user is a User object from Supabase, check its id attribute
-                        existing_user_id = existing_user.id if hasattr(existing_user, 'id') else None
-                        if existing_user_id and existing_user_id != user_id:
-                            raise HTTPException(
-                                status_code=status.HTTP_409_CONFLICT,
-                                detail="This email is already registered with another account. Please use a different email."
-                            )
-                except HTTPException:
-                    raise
-                except Exception as e:
-                    # If get_auth_user_by_email fails for reasons other than user not found, log and continue
-                    # (user not found is expected and means email is available)
-                    logger.warning("Error checking email existence: %s", str(e))
-                
-                triggered_text = VerificationTrigger.EMAIL_UPDATE.value
-            else:  # PHONE_NUMBER
-                entered_phone = data.phoneNumber
-                
-                # Get current user's phone from user metadata
-                try:
-                    user_data = await get_user_by_id(user_id)
-                    if user_data and hasattr(user_data, 'user') and user_data.user:
-                        current_user_phone = user_data.user.user_metadata.get("phone") if user_data.user.user_metadata else None
-                        
-                        # Check if entered phone is same as current phone
-                        if current_user_phone and entered_phone == current_user_phone:
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="The entered phone number is the same as your current phone number. No change needed."
-                            )
-                        
-                        # Check if phone already exists for another user in auth.users
-                        # We'll check by listing users and checking their user_metadata
-                        # Note: This is a simple check - for production, consider a more efficient approach
-                        from libs.shared_db.supabase_db.db import get_supabase_admin_client
-                        supabase = await get_supabase_admin_client()
-                        users_list = await supabase.auth.admin.list_users(per_page=1000)
-                        
-                        for user in users_list:
-                            if user.id != user_id and user.user_metadata:
-                                user_phone = user.user_metadata.get("phone")
-                                if user_phone and user_phone == entered_phone:
-                                    raise HTTPException(
-                                        status_code=status.HTTP_409_CONFLICT,
-                                        detail="This phone number is already registered with another account. Please use a different phone number."
-                                    )
-                except HTTPException:
-                    raise
-                except Exception as e:
-                    logger.warning("Error checking phone number: %s", str(e))
-                    # Continue with verification code creation if check fails
-                
-                triggered_text = VerificationTrigger.PHONE_NUMBER_UPDATE.value
+            user_id, triggered_text = await _validate_authenticated_user_input(data, current_user)
         else:
-            # Unauthenticated user - signup operation
-            if data.type == VerificationType.EMAIL:
-                triggered_text = VerificationTrigger.SIGNUP_EMAIL_VERIFICATION.value
-            else:  # PHONE_NUMBER
-                triggered_text = VerificationTrigger.SIGNUP_PHONE_VERIFICATION.value
+            user_id = None
+            triggered_text = _determine_triggered_text(data, current_user)
 
         # Check for recent verification codes to count attempts
         recent_codes = await get_recent_verification_codes(
@@ -256,10 +314,6 @@ async def send_verification_code(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Maximum verification attempts ({MAX_ATTEMPT_VERIFICATION}) reached. Please try again later."
             )
-
-        # Get user ID if authenticated (already extracted above for validation)
-        if not current_user:
-            user_id = None
 
         # Get client IP address
         ip_address = get_client_ip(request)

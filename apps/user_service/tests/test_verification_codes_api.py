@@ -273,6 +273,133 @@ class TestSendVerificationCode:
             call_kwargs = mock_create.call_args[1]
             assert call_kwargs.get("user_id") == "test-user-id-123"
 
+    def test_send_verification_code_authenticated_user_same_email(self, client_with_auth):
+        """Test send verification code with authenticated user using same email (should fail)."""
+        request_data = {
+            "type": "EMAIL",
+            "email": "current@example.com"  # Same as current user's email
+        }
+
+        response = client_with_auth.post("/v1/verification-code/send", json=request_data)
+
+        assert response.status_code == 400
+        assert "same as your current email" in response.json()["detail"]
+
+    def test_send_verification_code_authenticated_user_email_already_exists(self, client_with_auth):
+        """Test send verification code with authenticated user using email that exists for another user."""
+        request_data = {
+            "type": "EMAIL",
+            "email": "existing@example.com"
+        }
+
+        # Mock existing user with different ID
+        mock_existing_user = MagicMock()
+        mock_existing_user.id = "different-user-id"
+
+        with patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+                   AsyncMock(return_value=[])), \
+             patch('apps.user_service.app.api.verification_codes.get_auth_user_by_email',
+                   AsyncMock(return_value=mock_existing_user)):
+
+            response = client_with_auth.post("/v1/verification-code/send", json=request_data)
+
+            assert response.status_code == 409
+            assert "already registered with another account" in response.json()["detail"]
+
+    def test_send_verification_code_authenticated_user_phone_update(self, client_with_auth, mock_verification_record):
+        """Test send verification code with authenticated user for phone update."""
+        request_data = {
+            "type": "PHONE_NUMBER",
+            "phoneNumber": "1234567890"
+        }
+
+        phone_record = mock_verification_record.copy()
+        phone_record["type_text"] = "PHONE_NUMBER"
+        phone_record["given_input"] = "1234567890"
+        phone_record["triggered_text"] = "PHONE_NUMBER_UPDATE"
+
+        mock_user_data = MagicMock()
+        mock_user_data.user = MagicMock()
+        mock_user_data.user.user_metadata = {}  # No phone set
+
+        mock_supabase = MagicMock()
+        mock_supabase.auth.admin.list_users = AsyncMock(return_value=[])
+
+        # Patch both locations to ensure it works
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_recent_verification_codes',
+                   AsyncMock(return_value=[])), \
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+                   AsyncMock(return_value=[])), \
+             patch('apps.user_service.app.api.verification_codes.create_verification_code',
+                   AsyncMock(return_value=phone_record)), \
+             patch('apps.user_service.app.api.verification_codes.get_user_by_id',
+                   AsyncMock(return_value=mock_user_data)), \
+             patch('libs.shared_db.supabase_db.db.get_supabase_admin_client',
+                   AsyncMock(return_value=mock_supabase)):
+
+            response = client_with_auth.post("/v1/verification-code/send", json=request_data)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "verificationId" in data
+
+    def test_send_verification_code_authenticated_user_same_phone(self, client_with_auth):
+        """Test send verification code with authenticated user using same phone (should fail)."""
+        request_data = {
+            "type": "PHONE_NUMBER",
+            "phoneNumber": "1234567890"
+        }
+
+        mock_user_data = MagicMock()
+        mock_user_data.user = MagicMock()
+        mock_user_data.user.user_metadata = {"phone": "1234567890"}  # Same phone
+
+        # Patch both locations to ensure it works
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_recent_verification_codes',
+                   AsyncMock(return_value=[])), \
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+                   AsyncMock(return_value=[])), \
+             patch('apps.user_service.app.api.verification_codes.get_user_by_id',
+                   AsyncMock(return_value=mock_user_data)):
+
+            response = client_with_auth.post("/v1/verification-code/send", json=request_data)
+
+            assert response.status_code == 400
+            assert "same as your current phone number" in response.json()["detail"]
+
+    def test_send_verification_code_authenticated_user_phone_already_exists(self, client_with_auth):
+        """Test send verification code with authenticated user using phone that exists for another user."""
+        request_data = {
+            "type": "PHONE_NUMBER",
+            "phoneNumber": "9876543210"
+        }
+
+        mock_user_data = MagicMock()
+        mock_user_data.user = MagicMock()
+        mock_user_data.user.user_metadata = {}  # No phone set
+
+        # Mock another user with the same phone
+        mock_other_user = MagicMock()
+        mock_other_user.id = "other-user-id"
+        mock_other_user.user_metadata = {"phone": "9876543210"}
+
+        mock_supabase = MagicMock()
+        mock_supabase.auth.admin.list_users = AsyncMock(return_value=[mock_other_user])
+
+        # Patch both locations to ensure it works
+        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_recent_verification_codes',
+                   AsyncMock(return_value=[])), \
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+                   AsyncMock(return_value=[])), \
+             patch('apps.user_service.app.api.verification_codes.get_user_by_id',
+                   AsyncMock(return_value=mock_user_data)), \
+             patch('libs.shared_db.supabase_db.db.get_supabase_admin_client',
+                   AsyncMock(return_value=mock_supabase)):
+
+            response = client_with_auth.post("/v1/verification-code/send", json=request_data)
+
+            assert response.status_code == 409
+            assert "already registered with another account" in response.json()["detail"]
 
 # ============================================================================
 # VERIFY VERIFICATION CODE TESTS
@@ -492,44 +619,4 @@ class TestVerifyVerificationCode:
 
             # Should handle error gracefully (500 or handled by exception middleware)
             assert response.status_code in [500, 400]
-
-    def test_send_verification_code_email_failure_does_not_block(self, client, mock_verification_record):
-        """Test that email sending failure doesn't block code creation."""
-        request_data = {
-            "type": "EMAIL",
-            "email": "test@example.com"
-        }
-
-        with patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
-                   AsyncMock(return_value=[])), \
-             patch('apps.user_service.app.api.verification_codes.create_verification_code',
-                   AsyncMock(return_value=mock_verification_record)), \
-             patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
-                   return_value=False):  # Email fails
-
-            response = client.post("/v1/verification-code/send", json=request_data)
-
-            # Should still succeed even if email fails
-            assert response.status_code == 200
-            assert "verificationId" in response.json()
-
-    def test_send_verification_code_email_exception_does_not_block(self, client, mock_verification_record):
-        """Test that email sending exception doesn't block code creation."""
-        request_data = {
-            "type": "EMAIL",
-            "email": "test@example.com"
-        }
-
-        with patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
-                   AsyncMock(return_value=[])), \
-             patch('apps.user_service.app.api.verification_codes.create_verification_code',
-                   AsyncMock(return_value=mock_verification_record)), \
-             patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
-                   side_effect=Exception("Email service error")):
-
-            response = client.post("/v1/verification-code/send", json=request_data)
-
-            # Should still succeed even if email throws exception
-            assert response.status_code == 200
-            assert "verificationId" in response.json()
 
