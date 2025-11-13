@@ -17,8 +17,9 @@ from apps.user_service.app.api.admin_management.users.users import (
 from apps.user_service.app.api.admin_management.users.user_profile import (
     router as user_profile_router,
 )
-# Maybe Needed In Future | #from apps.user_service.app.api.admin_manage
-# Maybe Needed In Future | #ment.users.update_user import router as update_user_router
+from apps.user_service.app.api.admin_management.users.update_user import (
+    router as update_user_router,
+)
 
 from apps.user_service.app.api.admin_management.roles import router as roles_router
 from apps.user_service.app.api.admin_management.sessions.sessions import (
@@ -38,7 +39,7 @@ router = APIRouter(prefix="/v1/admin")
 router.include_router(auth_router)
 router.include_router(organisation_router)
 router.include_router(users_router)
-# router.include_router(update_user_router)
+router.include_router(update_user_router)
 router.include_router(user_profile_router)
 router.include_router(roles_router)
 router.include_router(sessions_router)

@@ -31,7 +31,10 @@ from apps.user_service.app.schemas.users import (
     UnbanResponse,
     BanResponse,
     ResponseModel,
+    UpdateUserResponse,
 )
+from pydantic import BaseModel, Field
+from typing import Optional
 
 # Audit logging imports
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
@@ -46,16 +49,21 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     suspend_user,
     revoke_suspended_user,
+    update_user_info,
+    get_user_profile_by_id,
 )
 
 from libs.shared_db.supabase_db.admin_operations.user import (
     ban_the_user,
     unban_the_user,
+    update_metadata_of_user,
+    get_user_by_id,
 )
 
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE
+from apps.user_service.app.dependencies.common_utils import extract_user_context
 
 # Create router for user update endpoints
 router = APIRouter(prefix="/users", tags=["User Update Operations"])
@@ -64,6 +72,35 @@ router = APIRouter(prefix="/users", tags=["User Update Operations"])
 logger = get_logger("user-update-api")
 
 DELETED_ROLES = "delete roles"
+
+
+# Update profile request schema
+class UpdateUserProfileRequest(BaseModel):
+    """Request model for updating user profile information.
+    
+    Only these fields can be updated:
+    - first_name: Updated first name
+    - last_name: Updated last name  
+    - timezone: Updated timezone preference
+    - avatar_url: Updated avatar URL
+    
+    full_name will be automatically calculated from first_name + last_name.
+    """
+    first_name: Optional[str] = Field(None, description="Updated first name")
+    last_name: Optional[str] = Field(None, description="Updated last name")
+    timezone: Optional[str] = Field(None, description="Updated timezone preference")
+    avatar_url: Optional[str] = Field(None, description="Updated avatar URL")
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "first_name": "John",
+                "last_name": "Doe",
+                "timezone": "America/New_York",
+                "avatar_url": "https://example.com/avatar.jpg"
+            }
+        }
+    }
 
 @router.put(
     "/{user_id}/email",
@@ -327,3 +364,193 @@ async def unban_user(
     }
 
     return UnbanResponse(message="User successfully unbanned")
+
+
+@router.put(
+    "/update",
+    response_model=UpdateUserResponse,
+    status_code=status.HTTP_200_OK,
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",  # Updating user profile involves personal information
+        "pii",  # User profile updates contain personally identifiable information
+        "audit_required",  # User updates must be logged for compliance and security audits
+    ],
+    table_name="organization_members",
+    category="USER_UPDATE",
+)
+@handle_api_exceptions("update user profile")
+async def update_user_profile(
+    request: Request,
+    current_user: dict = Depends(get_user_from_auth),
+    body: UpdateUserProfileRequest = Body(...)
+):
+    """
+    Update authenticated user's own profile information.
+    
+    Updates only the following fields:
+    - first_name
+    - last_name
+    - timezone
+    - avatar_url
+    
+    full_name is automatically calculated from first_name + last_name.
+    Only fields provided in the request will be updated (partial updates supported).
+    Uses the authenticated user's ID from the JWT token (self profile update).
+    No admin permissions required - users can update their own profile.
+    """
+    # Extract user context from JWT token (no permission check needed for self-update)
+    user_context = await extract_user_context(current_user)
+    user_id = user_context.user_id
+
+    # Set audit context
+    request.state.audit_risk_level = "low"
+    request.state.audit_table = "organization_members"
+    request.state.audit_requested_id = user_id
+    request.state.audit_description = f"User updating their own profile: {user_id}"
+
+    # Get current user data for audit
+    # If user has organization_id, get from organization, otherwise allow update without org
+    current_user_data = None
+    if user_context.organization_id:
+        current_user_data = await get_user_in_organization(
+            user_id, user_context.organization_id
+        )
+    
+    # If user not in organization, create a basic profile structure
+    if not current_user_data:
+        # Allow users without organization to update their profile
+        # Get metadata from JWT token or Supabase Auth
+        user_metadata = current_user.get("user_metadata", {})
+        try:
+            user_data = await get_user_by_id(user_id)
+            if user_data and hasattr(user_data, 'user') and user_data.user:
+                user_metadata = user_data.user.user_metadata or {}
+        except Exception:
+            # Use JWT token metadata if Supabase call fails
+            pass
+        
+        current_user_data = {
+            "user_id": user_id,
+            "email": user_context.email,
+            "first_name": user_metadata.get("first_name", ""),
+            "last_name": user_metadata.get("last_name", ""),
+            "full_name": user_metadata.get("full_name", ""),
+            "timezone": user_metadata.get("timezone", "UTC"),
+            "avatar_url": user_metadata.get("avatar_url"),
+            "organization_id": user_context.organization_id,
+        }
+
+    # Set old values for audit comparison
+    set_audit_old_data_from_user(request, current_user_data)
+
+    # Prepare update data - only include fields that are provided
+    update_data = {}
+    metadata_update = {}
+    
+    # Get current values to calculate full_name
+    current_first_name = current_user_data.get("first_name") or ""
+    current_last_name = current_user_data.get("last_name") or ""
+    
+    # Update first_name if provided
+    if body.first_name is not None:
+        update_data["first_name"] = body.first_name
+        metadata_update["first_name"] = body.first_name
+        current_first_name = body.first_name
+    
+    # Update last_name if provided
+    if body.last_name is not None:
+        update_data["last_name"] = body.last_name
+        metadata_update["last_name"] = body.last_name
+        current_last_name = body.last_name
+    
+    # Calculate full_name from first_name + last_name
+    if body.first_name is not None or body.last_name is not None:
+        full_name_parts = [part.strip() for part in [current_first_name, current_last_name] if part.strip()]
+        full_name = " ".join(full_name_parts) if full_name_parts else ""
+        if full_name:
+            update_data["full_name"] = full_name
+            metadata_update["full_name"] = full_name
+    
+    # Update timezone if provided
+    if body.timezone is not None:
+        update_data["timezone"] = body.timezone
+        metadata_update["timezone"] = body.timezone
+    
+    # Update avatar_url if provided
+    if body.avatar_url is not None:
+        update_data["avatar_url"] = body.avatar_url
+        metadata_update["avatar_url"] = body.avatar_url
+
+    # Check if there's anything to update
+    if not update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields provided for update"
+        )
+
+    # Update organization_members table if user is in an organization
+    if user_context.organization_id:
+        updated_user = await update_user_info(
+            user_id, 
+            user_context.organization_id, 
+            update_data
+        )
+        
+        if not updated_user:
+            logger.warning("Failed to update user in organization_members table for user: %s", user_id)
+            # Continue with metadata update even if organization update fails
+    else:
+        logger.info("User %s not in organization, updating only Supabase Auth metadata", user_id)
+
+    # Update Supabase Auth user_metadata if we have metadata to update
+    if metadata_update:
+        # Get current user metadata to preserve existing fields
+        try:
+            user_data = await get_user_by_id(user_id)
+            existing_metadata = {}
+            if user_data and hasattr(user_data, 'user') and user_data.user:
+                existing_metadata = user_data.user.user_metadata or {}
+        except Exception as e:
+            # If get_user_by_id fails, use JWT token metadata as fallback
+            logger.warning("Could not fetch user metadata from Supabase Auth: %s. Using JWT token metadata.", str(e))
+            existing_metadata = current_user.get("user_metadata", {})
+        
+        # Merge with existing metadata
+        updated_metadata = {**existing_metadata, **metadata_update}
+        
+        # Update metadata in Supabase Auth
+        try:
+            metadata_updated = await update_metadata_of_user(user_id, updated_metadata)
+            if not metadata_updated:
+                logger.warning("Failed to update user metadata in Supabase Auth for user: %s", user_id)
+        except Exception as e:
+            logger.warning("Error updating user metadata in Supabase Auth: %s", str(e))
+            # Don't fail the entire operation if metadata update fails
+
+    # Get updated user profile for response
+    updated_profile = await get_user_profile_by_id(user_id, user_context.organization_id)
+
+    # Set new values for audit comparison
+    request.state.raw_audit_new_data = {
+        "user_id": str(user_id),
+        "first_name": updated_profile.get("first_name") if updated_profile else current_user_data.get("first_name"),
+        "last_name": updated_profile.get("last_name") if updated_profile else current_user_data.get("last_name"),
+        "full_name": updated_profile.get("full_name") if updated_profile else current_user_data.get("full_name"),
+        "timezone": updated_profile.get("timezone") if updated_profile else current_user_data.get("timezone"),
+        "avatar_url": updated_profile.get("avatar_url") if updated_profile else current_user_data.get("avatar_url"),
+        "organization_id": str(user_context.organization_id) if user_context.organization_id else None,
+        "updated_by_user_id": user_context.user_id,
+        "updated_by_email": user_context.email,
+        "update_timestamp": datetime.now().isoformat(),
+    }
+
+    return UpdateUserResponse(
+        message="User profile updated successfully",
+        status="success",
+        data=None
+    )
