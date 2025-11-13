@@ -19,19 +19,66 @@ from libs.shared_middleware.jwt_auth import get_user_from_auth
 def mock_rate_limiter():
     """Disable rate limiting for tests."""
     class DummyLimiter:
+        def __init__(self, *args, **kwargs):
+            self.enabled = False  # Disable rate limiting
+            self._auto_check = False
+        
         def limit(self, *_args, **_kwargs):
             def decorator(func):
                 return func
             return decorator
+        
+        def __call__(self, *args, **kwargs):
+            return self
+        
+        def hit(self, *args, **kwargs):
+            return True
+        
+        def get_window_stats(self, *args, **kwargs):
+            return (0, 0)
+        
+        def _check_request_limit(self, *args, **kwargs):
+            # Don't check limits
+            pass
+        
+        def _inject_headers(self, response, *args, **kwargs):
+            return response
 
-    with patch('apps.user_service.app.api.verification_codes.limiter', DummyLimiter()):
+    # Mock the limiter at the source (app_instance) and in the verification_codes module
+    # Also mock get_recent_verification_codes to prevent rate limiting
+    # Patch slowapi middleware to bypass rate limiting
+    dummy_limiter = DummyLimiter()
+    
+    # Patch the slowapi middleware dispatch to bypass rate limiting
+    async def bypass_middleware(self, request, call_next):
+        """Bypass slowapi middleware rate limiting."""
+        return await call_next(request)
+    
+    with patch('apps.user_service.app.app_instance.limiter', dummy_limiter), \
+         patch('apps.user_service.app.api.verification_codes.limiter', dummy_limiter), \
+         patch('slowapi.middleware.SlowAPIMiddleware.dispatch', bypass_middleware), \
+         patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+               AsyncMock(return_value=[])), \
+         patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_recent_verification_codes',
+               AsyncMock(return_value=[])):
         yield
 
 
 @pytest.fixture
-def app():
+def app(mock_rate_limiter):
     """Create FastAPI app with verification codes router for testing."""
     app = FastAPI()
+    
+    # Set a dummy limiter in app.state to prevent slowapi middleware from checking
+    class DummyLimiter:
+        enabled = False
+        _auto_check = False
+        def limit(self, *args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+    
+    app.state.limiter = DummyLimiter()
     app.include_router(verification_codes_router)
 
     # Mock optional authentication (can return None for unauthenticated requests)
@@ -46,9 +93,20 @@ def app():
 
 
 @pytest.fixture
-def app_with_auth():
+def app_with_auth(mock_rate_limiter):
     """Create FastAPI app with verification codes router for testing with authenticated user."""
     app = FastAPI()
+    
+    # Set a dummy limiter in app.state to prevent slowapi middleware from checking
+    class DummyLimiter:
+        enabled = False
+        _auto_check = False
+        def limit(self, *args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+    
+    app.state.limiter = DummyLimiter()
     app.include_router(verification_codes_router)
 
     # Mock optional authentication with authenticated user
@@ -401,6 +459,7 @@ class TestSendVerificationCode:
             assert response.status_code == 409
             assert "already registered with another account" in response.json()["detail"]
 
+
 # ============================================================================
 # VERIFY VERIFICATION CODE TESTS
 # ============================================================================
@@ -619,4 +678,274 @@ class TestVerifyVerificationCode:
 
             # Should handle error gracefully (500 or handled by exception middleware)
             assert response.status_code in [500, 400]
+
+    def test_verify_verification_code_authenticated_user_no_sub_in_token(self, client_with_auth, mock_verification_record):
+        """Test verify with authenticated user but no 'sub' in token - covers line 282-283."""
+        verification_id = mock_verification_record["id"]
+        request_data = {
+            "type": "EMAIL",
+            "verificationId": verification_id,
+            "verificationCode": "1111",
+            "email": "test@example.com"
+        }
+
+        # Override to return user without 'sub'
+        from apps.user_service.app.api.verification_codes import get_optional_user
+        from fastapi import FastAPI
+        
+        app = FastAPI()
+        
+        # Set a dummy limiter in app.state to prevent slowapi middleware from checking
+        class DummyLimiter:
+            enabled = False
+            _auto_check = False
+            def limit(self, *args, **kwargs):
+                def decorator(func):
+                    return func
+                return decorator
+        
+        app.state.limiter = DummyLimiter()
+        app.include_router(verification_codes_router)
+        
+        def mock_get_optional_user_no_sub():
+            return {"email": "test@example.com"}  # No 'sub' field
+        
+        app.dependency_overrides[get_optional_user] = mock_get_optional_user_no_sub
+        client = TestClient(app)
+
+        with patch('apps.user_service.app.api.verification_codes.get_verification_code_by_id',
+                   AsyncMock(return_value=mock_verification_record)), \
+             patch('apps.user_service.app.api.verification_codes.update_verification_code',
+                   AsyncMock(return_value=mock_verification_record)):
+            response = client.post("/v1/verification-code/verify", json=request_data)
+            # Should still work, just with warning logged
+            assert response.status_code == 200
+
+
+
+# ============================================================================
+# ADDITIONAL COVERAGE TESTS - NEW CODE
+# ============================================================================
+
+def test_get_optional_user_no_user_in_state():
+    """Test get_optional_user when no user in request.state - covers line 74."""
+    from apps.user_service.app.api.verification_codes import get_optional_user
+    from fastapi import Request
+    from unittest.mock import MagicMock
+    
+    # Create a mock request without user in state
+    mock_request = MagicMock(spec=Request)
+    mock_request.state = MagicMock()
+    mock_request.state.user = None  # No user
+    
+    result = get_optional_user(mock_request)
+    # Should return None when no user in state
+    assert result is None
+
+
+def test_get_optional_user_exception_handling():
+    """Test get_optional_user when get_user_from_auth raises exception - covers lines 77-81."""
+    from apps.user_service.app.api.verification_codes import get_optional_user
+    from fastapi import Request
+    from unittest.mock import MagicMock, patch
+    
+    # Create a mock request with user in state
+    mock_request = MagicMock(spec=Request)
+    mock_request.state = MagicMock()
+    mock_request.state.user = {"sub": "test-user-id"}
+    
+    # Patch get_user_from_auth to raise an exception
+    with patch('apps.user_service.app.api.verification_codes.get_user_from_auth',
+               side_effect=Exception("Token validation failed")):
+        result = get_optional_user(mock_request)
+        # Should return None when exception occurs
+        assert result is None
+
+
+def test_get_client_ip_with_forwarded_for():
+    """Test get_client_ip with X-Forwarded-For header - covers lines 91-94."""
+    from apps.user_service.app.api.verification_codes import get_client_ip
+    from fastapi import Request
+    from unittest.mock import MagicMock
+    
+    mock_request = MagicMock(spec=Request)
+    mock_request.headers = {"X-Forwarded-For": "192.168.1.1, 10.0.0.1"}
+    
+    ip = get_client_ip(mock_request)
+    assert ip == "192.168.1.1"
+
+
+def test_get_client_ip_with_real_ip():
+    """Test get_client_ip with X-Real-IP header - covers lines 97-99."""
+    from apps.user_service.app.api.verification_codes import get_client_ip
+    from fastapi import Request
+    from unittest.mock import MagicMock
+    
+    mock_request = MagicMock(spec=Request)
+    mock_request.headers = {"X-Real-IP": "203.0.113.1"}
+    mock_request.client = None
+    
+    ip = get_client_ip(mock_request)
+    assert ip == "203.0.113.1"
+
+
+# ============================================================================
+# UNIT TESTS FOR HELPER FUNCTIONS - Direct testing to avoid rate limiting
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_validate_email_for_update_generic_exception():
+    """Test _validate_email_for_update with generic exception - covers lines 138-140."""
+    from apps.user_service.app.api.verification_codes import _validate_email_for_update
+    
+    with patch('apps.user_service.app.api.verification_codes.get_auth_user_by_email',
+               AsyncMock(side_effect=Exception("Database connection timeout"))):
+        # Should not raise, just log warning
+        await _validate_email_for_update("new@example.com", "user-123", "old@example.com")
+
+
+@pytest.mark.asyncio
+async def test_validate_phone_for_update_generic_exception():
+    """Test _validate_phone_for_update with generic exception - covers lines 195-196."""
+    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
+    
+    with patch('apps.user_service.app.api.verification_codes.get_user_by_id',
+               AsyncMock(side_effect=Exception("Network timeout"))):
+        # Should not raise, just log warning
+        await _validate_phone_for_update("1234567890", "user-123")
+
+
+def test_check_verification_code_ownership_mismatch():
+    """Test _check_verification_code_ownership with mismatch - covers lines 287-294."""
+    from apps.user_service.app.api.verification_codes import _check_verification_code_ownership
+    from fastapi import HTTPException
+    
+    verification_record = {"user_id": "different-user-id"}
+    current_user = {"sub": "test-user-id-123"}
+    
+    with pytest.raises(HTTPException) as exc_info:
+        _check_verification_code_ownership(verification_record, current_user, "verification-id")
+    
+    assert exc_info.value.status_code == 403
+    assert "You can only verify your own verification codes" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_verify_code_and_update_record_attempts_not_list():
+    """Test _verify_code_and_update_record with attempts not a list - covers line 319."""
+    from apps.user_service.app.api.verification_codes import _verify_code_and_update_record
+    
+    verification_record = {
+        "id": "test-id",
+        "verification_code": "1111",
+        "attempts": "invalid"  # Not a list
+    }
+    
+    with patch('apps.user_service.app.api.verification_codes.update_verification_code',
+               AsyncMock(return_value=verification_record)):
+        result = await _verify_code_and_update_record(verification_record, "1111", "test-id")
+        assert result is True  # Code matches
+
+
+@pytest.mark.asyncio
+async def test_update_email_or_phone_email_success():
+    """Test _update_email_or_phone for email update success - covers lines 379-405."""
+    from apps.user_service.app.api.verification_codes import _update_email_or_phone
+    from apps.user_service.app.schemas.verification_codes import VerificationTrigger
+    
+    with patch('apps.user_service.app.api.verification_codes.update_email_of_user',
+               AsyncMock(return_value=True)):
+        email_updated, phone_updated = await _update_email_or_phone(
+            "user-123", "new@example.com", VerificationTrigger.EMAIL_UPDATE.value
+        )
+        assert email_updated is True
+        assert phone_updated is False
+
+
+@pytest.mark.asyncio
+async def test_update_email_or_phone_phone_success():
+    """Test _update_email_or_phone for phone update success - covers lines 379-405."""
+    from apps.user_service.app.api.verification_codes import _update_email_or_phone
+    from apps.user_service.app.schemas.verification_codes import VerificationTrigger
+    
+    with patch('apps.user_service.app.api.verification_codes.update_phone_of_user',
+               AsyncMock(return_value=True)):
+        email_updated, phone_updated = await _update_email_or_phone(
+            "user-123", "1234567890", VerificationTrigger.PHONE_NUMBER_UPDATE.value
+        )
+        assert email_updated is False
+        assert phone_updated is True
+
+
+@pytest.mark.asyncio
+async def test_update_email_or_phone_email_failure():
+    """Test _update_email_or_phone for email update failure - covers lines 388-392."""
+    from apps.user_service.app.api.verification_codes import _update_email_or_phone
+    from apps.user_service.app.schemas.verification_codes import VerificationTrigger
+    
+    with patch('apps.user_service.app.api.verification_codes.update_email_of_user',
+               AsyncMock(return_value=False)):
+        email_updated, phone_updated = await _update_email_or_phone(
+            "user-123", "new@example.com", VerificationTrigger.EMAIL_UPDATE.value
+        )
+        assert email_updated is False
+        assert phone_updated is False
+
+
+@pytest.mark.asyncio
+async def test_update_email_or_phone_email_exception():
+    """Test _update_email_or_phone for email update exception - covers lines 390-392."""
+    from apps.user_service.app.api.verification_codes import _update_email_or_phone
+    from apps.user_service.app.schemas.verification_codes import VerificationTrigger
+    
+    with patch('apps.user_service.app.api.verification_codes.update_email_of_user',
+               AsyncMock(side_effect=Exception("Update failed"))):
+        email_updated, phone_updated = await _update_email_or_phone(
+            "user-123", "new@example.com", VerificationTrigger.EMAIL_UPDATE.value
+        )
+        assert email_updated is False
+        assert phone_updated is False
+
+
+@pytest.mark.asyncio
+async def test_update_email_or_phone_phone_exception():
+    """Test _update_email_or_phone for phone update exception - covers lines 401-403."""
+    from apps.user_service.app.api.verification_codes import _update_email_or_phone
+    from apps.user_service.app.schemas.verification_codes import VerificationTrigger
+    
+    with patch('apps.user_service.app.api.verification_codes.update_phone_of_user',
+               AsyncMock(side_effect=Exception("Update failed"))):
+        email_updated, phone_updated = await _update_email_or_phone(
+            "user-123", "1234567890", VerificationTrigger.PHONE_NUMBER_UPDATE.value
+        )
+        assert email_updated is False
+        assert phone_updated is False
+
+
+def test_determine_triggered_text_authenticated_phone():
+    """Test _determine_triggered_text for authenticated user phone - covers lines 421-424."""
+    from apps.user_service.app.api.verification_codes import _determine_triggered_text
+    from apps.user_service.app.schemas.verification_codes import SendVerificationCodeRequest, VerificationType, VerificationTrigger
+    
+    data = SendVerificationCodeRequest(type=VerificationType.PHONE_NUMBER, phoneNumber="1234567890")
+    current_user = {"sub": "user-123"}
+    
+    result = _determine_triggered_text(data, current_user)
+    assert result == VerificationTrigger.PHONE_NUMBER_UPDATE.value
+
+
+@pytest.mark.asyncio
+async def test_validate_authenticated_user_input_no_user_id():
+    """Test _validate_authenticated_user_input with no user_id - covers line 452."""
+    from apps.user_service.app.api.verification_codes import _validate_authenticated_user_input
+    from apps.user_service.app.schemas.verification_codes import SendVerificationCodeRequest, VerificationType
+    
+    data = SendVerificationCodeRequest(type=VerificationType.EMAIL, email="new@example.com")
+    current_user = {"email": "old@example.com"}  # No 'sub' field
+    
+    with patch('apps.user_service.app.api.verification_codes.get_auth_user_by_email',
+               AsyncMock(return_value=None)):
+        user_id, triggered_text = await _validate_authenticated_user_input(data, current_user)
+        # Should still work, just with warning logged
+        assert user_id is None or user_id == ""
 
