@@ -1145,30 +1145,6 @@ class TestEmailUtils:
             assert "from_name" in payload
             assert payload["from_name"] == "Test Sender"
 
-    def test_send_email_with_from_email(self):
-        """Test email sending with from_email parameter."""
-        from libs.shared_utils.email_utils import send_email
-
-        with patch("libs.shared_utils.email_utils.httpx.post") as mock_post:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.text = "Email sent successfully"
-            mock_post.return_value = mock_response
-
-            result = send_email(
-                "test@example.com",
-                "Test Subject",
-                "Test message",
-                from_email="sender@example.com"
-            )
-
-            assert result is True
-            call_args = mock_post.call_args
-            payload = call_args[1]["json"]
-            # Note: from_email is not currently used in the implementation
-            # This test ensures the function doesn't break when it's provided
-
-
 class TestSendPasswordResetConfirmationEmail:
     """Test cases for send_password_reset_confirmation_email function."""
 

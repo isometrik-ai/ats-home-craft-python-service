@@ -84,13 +84,20 @@ app.add_exception_handler(Exception, unified_exception_handler)
 app.add_exception_handler(StarletteHTTPException, unified_exception_handler)
 app.add_exception_handler(RequestValidationError, unified_exception_handler)
 app.add_exception_handler(FastAPIHTTPException, unified_exception_handler)
-# Add Datadog tracing middleware
-app.add_middleware(TraceMiddleware, tracer=tracer)
-# ✅ cache request body BEFORE JWT and auditing
-app.add_middleware(CacheRequestBodyMiddleware)
-# Add Datadog tracing middleware
+
+# Middleware order (executed in reverse order of addition):
+# 1. CORS - Handles preflight requests and adds CORS headers to all responses
+# 2. Tracing - Monitors all requests for observability
+# 3. Body Caching - Caches request body for reuse (before auth/auditing)
+# 4. JWT Auth - Validates authentication tokens
+
+# Add Datadog tracing middleware (monitors all requests)
 app.add_middleware(TraceMiddleware, tracer=tracer)
 
+# Cache request body BEFORE JWT and auditing (allows multiple reads)
+app.add_middleware(CacheRequestBodyMiddleware)
+
+# JWT authentication middleware (validates tokens)
 app.add_middleware(JWTAuthMiddleware)
 app.include_router(api_router)
 app.include_router(verification_codes_router)

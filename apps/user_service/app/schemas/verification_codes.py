@@ -7,7 +7,7 @@ This module contains Pydantic schemas for verification code operations.
 
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, Field, EmailStr, model_validator
 
 from apps.user_service.app.schemas import ResponseModel
 
@@ -109,4 +109,3 @@ class VerifyVerificationCodeResponse(ResponseModel):
 
     verified: bool = Field(..., description="Whether the verification was successful")
     message: str = Field(..., description="Response message")
-

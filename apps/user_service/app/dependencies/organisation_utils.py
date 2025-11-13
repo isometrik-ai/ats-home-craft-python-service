@@ -17,7 +17,7 @@ Organisation-Specific Operations Covered:
 6. Default permissions and roles setup
 """
 
-from typing import Optional, Any, Dict, Tuple
+from typing import Optional, Any, Dict
 
 from fastapi import HTTPException, status
 from postgrest import APIError
@@ -38,6 +38,8 @@ from libs.shared_db.postgres_db.user_service_operations.exception_handling impor
     DatabaseOperationError,
     SupabaseAPIError,
 )
+
+FAIL_CREATE_ACCOUNT = "Failed to create account. Please try again."
 
 logger = get_logger("organisation_utils")
 
@@ -198,24 +200,26 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         error_code = None
         error_message = ""
 
-        if isinstance(api_error, APIError):
-            # Direct APIError from postgrest
-            error_details = getattr(api_error, 'message', {})
-            if isinstance(error_details, dict):
-                error_code = error_details.get('code')
-                error_message = str(error_details.get('message', '')).lower()
-            elif isinstance(error_details, str):
-                error_message = error_details.lower()
-        elif isinstance(api_error, SupabaseAPIError):
-            # SupabaseAPIError - check if original error is accessible
-            original_error = api_error.__cause__
-            if isinstance(original_error, APIError):
-                error_details = getattr(original_error, 'message', {})
-                if isinstance(error_details, dict):
-                    error_code = error_details.get('code')
-                    error_message = str(error_details.get('message', '')).lower()
-                elif isinstance(error_details, str):
-                    error_message = error_details.lower()
+        match api_error:
+            case APIError():
+                error_details = getattr(api_error, 'message', {})
+                match error_details:
+                    case dict():
+                        error_code = error_details.get('code')
+                        error_message = str(error_details.get('message', '')).lower()
+                    case str():
+                        error_message = error_details.lower()
+            case SupabaseAPIError():
+                original_error = getattr(api_error, '__cause__', None)
+                match original_error:
+                    case APIError():
+                        error_details = getattr(original_error, 'message', {})
+                        match error_details:
+                            case dict():
+                                error_code = error_details.get('code')
+                                error_message = str(error_details.get('message', '')).lower()
+                            case str():
+                                error_message = error_details.lower()
 
         # Build comprehensive error message for pattern matching
         error_str = str(api_error).lower()
@@ -269,7 +273,7 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create account. Please try again.",
+            detail=FAIL_CREATE_ACCOUNT,
         ) from api_error
 
     except DatabaseOperationError as db_error:
@@ -285,7 +289,7 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create account. Please try again.",
+            detail=FAIL_CREATE_ACCOUNT,
         ) from db_error
 
     except Exception as unexpected_error:
@@ -301,5 +305,5 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create account. Please try again.",
+            detail=FAIL_CREATE_ACCOUNT,
         ) from unexpected_error
