@@ -854,6 +854,37 @@ async def oauth_callback(request: Request):
 # CHANGE PASSWORD API
 # ============================================================================
 
+async def _handle_password_update_error(error: Exception) -> None:
+    """
+    Handle errors during password update and raise appropriate HTTPException.
+    
+    Args:
+        error: The exception that occurred during password update
+        
+    Raises:
+        HTTPException: Appropriate error based on error message
+    """
+    error_message = str(error).lower()
+    logger.error("Error updating password: %s", str(error))
+    
+    # Check for specific Supabase errors
+    if "user not allowed" in error_message or "not allowed" in error_message:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is restricted. Please contact support if you believe this is an error."
+        ) from error
+    elif "auth" in error_message or "authentication" in error_message:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication service error. Please try again later."
+        ) from error
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update password"
+        ) from error
+
+
 @router.post(
     "/change-password",
     response_model=ChangePasswordResponse,
@@ -930,25 +961,7 @@ async def change_password(
     except HTTPException:
         raise
     except Exception as e:
-        error_message = str(e).lower()
-        logger.error("Error updating password: %s", str(e))
-        
-        # Check for specific Supabase errors
-        if "user not allowed" in error_message or "not allowed" in error_message:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User account is restricted. Please contact support if you believe this is an error."
-            ) from e
-        elif "auth" in error_message or "authentication" in error_message:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Authentication service error. Please try again later."
-            ) from e
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update password"
-            ) from e
+        await _handle_password_update_error(e)
     
     return ChangePasswordResponse(
         message="Password changed successfully"

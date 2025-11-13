@@ -140,6 +140,31 @@ async def _validate_email_for_update(email: str, user_id: str, current_user_emai
         logger.warning("Error checking email existence: %s", str(e))
 
 
+async def _check_phone_exists_for_other_user(phone: str, user_id: str) -> None:
+    """
+    Check if phone number already exists for another user.
+    
+    Args:
+        phone: Phone number to check
+        user_id: Current user ID to exclude from check
+        
+    Raises:
+        HTTPException: If phone is already registered with another account
+    """
+    from libs.shared_db.supabase_db.db import get_supabase_admin_client
+    supabase = await get_supabase_admin_client()
+    users_list = await supabase.auth.admin.list_users(per_page=1000)
+    
+    for user in users_list:
+        if user.id != user_id and user.user_metadata:
+            user_phone = user.user_metadata.get("phone")
+            if user_phone and user_phone == phone:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This phone number is already registered with another account. Please use a different phone number."
+                )
+
+
 async def _validate_phone_for_update(phone: str, user_id: str) -> None:
     """
     Validate phone number for authenticated user update.
@@ -163,24 +188,223 @@ async def _validate_phone_for_update(phone: str, user_id: str) -> None:
                     detail="The entered phone number is the same as your current phone number. No change needed."
                 )
             
-            # Check if phone already exists for another user in auth.users
-            from libs.shared_db.supabase_db.db import get_supabase_admin_client
-            supabase = await get_supabase_admin_client()
-            users_list = await supabase.auth.admin.list_users(per_page=1000)
-            
-            for user in users_list:
-                if user.id != user_id and user.user_metadata:
-                    user_phone = user.user_metadata.get("phone")
-                    if user_phone and user_phone == phone:
-                        raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail="This phone number is already registered with another account. Please use a different phone number."
-                        )
+            # Check if phone already exists for another user
+            await _check_phone_exists_for_other_user(phone, user_id)
     except HTTPException:
         raise
     except Exception as e:
         logger.warning("Error checking phone number: %s", str(e))
         # Continue with verification code creation if check fails
+
+
+async def _validate_verification_record(verification_record: dict, data: VerifyVerificationCodeRequest) -> str:
+    """
+    Validate verification record and return given_input.
+    
+    Args:
+        verification_record: The verification code record
+        data: Request data containing type and email/phoneNumber
+        
+    Returns:
+        The given_input value (email or phoneNumber)
+        
+    Raises:
+        HTTPException: If validation fails
+    """
+    if not verification_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Verification code not found"
+        )
+
+    # Check if already verified
+    if verification_record.get("verified", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code has already been verified"
+        )
+
+    # Check expiry
+    current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    expiry_at = verification_record.get("expiry_at", 0)
+
+    if expiry_at < current_time_ms:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code has expired"
+        )
+
+    # Validate given input matches
+    if data.type == VerificationType.EMAIL:
+        given_input = data.email
+    else:  # PHONE_NUMBER
+        given_input = data.phoneNumber
+
+    stored_given_input = verification_record.get("given_input")
+    if stored_given_input != given_input:
+        logger.warning(
+            "Given input mismatch for verification %s: "
+            "stored='%s', provided='%s'",
+            data.verificationId,
+            stored_given_input,
+            given_input
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Given input '{given_input}' does not match the verification record. Expected: '{stored_given_input}'",
+        )
+    
+    return given_input
+
+
+def _check_verification_code_ownership(
+    verification_record: dict,
+    current_user: Optional[dict],
+    verification_id: str
+) -> None:
+    """
+    Check if authenticated user owns the verification code.
+    
+    Args:
+        verification_record: The verification code record
+        current_user: Optional authenticated user
+        verification_id: Verification code ID for logging
+        
+    Raises:
+        HTTPException: If user doesn't own the verification code
+    """
+    stored_user_id = verification_record.get("user_id")
+    if not current_user:
+        return
+    
+    # JWT tokens use "sub" for user ID
+    current_user_id = current_user.get("sub")
+    if not current_user_id:
+        logger.warning("User ID not found in token for verification: %s", current_user.keys())
+    
+    # If verification code has a user_id, it must match the current user
+    if stored_user_id and current_user_id and stored_user_id != current_user_id:
+        logger.warning(
+            "User ownership mismatch for verification %s: "
+            "stored_user_id='%s', current_user_id='%s'",
+            verification_id,
+            stored_user_id,
+            current_user_id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only verify your own verification codes"
+        )
+
+
+async def _verify_code_and_update_record(
+    verification_record: dict,
+    verification_code: str,
+    verification_id: str
+) -> bool:
+    """
+    Verify the code and update the verification record.
+    
+    Args:
+        verification_record: The verification code record
+        verification_code: The code to verify
+        verification_id: The verification code ID
+        
+    Returns:
+        True if code matches, False otherwise
+    """
+    # Get existing attempts
+    attempts = verification_record.get("attempts", [])
+    if not isinstance(attempts, list):
+        attempts = []
+
+    # Increment attempt count
+    max_attempt = len(attempts) + 1
+
+    # Create attempt record
+    attempt_record = {
+        "entered_value": verification_code,
+        "verified_on": int(datetime.now(timezone.utc).timestamp() * 1000),
+        "matched": False,
+        "success": False
+    }
+
+    # Check if code matches
+    stored_code = verification_record.get("verification_code")
+    code_matched = (verification_code == stored_code)
+
+    # Update attempt record
+    attempt_record["matched"] = code_matched
+    attempt_record["success"] = code_matched
+
+    # Add attempt to attempts array
+    attempts.append(attempt_record)
+
+    # Update verification record
+    verified = code_matched
+
+    # Update database
+    await update_verification_code(
+        verification_id=verification_id,
+        verified=verified,
+        attempts=attempts
+    )
+
+    # If not matched, reject with attempt count message
+    if not code_matched:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid verification code. Attempt {max_attempt} of {MAX_ATTEMPT_VERIFICATION}."
+        )
+    
+    return code_matched
+
+
+async def _update_email_or_phone(
+    user_id: str,
+    given_input: str,
+    triggered_text: str,
+    verification_type: VerificationType
+) -> tuple[bool, bool]:
+    """
+    Update email or phone number based on triggered_text.
+    
+    Args:
+        user_id: User ID to update
+        given_input: Email or phone number to set
+        triggered_text: The trigger type from verification record
+        verification_type: The verification type (EMAIL or PHONE_NUMBER)
+        
+    Returns:
+        Tuple of (email_updated, phone_updated)
+    """
+    email_updated = False
+    phone_updated = False
+    
+    if triggered_text == VerificationTrigger.EMAIL_UPDATE.value:
+        # Update email
+        try:
+            email_updated = await update_email_of_user(user_id, given_input)
+            if email_updated:
+                logger.info("Email updated successfully for user %s: %s", user_id, given_input)
+            else:
+                logger.warning("Email update returned False for user %s: %s", user_id, given_input)
+        except Exception as e:
+            logger.error("Error updating email for user %s: %s", user_id, str(e), exc_info=True)
+            email_updated = False
+    elif triggered_text == VerificationTrigger.PHONE_NUMBER_UPDATE.value:
+        # Update phone number
+        try:
+            phone_updated = await update_phone_of_user(user_id, given_input)
+            if phone_updated:
+                logger.info("Phone number updated successfully for user %s: %s", user_id, given_input)
+            else:
+                logger.warning("Phone update returned False for user %s: %s", user_id, given_input)
+        except Exception as e:
+            logger.error("Error updating phone for user %s: %s", user_id, str(e), exc_info=True)
+            phone_updated = False
+    
+    return email_updated, phone_updated
 
 
 def _determine_triggered_text(data: SendVerificationCodeRequest, current_user: Optional[dict]) -> str:
@@ -412,129 +636,24 @@ async def verify_verification_code(
         # Get verification code record
         verification_record = await get_verification_code_by_id(data.verificationId)
 
-        if not verification_record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Verification code not found"
-            )
-
-        # Check if already verified
-        if verification_record.get("verified", False):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Verification code has already been verified"
-            )
-
-        # Check expiry
-        current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        expiry_at = verification_record.get("expiry_at", 0)
-
-        if expiry_at < current_time_ms:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Verification code has expired"
-            )
-
-        # Validate given input matches
-        if data.type == VerificationType.EMAIL:
-            given_input = data.email
-        else:  # PHONE_NUMBER
-            given_input = data.phoneNumber
-
-        stored_given_input = verification_record.get("given_input")
-        if stored_given_input != given_input:
-            logger.warning(
-                "Given input mismatch for verification %s: "
-                "stored='%s', provided='%s'",
-                data.verificationId,
-                stored_given_input,
-                given_input
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Given input '{given_input}' does not match the verification record. Expected: '{stored_given_input}'",
-            )
+        # Validate verification record and get given_input
+        given_input = await _validate_verification_record(verification_record, data)
 
         # Security check: If authenticated user, verify they own the verification code
-        stored_user_id = verification_record.get("user_id")
-        if current_user:
-            # JWT tokens use "sub" for user ID
-            current_user_id = current_user.get("sub")
-            if not current_user_id:
-                logger.warning("User ID not found in token for verification: %s", current_user.keys())
-            # If verification code has a user_id, it must match the current user
-            if stored_user_id and current_user_id and stored_user_id != current_user_id:
-                logger.warning(
-                    "User ownership mismatch for verification %s: "
-                    "stored_user_id='%s', current_user_id='%s'",
-                    data.verificationId,
-                    stored_user_id,
-                    current_user_id
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You can only verify your own verification codes"
-                )
-            # If user is authenticated but verification code has no user_id, allow it
-            # (signup codes can be verified by authenticated users if email/phone matches)
-        # If not authenticated but verification code has user_id, allow it
-        # (email/phone change codes can be verified without token if email/phone matches)
-        # The email/phone validation above already ensures the correct user is verifying
+        _check_verification_code_ownership(verification_record, current_user, data.verificationId)
 
-        # Get existing attempts
-        attempts = verification_record.get("attempts", [])
-        if not isinstance(attempts, list):
-            attempts = []
-
-        # Increment attempt count
-        max_attempt = len(attempts) + 1
-
-        # Create attempt record
-        attempt_record = {
-            "entered_value": data.verificationCode,
-            "verified_on": int(datetime.now(timezone.utc).timestamp() * 1000),
-            "matched": False,
-            "success": False
-        }
-
-        # Check if code matches
-        stored_code = verification_record.get("verification_code")
-
-        # Match only if entered code exactly equals stored code
-        # When OTP_ENABLED=false, the stored code is already DEFAULT_OTP, so this will match
-        # When OTP_ENABLED=true, the stored code is random, so only exact match works
-        code_matched = (data.verificationCode == stored_code)
-
-        # Update attempt record
-        attempt_record["matched"] = code_matched
-        attempt_record["success"] = code_matched
-
-        # Add attempt to attempts array
-        attempts.append(attempt_record)
-
-        # Update verification record
-        verified = code_matched
-
-        # Update database
-        await update_verification_code(
-            verification_id=data.verificationId,
-            verified=verified,
-            attempts=attempts
+        # Verify code and update record
+        await _verify_code_and_update_record(
+            verification_record,
+            data.verificationCode,
+            data.verificationId
         )
-
-        # If not matched, reject with attempt count message
-        if not code_matched:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid verification code. Attempt {max_attempt} of {MAX_ATTEMPT_VERIFICATION}."
-            )
 
         logger.info("Verification code verified successfully: %s", data.verificationId)
 
         # After successful verification, check if we need to update email/phone
-        email_updated = False
-        phone_updated = False
         triggered_text = verification_record.get("triggered_text", "")
+        stored_user_id = verification_record.get("user_id")
         
         # Debug logging
         logger.info(
@@ -545,43 +664,24 @@ async def verify_verification_code(
             data.type.value
         )
 
-        # Only update if user is authenticated and trigger indicates change operation
-        # Check if user is authenticated (either from token or from stored_user_id)
+        # Determine user_id for update (from token or stored_user_id)
         user_id = None
         if current_user:
             user_id = current_user.get("sub")
         elif stored_user_id:
-            # If no current_user but stored_user_id exists, use stored_user_id
             user_id = stored_user_id
         
+        # Update email/phone if needed
+        email_updated = False
+        phone_updated = False
         if user_id and triggered_text in [VerificationTrigger.EMAIL_UPDATE.value, VerificationTrigger.PHONE_NUMBER_UPDATE.value]:
             logger.info("Attempting to update %s for user %s with triggered_text: %s", data.type.value, user_id, triggered_text)
-            
-            if triggered_text == VerificationTrigger.EMAIL_UPDATE.value:
-                # Update email
-                try:
-                    email_updated = await update_email_of_user(user_id, given_input)
-                    if email_updated:
-                        logger.info("Email updated successfully for user %s: %s", user_id, given_input)
-                    else:
-                        logger.warning("Email update returned False for user %s: %s", user_id, given_input)
-                except Exception as e:
-                    logger.error("Error updating email for user %s: %s", user_id, str(e), exc_info=True)
-                    # Don't fail the verification if email update fails, but log it
-                    email_updated = False
-                    
-            elif triggered_text == VerificationTrigger.PHONE_NUMBER_UPDATE.value:
-                # Update phone number
-                try:
-                    phone_updated = await update_phone_of_user(user_id, given_input)
-                    if phone_updated:
-                        logger.info("Phone number updated successfully for user %s: %s", user_id, given_input)
-                    else:
-                        logger.warning("Phone update returned False for user %s: %s", user_id, given_input)
-                except Exception as e:
-                    logger.error("Error updating phone for user %s: %s", user_id, str(e), exc_info=True)
-                    # Don't fail the verification if phone update fails, but log it
-                    phone_updated = False
+            email_updated, phone_updated = await _update_email_or_phone(
+                user_id,
+                given_input,
+                triggered_text,
+                data.type
+            )
         else:
             logger.info(
                 "Skipping email/phone update - user_id: %s, triggered_text: %s, expected: %s or %s",
