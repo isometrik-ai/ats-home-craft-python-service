@@ -570,6 +570,5 @@ async def update_user_profile(
 
     return UpdateUserResponse(
         message="User profile updated successfully",
-        status="success",
         data=None
     )
