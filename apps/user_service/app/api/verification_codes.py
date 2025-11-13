@@ -197,7 +197,7 @@ async def _validate_phone_for_update(phone: str, user_id: str) -> None:
         # Continue with verification code creation if check fails
 
 
-async def _validate_verification_record(verification_record: dict, data: VerifyVerificationCodeRequest) -> str:
+def _validate_verification_record(verification_record: dict, data: VerifyVerificationCodeRequest) -> str:
     """
     Validate verification record and return given_input.
     
@@ -363,8 +363,7 @@ async def _verify_code_and_update_record(
 async def _update_email_or_phone(
     user_id: str,
     given_input: str,
-    triggered_text: str,
-    verification_type: VerificationType
+    triggered_text: str
 ) -> tuple[bool, bool]:
     """
     Update email or phone number based on triggered_text.
@@ -373,7 +372,6 @@ async def _update_email_or_phone(
         user_id: User ID to update
         given_input: Email or phone number to set
         triggered_text: The trigger type from verification record
-        verification_type: The verification type (EMAIL or PHONE_NUMBER)
         
     Returns:
         Tuple of (email_updated, phone_updated)
@@ -637,7 +635,7 @@ async def verify_verification_code(
         verification_record = await get_verification_code_by_id(data.verificationId)
 
         # Validate verification record and get given_input
-        given_input = await _validate_verification_record(verification_record, data)
+        given_input = _validate_verification_record(verification_record, data)
 
         # Security check: If authenticated user, verify they own the verification code
         _check_verification_code_ownership(verification_record, current_user, data.verificationId)
@@ -679,8 +677,7 @@ async def verify_verification_code(
             email_updated, phone_updated = await _update_email_or_phone(
                 user_id,
                 given_input,
-                triggered_text,
-                data.type
+                triggered_text
             )
         else:
             logger.info(

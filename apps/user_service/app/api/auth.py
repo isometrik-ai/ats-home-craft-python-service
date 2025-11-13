@@ -854,7 +854,7 @@ async def oauth_callback(request: Request):
 # CHANGE PASSWORD API
 # ============================================================================
 
-async def _handle_password_update_error(error: Exception) -> None:
+def _handle_password_update_error(error: Exception) -> None:
     """
     Handle errors during password update and raise appropriate HTTPException.
     
@@ -961,7 +961,7 @@ async def change_password(
     except HTTPException:
         raise
     except Exception as e:
-        await _handle_password_update_error(e)
+        _handle_password_update_error(e)
     
     return ChangePasswordResponse(
         message="Password changed successfully"
