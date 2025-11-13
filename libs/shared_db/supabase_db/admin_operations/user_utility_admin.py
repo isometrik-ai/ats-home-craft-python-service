@@ -320,39 +320,23 @@ organization_id: Organization ID to associate with user
         logger.warning("Signup error - Type: %s, Message: %s", error_type, error_message)
 
         # Check error message and also check error attributes if available
-        error_str_lower = error_message
-        if hasattr(supabase_error, 'message'):
-            error_str_lower += " " + str(supabase_error.message).lower()
-        if hasattr(supabase_error, 'detail'):
-            error_str_lower += " " + str(supabase_error.detail).lower()
-        if hasattr(supabase_error, 'args') and supabase_error.args:
+        error_str_lower = error_message + " " + " ".join(
+            str(getattr(supabase_error, attr, "")).lower()
+            for attr in ("message", "detail")
+            if getattr(supabase_error, attr, None))
+        if getattr(supabase_error, "args", None):
             error_str_lower += " " + " ".join(str(arg).lower() for arg in supabase_error.args)
 
-        if (
-            "already_exists" in error_str_lower
-            or "duplicate" in error_str_lower
-            or "already registered" in error_str_lower
-            or "user already registered" in error_str_lower
-            or "email already" in error_str_lower
-            or "user already exists" in error_str_lower
-            or "already been registered" in error_str_lower
-        ):
+        if any(kw in error_str_lower for kw in [
+            "already_exists", "duplicate", "already registered", 
+            "user already registered", "email already", 
+            "user already exists", "already been registered"
+        ]):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
             ) from supabase_error
-
-        # Handle specific exception types for better error messages
-        if isinstance(supabase_error, (ConnectionError, TimeoutError)):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Service temporarily unavailable. Please try again later.",
-            ) from supabase_error
-
-        if isinstance(supabase_error, (ValueError, AuthApiError)):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid request: {str(supabase_error)}",
-            ) from supabase_error
+        
+        handle_supabase_signup_exceptions(supabase_error)
 
         # Default to 500 for unexpected errors
         raise HTTPException(
@@ -360,6 +344,21 @@ organization_id: Organization ID to associate with user
             detail="Failed to create user account",
         ) from supabase_error
 
+def handle_supabase_signup_exceptions(supabase_error):
+    """
+    Handles specific supabase signup exceptions and raises appropriate HTTPException.
+    """
+    if isinstance(supabase_error, (ConnectionError, TimeoutError)):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service temporarily unavailable. Please try again later.",
+        ) from supabase_error
+
+    if isinstance(supabase_error, (ValueError, AuthApiError)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid request: {str(supabase_error)}",
+        ) from supabase_error
 # ============================================================================
 # AUTHENTICATION FUNCTIONS
 # ============================================================================
@@ -611,7 +610,6 @@ async def refresh_session(refresh_token: str) -> dict:
     Refresh user session using Supabase Auth Admin API.
     """
     try:
-        # supabase = await get_supabase_client()
         supabase = await get_supabase_admin_client()
         return await supabase.auth.refresh_session(refresh_token)
     except AuthApiError as e:

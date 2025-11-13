@@ -293,7 +293,7 @@ async def verify_verification_code(
         # Match only if entered code exactly equals stored code
         # When OTP_ENABLED=false, the stored code is already DEFAULT_OTP, so this will match
         # When OTP_ENABLED=true, the stored code is random, so only exact match works
-        code_matched = (data.verificationCode == stored_code)
+        code_matched = data.verificationCode == stored_code
 
         # Update attempt record
         attempt_record["matched"] = code_matched

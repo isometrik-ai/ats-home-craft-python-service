@@ -219,4 +219,3 @@ async def update_verification_code(
         )
 
     return result.data[0]
-

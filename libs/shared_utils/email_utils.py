@@ -22,8 +22,7 @@ def send_email(
     subject: str,
     message: str,
     html: str = None,
-    from_name: str = None,
-    from_email: str = None
+    from_name: str = None
 ) -> bool:
     """
     Send an email using Supabase Edge Function with Resend.
