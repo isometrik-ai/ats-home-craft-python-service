@@ -239,6 +239,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         Raises:
             HTTPException: When JWT validation fails (expired or invalid token)
         """
+        # Skip OPTIONS requests (CORS preflight) - they don't need authentication
+        # CORS middleware will handle these requests and add appropriate headers
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         auth_header = request.headers.get("Authorization")
 
         if not auth_header or not auth_header.startswith("Bearer "):

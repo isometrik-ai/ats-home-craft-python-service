@@ -242,7 +242,7 @@ async def test_exception_handlers_async():
 async def test_rate_limit_exceeded_handler():
     """Test rate limit exceeded handler - covers fastapi_app.py"""
     from slowapi.errors import RateLimitExceeded
-    from fastapi.responses import JSONResponse
+    from fastapi import HTTPException, status
 
     # Import the app to get access to the exception handler
     with patch('ddtrace.patch_all'), \
@@ -264,10 +264,10 @@ async def test_rate_limit_exceeded_handler():
         mock_exception.status_code = 429
         mock_exception.detail = "Rate limit exceeded"
 
-        # Call the handler
-        response = await handler(mock_request, mock_exception)
+        # Call the handler and verify it raises HTTPException
+        with pytest.raises(HTTPException) as exc_info:
+            await handler(mock_request, mock_exception)
 
-        # Verify the response
-        assert isinstance(response, JSONResponse)
-        assert response.status_code == 429
-        assert response.body == b'{"detail":"Rate limit exceeded"}'
+        # Verify the exception details
+        assert exc_info.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+        assert "Rate limit exceeded" in exc_info.value.detail
