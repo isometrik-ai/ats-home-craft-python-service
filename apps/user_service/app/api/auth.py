@@ -45,6 +45,8 @@ from apps.user_service.app.schemas.auth import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     SetPasswordRequest,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
     PASSWORD_CONDITION_MESSAGE_EXTENDED
 
 )
@@ -279,6 +281,7 @@ async def login(request: Request, data: AuthLogin):
                 email=result.user.email,
                 first_name=result.user.user_metadata.get("first_name", None),
                 last_name=result.user.user_metadata.get("last_name", None),
+                phone=result.user.user_metadata.get("phone", None),
                 timezone=result.user.user_metadata.get("timezone", None),
             ),
         )
@@ -321,6 +324,7 @@ async def refresh(request: Request):
                 email=res.user.email,
                 first_name=res.user.user_metadata.get("first_name", None),
                 last_name=res.user.user_metadata.get("last_name", None),
+                phone=res.user.user_metadata.get("phone", None),
                 timezone=res.user.user_metadata.get("timezone", None),
             )
         )
@@ -637,6 +641,7 @@ async def signup(
             email=signup_result.user.email,
             first_name=signup_result.user.user_metadata.get("first_name", None),
             last_name=signup_result.user.user_metadata.get("last_name", None),
+            phone=signup_result.user.user_metadata.get("phone", None),
             timezone=signup_result.user.user_metadata.get("timezone", None),
         ),
     )
@@ -843,3 +848,121 @@ async def oauth_callback(request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process OAuth callback"
         )
+
+
+# ============================================================================
+# CHANGE PASSWORD API
+# ============================================================================
+
+def _handle_password_update_error(error: Exception) -> None:
+    """
+    Handle errors during password update and raise appropriate HTTPException.
+    
+    Args:
+        error: The exception that occurred during password update
+        
+    Raises:
+        HTTPException: Appropriate error based on error message
+    """
+    error_message = str(error).lower()
+    logger.error("Error updating password: %s", str(error))
+    
+    # Check for specific Supabase errors
+    if "user not allowed" in error_message or "not allowed" in error_message:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is restricted. Please contact support if you believe this is an error."
+        ) from error
+    elif "auth" in error_message or "authentication" in error_message:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication service error. Please try again later."
+        ) from error
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update password"
+        ) from error
+
+
+@router.post(
+    "/change-password",
+    response_model=ChangePasswordResponse,
+    status_code=status.HTTP_200_OK
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="auth.users",
+    category="PASSWORD_CHANGE",
+)
+@handle_api_exceptions("change_password")
+async def change_password(
+    request: Request,  # pylint: disable=unused-argument
+    data: ChangePasswordRequest = Body(...),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """
+    Change user password endpoint.
+    
+    Requires authentication. Validates current password before updating to new password.
+    
+    Args:
+        data: ChangePasswordRequest containing current_password and new_password
+        current_user: Authenticated user from JWT token
+        
+    Returns:
+        ChangePasswordResponse: Success message
+        
+    Raises:
+        HTTPException: 401 for invalid current password
+        HTTPException: 400 for validation errors
+        HTTPException: 500 for server errors
+    """
+    user_id = current_user.get("sub")
+    user_email = current_user.get("email")
+    
+    if not user_id or not user_email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user information"
+        )
+    
+    # Validate new password strength
+    _validate_password_strength(data.new_password)
+    
+    # Verify current password by attempting to login
+    try:
+        await login_user(user_email, data.current_password)
+    except HTTPException as e:
+        if e.status_code == 401 or e.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Current password is incorrect"
+            ) from e
+        raise
+    except Exception as e:
+        logger.error("Error verifying current password: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to verify current password"
+        ) from e
+    
+    # Update password
+    try:
+        result = await update_password_with_link_identity(user_id, data.new_password)
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update password"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        _handle_password_update_error(e)
+    
+    return ChangePasswordResponse(
+        message="Password changed successfully"
+    )

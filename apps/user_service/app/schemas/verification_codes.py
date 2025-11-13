@@ -11,6 +11,16 @@ from pydantic import BaseModel, Field, EmailStr, model_validator
 
 from apps.user_service.app.schemas import ResponseModel
 
+# Re-export enums for easier imports
+__all__ = [
+    "VerificationType",
+    "VerificationTrigger",
+    "SendVerificationCodeRequest",
+    "SendVerificationCodeResponse",
+    "VerifyVerificationCodeRequest",
+    "VerifyVerificationCodeResponse",
+]
+
 
 # ============================================================================
 # ENUMS
@@ -20,6 +30,14 @@ class VerificationType(str, Enum):
     """Verification type enumeration"""
     EMAIL = "EMAIL"
     PHONE_NUMBER = "PHONE_NUMBER"
+
+
+class VerificationTrigger(str, Enum):
+    """Verification trigger/purpose enumeration"""
+    SIGNUP_EMAIL_VERIFICATION = "SIGNUP_EMAIL_VERIFICATION"
+    SIGNUP_PHONE_VERIFICATION = "SIGNUP_PHONE_VERIFICATION"
+    EMAIL_UPDATE = "EMAIL_UPDATE"
+    PHONE_NUMBER_UPDATE = "PHONE_NUMBER_UPDATE"
 
 
 # ============================================================================
