@@ -123,6 +123,11 @@ class CacheRequestBodyMiddleware(BaseHTTPMiddleware):
         Returns:
             Response: The response from the next handler
         """
+        # Skip body caching for OPTIONS requests (CORS preflight) - they don't have bodies
+        # This optimizes performance and avoids unnecessary processing
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         # Generate request ID for tracking
         request_id = str(uuid.uuid4())
 

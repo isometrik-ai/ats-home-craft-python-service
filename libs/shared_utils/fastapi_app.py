@@ -5,8 +5,7 @@ This module provides shared functionality for initializing FastAPI applications
 with common configurations like rate limiting.
 """
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -32,25 +31,30 @@ def create_fastapi_app(lifespan=None) -> tuple[FastAPI, Limiter]:
     app.add_middleware(SlowAPIMiddleware)
 
     # Add a global exception handler for rate limit exceeded
+    # Note: This handler raises HTTPException instead of returning JSONResponse directly
+    # to ensure CORS headers are properly added by the CORS middleware and to maintain
+    # consistency with the unified exception handler pattern
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_exceeded_handler(_request, _exc):
         """
         Handles the RateLimitExceeded exception globally.
 
         This function is triggered when a request exceeds the defined rate limit.
-        It returns a JSON response with a 429 status code and a message indicating
-        that the rate limit has been exceeded.
+        It raises an HTTPException with a 429 status code, which will be handled by
+        the unified exception handler to ensure proper CORS headers and consistent
+        error response format.
 
         Args:
             request: The incoming HTTP request object.
             exc: The exception instance containing details about the rate limit exceedance.
 
-        Returns:
-            JSONResponse: A response object with a 429 status code and a message.
+        Raises:
+            HTTPException: A 429 status code exception that will be handled by the
+                          unified exception handler with proper CORS headers.
         """
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Rate limit exceeded"},
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded. Please try again later.",
         )
 
     return app, limiter
