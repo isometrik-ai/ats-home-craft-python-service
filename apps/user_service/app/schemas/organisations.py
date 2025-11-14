@@ -11,12 +11,11 @@ Last Updated: 2024-12-19
 """
 
 from typing import List, Optional
-from urllib.parse import urlparse
 from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 from fastapi import HTTPException, status
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
 from apps.user_service.app.schemas.auth import CompanyData, PlanType, User
-from apps.user_service.app.schemas import ResponseModel
+from apps.user_service.app.schemas import ResponseModel, validate_url_field
 
 
 class OrganisationInfo(BaseModel):
@@ -220,25 +219,7 @@ class UpdateOrganisationRequest(BaseModel):
     @classmethod
     def validate_logo_url(cls, v):
         """Validate logo_url is a valid URL if provided"""
-        if v is None:
-            return v
-        # Handle empty string or whitespace-only string before model-level validation
-        if isinstance(v, str):
-            v = v.strip()
-            if not v:
-                return None
-        # Validate URL format
-        try:
-            result = urlparse(v)
-            if not result.scheme or result.scheme not in ('http', 'https'):
-                raise ValueError("logo_url must start with http:// or https://")
-            if not result.netloc:
-                raise ValueError("logo_url must contain a valid domain or host")
-            return v
-        except Exception as e:
-            if isinstance(e, ValueError):
-                raise
-            raise ValueError("logo_url must be a valid URL (e.g., https://example.com/logo.jpg)")
+        return validate_url_field(v, "logo_url")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -443,25 +424,7 @@ class OrganizationUpdate(BaseModel):
     @classmethod
     def validate_logo_url(cls, v):
         """Validate logo_url is a valid URL if provided"""
-        if v is None:
-            return v
-        # Handle empty string or whitespace-only string before model-level validation
-        if isinstance(v, str):
-            v = v.strip()
-            if not v:
-                return None
-        # Validate URL format
-        try:
-            result = urlparse(v)
-            if not result.scheme or result.scheme not in ('http', 'https'):
-                raise ValueError("logo_url must start with http:// or https://")
-            if not result.netloc:
-                raise ValueError("logo_url must contain a valid domain or host")
-            return v
-        except Exception as e:
-            if isinstance(e, ValueError):
-                raise
-            raise ValueError("logo_url must be a valid URL (e.g., https://example.com/logo.jpg)")
+        return validate_url_field(v, "logo_url")
     
     industry: Optional[str] = Field(
         None,
