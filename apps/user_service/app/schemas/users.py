@@ -12,8 +12,9 @@ Last Updated: 2024-12-19
 
 from typing import List, Optional
 from enum import Enum
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
 from apps.user_service.app.schemas import ResponseModel
@@ -296,6 +297,28 @@ class UpdateUserRequest(BaseModel):
     status: Optional[UserStatus] = Field(
         None, description="User status: active, invited, or suspended"
     )
+    
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url(cls, v):
+        """Validate avatar_url is a valid URL if provided"""
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        # Validate URL format
+        try:
+            result = urlparse(v)
+            if not result.scheme or result.scheme not in ('http', 'https'):
+                raise ValueError("avatar_url must start with http:// or https://")
+            if not result.netloc:
+                raise ValueError("avatar_url must contain a valid domain or host")
+            return v
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError("avatar_url must be a valid URL (e.g., https://example.com/avatar.jpg)")
 
     model_config = ConfigDict(
         json_schema_extra={

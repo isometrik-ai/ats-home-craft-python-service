@@ -7,6 +7,7 @@ All endpoints include proper authentication, validation, and database operations
 
 from datetime import datetime
 import uuid
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request, Body
 
@@ -33,7 +34,7 @@ from apps.user_service.app.schemas.users import (
     ResponseModel,
     UpdateUserResponse,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 # Audit logging imports
@@ -90,6 +91,28 @@ class UpdateUserProfileRequest(BaseModel):
     last_name: Optional[str] = Field(None, description="Updated last name")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
     avatar_url: Optional[str] = Field(None, description="Updated avatar URL")
+    
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url(cls, v):
+        """Validate avatar_url is a valid URL if provided"""
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        # Validate URL format
+        try:
+            result = urlparse(v)
+            if not result.scheme or result.scheme not in ('http', 'https'):
+                raise ValueError("avatar_url must start with http:// or https://")
+            if not result.netloc:
+                raise ValueError("avatar_url must contain a valid domain or host")
+            return v
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError("avatar_url must be a valid URL (e.g., https://example.com/avatar.jpg)")
     
     model_config = {
         "json_schema_extra": {

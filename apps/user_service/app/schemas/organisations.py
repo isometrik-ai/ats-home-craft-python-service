@@ -11,7 +11,8 @@ Last Updated: 2024-12-19
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from urllib.parse import urlparse
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 from fastapi import HTTPException, status
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
 from apps.user_service.app.schemas.auth import CompanyData, PlanType, User
@@ -214,6 +215,28 @@ class UpdateOrganisationRequest(BaseModel):
     plan_type: Optional[str] = Field(None, description="Updated plan type")
     max_users: Optional[int] = Field(None, description="Updated maximum users")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
+    
+    @field_validator("logo_url")
+    @classmethod
+    def validate_logo_url(cls, v):
+        """Validate logo_url is a valid URL if provided"""
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        # Validate URL format
+        try:
+            result = urlparse(v)
+            if not result.scheme or result.scheme not in ('http', 'https'):
+                raise ValueError("logo_url must start with http:// or https://")
+            if not result.netloc:
+                raise ValueError("logo_url must contain a valid domain or host")
+            return v
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError("logo_url must be a valid URL (e.g., https://example.com/logo.jpg)")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -413,6 +436,29 @@ class OrganizationUpdate(BaseModel):
         None,
         description="URL to the organisation's logo image",
     )
+    
+    @field_validator("logo_url")
+    @classmethod
+    def validate_logo_url(cls, v):
+        """Validate logo_url is a valid URL if provided"""
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        # Validate URL format
+        try:
+            result = urlparse(v)
+            if not result.scheme or result.scheme not in ('http', 'https'):
+                raise ValueError("logo_url must start with http:// or https://")
+            if not result.netloc:
+                raise ValueError("logo_url must contain a valid domain or host")
+            return v
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError("logo_url must be a valid URL (e.g., https://example.com/logo.jpg)")
+    
     industry: Optional[str] = Field(
         None,
         max_length=100,

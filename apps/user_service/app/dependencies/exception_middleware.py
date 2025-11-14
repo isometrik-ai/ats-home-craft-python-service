@@ -273,6 +273,22 @@ async def unified_exception_handler(request: Request, exc: Exception):
     # Handle Request Validation Errors (422)
     if isinstance(exc, RequestValidationError):
         validation_errors = exc.errors()
+        
+        # Sanitize validation errors to ensure JSON serializability
+        # Convert any ValueError or other exception objects in ctx to strings
+        sanitized_errors = []
+        for error in validation_errors:
+            sanitized_error = error.copy()
+            if 'ctx' in sanitized_error and sanitized_error['ctx']:
+                sanitized_ctx = {}
+                for key, value in sanitized_error['ctx'].items():
+                    # Convert exception objects to strings
+                    if isinstance(value, (ValueError, Exception)):
+                        sanitized_ctx[key] = str(value)
+                    else:
+                        sanitized_ctx[key] = value
+                sanitized_error['ctx'] = sanitized_ctx
+            sanitized_errors.append(sanitized_error)
 
         log_msg = (
             "Request validation error occurred - Status Code: 422, Request ID: %s, "
@@ -293,7 +309,7 @@ async def unified_exception_handler(request: Request, exc: Exception):
             status_code=422,
             content={
                 "detail": "Validation error",
-                "errors": validation_errors,
+                "errors": sanitized_errors,
                 "status_code": 422,
                 "request_id": request_id,
                 "error_type": "RequestValidationError",
