@@ -216,15 +216,17 @@ class UpdateOrganisationRequest(BaseModel):
     max_users: Optional[int] = Field(None, description="Updated maximum users")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
     
-    @field_validator("logo_url")
+    @field_validator("logo_url", mode="before")
     @classmethod
     def validate_logo_url(cls, v):
         """Validate logo_url is a valid URL if provided"""
         if v is None:
             return v
-        v = v.strip()
-        if not v:
-            return None
+        # Handle empty string or whitespace-only string before model-level validation
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
         # Validate URL format
         try:
             result = urlparse(v)
@@ -437,15 +439,17 @@ class OrganizationUpdate(BaseModel):
         description="URL to the organisation's logo image",
     )
     
-    @field_validator("logo_url")
+    @field_validator("logo_url", mode="before")
     @classmethod
     def validate_logo_url(cls, v):
         """Validate logo_url is a valid URL if provided"""
         if v is None:
             return v
-        v = v.strip()
-        if not v:
-            return None
+        # Handle empty string or whitespace-only string before model-level validation
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
         # Validate URL format
         try:
             result = urlparse(v)
