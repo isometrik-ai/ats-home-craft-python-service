@@ -933,6 +933,13 @@ async def change_password(
     # Validate new password strength
     _validate_password_strength(data.new_password)
     
+    # Check if new password is different from current password
+    if data.current_password == data.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from current password"
+        )
+    
     # Verify current password by attempting to login
     try:
         await login_user(user_email, data.current_password)

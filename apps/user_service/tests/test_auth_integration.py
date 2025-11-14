@@ -1418,6 +1418,18 @@ def test_change_password_weak_new_password(auth_client):
     assert response.status_code in [400, 422]
 
 
+def test_change_password_same_as_current(auth_client):
+    """Test change_password when new password is same as current password - covers lines 936-941"""
+    change_password_data = {
+        "current_password": "OldPass123!",
+        "new_password": "OldPass123!"  # Same as current password
+    }
+
+    response = auth_client.post("/auth/change-password", json=change_password_data)
+    assert response.status_code == 400
+    assert "New password must be different from current password" in response.json()["detail"]
+
+
 def test_change_password_http_exception_re_raise(auth_client):
     """Test change_password when HTTPException is raised during update - covers line 961"""
     change_password_data = {
