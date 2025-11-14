@@ -523,8 +523,8 @@ def set_audit_old_data_from_user(request, current_user_data: dict):
 
     # Add optional timestamp fields if they exist
     if current_user_data.get("joined_at"):
-        audit_data["joined_at"] = current_user_data["joined_at"].isoformat()
+        audit_data["joined_at"] = format_iso_datetime(current_user_data["joined_at"])
     if current_user_data.get("last_active_at"):
-        audit_data["last_active_at"] = current_user_data["last_active_at"].isoformat()
+        audit_data["last_active_at"] = format_iso_datetime(current_user_data["last_active_at"])
 
     request.state.raw_audit_old_data = audit_data

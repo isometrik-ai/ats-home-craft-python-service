@@ -78,6 +78,7 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     get_oauth_link_url,
     refresh_session
 )
+from supabase_auth.errors import AuthApiError
 from libs.shared_db.supabase_db.admin_operations.session import get_session_by_id_admin
 from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
     get_verification_code_by_id,
@@ -267,7 +268,7 @@ async def login(request: Request, data: AuthLogin):
         AuthResponse: Access token and user information
 
     Raises:
-        HTTPException: 401 for invalid credentials, 500 for other errors
+        HTTPException: 400 for invalid credentials, 500 for other errors
     """
     try:
         result = await login_user(data.email, data.password)
@@ -287,13 +288,39 @@ async def login(request: Request, data: AuthLogin):
         )
     except HTTPException:
         raise
+    except AuthApiError as error:
+        # AuthApiError from Supabase for invalid credentials
+        # login_user already handles "Email not confirmed" as HTTPException 403
+        # So any AuthApiError here is likely invalid credentials
+        error_message = str(error).lower()
+        error_msg = getattr(error, 'message', '')
+        if (hasattr(error, 'status') and error.status == 400) or \
+           "invalid login credentials" in error_message or \
+           (error_msg and "invalid login credentials" in str(error_msg).lower()):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid login credentials"
+            ) from error
+        # For any other AuthApiError, treat as invalid credentials (most common case)
+        logger.warning("AuthApiError during login (treating as invalid credentials): %s", str(error))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid login credentials"
+        ) from error
     except Exception as error:
         log_exception()
-        if "Invalid login credentials" in str(error):
+        error_str = str(error).lower()
+        # Check for invalid credentials in error message
+        if "invalid login credentials" in error_str or \
+           ("invalid" in error_str and "credential" in error_str):
             raise HTTPException(
-                status_code=401, detail="Invalid login credentials"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid login credentials"
             ) from error
-        raise HTTPException(status_code=500, detail="Authentication failed"+str(error)) from error
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication failed"
+        ) from error
 
 
 @router.put("/refresh",response_model=AuthResponse,status_code=status.HTTP_200_OK)
@@ -917,8 +944,7 @@ async def change_password(
         ChangePasswordResponse: Success message
         
     Raises:
-        HTTPException: 401 for invalid current password
-        HTTPException: 400 for validation errors
+        HTTPException: 400 for invalid current password or validation errors
         HTTPException: 500 for server errors
     """
     user_id = current_user.get("sub")
@@ -933,29 +959,77 @@ async def change_password(
     # Validate new password strength
     _validate_password_strength(data.new_password)
     
-    # Check if new password is different from current password
-    if data.current_password == data.new_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New password must be different from current password"
-        )
-    
-    # Verify current password by attempting to login
+    # First, verify current password matches database password (must pass before proceeding)
     try:
         await login_user(user_email, data.current_password)
     except HTTPException as e:
         if e.status_code == 401 or e.status_code == 403:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Current password is incorrect"
             ) from e
         raise
+    except AuthApiError as e:
+        # AuthApiError from Supabase - login_user already handles "Email not confirmed" as HTTPException 403
+        # So any AuthApiError here is likely invalid credentials
+        # Check for invalid login credentials
+        error_message = str(e).lower()
+        error_msg = getattr(e, 'message', '')
+        if (hasattr(e, 'status') and e.status == 400) or \
+           "invalid login credentials" in error_message or \
+           (error_msg and "invalid login credentials" in str(error_msg).lower()):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect"
+            ) from e
+        # For any other AuthApiError, treat as invalid credentials (most common case)
+        # This covers cases where the error format might vary
+        logger.warning("AuthApiError during password verification (treating as invalid credentials): %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        ) from e
     except Exception as e:
+        # Check if it's likely an invalid credentials error
+        error_str = str(e).lower()
+        if "invalid login credentials" in error_str or \
+           ("invalid" in error_str and "credential" in error_str) or \
+           "authentication" in error_str:
+            logger.warning("Exception during password verification (treating as invalid credentials): %s", str(e))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect"
+            ) from e
         logger.error("Error verifying current password: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to verify current password"
         ) from e
+    
+    # Check if new password is same as current password in database
+    # Attempt login with new password - if it succeeds, new password = current password
+    try:
+        await login_user(user_email, data.new_password)
+        # If login succeeds, new password is the same as current password stored in database
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from current password"
+        )
+    except HTTPException as e:
+        # If it's a 401/403, that's expected - new password is different from current (good!)
+        if e.status_code == 401 or e.status_code == 403:
+            # New password is different from current password in database, proceed
+            pass
+        else:
+            # Re-raise other HTTP exceptions (like our 400 above)
+            raise
+    except AuthApiError as e:
+        # AuthApiError means login failed - new password is different from current (good!)
+        # This is expected behavior, so proceed with password update
+        pass
+    except Exception as e:
+        # If login fails for other reasons, assume new password is different and proceed
+        logger.warning("Error checking if new password matches current: %s. Proceeding with password update.", str(e))
     
     # Update password
     try:
