@@ -533,6 +533,211 @@ The {company_name} Team"""
         return False
 
 
+def send_password_change_success_email(
+    email: str,
+    user_name: str = None,
+    company_name: str = "House of App AI",
+    support_email: str = "support@houseofapp.ai",
+    company_address: str = "123 Main Street, City, State 12345",
+    site_url: str = "https://houseofapp.ai",
+    privacy_policy_url: str = "https://houseofapp.ai/privacy-policy",
+    terms_url: str = "https://houseofapp.ai/terms"
+) -> bool:
+    """
+    Send a password change success email to the user.
+
+    Args:
+        email (str): User's email address
+        user_name (str, optional): User's name for personalization
+        company_name (str): Company name (default: "House of App AI")
+        support_email (str): Support email address
+        company_address (str): Company address for footer
+        site_url (str): Site URL for links
+        privacy_policy_url (str): Privacy policy URL
+        terms_url (str): Terms of service URL
+
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    try:
+        # Create personalized greeting - use name if available, otherwise use "User"
+        name = user_name.strip() if user_name and user_name.strip() else "User"
+        current_year = datetime.now().year
+
+        subject = "Password Changed Successfully"
+
+        # Plain text message
+        message = f"""Hello {name},
+
+This is a confirmation that your password for {company_name} has been successfully updated.
+
+If you made this change, no further action is needed.
+
+If you did not update your password, please contact us immediately for assistance.
+
+Contact Support: {support_email}
+
+© {current_year} {company_name}. All rights reserved.
+{company_address}"""
+
+        # HTML message using the provided template
+        html_message = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Password Updated</title>
+</head>
+<body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+    
+    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee;">
+      <h2 style="margin:0; color:#1f3a93;">Password Updated Successfully</h2>
+    </div>
+    <div style="padding:30px; font-size:15px; color:#444; line-height:1.6;">
+      <p>Hello {name},</p>
+      <p>This is a confirmation that your password for <strong>{company_name}</strong> has been successfully updated.</p>
+      <p>If you made this change, no further action is needed.</p>
+      <p>If you did <strong>not</strong> update your password, please contact us immediately for assistance.</p>
+      <p style="margin-top:25px;">
+        📩 <strong>Contact Support:</strong><br />
+        <a href="mailto:{support_email}" style="color:#2f76ff;">{support_email}</a>
+      </p>
+    </div>
+  </div>
+  <div style="max-width:600px; margin:20px auto; text-align:center; font-size:13px; color:#777;">
+    <p style="color:#aaa;">
+      © {current_year} {company_name}. All rights reserved.<br />
+      {company_address}
+    </p>
+    <p>
+      <a href="{privacy_policy_url}" style="color:#6c7ae0;">Privacy Policy</a> |
+      <a href="{terms_url}" style="color:#6c7ae0;">Terms of Service</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+        # Send the email with HTML content and sender name "Ross.Ai"
+        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+
+        if email_sent:
+            logger.info("Password change success email sent successfully to %s", email)
+            return True
+        logger.error("Failed to send password change success email to %s", email)
+        return False
+
+    except Exception as error:
+        logger.error("Error sending password change success email: %s", str(error))
+        return False
+
+
+def send_password_reset_success_email(
+    email: str,
+    user_name: str = None,
+    company_name: str = "House of App AI",
+    support_email: str = "support@houseofapp.ai",
+    company_address: str = "123 Main Street, City, State 12345",
+    site_url: str = "https://houseofapp.ai",
+    privacy_policy_url: str = "https://houseofapp.ai/privacy-policy",
+    terms_url: str = "https://houseofapp.ai/terms"
+) -> bool:
+    """
+    Send a password reset success email to the user.
+
+    Args:
+        email (str): User's email address
+        user_name (str, optional): User's name for personalization
+        company_name (str): Company name (default: "House of App AI")
+        support_email (str): Support email address
+        company_address (str): Company address for footer
+        site_url (str): Site URL for links
+        privacy_policy_url (str): Privacy policy URL
+        terms_url (str): Terms of service URL
+
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    try:
+        # Create personalized greeting - use name if available, otherwise use "User"
+        name = user_name.strip() if user_name and user_name.strip() else "User"
+        current_year = datetime.now().year
+
+        subject = "Password Reset Successful"
+
+        # Plain text message
+        message = f"""Hello {name},
+
+Your password for {company_name} has been reset successfully.
+
+If you requested this reset, you're all set.
+
+If you didn't request a password reset, your account may be at risk. Please reach out to us immediately.
+
+Contact Support: {support_email}
+
+© {current_year} {company_name}. All rights reserved.
+{company_address}"""
+
+        # HTML message using the provided template
+        html_message = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Password Reset Completed</title>
+</head>
+<body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+    
+    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee;">
+      <h2 style="margin:0; color:#1f3a93;">Your Password Has Been Reset</h2>
+    </div>
+
+    <div style="padding:30px; font-size:15px; color:#444; line-height:1.6;">
+      <p>Hello {name},</p>
+
+      <p>Your password for <strong>{company_name}</strong> has been reset successfully.</p>
+
+      <p>If you requested this reset, you're all set.</p>
+
+      <p>If you didn't request a password reset, your account may be at risk.  
+      Please reach out to us immediately.</p>
+
+      <p style="margin-top:25px;">
+        📩 <strong>Contact Support:</strong><br />
+        <a href="mailto:{support_email}" style="color:#2f76ff;">{support_email}</a>
+      </p>
+    </div>
+
+  </div>
+
+  <div style="max-width:600px; margin:20px auto; text-align:center; font-size:13px; color:#777;">
+    <p style="color:#aaa;">
+      © {current_year} {company_name}. All rights reserved.<br />
+      {company_address}
+    </p>
+    <p>
+      <a href="{privacy_policy_url}" style="color:#6c7ae0;">Privacy Policy</a> |
+      <a href="{terms_url}" style="color:#6c7ae0;">Terms of Service</a>
+    </p>
+  </div>
+
+</body>
+</html>"""
+
+        # Send the email with HTML content and sender name "Ross.Ai"
+        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+
+        if email_sent:
+            logger.info("Password reset success email sent successfully to %s", email)
+            return True
+        logger.error("Failed to send password reset success email to %s", email)
+        return False
+
+    except Exception as error:
+        logger.error("Error sending password reset success email: %s", str(error))
+        return False
+
+
 def send_verification_code_email(
     email: str,
     otp_code: str,

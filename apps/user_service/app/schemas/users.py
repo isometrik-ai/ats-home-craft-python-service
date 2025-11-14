@@ -13,10 +13,10 @@ Last Updated: 2024-12-19
 from typing import List, Optional
 from enum import Enum
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
-from apps.user_service.app.schemas import ResponseModel
+from apps.user_service.app.schemas import ResponseModel, validate_url_field
 
 class UserStatus(str, Enum):
     """Enumeration for user account status"""
@@ -296,6 +296,12 @@ class UpdateUserRequest(BaseModel):
     status: Optional[UserStatus] = Field(
         None, description="User status: active, invited, or suspended"
     )
+    
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url(cls, v):
+        """Validate avatar_url is a valid URL if provided"""
+        return validate_url_field(v, "avatar_url")
 
     model_config = ConfigDict(
         json_schema_extra={

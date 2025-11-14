@@ -33,7 +33,8 @@ from apps.user_service.app.schemas.users import (
     ResponseModel,
     UpdateUserResponse,
 )
-from pydantic import BaseModel, Field
+from apps.user_service.app.schemas import validate_url_field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 # Audit logging imports
@@ -90,6 +91,12 @@ class UpdateUserProfileRequest(BaseModel):
     last_name: Optional[str] = Field(None, description="Updated last name")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
     avatar_url: Optional[str] = Field(None, description="Updated avatar URL")
+    
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url(cls, v):
+        """Validate avatar_url is a valid URL if provided"""
+        return validate_url_field(v, "avatar_url")
     
     model_config = {
         "json_schema_extra": {
