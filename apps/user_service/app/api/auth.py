@@ -58,7 +58,12 @@ from apps.user_service.app.app_instance import limiter
 from libs.shared_middleware.jwt_auth import get_user_from_token, get_user_from_auth
 
 # Email utilities
-from libs.shared_utils.email_utils import send_password_reset_confirmation_email, send_welcome_email
+from libs.shared_utils.email_utils import (
+    send_password_reset_confirmation_email,
+    send_welcome_email,
+    send_password_change_success_email,
+    send_password_reset_success_email
+)
 
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_auth_user_by_email,
@@ -536,21 +541,21 @@ async def reset_password(
         result = await update_password_with_token(user['sub'], data.new_password)
         if result.user:
 
-            # Send confirmation email to user
+            # Send password reset success email to user
             user_email = user.get('email', '')
-            user_name = user.get(
-                'user_metadata', {}).get(
-                'full_name', '') or user.get('email', '').split('@')[0]
+            user_metadata = user.get('user_metadata', {})
+            user_name = user_metadata.get('full_name', '') or \
+                       f"{user_metadata.get('first_name', '')} {user_metadata.get('last_name', '')}".strip() or \
+                       user_email.split('@')[0]
 
             try:
-                email_sent = send_password_reset_confirmation_email(user_email, user_name)
+                email_sent = send_password_reset_success_email(email=user_email, user_name=user_name)
                 if not email_sent:
-                    logger.warning("Failed to send password reset confirmation email to %s",
-                        user_email)
+                    logger.warning("Failed to send password reset success email to %s", user_email)
                     # Note: We don't fail the entire operation if email fails
                     # The password reset was successful, only the email notification failed
             except Exception as email_error:
-                logger.error("Error sending password reset confirmation email:%s", str(email_error))
+                logger.error("Error sending password reset success email: %s", str(email_error))
                 # Note: We don't fail the entire operation if email fails
 
             return PasswordResponse(
@@ -1043,6 +1048,20 @@ async def change_password(
         raise
     except Exception as e:
         _handle_password_update_error(e)
+    
+    # Send password change success email
+    try:
+        user_metadata = current_user.get("user_metadata", {})
+        user_name = user_metadata.get("full_name") or \
+                   f"{user_metadata.get('first_name', '')} {user_metadata.get('last_name', '')}".strip() or \
+                   user_email.split('@')[0]
+        
+        email_sent = send_password_change_success_email(email=user_email, user_name=user_name)
+        if not email_sent:
+            logger.warning("Failed to send password change success email to %s", user_email)
+    except Exception as email_error:
+        logger.error("Error sending password change success email: %s", str(email_error))
+        # Don't fail the operation if email fails
     
     return ChangePasswordResponse(
         message="Password changed successfully"
