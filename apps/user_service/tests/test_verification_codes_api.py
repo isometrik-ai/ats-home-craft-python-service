@@ -561,7 +561,7 @@ class TestVerifyVerificationCode:
 
             assert response.status_code == 400
             assert "Invalid verification code" in response.json()["detail"]
-            assert "Attempt 1" in response.json()["detail"]
+            assert "Please try again" in response.json()["detail"]
 
     def test_verify_verification_code_email_mismatch(self, client, mock_verification_record):
         """Test verify with email that doesn't match verification record."""
@@ -608,7 +608,7 @@ class TestVerifyVerificationCode:
 
             assert response.status_code == 400
             assert "Invalid verification code" in response.json()["detail"]
-            assert "Attempt 3" in response.json()["detail"]
+            assert "Please try again" in response.json()["detail"]
 
     def test_verify_verification_code_phone_success(self, client, mock_verification_record):
         """Test successful phone verification."""
