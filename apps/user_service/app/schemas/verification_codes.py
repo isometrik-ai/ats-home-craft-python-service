@@ -102,6 +102,7 @@ class SendVerificationCodeResponse(ResponseModel):
     verificationId: str = Field(..., description="ID of the created verification code")
     expiryAt: int = Field(..., description="Expiry timestamp (Unix timestamp in milliseconds)")
     message: str = Field(default="Verification code sent successfully", description="Response message")
+    attemptsLeft: int = Field(..., description="Number of send OTP attempts remaining for today")
 
 
 class VerifyVerificationCodeResponse(ResponseModel):

@@ -680,15 +680,13 @@ async def signup(
 
 
 def _get_not_found_response():
-    data = VerifyEmailResponse(
+    """Return response for email not found (200 status with email_found=False)."""
+    return VerifyEmailResponse(
         message="Email not found.",
         email_found=False,
         status=None,
         can_login=False,
     )
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=data.model_dump())
 
 def _extract_user_type_strict(row) -> str|None:
     if not row:
@@ -715,6 +713,8 @@ async def verify_email(
     """
     Verify user email and status by determining user type from auth.users metadata
     and checking the corresponding table for status.
+    
+    Returns email_found=True if email exists in auth.users, regardless of user type or status.
     """
 
     # 1) Get user from auth.users using centralized operation
@@ -722,12 +722,10 @@ async def verify_email(
     if not auth_user:
         return _get_not_found_response()
 
-
-    # 2) Extract and validate user type
+    # 2) Extract user type (if available)
     user_type = _extract_user_type_strict(auth_user)
-    if not user_type:
-        return _get_not_found_response()
 
+    # 3) If user is organization_member, check status in organization_members table
     if user_type == "organization_member":
         status_value = await get_organization_member_status_by_email(body.email)
         if status_value:
@@ -738,7 +736,23 @@ async def verify_email(
                 status=status_value,
                 can_login=can_login_local,
             )
-    return _get_not_found_response()
+        else:
+            # User exists in auth.users but not in organization_members table
+            return VerifyEmailResponse(
+                message="Email found.",
+                email_found=True,
+                status=None,
+                can_login=False,
+            )
+    
+    # 4) User exists in auth.users but is not organization_member or has no user type
+    # Still return email_found=True since email exists
+    return VerifyEmailResponse(
+        message="Email found.",
+        email_found=True,
+        status=None,
+        can_login=False,
+    )
 
 
 @handle_api_exceptions("delete user")
