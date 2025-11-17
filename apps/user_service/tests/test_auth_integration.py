@@ -510,9 +510,13 @@ def test_verify_email_non_organization_member(auth_client):
 
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=mock_auth_user)):
-        response = auth_client.post("/auth/email/verify", json=verify_data)
-        assert response.status_code == 404
-        assert "Email not found" in response.json()["detail"]["message"]
+        response = auth_client.post("/auth/email/verify", json=verify_data)        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["email_found"] is True
+        assert data["message"] == "Email found."
+        assert data["status"] is None
+        assert data["can_login"] is False
 
 @pytest.mark.asyncio
 async def test_login_endpoint_http_exception_re_raise():
@@ -718,16 +722,17 @@ def test_verify_email_endpoint_not_found(auth_client):
 
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=None)):
-        response = auth_client.post("/auth/email/verify", json=verify_data)
-        assert response.status_code == 404
+        response = auth_client.post("/auth/email/verify", json=verify_data)        
+        assert response.status_code == 200
         data = response.json()
-        assert "Email not found" in data["detail"]["message"]
-        assert data["detail"]["email_found"] == False
-        assert data["detail"]["can_login"] == False
+        assert data["message"] == "Email not found."
+        assert data["email_found"] is False
+        assert data["can_login"] is False
+        assert data["status"] is None
 
 
 def test_verify_email_endpoint_unknown_type(auth_client):
-    """Test verify email when user metadata lacks type - covers fallback branch"""
+    """Test verify email when user metadata lacks type - covers fallback branch""" 
     verify_data = {"email": "test@example.com"}
 
     mock_auth_user = MagicMock()
@@ -736,11 +741,13 @@ def test_verify_email_endpoint_unknown_type(auth_client):
 
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=mock_auth_user)):
-        response = auth_client.post("/auth/email/verify", json=verify_data)
-        assert response.status_code == 404
+        response = auth_client.post("/auth/email/verify", json=verify_data)        
+        assert response.status_code == 200
         data = response.json()
-        assert data["detail"]["email_found"] is False
-        assert data["detail"]["status"] is None
+        assert data["email_found"] is True
+        assert data["message"] == "Email found."
+        assert data["status"] is None
+        assert data["can_login"] is False
 
 
 def test_verify_email_endpoint_inactive_member(auth_client):
@@ -761,11 +768,31 @@ def test_verify_email_endpoint_inactive_member(auth_client):
         assert data["status"] == "suspended"
         assert data["can_login"] is False
 
+def test_verify_email_endpoint_organization_member_not_in_table(auth_client):
+    """Test verify email when organization_member exists in auth.users but not in organization_members table."""
+    verify_data = {"email": "test@example.com"}
+
+    mock_auth_user = MagicMock()
+    mock_auth_user.user_metadata = {"type": "organization_member"}
+    mock_auth_user.app_metadata = {}
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_auth_user)), \
+         patch('apps.user_service.app.api.auth.get_organization_member_status_by_email',
+               AsyncMock(return_value=None)):  # Not found in organization_members table
+        response = auth_client.post("/auth/email/verify", json=verify_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["email_found"] is True
+        assert data["message"] == "Email found."
+        assert data["status"] is None
+        assert data["can_login"] is False
+
 
 @pytest.mark.asyncio
 async def test_verify_email_endpoint_not_found_async(async_auth_client):
     """Test verify email with non-existent email asynchronously - covers auth.py error handling"""
-    from fastapi import Request, HTTPException
+    from fastapi import Request
     from apps.user_service.app.api.auth import verify_email
     from apps.user_service.app.schemas.auth import VerifyEmailRequest
 
@@ -774,11 +801,12 @@ async def test_verify_email_endpoint_not_found_async(async_auth_client):
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=None)):
         mock_request = MagicMock(spec=Request)
-        with pytest.raises(HTTPException) as exc_info:
-            await verify_email(request=mock_request, body=verify_data)
+        response = await verify_email(request=mock_request, body=verify_data)
 
-        assert exc_info.value.status_code == 404
-        assert "Email not found" in str(exc_info.value.detail)
+    assert response.email_found is False
+    assert response.message == "Email not found."
+    assert response.status is None
+    assert response.can_login is False
 
 
 def test_get_oauth_link_url_endpoint_success(auth_client):
@@ -1029,13 +1057,13 @@ def test_extract_user_type_strict():
 def test_get_not_found_response_helper():
     """Test not found response helper - covers auth.py helper function"""
     from apps.user_service.app.api.auth import _get_not_found_response
-    from fastapi import HTTPException
 
-    with pytest.raises(HTTPException) as exc_info:
-        _get_not_found_response()
+    response = _get_not_found_response()
 
-    assert exc_info.value.status_code == 404
-    assert "Email not found" in str(exc_info.value.detail)
+    assert response.email_found is False
+    assert response.message == "Email not found."
+    assert response.status is None
+    assert response.can_login is False
 
 @pytest.mark.asyncio
 async def test_auth_module_initialization_async():
@@ -1088,10 +1116,12 @@ async def test_auth_helper_functions_async():
     mock_row.app_metadata = {}
     assert await asyncio.to_thread(_extract_user_type_strict, mock_row) == "test"
 
-    # Test response helpers (now raises HTTPException)
-    with pytest.raises(HTTPException) as exc_info:
-        await asyncio.to_thread(_get_not_found_response)
-    assert exc_info.value.status_code == 404
+    # Test response helpers (now returns response object)
+    response = await asyncio.to_thread(_get_not_found_response)
+    assert response.email_found is False
+    assert response.message == "Email not found."
+    assert response.status is None
+    assert response.can_login is False
 
 
 # ============================================================================

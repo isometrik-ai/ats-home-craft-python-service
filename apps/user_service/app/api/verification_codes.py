@@ -52,6 +52,7 @@ from libs.shared_db.supabase_db.admin_operations.user import (
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_auth_user_by_email,
 )
+from libs.shared_db.supabase_db.db import get_supabase_admin_client
 
 # Create router for verification code endpoints
 router = APIRouter(prefix="/v1/verification-code", tags=["Verification Codes"])
@@ -163,6 +164,31 @@ async def _check_phone_exists_for_other_user(phone: str, user_id: str) -> None:
                     status_code=status.HTTP_409_CONFLICT,
                     detail="This phone number is already registered with another account. Please use a different phone number."
                 )
+
+
+async def _check_auth_user_exists_by_phone(phone: str) -> bool:
+    """
+    Check if phone number already exists in auth.users.
+    
+    Args:
+        phone: Phone number to check
+        
+    Returns:
+        True if phone exists in auth.users, False otherwise
+    """
+    try:
+        supabase = await get_supabase_admin_client()
+        users_list = await supabase.auth.admin.list_users(per_page=1000)
+        
+        for user in users_list:
+            if user.user_metadata:
+                user_phone = user.user_metadata.get("phone")
+                if user_phone and user_phone == phone:
+                    return True
+        return False
+    except Exception as e:
+        logger.warning("Error checking phone existence in auth.users: %s", str(e))
+        return False
 
 
 async def _validate_phone_for_update(phone: str, user_id: str) -> None:
@@ -305,6 +331,8 @@ async def _verify_code_and_update_record(
     """
     Verify the code and update the verification record.
     
+    Note: There is no limit on verification attempts. Users can verify as many times as they want.
+    
     Args:
         verification_record: The verification code record
         verification_code: The code to verify
@@ -317,9 +345,6 @@ async def _verify_code_and_update_record(
     attempts = verification_record.get("attempts", [])
     if not isinstance(attempts, list):
         attempts = []
-
-    # Increment attempt count
-    max_attempt = len(attempts) + 1
 
     # Create attempt record
     attempt_record = {
@@ -350,11 +375,11 @@ async def _verify_code_and_update_record(
         attempts=attempts
     )
 
-    # If not matched, reject with attempt count message
+    # If not matched, reject with simple error message (no attempt limit)
     if not code_matched:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid verification code. Attempt {max_attempt} of {MAX_ATTEMPT_VERIFICATION}."
+            detail="Invalid verification code. Please try again."
         )
     
     return code_matched
@@ -485,9 +510,10 @@ async def send_verification_code(
     **Authentication Behavior:**
     
     **Without Token (Unauthenticated):**
-    - Sends verification code (OTP) to the provided email or phone number
+    - Checks if email/phone already exists in auth.users database
+    - If user is already registered, returns error asking to login instead
+    - If user is not registered, sends verification code (OTP) for signup flow
     - Works for both EMAIL and PHONE_NUMBER types
-    - Used for signup flow verification
     
     **With Token (Authenticated):**
     - Validates that entered email/phone is different from current user's email/phone
@@ -501,14 +527,25 @@ async def send_verification_code(
         current_user: Optional authenticated user (from JWT token in Authorization header)
 
     Returns:
-        SendVerificationCodeResponse: Verification ID and expiry time
+        SendVerificationCodeResponse: 
+            - verificationId: ID of the created verification code
+            - expiryAt: Expiry timestamp
+            - message: Success message
+            - attemptsLeft: Number of send OTP attempts remaining for today (per day limit)
 
     Raises:
         HTTPException: 
-            - 400: Entered email/phone is same as current user's email/phone (when token provided)
+            - 400: 
+                - Entered email/phone is same as current user's email/phone (when token provided)
+                - Email/phone already registered in auth.users (when no token - user should login instead)
             - 409: Email/phone already registered with another account (when token provided)
-            - 429: Maximum verification attempts reached
+            - 429: Maximum send OTP attempts reached for today (per day limit)
             - 500: Internal server error
+    
+    Note:
+        - There is a per-day limit on sending OTP codes (default: 5 attempts per day)
+        - The limit resets after 24 hours
+        - The response includes remaining attempts for the day
     """
     try:
         # Determine the input value based on type
@@ -518,6 +555,24 @@ async def send_verification_code(
         if current_user:
             user_id, triggered_text = await _validate_authenticated_user_input(data, current_user)
         else:
+            # For unauthenticated requests (signup flow), check if user already exists
+            if data.type == VerificationType.EMAIL:
+                # Check if email already exists in auth.users
+                existing_auth_user = await get_auth_user_by_email(data.email)
+                if existing_auth_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="This email is already registered. Please login instead of signing up."
+                    )
+            else:  # PHONE_NUMBER
+                # Check if phone already exists in auth.users
+                phone_exists = await _check_auth_user_exists_by_phone(data.phoneNumber)
+                if phone_exists:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="This phone number is already registered. Please login instead of signing up."
+                    )
+            
             user_id = None
             triggered_text = _determine_triggered_text(data, current_user)
 
@@ -536,11 +591,14 @@ async def send_verification_code(
             if not code.get("verified", False)
         )
 
-        # Check if max attempts reached
+        # Calculate remaining attempts (before creating new code)
+        attempts_left = MAX_ATTEMPT_VERIFICATION - unverified_count
+
+        # Check if max attempts reached (per day limit)
         if unverified_count >= MAX_ATTEMPT_VERIFICATION:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Maximum verification attempts ({MAX_ATTEMPT_VERIFICATION}) reached. Please try again later."
+                detail=f"Maximum send OTP attempts ({MAX_ATTEMPT_VERIFICATION}) reached for today. Please try again tomorrow."
             )
 
         # Get client IP address
@@ -573,11 +631,16 @@ async def send_verification_code(
 
         logger.info("Verification code sent for %s: %s", data.type.value, given_input)
 
+        # Calculate remaining attempts after creating this code
+        # Subtract 1 because we just created a new unverified code
+        attempts_left_after = attempts_left - 1
+
         # Return response
         return SendVerificationCodeResponse(
             verificationId=verification_record["id"],
             expiryAt=verification_record["expiry_at"],
-            message="Verification code sent successfully"
+            message="Verification code sent successfully",
+            attemptsLeft=attempts_left_after
         )
 
     except HTTPException:
@@ -636,6 +699,10 @@ async def verify_verification_code(
             - 403: Trying to verify another user's verification code (when token provided)
             - 404: Verification code not found
             - 500: Internal server error
+    
+    Note:
+        - There is NO limit on verification attempts. Users can verify as many times as they want.
+        - Only the send OTP endpoint has a per-day limit.
     """
     try:
         # Get verification code record
