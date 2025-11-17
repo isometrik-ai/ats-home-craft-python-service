@@ -768,6 +768,26 @@ def test_verify_email_endpoint_inactive_member(auth_client):
         assert data["status"] == "suspended"
         assert data["can_login"] is False
 
+def test_verify_email_endpoint_organization_member_not_in_table(auth_client):
+    """Test verify email when organization_member exists in auth.users but not in organization_members table."""
+    verify_data = {"email": "test@example.com"}
+
+    mock_auth_user = MagicMock()
+    mock_auth_user.user_metadata = {"type": "organization_member"}
+    mock_auth_user.app_metadata = {}
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_auth_user)), \
+         patch('apps.user_service.app.api.auth.get_organization_member_status_by_email',
+               AsyncMock(return_value=None)):  # Not found in organization_members table
+        response = auth_client.post("/auth/email/verify", json=verify_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["email_found"] is True
+        assert data["message"] == "Email found."
+        assert data["status"] is None
+        assert data["can_login"] is False
+
 
 @pytest.mark.asyncio
 async def test_verify_email_endpoint_not_found_async(async_auth_client):
