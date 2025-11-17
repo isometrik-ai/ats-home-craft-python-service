@@ -183,7 +183,9 @@ class TestSendVerificationCode:
             "email": "test@example.com"
         }
 
-        with patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+        with patch('apps.user_service.app.api.verification_codes.get_auth_user_by_email',
+                   AsyncMock(return_value=None)), \
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
                    AsyncMock(return_value=[])), \
              patch('apps.user_service.app.api.verification_codes.create_verification_code',
                    AsyncMock(return_value=mock_verification_record)), \
@@ -211,7 +213,9 @@ class TestSendVerificationCode:
         phone_record["given_input"] = "9558985338"
         phone_record["triggered_text"] = "9558985338"
 
-        with patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+        with patch('apps.user_service.app.api.verification_codes._check_auth_user_exists_by_phone',
+                   AsyncMock(return_value=False)), \
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
                    AsyncMock(return_value=[])), \
              patch('apps.user_service.app.api.verification_codes.create_verification_code',
                    AsyncMock(return_value=phone_record)):
@@ -261,7 +265,9 @@ class TestSendVerificationCode:
             "email": "test@example.com"
         }
 
-        with patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+        with patch('apps.user_service.app.api.verification_codes.get_auth_user_by_email',
+                   AsyncMock(return_value=None)), \
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
                    AsyncMock(return_value=[])), \
              patch('apps.user_service.app.api.verification_codes.create_verification_code',
                    AsyncMock(return_value=mock_verification_record)), \
@@ -288,7 +294,9 @@ class TestSendVerificationCode:
         phone_record["type_text"] = "PHONE_NUMBER"
         phone_record["given_input"] = "9558985338"
 
-        with patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+        with patch('apps.user_service.app.api.verification_codes._check_auth_user_exists_by_phone',
+                   AsyncMock(return_value=False)), \
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
                    AsyncMock(return_value=[])), \
              patch('apps.user_service.app.api.verification_codes.create_verification_code',
                    AsyncMock(return_value=phone_record)), \
