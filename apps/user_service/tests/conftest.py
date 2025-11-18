@@ -82,6 +82,7 @@ def patch_operations_to_use_mock_supabase():
         import apps.user_service.app.api.admin_management.organisation as org_api
         import apps.user_service.app.api.admin_management.sessions.sessions as sessions_api
         import apps.user_service.app.api.audit_logs.audit_logs as audit_api
+        import apps.user_service.app.api.auth as auth_api
     except Exception:
         return
 
@@ -113,19 +114,21 @@ def patch_operations_to_use_mock_supabase():
         setattr(api_mod, "check_permissions", _mock_check_permissions)
 
     # Disable rate limiting and audit decorator inside tests
-    class _DummyLimiter:
-        def limit(self, *_args, **_kwargs):
-            def _decorator(fn):
-                return fn
-            return _decorator
-
     def _noop_audit(*_a, **_k):
         def _decorator(fn):
             return fn
         return _decorator
 
-    for api_mod in [roles_api, users_api, user_profile_api, perms_api, org_api, sessions_api, audit_api]:
-        setattr(api_mod, "limiter", _DummyLimiter())
+    try:
+        import apps.user_service.app.app_instance as app_instance
+        if getattr(app_instance, "limiter", None):
+            app_instance.limiter.enabled = False
+    except Exception:
+        pass
+
+    for api_mod in [roles_api, users_api, user_profile_api, perms_api, org_api, sessions_api, audit_api, auth_api]:
+        if getattr(api_mod, "limiter", None):
+            api_mod.limiter.enabled = False
         if hasattr(api_mod, "audit_api_call"):
             setattr(api_mod, "audit_api_call", _noop_audit)
 

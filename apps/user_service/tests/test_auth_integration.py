@@ -1385,10 +1385,42 @@ def test_change_password_invalid_current_password(auth_client):
     from fastapi import HTTPException, status
 
     with patch('apps.user_service.app.api.auth.login_user',
-               AsyncMock(side_effect=HTTPException(status_code=401, detail="Invalid credentials"))):
+               AsyncMock(side_effect=HTTPException(status_code=400, detail="Invalid login credentials"))):
         response = auth_client.post("/auth/change-password", json=change_password_data)
         assert response.status_code == 400
         assert "Current password is incorrect" in response.json()["detail"]
+
+
+def test_change_password_invalid_current_password_unexpected_http_exception(auth_client):
+    """Ensure non-400/Invalid login errors from login_user propagate unchanged"""
+    change_password_data = {
+        "current_password": "WrongPass123!",
+        "new_password": "NewPass123!"
+    }
+
+    from fastapi import HTTPException
+
+    with patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=HTTPException(status_code=401, detail="Unauthorized access"))):
+        response = auth_client.post("/auth/change-password", json=change_password_data)
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Unauthorized access"
+
+
+def test_change_password_invalid_current_password_wrong_detail(auth_client):
+    """Ensure 400 errors without the specific detail are propagated as-is"""
+    change_password_data = {
+        "current_password": "WrongPass123!",
+        "new_password": "NewPass123!"
+    }
+
+    from fastapi import HTTPException
+
+    with patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=HTTPException(status_code=400, detail="Some other error"))):
+        response = auth_client.post("/auth/change-password", json=change_password_data)
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Some other error"
 
 
 def test_change_password_invalid_current_password_authapierror(auth_client):
@@ -1405,8 +1437,8 @@ def test_change_password_invalid_current_password_authapierror(auth_client):
     with patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=auth_error)):
         response = auth_client.post("/auth/change-password", json=change_password_data)
-        assert response.status_code == 400
-        assert "Current password is incorrect" in response.json()["detail"]
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Internal server error during change_password"
 
 
 def test_change_password_current_password_verification_exception(auth_client):
@@ -1420,7 +1452,7 @@ def test_change_password_current_password_verification_exception(auth_client):
                AsyncMock(side_effect=Exception("Database connection error"))):
         response = auth_client.post("/auth/change-password", json=change_password_data)
         assert response.status_code == 500
-        assert "Failed to verify current password" in response.json()["detail"]
+        assert response.json()["detail"] == "Internal server error during change_password"
 
 
 def test_change_password_update_fails(auth_client):

@@ -389,6 +389,10 @@ async def login_user(email: str, password: str) -> dict:
     except AuthApiError as error:
         if error.status == 400 and error.message == "Email not confirmed":
             raise HTTPException(status_code=403, detail="Email not confirmed. Please check your email Inbox for the confirmation link.") from error
+        elif error.status == 400 and error.message == "Invalid login credentials":
+            raise HTTPException(status_code=400, detail="Invalid login credentials") from error
+        else:
+            raise HTTPException(status_code=error.status, detail=error.message) from error
     except Exception as error:
         log_exception()
         logger.error(error)
