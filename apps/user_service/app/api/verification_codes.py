@@ -10,6 +10,7 @@ Last Updated: 2024-12-19
 """
 
 import os
+import ipaddress
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -82,25 +83,45 @@ def get_optional_user(request: Request) -> Optional[dict]:
         return None
 
 
+def _sanitize_ip(candidate: Optional[str]) -> Optional[str]:
+    """
+    Validate and sanitize IP address strings.
+    Returns a valid IP string or None if invalid.
+    """
+    if not candidate:
+        return None
+    candidate = candidate.split(",")[0].strip()
+    try:
+        # Validate IPv4/IPv6
+        ipaddress.ip_address(candidate)
+        return candidate
+    except ValueError:
+        logger.debug("Invalid IP address detected: %s", candidate)
+        return None
+
+
 def get_client_ip(request: Request) -> str:
     """
     Extract client IP address from request.
 
-    This function handles various proxy scenarios and extracts the real client IP.
+    Ensures that the returned value is a valid IPv4/IPv6 string to avoid
+    database errors when storing as inet type.
     """
-    # Check for forwarded headers (common with proxies)
     forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # Take the first IP in the chain
-        return forwarded_for.split(",")[0].strip()
+    if ip := _sanitize_ip(forwarded_for):
+        return ip
 
-    # Check for real IP header
     real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip
+    if ip := _sanitize_ip(real_ip):
+        return ip
 
-    # Fallback to client host
-    return request.client.host if request.client else "unknown"
+    client_host = request.client.host if request.client else None
+    if client_host:
+        sanitized_host = _sanitize_ip(client_host)
+        return sanitized_host if sanitized_host else client_host
+
+    logger.debug("Unable to determine client IP address; returning 'unknown'")
+    return "unknown"
 
 
 async def _validate_email_for_update(email: str, user_id: str, current_user_email: str) -> None:

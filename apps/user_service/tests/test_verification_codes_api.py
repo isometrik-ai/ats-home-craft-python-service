@@ -400,6 +400,8 @@ class TestSendVerificationCode:
                    AsyncMock(return_value=phone_record)), \
              patch('apps.user_service.app.api.verification_codes.get_user_by_id',
                    AsyncMock(return_value=mock_user_data)), \
+             patch('apps.user_service.app.api.verification_codes.get_supabase_admin_client',
+                   AsyncMock(return_value=mock_supabase)), \
              patch('libs.shared_db.supabase_db.db.get_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
@@ -459,6 +461,8 @@ class TestSendVerificationCode:
                    AsyncMock(return_value=[])), \
              patch('apps.user_service.app.api.verification_codes.get_user_by_id',
                    AsyncMock(return_value=mock_user_data)), \
+             patch('apps.user_service.app.api.verification_codes.get_supabase_admin_client',
+                   AsyncMock(return_value=mock_supabase)), \
              patch('libs.shared_db.supabase_db.db.get_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)):
 
