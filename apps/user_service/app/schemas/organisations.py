@@ -214,7 +214,7 @@ class UpdateOrganisationRequest(BaseModel):
     plan_type: Optional[str] = Field(None, description="Updated plan type")
     max_users: Optional[int] = Field(None, description="Updated maximum users")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
-    
+
     @field_validator("logo_url", mode="before")
     @classmethod
     def validate_logo_url(cls, v):
@@ -419,13 +419,13 @@ class OrganizationUpdate(BaseModel):
         None,
         description="URL to the organisation's logo image",
     )
-    
+
     @field_validator("logo_url", mode="before")
     @classmethod
     def validate_logo_url(cls, v):
         """Validate logo_url is a valid URL if provided"""
         return validate_url_field(v, "logo_url")
-    
+
     industry: Optional[str] = Field(
         None,
         max_length=100,

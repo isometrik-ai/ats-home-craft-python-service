@@ -62,7 +62,7 @@ class TestUpdateUserProfile:
         """Test successful profile update when user is in organization."""
         user_id = mock_user_context.user_id
         org_id = mock_user_context.organization_id
-        
+
         current_user_data = {
             "user_id": user_id,
             "email": "test@example.com",
@@ -72,7 +72,7 @@ class TestUpdateUserProfile:
             "timezone": "UTC",
             "avatar_url": "https://old.com/avatar.jpg"
         }
-        
+
         updated_user_data = {
             "user_id": user_id,
             "email": "test@example.com",
@@ -82,11 +82,11 @@ class TestUpdateUserProfile:
             "timezone": "America/New_York",
             "avatar_url": "https://new.com/avatar.jpg"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {"existing": "data"}
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -101,9 +101,9 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_user_data)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
@@ -113,7 +113,7 @@ class TestUpdateUserProfile:
                     "avatar_url": "https://new.com/avatar.jpg"
                 }
             )
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["message"] == "User profile updated successfully"
@@ -127,21 +127,21 @@ class TestUpdateUserProfile:
             organization_id=None,
             email="test@example.com"
         )
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {
             "first_name": "Old",
             "last_name": "User"
         }
-        
+
         updated_profile = {
             "user_id": user_id,
             "first_name": "New",
             "last_name": "Name",
             "full_name": "New Name"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -154,9 +154,9 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
@@ -164,7 +164,7 @@ class TestUpdateUserProfile:
                     "last_name": "Name"
                 }
             )
-            
+
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -176,13 +176,13 @@ class TestUpdateUserProfile:
             organization_id=None,
             email="test@example.com"
         )
-        
+
         updated_profile = {
             "user_id": user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -195,9 +195,9 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
@@ -205,7 +205,7 @@ class TestUpdateUserProfile:
                     "last_name": "Name"
                 }
             )
-            
+
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -217,7 +217,7 @@ class TestUpdateUserProfile:
             organization_id=None,
             email="test@example.com"
         )
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {
@@ -225,13 +225,13 @@ class TestUpdateUserProfile:
             "last_name": "User",
             "timezone": "UTC"
         }
-        
+
         updated_profile = {
             "user_id": user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -244,9 +244,9 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
@@ -254,7 +254,7 @@ class TestUpdateUserProfile:
                     "last_name": "Name"
                 }
             )
-            
+
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -266,21 +266,21 @@ class TestUpdateUserProfile:
             "first_name": "Old",
             "last_name": "User"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
                    AsyncMock(return_value=current_user_data)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={}
             )
-            
+
             assert response.status_code == 400
             assert "No fields provided for update" in response.json()["detail"]
 
@@ -293,9 +293,9 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=None)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_by_id',
                    AsyncMock(return_value=None)):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             # This should still work because we create basic profile structure
             response = client.put(
                 "/v1/admin/users/update",
@@ -303,7 +303,7 @@ class TestUpdateUserProfile:
                     "first_name": "New"
                 }
             )
-            
+
             # Should succeed because we handle users not in organization
             assert response.status_code == 200
 
@@ -317,18 +317,18 @@ class TestUpdateUserProfile:
             "last_name": "User",
             "full_name": "Old User"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "User",
             "full_name": "New User"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -343,16 +343,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_user_data)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "first_name": "New"
                 }
             )
-            
+
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -365,18 +365,18 @@ class TestUpdateUserProfile:
             "last_name": "User",
             "full_name": "Old User"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "first_name": "Old",
             "last_name": "New",
             "full_name": "Old New"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -391,16 +391,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_user_data)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "last_name": "New"
                 }
             )
-            
+
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -413,18 +413,18 @@ class TestUpdateUserProfile:
             "last_name": "User",
             "full_name": "Old User"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "first_name": "John",
             "last_name": "Doe",
             "full_name": "John Doe"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -439,9 +439,9 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_user_data)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
@@ -449,7 +449,7 @@ class TestUpdateUserProfile:
                     "last_name": "Doe"
                 }
             )
-            
+
             assert response.status_code == 200
             # Verify update_user_info was called with full_name
             from apps.user_service.app.api.admin_management.users.update_user import update_user_info
@@ -464,17 +464,17 @@ class TestUpdateUserProfile:
             "first_name": "Old",
             "last_name": "User"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         updated_profile = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -489,16 +489,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "first_name": "New"
                 }
             )
-            
+
             # Should still succeed because we continue with metadata update
             assert response.status_code == 200
 
@@ -511,19 +511,19 @@ class TestUpdateUserProfile:
             "first_name": "Old",
             "last_name": "User"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         updated_profile = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -538,16 +538,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "first_name": "New"
                 }
             )
-            
+
             # Should succeed, using JWT token metadata as fallback
             assert response.status_code == 200
 
@@ -560,23 +560,23 @@ class TestUpdateUserProfile:
             "first_name": "Old",
             "last_name": "User"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {"existing": "metadata"}
-        
+
         updated_profile = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -591,16 +591,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "first_name": "New"
                 }
             )
-            
+
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -612,23 +612,23 @@ class TestUpdateUserProfile:
             "first_name": "Old",
             "last_name": "User"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         updated_profile = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -643,16 +643,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "first_name": "New"
                 }
             )
-            
+
             # Should still succeed, just logs warning
             assert response.status_code == 200
 
@@ -665,23 +665,23 @@ class TestUpdateUserProfile:
             "first_name": "Old",
             "last_name": "User"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         updated_profile = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -696,16 +696,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "first_name": "New"
                 }
             )
-            
+
             # Should still succeed, just logs warning
             assert response.status_code == 200
 
@@ -721,17 +721,17 @@ class TestUpdateUserProfile:
             "timezone": "UTC",
             "avatar_url": "https://old.com/avatar.jpg"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "first_name": "New",
             "last_name": "Name"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -746,16 +746,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=None)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "first_name": "New"
                 }
             )
-            
+
             # Should succeed, uses current_user_data as fallback
             assert response.status_code == 200
 
@@ -769,21 +769,21 @@ class TestUpdateUserProfile:
             "last_name": "User",
             "timezone": "UTC"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "timezone": "America/New_York"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         updated_profile = {
             "user_id": mock_user_context.user_id,
             "timezone": "America/New_York"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -798,16 +798,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "timezone": "America/New_York"
                 }
             )
-            
+
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -818,21 +818,21 @@ class TestUpdateUserProfile:
             "email": "test@example.com",
             "avatar_url": "https://old.com/avatar.jpg"
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "avatar_url": "https://new.com/avatar.jpg"
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         updated_profile = {
             "user_id": mock_user_context.user_id,
             "avatar_url": "https://new.com/avatar.jpg"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -847,16 +847,16 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "avatar_url": "https://new.com/avatar.jpg"
                 }
             )
-            
+
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -869,24 +869,24 @@ class TestUpdateUserProfile:
             "last_name": "",
             "full_name": ""
         }
-        
+
         updated_user_data = {
             "user_id": mock_user_context.user_id,
             "first_name": "",
             "last_name": "",
             "full_name": ""
         }
-        
+
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}
-        
+
         updated_profile = {
             "user_id": mock_user_context.user_id,
             "first_name": "",
             "last_name": ""
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -901,9 +901,9 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
@@ -911,7 +911,7 @@ class TestUpdateUserProfile:
                     "last_name": ""
                 }
             )
-            
+
             # Should succeed, full_name won't be set if both are empty
             assert response.status_code == 200
 
@@ -924,16 +924,16 @@ class TestUpdateUserProfile:
             organization_id=None,
             email="test@example.com"
         )
-        
+
         # Mock user_data without user attribute
         mock_user_data = MagicMock()
         mock_user_data.user = None
-        
+
         updated_profile = {
             "user_id": user_id,
             "first_name": "New"
         }
-        
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
@@ -946,15 +946,15 @@ class TestUpdateUserProfile:
                    AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
-            
+
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
-            
+
             response = client.put(
                 "/v1/admin/users/update",
                 json={
                     "first_name": "New"
                 }
             )
-            
+
             assert response.status_code == 200
 

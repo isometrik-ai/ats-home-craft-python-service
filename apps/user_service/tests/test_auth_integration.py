@@ -486,7 +486,7 @@ def test_validate_password_strength_weak():
 
     with pytest.raises(HTTPException) as exc_info:
         _validate_password_strength("weak")
-    
+
     assert exc_info.value.status_code == 400
     assert "Password must be at least 6 characters" in exc_info.value.detail
 
@@ -510,7 +510,7 @@ def test_verify_email_non_organization_member(auth_client):
 
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=mock_auth_user)):
-        response = auth_client.post("/auth/email/verify", json=verify_data)        
+        response = auth_client.post("/auth/email/verify", json=verify_data)
         assert response.status_code == 200
         data = response.json()
         assert data["email_found"] is True
@@ -536,10 +536,10 @@ async def test_login_endpoint_http_exception_re_raise():
     with patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=HTTPException(status_code=500, detail="Server error"))):
         mock_request = MagicMock(spec=Request)
-        
+
         with pytest.raises(HTTPException) as exc_info:
             await login(request=mock_request, data=login_data)
-        
+
         assert exc_info.value.status_code == 500
         assert "Server error" in exc_info.value.detail
 
@@ -722,7 +722,7 @@ def test_verify_email_endpoint_not_found(auth_client):
 
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=None)):
-        response = auth_client.post("/auth/email/verify", json=verify_data)        
+        response = auth_client.post("/auth/email/verify", json=verify_data)
         assert response.status_code == 200
         data = response.json()
         assert data["message"] == "Email not found."
@@ -732,7 +732,7 @@ def test_verify_email_endpoint_not_found(auth_client):
 
 
 def test_verify_email_endpoint_unknown_type(auth_client):
-    """Test verify email when user metadata lacks type - covers fallback branch""" 
+    """Test verify email when user metadata lacks type - covers fallback branch"""
     verify_data = {"email": "test@example.com"}
 
     mock_auth_user = MagicMock()
@@ -741,7 +741,7 @@ def test_verify_email_endpoint_unknown_type(auth_client):
 
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=mock_auth_user)):
-        response = auth_client.post("/auth/email/verify", json=verify_data)        
+        response = auth_client.post("/auth/email/verify", json=verify_data)
         assert response.status_code == 200
         data = response.json()
         assert data["email_found"] is True
@@ -1326,8 +1326,8 @@ def test_change_password_success(auth_client):
     }
 
     from fastapi import HTTPException, status
-    
-    # Mock login_user: first call succeeds (current password correct), 
+
+    # Mock login_user: first call succeeds (current password correct),
     # second call fails with 401 (new password is different - good!)
     call_count = [0]  # Use list to allow modification in nested function
     async def mock_login_user(email, password):
@@ -1338,7 +1338,7 @@ def test_change_password_success(auth_client):
         # Second call: new_password check - should fail to indicate it's different
         else:
             raise HTTPException(status_code=401, detail="Invalid credentials")
-    
+
     with patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=mock_login_user)), \
          patch('apps.user_service.app.api.auth.update_password_with_link_identity',
@@ -1385,10 +1385,42 @@ def test_change_password_invalid_current_password(auth_client):
     from fastapi import HTTPException, status
 
     with patch('apps.user_service.app.api.auth.login_user',
-               AsyncMock(side_effect=HTTPException(status_code=401, detail="Invalid credentials"))):
+               AsyncMock(side_effect=HTTPException(status_code=400, detail="Invalid login credentials"))):
         response = auth_client.post("/auth/change-password", json=change_password_data)
         assert response.status_code == 400
         assert "Current password is incorrect" in response.json()["detail"]
+
+
+def test_change_password_invalid_current_password_unexpected_http_exception(auth_client):
+    """Ensure non-400/Invalid login errors from login_user propagate unchanged"""
+    change_password_data = {
+        "current_password": "WrongPass123!",
+        "new_password": "NewPass123!"
+    }
+
+    from fastapi import HTTPException
+
+    with patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=HTTPException(status_code=401, detail="Unauthorized access"))):
+        response = auth_client.post("/auth/change-password", json=change_password_data)
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Unauthorized access"
+
+
+def test_change_password_invalid_current_password_wrong_detail(auth_client):
+    """Ensure 400 errors without the specific detail are propagated as-is"""
+    change_password_data = {
+        "current_password": "WrongPass123!",
+        "new_password": "NewPass123!"
+    }
+
+    from fastapi import HTTPException
+
+    with patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=HTTPException(status_code=400, detail="Some other error"))):
+        response = auth_client.post("/auth/change-password", json=change_password_data)
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Some other error"
 
 
 def test_change_password_invalid_current_password_authapierror(auth_client):
@@ -1405,8 +1437,8 @@ def test_change_password_invalid_current_password_authapierror(auth_client):
     with patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=auth_error)):
         response = auth_client.post("/auth/change-password", json=change_password_data)
-        assert response.status_code == 400
-        assert "Current password is incorrect" in response.json()["detail"]
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Internal server error during change_password"
 
 
 def test_change_password_current_password_verification_exception(auth_client):
@@ -1420,7 +1452,7 @@ def test_change_password_current_password_verification_exception(auth_client):
                AsyncMock(side_effect=Exception("Database connection error"))):
         response = auth_client.post("/auth/change-password", json=change_password_data)
         assert response.status_code == 500
-        assert "Failed to verify current password" in response.json()["detail"]
+        assert response.json()["detail"] == "Internal server error during change_password"
 
 
 def test_change_password_update_fails(auth_client):
@@ -1431,7 +1463,7 @@ def test_change_password_update_fails(auth_client):
     }
 
     from fastapi import HTTPException
-    
+
     # Mock login_user: first call succeeds (current password), second call fails (new password is different)
     call_count = [0]
     async def mock_login_user(email, password):
@@ -1440,7 +1472,7 @@ def test_change_password_update_fails(auth_client):
             return MagicMock()  # First call succeeds
         else:
             raise HTTPException(status_code=401, detail="Invalid credentials")  # Second call fails
-    
+
     with patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=mock_login_user)), \
          patch('apps.user_service.app.api.auth.update_password_with_link_identity',
@@ -1456,9 +1488,9 @@ def test_change_password_update_error_user_not_allowed(auth_client):
         "current_password": "OldPass123!",
         "new_password": "NewPass123!"
     }
-    
+
     from fastapi import HTTPException
-    
+
     # Mock login_user: first call succeeds (current password), second call fails (new password is different)
     call_count = [0]
     async def mock_login_user(email, password):
@@ -1467,7 +1499,7 @@ def test_change_password_update_error_user_not_allowed(auth_client):
             return MagicMock()  # First call succeeds
         else:
             raise HTTPException(status_code=401, detail="Invalid credentials")  # Second call fails
-    
+
     with patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=mock_login_user)), \
          patch('apps.user_service.app.api.auth.update_password_with_link_identity',
@@ -1485,7 +1517,7 @@ def test_change_password_update_error_authentication_error(auth_client):
     }
 
     from fastapi import HTTPException
-    
+
     # Mock login_user: first call succeeds (current password), second call fails (new password is different)
     call_count = [0]
     async def mock_login_user(email, password):
@@ -1494,7 +1526,7 @@ def test_change_password_update_error_authentication_error(auth_client):
             return MagicMock()  # First call succeeds
         else:
             raise HTTPException(status_code=401, detail="Invalid credentials")  # Second call fails
-    
+
     with patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=mock_login_user)), \
          patch('apps.user_service.app.api.auth.update_password_with_link_identity',
@@ -1512,7 +1544,7 @@ def test_change_password_update_error_generic(auth_client):
     }
 
     from fastapi import HTTPException
-    
+
     # Mock login_user: first call succeeds (current password), second call fails (new password is different)
     call_count = [0]
     async def mock_login_user(email, password):
@@ -1521,11 +1553,11 @@ def test_change_password_update_error_generic(auth_client):
             return MagicMock()  # First call succeeds
         else:
             raise HTTPException(status_code=401, detail="Invalid credentials")  # Second call fails
-    
+
     with patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=mock_login_user)), \
          patch('apps.user_service.app.api.auth.update_password_with_link_identity',
-               AsyncMock(side_effect=Exception("Unknown database error"))):        
+               AsyncMock(side_effect=Exception("Unknown database error"))):
         response = auth_client.post("/auth/change-password", json=change_password_data)
         assert response.status_code == 500
         assert "Failed to update password" in response.json()["detail"]

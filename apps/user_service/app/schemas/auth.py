@@ -200,7 +200,7 @@ class ForgotPasswordResponse(ResponseModel):
 
 class ChangePasswordRequest(BaseModel):
     """Request model for change password operations"""
-    
+
     current_password: str = Field(..., description="Current password for verification")
     new_password: str = Field(..., min_length=6, description="New password to set")
 

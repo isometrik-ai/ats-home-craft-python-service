@@ -5,9 +5,11 @@ This module provides user update operations including email updates, ban, and un
 All endpoints include proper authentication, validation, and database operations.
 """
 
+from typing import Optional
 from datetime import datetime
 import uuid
 
+from pydantic import BaseModel, Field, field_validator
 from fastapi import APIRouter, HTTPException, status, Depends, Request, Body
 
 # Logger import
@@ -34,13 +36,12 @@ from apps.user_service.app.schemas.users import (
     UpdateUserResponse,
 )
 from apps.user_service.app.schemas import validate_url_field
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional
 
 # Audit logging imports
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
+from apps.user_service.app.dependencies.common_utils import extract_user_context
 
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     update_supabase_user_email
@@ -64,7 +65,6 @@ from libs.shared_db.supabase_db.admin_operations.user import (
 # Local imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE
-from apps.user_service.app.dependencies.common_utils import extract_user_context
 
 # Create router for user update endpoints
 router = APIRouter(prefix="/users", tags=["User Update Operations"])
@@ -78,26 +78,26 @@ DELETED_ROLES = "delete roles"
 # Update profile request schema
 class UpdateUserProfileRequest(BaseModel):
     """Request model for updating user profile information.
-    
+
     Only these fields can be updated:
     - first_name: Updated first name
-    - last_name: Updated last name  
+    - last_name: Updated last name
     - timezone: Updated timezone preference
     - avatar_url: Updated avatar URL
-    
+
     full_name will be automatically calculated from first_name + last_name.
     """
     first_name: Optional[str] = Field(None, description="Updated first name")
     last_name: Optional[str] = Field(None, description="Updated last name")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
     avatar_url: Optional[str] = Field(None, description="Updated avatar URL")
-    
+
     @field_validator("avatar_url")
     @classmethod
     def validate_avatar_url(cls, v):
         """Validate avatar_url is a valid URL if provided"""
         return validate_url_field(v, "avatar_url")
-    
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -398,18 +398,18 @@ async def update_user_profile(
 ):
     """
     Update authenticated user's own profile information.
-    
+
     **Self Profile Update:**
     - Uses the authenticated user's ID from the JWT token (no user_id parameter needed)
     - Users can only update their own profile
     - No admin permissions required
-    
+
     **Updatable Fields:**
     - `first_name`: Updated first name
     - `last_name`: Updated last name
     - `timezone`: Updated timezone preference (e.g., "America/New_York", "UTC")
     - `avatar_url`: Updated avatar/profile picture URL
-    
+
     **Automatic Behavior:**
     - `full_name` is automatically calculated from `first_name + last_name` when either is updated
     - Only fields provided in the request will be updated (partial updates supported)
@@ -424,7 +424,7 @@ async def update_user_profile(
         UpdateUserResponse: Success message with status
 
     Raises:
-        HTTPException: 
+        HTTPException:
             - 400: No fields provided for update
             - 404: User not found in organization
             - 500: Internal server error
@@ -446,7 +446,7 @@ async def update_user_profile(
         current_user_data = await get_user_in_organization(
             user_id, user_context.organization_id
         )
-    
+
     # If user not in organization, create a basic profile structure
     if not current_user_data:
         # Allow users without organization to update their profile
@@ -459,7 +459,7 @@ async def update_user_profile(
         except Exception:
             # Use JWT token metadata if Supabase call fails
             pass
-        
+
         current_user_data = {
             "user_id": user_id,
             "email": user_context.email,
@@ -477,23 +477,23 @@ async def update_user_profile(
     # Prepare update data - only include fields that are provided
     update_data = {}
     metadata_update = {}
-    
+
     # Get current values to calculate full_name
     current_first_name = current_user_data.get("first_name") or ""
     current_last_name = current_user_data.get("last_name") or ""
-    
+
     # Update first_name if provided
     if body.first_name is not None:
         update_data["first_name"] = body.first_name
         metadata_update["first_name"] = body.first_name
         current_first_name = body.first_name
-    
+
     # Update last_name if provided
     if body.last_name is not None:
         update_data["last_name"] = body.last_name
         metadata_update["last_name"] = body.last_name
         current_last_name = body.last_name
-    
+
     # Calculate full_name from first_name + last_name
     if body.first_name is not None or body.last_name is not None:
         full_name_parts = [part.strip() for part in [current_first_name, current_last_name] if part.strip()]
@@ -501,12 +501,12 @@ async def update_user_profile(
         if full_name:
             update_data["full_name"] = full_name
             metadata_update["full_name"] = full_name
-    
+
     # Update timezone if provided
     if body.timezone is not None:
         update_data["timezone"] = body.timezone
         metadata_update["timezone"] = body.timezone
-    
+
     # Update avatar_url if provided
     if body.avatar_url is not None:
         update_data["avatar_url"] = body.avatar_url
@@ -522,13 +522,14 @@ async def update_user_profile(
     # Update organization_members table if user is in an organization
     if user_context.organization_id:
         updated_user = await update_user_info(
-            user_id, 
-            user_context.organization_id, 
+            user_id,
+            user_context.organization_id,
             update_data
         )
-        
+
         if not updated_user:
-            logger.warning("Failed to update user in organization_members table for user: %s", user_id)
+            logger.warning(
+                "Failed to update user in organization_members table for user: %s", user_id)
             # Continue with metadata update even if organization update fails
     else:
         logger.info("User %s not in organization, updating only Supabase Auth metadata", user_id)
@@ -545,15 +546,16 @@ async def update_user_profile(
             # If get_user_by_id fails, use JWT token metadata as fallback
             logger.warning("Could not fetch user metadata from Supabase Auth: %s. Using JWT token metadata.", str(e))
             existing_metadata = current_user.get("user_metadata", {})
-        
+
         # Merge with existing metadata
         updated_metadata = {**existing_metadata, **metadata_update}
-        
+
         # Update metadata in Supabase Auth
         try:
             metadata_updated = await update_metadata_of_user(user_id, updated_metadata)
             if not metadata_updated:
-                logger.warning("Failed to update user metadata in Supabase Auth for user: %s", user_id)
+                logger.warning(
+                    "Failed to update user metadata in Supabase Auth for user: %s", user_id)
         except Exception as e:
             logger.warning("Error updating user metadata in Supabase Auth: %s", str(e))
             # Don't fail the entire operation if metadata update fails

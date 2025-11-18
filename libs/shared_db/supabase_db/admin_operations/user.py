@@ -132,10 +132,10 @@ async def update_phone_of_user(user_id: str, phone: str) -> bool:
         existing_metadata = user_data.user.user_metadata if hasattr(user_data, 'user') and user_data.user else {}
         if not existing_metadata:
             existing_metadata = {}
-        
+
         # Update phone in metadata
         updated_metadata = {**existing_metadata, "phone": phone}
-        
+
         # Update user with new metadata
         result = await supabase.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
         return result.user is not None

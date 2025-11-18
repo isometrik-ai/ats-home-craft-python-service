@@ -589,7 +589,7 @@ Contact Support: {support_email}
 </head>
 <body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
   <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
-    
+
     <div style="padding:30px; text-align:center; border-bottom:1px solid #eee;">
       <h2 style="margin:0; color:#1f3a93;">Password Updated Successfully</h2>
     </div>
@@ -687,7 +687,7 @@ Contact Support: {support_email}
 </head>
 <body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
   <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
-    
+
     <div style="padding:30px; text-align:center; border-bottom:1px solid #eee;">
       <h2 style="margin:0; color:#1f3a93;">Your Password Has Been Reset</h2>
     </div>
@@ -699,7 +699,7 @@ Contact Support: {support_email}
 
       <p>If you requested this reset, you're all set.</p>
 
-      <p>If you didn't request a password reset, your account may be at risk.  
+      <p>If you didn't request a password reset, your account may be at risk.
       Please reach out to us immediately.</p>
 
       <p style="margin-top:25px;">

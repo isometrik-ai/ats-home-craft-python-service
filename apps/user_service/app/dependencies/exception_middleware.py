@@ -273,7 +273,7 @@ async def unified_exception_handler(request: Request, exc: Exception):
     # Handle Request Validation Errors (422)
     if isinstance(exc, RequestValidationError):
         validation_errors = exc.errors()
-        
+
         # Sanitize validation errors to ensure JSON serializability
         # Convert any ValueError or other exception objects in ctx to strings
         sanitized_errors = []

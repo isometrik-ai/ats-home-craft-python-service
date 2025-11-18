@@ -18,6 +18,7 @@ from datetime import datetime
 # Third-party imports
 import jwt
 from fastapi import APIRouter, HTTPException, status, Body, Request, Depends, Response
+from supabase_auth.errors import AuthApiError
 
 # Internal utility imports
 from apps.user_service.app.dependencies.common_utils import (
@@ -83,7 +84,6 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     get_oauth_link_url,
     refresh_session
 )
-from supabase_auth.errors import AuthApiError
 from libs.shared_db.supabase_db.admin_operations.session import get_session_by_id_admin
 from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
     get_verification_code_by_id,
@@ -713,7 +713,7 @@ async def verify_email(
     """
     Verify user email and status by determining user type from auth.users metadata
     and checking the corresponding table for status.
-    
+
     Returns email_found=True if email exists in auth.users, regardless of user type or status.
     """
 
@@ -744,7 +744,7 @@ async def verify_email(
                 status=None,
                 can_login=False,
             )
-    
+
     # 4) User exists in auth.users but is not organization_member or has no user type
     # Still return email_found=True since email exists
     return VerifyEmailResponse(
@@ -903,16 +903,16 @@ async def oauth_callback(request: Request):
 def _handle_password_update_error(error: Exception) -> None:
     """
     Handle errors during password update and raise appropriate HTTPException.
-    
+
     Args:
         error: The exception that occurred during password update
-        
+
     Raises:
         HTTPException: Appropriate error based on error message
     """
     error_message = str(error).lower()
     logger.error("Error updating password: %s", str(error))
-    
+
     # Check for specific Supabase errors
     if "user not allowed" in error_message or "not allowed" in error_message:
         raise HTTPException(
@@ -952,105 +952,55 @@ async def change_password(
 ):
     """
     Change user password endpoint.
-    
+
     Requires authentication. Validates current password before updating to new password.
-    
+
     Args:
         data: ChangePasswordRequest containing current_password and new_password
         current_user: Authenticated user from JWT token
-        
+
     Returns:
         ChangePasswordResponse: Success message
-        
+
     Raises:
         HTTPException: 400 for invalid current password or validation errors
         HTTPException: 500 for server errors
     """
     user_id = current_user.get("sub")
     user_email = current_user.get("email")
-    
+
     if not user_id or not user_email:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid user information"
         )
-    
+
     # Validate new password strength
     _validate_password_strength(data.new_password)
-    
-    # First, verify current password matches database password (must pass before proceeding)
+
+    # Step :1 ) verify current password matches database password (must pass before proceeding)
     try:
         await login_user(user_email, data.current_password)
     except HTTPException as e:
-        if e.status_code == 401 or e.status_code == 403:
+        # if e.status_code == 401 or e.status_code == 403:
+        if e.status_code == 400 and e.detail == "Invalid login credentials":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Current password is incorrect"
             ) from e
-        raise
-    except AuthApiError as e:
-        # AuthApiError from Supabase - login_user already handles "Email not confirmed" as HTTPException 403
-        # So any AuthApiError here is likely invalid credentials
-        # Check for invalid login credentials
-        error_message = str(e).lower()
-        error_msg = getattr(e, 'message', '')
-        if (hasattr(e, 'status') and e.status == 400) or \
-           "invalid login credentials" in error_message or \
-           (error_msg and "invalid login credentials" in str(error_msg).lower()):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect"
-            ) from e
-        # For any other AuthApiError, treat as invalid credentials (most common case)
-        # This covers cases where the error format might vary
-        logger.warning("AuthApiError during password verification (treating as invalid credentials): %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current password is incorrect"
-        ) from e
-    except Exception as e:
-        # Check if it's likely an invalid credentials error
-        error_str = str(e).lower()
-        if "invalid login credentials" in error_str or \
-           ("invalid" in error_str and "credential" in error_str) or \
-           "authentication" in error_str:
-            logger.warning("Exception during password verification (treating as invalid credentials): %s", str(e))
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect"
-            ) from e
-        logger.error("Error verifying current password: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to verify current password"
-        ) from e
-    
-    # Check if new password is same as current password in database
-    # Attempt login with new password - if it succeeds, new password = current password
-    try:
-        await login_user(user_email, data.new_password)
-        # If login succeeds, new password is the same as current password stored in database
+        else:
+            raise e
+
+    # Step :2 ) Check if new password is same as current password
+    if data.current_password == data.new_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="New password must be different from current password"
         )
-    except HTTPException as e:
-        # If it's a 401/403, that's expected - new password is different from current (good!)
-        if e.status_code == 401 or e.status_code == 403:
-            # New password is different from current password in database, proceed
-            pass
-        else:
-            # Re-raise other HTTP exceptions (like our 400 above)
-            raise
-    except AuthApiError as e:
-        # AuthApiError means login failed - new password is different from current (good!)
-        # This is expected behavior, so proceed with password update
-        pass
-    except Exception as e:
-        # If login fails for other reasons, assume new password is different and proceed
-        logger.warning("Error checking if new password matches current: %s. Proceeding with password update.", str(e))
-    
-    # Update password
+    # Check if new password is same as current password in database
+    # Attempt login with new password - if it succeeds, new password = current password
+
+    # Step :3 ) Update password
     try:
         result = await update_password_with_link_identity(user_id, data.new_password)
         if not result:
@@ -1062,21 +1012,24 @@ async def change_password(
         raise
     except Exception as e:
         _handle_password_update_error(e)
-    
+
     # Send password change success email
     try:
         user_metadata = current_user.get("user_metadata", {})
-        user_name = user_metadata.get("full_name") or \
-                   f"{user_metadata.get('first_name', '')} {user_metadata.get('last_name', '')}".strip() or \
-                   user_email.split('@')[0]
-        
+        if user_metadata.get("first_name"):
+            user_name = user_metadata.get("first_name")
+        elif user_metadata.get("full_name"):
+            user_name = user_metadata.get("full_name")
+        else:
+            user_name = user_email.split('@')[0]
+
         email_sent = send_password_change_success_email(email=user_email, user_name=user_name)
         if not email_sent:
             logger.warning("Failed to send password change success email to %s", user_email)
     except Exception as email_error:
         logger.error("Error sending password change success email: %s", str(email_error))
         # Don't fail the operation if email fails
-    
+
     return ChangePasswordResponse(
         message="Password changed successfully"
     )

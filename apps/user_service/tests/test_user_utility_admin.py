@@ -1889,7 +1889,7 @@ class TestGetUserById:
 
         # First call fails with "User not allowed", second succeeds
         auth_error = AuthApiError("User not allowed", status=403, code="user_not_allowed")
-        
+
         with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client, \
              patch("asyncio.sleep", AsyncMock()):  # Mock sleep to speed up test
             mock_supabase = MagicMock()
@@ -1899,7 +1899,7 @@ class TestGetUserById:
             # Import cache to patch it
             from libs.shared_db.supabase_db.db import _cache
             original_cache_value = _cache._supabase_admin_client
-            
+
             try:
                 from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
                 result = await get_user_by_id(user_id)
@@ -1921,7 +1921,7 @@ class TestGetUserById:
 
         # Both attempts fail with "User not allowed"
         auth_error = AuthApiError("User not allowed", status=403, code="user_not_allowed")
-        
+
         with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client, \
              patch("asyncio.sleep", AsyncMock()):  # Mock sleep to speed up test
             mock_supabase = MagicMock()
@@ -1931,7 +1931,7 @@ class TestGetUserById:
             # Import cache to patch it
             from libs.shared_db.supabase_db.db import _cache
             original_cache_value = _cache._supabase_admin_client
-            
+
             try:
                 from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
                 with pytest.raises(AuthApiError):

@@ -328,14 +328,14 @@ organization_id: Organization ID to associate with user
             error_str_lower += " " + " ".join(str(arg).lower() for arg in supabase_error.args)
 
         if any(kw in error_str_lower for kw in [
-            "already_exists", "duplicate", "already registered", 
-            "user already registered", "email already", 
+            "already_exists", "duplicate", "already registered",
+            "user already registered", "email already",
             "user already exists", "already been registered"
         ]):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
             ) from supabase_error
-        
+
         handle_supabase_signup_exceptions(supabase_error)
 
         # Default to 500 for unexpected errors
@@ -389,6 +389,10 @@ async def login_user(email: str, password: str) -> dict:
     except AuthApiError as error:
         if error.status == 400 and error.message == "Email not confirmed":
             raise HTTPException(status_code=403, detail="Email not confirmed. Please check your email Inbox for the confirmation link.") from error
+        elif error.status == 400 and error.message == "Invalid login credentials":
+            raise HTTPException(status_code=400, detail="Invalid login credentials") from error
+        else:
+            raise HTTPException(status_code=error.status, detail=error.message) from error
     except Exception as error:
         log_exception()
         logger.error(error)
