@@ -70,7 +70,12 @@ def test_login_endpoint_success(auth_client):
         user=SimpleNamespace(
             id="test-user-id",
             email="test@example.com",
-            user_metadata={"first_name": "Test", "last_name": "User", "timezone": "UTC"},
+            user_metadata={
+                "first_name": "Test",
+                "last_name": "User",
+                "timezone": "UTC",
+                "organization_id": "org-123",
+            },
         ),
     )
 
@@ -82,6 +87,9 @@ def test_login_endpoint_success(auth_client):
         assert data["user"]["email"] == "test@example.com"
         assert data["user"]["first_name"] == "Test"
         assert data["user"]["last_name"] == "User"
+        assert data["user"]["org_setup_status_completed"] is True
+        assert data["user"]["organization_id"] == "org-123"
+        assert data["user"]["timezone"] == "UTC"
 
 @pytest.mark.asyncio
 async def test_login_endpoint_success_async(async_auth_client):
@@ -106,7 +114,12 @@ async def test_login_endpoint_success_async(async_auth_client):
         user=SimpleNamespace(
             id="test-user-id",
             email="test@example.com",
-            user_metadata={"first_name": "Test", "last_name": "User", "timezone": "UTC"},
+            user_metadata={
+                "first_name": "Test",
+                "last_name": "User",
+                "timezone": "UTC",
+                "organization_id": "org-123",
+            },
         ),
     )
 
@@ -119,6 +132,9 @@ async def test_login_endpoint_success_async(async_auth_client):
         assert result.user.email == "test@example.com"
         assert result.user.first_name == "Test"
         assert result.user.last_name == "User"
+        assert result.user.org_setup_status_completed is True
+        assert result.user.organization_id == "org-123"
+        assert result.user.tzone == "UTC"
 
 def test_login_endpoint_invalid_credentials(auth_client):
     """Test login with invalid credentials - covers auth.py error handling"""
@@ -911,7 +927,12 @@ def test_refresh_endpoint_success(auth_client):
         user=SimpleNamespace(
             id="user-id",
             email="user@example.com",
-            user_metadata={"first_name": "Test", "last_name": "User", "timezone": "UTC"},
+            user_metadata={
+                "first_name": "Test",
+                "last_name": "User",
+                "timezone": "UTC",
+                "organization_id": "org-321",
+            },
         ),
     )
 
@@ -931,6 +952,9 @@ def test_refresh_endpoint_success(auth_client):
         data = response.json()
         assert data["access_token"] == "new-access"
         assert data["user"]["email"] == "user@example.com"
+        assert data["user"]["org_setup_status_completed"] is True
+        assert data["user"]["organization_id"] == "org-321"
+        assert data["user"]["timezone"] == "UTC"
 
 
 def test_refresh_endpoint_token_not_expired(auth_client):
