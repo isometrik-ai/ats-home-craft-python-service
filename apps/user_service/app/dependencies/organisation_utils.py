@@ -187,13 +187,11 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         # Re-raise HTTP exceptions as-is (preserves status codes)
         raise
     except (APIError, SupabaseAPIError) as api_error:
-        """
-        Handle Supabase API errors (PostgreSQL errors wrapped by Supabase).
-        These can include:
-        - Duplicate key violations (error code 23505)
-        - RLS policy violations (error code 42501)
-        - Other database constraint violations
-        """
+        # Handle Supabase API errors (PostgreSQL errors wrapped by Supabase).
+        # These can include:
+        # - Duplicate key violations (error code 23505)
+        # - RLS policy violations (error code 42501)
+        # - Other database constraint violations
         log_exception()
 
         # Extract error code and message from APIError
@@ -277,10 +275,8 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         ) from api_error
 
     except DatabaseOperationError as db_error:
-        """
-        Handle other database operation errors (network, validation, etc.)
-        These are wrapped by the handle_database_errors decorator.
-        """
+        # Handle other database operation errors (network, validation, etc.)
+        # These are wrapped by the handle_database_errors decorator.
         log_exception()
         logger.error(
             "Database operation error during organization creation "
@@ -293,10 +289,8 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         ) from db_error
 
     except Exception as unexpected_error:
-        """
-        Handle any other unexpected errors.
-        This should rarely happen as database operations are wrapped.
-        """
+        # Handle any other unexpected errors.
+        # This should rarely happen as database operations are wrapped.
         log_exception()
         logger.error(
             "Unexpected error during organization creation - Organization ID: %s, Error: %s",

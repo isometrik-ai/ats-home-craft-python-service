@@ -296,7 +296,7 @@ class UpdateUserRequest(BaseModel):
     status: Optional[UserStatus] = Field(
         None, description="User status: active, invited, or suspended"
     )
-    
+
     @field_validator("avatar_url")
     @classmethod
     def validate_avatar_url(cls, v):

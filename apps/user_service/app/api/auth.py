@@ -18,6 +18,7 @@ from datetime import datetime
 # Third-party imports
 import jwt
 from fastapi import APIRouter, HTTPException, status, Body, Request, Depends, Response
+from supabase_auth.errors import AuthApiError
 
 # Internal utility imports
 from apps.user_service.app.dependencies.common_utils import (
@@ -83,7 +84,6 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     get_oauth_link_url,
     refresh_session
 )
-from supabase_auth.errors import AuthApiError
 from libs.shared_db.supabase_db.admin_operations.session import get_session_by_id_admin
 from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
     get_verification_code_by_id,
@@ -713,7 +713,7 @@ async def verify_email(
     """
     Verify user email and status by determining user type from auth.users metadata
     and checking the corresponding table for status.
-    
+
     Returns email_found=True if email exists in auth.users, regardless of user type or status.
     """
 
@@ -744,7 +744,7 @@ async def verify_email(
                 status=None,
                 can_login=False,
             )
-    
+
     # 4) User exists in auth.users but is not organization_member or has no user type
     # Still return email_found=True since email exists
     return VerifyEmailResponse(
@@ -903,16 +903,16 @@ async def oauth_callback(request: Request):
 def _handle_password_update_error(error: Exception) -> None:
     """
     Handle errors during password update and raise appropriate HTTPException.
-    
+
     Args:
         error: The exception that occurred during password update
-        
+
     Raises:
         HTTPException: Appropriate error based on error message
     """
     error_message = str(error).lower()
     logger.error("Error updating password: %s", str(error))
-    
+
     # Check for specific Supabase errors
     if "user not allowed" in error_message or "not allowed" in error_message:
         raise HTTPException(
@@ -952,32 +952,32 @@ async def change_password(
 ):
     """
     Change user password endpoint.
-    
+
     Requires authentication. Validates current password before updating to new password.
-    
+
     Args:
         data: ChangePasswordRequest containing current_password and new_password
         current_user: Authenticated user from JWT token
-        
+
     Returns:
         ChangePasswordResponse: Success message
-        
+
     Raises:
         HTTPException: 400 for invalid current password or validation errors
         HTTPException: 500 for server errors
     """
     user_id = current_user.get("sub")
     user_email = current_user.get("email")
-    
+
     if not user_id or not user_email:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid user information"
         )
-    
+
     # Validate new password strength
     _validate_password_strength(data.new_password)
-    
+
     # Step :1 ) verify current password matches database password (must pass before proceeding)
     try:
         await login_user(user_email, data.current_password)
@@ -1022,14 +1022,14 @@ async def change_password(
             user_name = user_metadata.get("full_name")
         else:
             user_name = user_email.split('@')[0]
-        
+
         email_sent = send_password_change_success_email(email=user_email, user_name=user_name)
         if not email_sent:
             logger.warning("Failed to send password change success email to %s", user_email)
     except Exception as email_error:
         logger.error("Error sending password change success email: %s", str(email_error))
         # Don't fail the operation if email fails
-    
+
     return ChangePasswordResponse(
         message="Password changed successfully"
     )

@@ -25,32 +25,32 @@ def _bad_request(detail: str) -> None:
 def validate_url_field(value: Optional[str], field_name: str = "URL") -> Optional[str]:
     """
     Shared URL validation function for avatar_url and logo_url fields.
-    
+
     Validates that a URL:
     - Is None (allowed for optional fields)
     - Is an empty/whitespace string (converted to None)
     - Starts with http:// or https://
     - Contains a valid domain or host
-    
+
     Args:
         value: The URL value to validate
         field_name: Name of the field for error messages (default: "URL")
-        
+
     Returns:
         The validated URL string, or None if value was None/empty
-        
+
     Raises:
         ValueError: If the URL is invalid
     """
     if value is None:
         return None
-    
+
     # Handle empty string or whitespace-only string
     if isinstance(value, str):
         value = value.strip()
         if not value:
             return None
-    
+
     # Validate URL format
     try:
         result = urlparse(value)

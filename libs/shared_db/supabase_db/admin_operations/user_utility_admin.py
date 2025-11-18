@@ -328,14 +328,14 @@ organization_id: Organization ID to associate with user
             error_str_lower += " " + " ".join(str(arg).lower() for arg in supabase_error.args)
 
         if any(kw in error_str_lower for kw in [
-            "already_exists", "duplicate", "already registered", 
-            "user already registered", "email already", 
+            "already_exists", "duplicate", "already registered",
+            "user already registered", "email already",
             "user already exists", "already been registered"
         ]):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
             ) from supabase_error
-        
+
         handle_supabase_signup_exceptions(supabase_error)
 
         # Default to 500 for unexpected errors
