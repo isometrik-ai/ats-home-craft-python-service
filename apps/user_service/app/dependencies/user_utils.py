@@ -59,4 +59,5 @@ def create_user_profile_data(
         user_type=user_type,
         role=role_info,
         permissions=permissions or [],
+        identities=user_profile["identities"]
     )

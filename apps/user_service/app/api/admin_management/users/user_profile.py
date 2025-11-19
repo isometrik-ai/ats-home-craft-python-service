@@ -151,6 +151,28 @@ async def get_user_profile(
 
     user_profile = await _fetch_org_member_profile()
 
+    async def _fetch_user_identities() -> list:
+        """Fetch user identities."""
+        identities_list = []
+        user_data = await get_user_by_id(user_context.user_id)
+        for identity in user_data.user.identities:
+            identity_data = {
+                "provider": identity.provider,
+                "created_at": identity.created_at,
+                "updated_at": identity.updated_at
+            }
+            if identity.provider != "email":
+                identity_data["provider_id"] = identity.identity_data.get("provider_id",identity.identity_data.get("sub",None))
+            else:
+                identity_data["provider_id"] = identity.identity_data.get("email",None)
+            identities_list.append(identity_data)
+        return identities_list
+    
+    identities_data = await _fetch_user_identities()
+    user_profile.update({
+        "identities": identities_data
+    })
+
     async def _fetch_permissions() -> list:
         """Fetch user permissions and update activity."""
 

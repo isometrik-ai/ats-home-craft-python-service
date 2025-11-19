@@ -10,6 +10,7 @@ Date: 2024-12-19
 Last Updated: 2024-12-19
 """
 
+import datetime
 from typing import List, Optional
 from enum import Enum
 
@@ -93,6 +94,24 @@ class PermissionInfo(BaseModel):
         }
     )
 
+class Indentites(BaseModel):
+    """Model for user indentites"""
+
+    provider: str = Field(..., description="Provider of the indentite")
+    provider_id: str = Field(..., description="Data of the indentite")
+    created_at: datetime.datetime = Field(..., description="ISO timestamp when the indentite was created")
+    updated_at: datetime.datetime = Field(..., description="ISO timestamp when the indentite was updated")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "provider": "google",
+                "identity_data": {"sub": "1234567890"},
+                "created_at": "2024-12-19T10:00:00Z",
+                "updated_at": "2024-12-19T10:00:00Z",
+                "last_sign_in_at": "2024-12-19T10:00:00Z",
+            }
+        }
+    )
 
 class UserProfileData(BaseModel):
     """Model for complete user profile data
@@ -151,6 +170,10 @@ class UserProfileData(BaseModel):
         None,
         description="Detailed candidate profile data (only for candidate user type)",
     )
+    identities: Optional[List[Indentites]] = Field(
+        None,
+        description="List of all user identities (only for organization_member)",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -180,6 +203,15 @@ class UserProfileData(BaseModel):
                     }
                 ],
                 "candidate_data": None,
+                "identities": [
+                    {
+                        "provider": "google",
+                        "identity_data": {"sub": "1234567890"},
+                        "created_at": "2024-12-19T10:00:00Z",
+                        "updated_at": "2024-12-19T10:00:00Z",
+                        "last_sign_in_at": "2024-12-19T10:00:00Z",
+                    }
+                ],
             }
         }
     )
@@ -196,8 +228,8 @@ class UserProfileResponse(ResponseModel):
         data (Optional[UserProfileData]): User profile data if successful
     """
 
-    data: Optional[UserProfileData] = Field(
-        None, description="User profile data if successful"
+    data: UserProfileData = Field(
+        ..., description="User profile data if successful"
     )
 
     model_config = ConfigDict(
