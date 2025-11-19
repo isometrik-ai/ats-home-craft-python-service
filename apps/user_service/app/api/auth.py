@@ -289,6 +289,8 @@ async def login(request: Request, data: AuthLogin):
                 last_name=result.user.user_metadata.get("last_name", None),
                 phone=result.user.user_metadata.get("phone", None),
                 timezone=result.user.user_metadata.get("timezone", None),
+                org_setup_status_completed=bool(result.user.user_metadata.get("organization_id", False)),
+                organization_id=result.user.user_metadata.get("organization_id", None),
             ),
         )
     except HTTPException:
@@ -346,6 +348,7 @@ async def refresh(request: Request):
             res = await refresh_session(refresh_token)
         res = await refresh_session(refresh_token)
         # print("\n\nres:\n", res,end="\n\n")
+        user_metadata = res.user.user_metadata or {}
         return AuthResponse(
             access_token=res.session.access_token,
             refresh_token=res.session.refresh_token,
@@ -354,10 +357,12 @@ async def refresh(request: Request):
             user=UserInfo(
                 id=res.user.id,
                 email=res.user.email,
-                first_name=res.user.user_metadata.get("first_name", None),
-                last_name=res.user.user_metadata.get("last_name", None),
-                phone=res.user.user_metadata.get("phone", None),
-                timezone=res.user.user_metadata.get("timezone", None),
+                first_name=user_metadata.get("first_name"),
+                last_name=user_metadata.get("last_name"),
+                phone=user_metadata.get("phone"),
+                timezone=user_metadata.get("timezone"),
+                org_setup_status_completed=bool(user_metadata.get("organization_id")),
+                organization_id=user_metadata.get("organization_id"),
             )
         )
     except HTTPException as error:

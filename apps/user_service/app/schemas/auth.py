@@ -130,6 +130,8 @@ class UserInfo(BaseModel):
     last_name: Optional[str] = None
     phone: Optional[str] = None
     tzone: Optional[str] = Field(alias="timezone")
+    org_setup_status_completed: bool = False
+    organization_id: Optional[str] = None
 
 
 class OrganizationInfo(BaseModel):
