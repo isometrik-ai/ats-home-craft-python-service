@@ -94,37 +94,80 @@ async def get_user_profile(
             user_context.user_id,
             user_context.organization_id
         )
+        
+        # Get current email and phone from Supabase auth (source of truth)
+        # JWT token email/phone might be stale if updated after token was issued
+        current_email = user_context.email  # Default to JWT token email
+        current_phone = None  # Will be set from Supabase auth
+        user_metadata = {}
+        try:
+            user_data = await get_user_by_id(user_context.user_id)
+            if user_data and user_data.user:
+                user_obj = user_data.user
+                # Check if there's a pending email change
+                # If email_change exists and is confirmed, use it; otherwise use current email
+                if hasattr(user_obj, 'email_change') and user_obj.email_change:
+                    # There's a pending email change - use it as the current email
+                    # This handles cases where email was updated but not yet confirmed
+                    current_email = user_obj.email_change
+                    logger.info(
+                        "Using pending email change '%s' for user %s (current email: '%s')",
+                        current_email, user_context.user_id, user_obj.email
+                    )
+                else:
+                    # No pending change, use the current email
+                    current_email = user_obj.email
+                
+                # Get current phone from Supabase auth
+                # Priority: user_metadata (raw_user_meta_data) > phone field > phone_change
+                # We prioritize user_metadata since that's what we explicitly update
+                user_metadata = user_obj.user_metadata or {}
+                
+                # First check user_metadata (raw_user_meta_data) - this is what we update
+                if user_metadata and user_metadata.get("phone"):
+                    current_phone = user_metadata.get("phone")
+                # Then check phone field
+                elif hasattr(user_obj, 'phone') and user_obj.phone:
+                    current_phone = user_obj.phone
+                # Finally check for pending phone change (similar to email_change)
+                elif hasattr(user_obj, 'phone_change') and user_obj.phone_change:
+                    current_phone = user_obj.phone_change
+        except Exception as user_fetch_error:
+            # If admin API fails, fall back to JWT token email and metadata
+            logger.warning("Could not fetch user data from admin API: %s, using JWT token data", str(user_fetch_error))
+            user_metadata = current_user.get("user_metadata", {})
+            # Try to get phone from JWT token metadata as fallback
+            if not current_phone:
+                current_phone = user_metadata.get("phone")
+        
         if not user_profile:
-            # User is not linked to any organization, create a basic profile from JWT token
+            # User is not linked to any organization, create a basic profile
             logger.info("User not linked to any organization - Request ID: %s, ",request_id)
             logger.info(
                 "User ID: %s, Email: %s - Creating basic profile",
-                user_context.user_id, user_context.email
+                user_context.user_id, current_email
             )
-
-            # Get user metadata from JWT token
-            user_data = await get_user_by_id(user_context.user_id)
-            user_metadata = user_data.user.user_metadata if user_data and user_data.user else {}
 
             # Extract fields from user metadata
             first_name = user_metadata.get("first_name", "")
             last_name = user_metadata.get("last_name", "")
             full_name = user_metadata.get("full_name",
-                f"{first_name} {last_name}".strip() or user_context.email.split('@')[0]
+                f"{first_name} {last_name}".strip() or current_email.split('@')[0]
             )
             avatar_url = user_metadata.get("avatar_url")
-            phone = user_metadata.get("phone")
+            # Use current_phone from Supabase auth if available, otherwise fall back to metadata
+            phone = current_phone or user_metadata.get("phone")
             tzone = user_metadata.get("timezone", "UTC")
 
             # Create a basic profile for users without organization membership
             user_profile = {
                 "user_id": user_context.user_id,
-                "email": user_context.email,
+                "email": current_email,  # Use current email from Supabase auth
                 "full_name": full_name,
                 "first_name": first_name,
                 "last_name": last_name,
                 "avatar_url": avatar_url,
-                "phone": phone,
+                "phone": phone,  # Use current phone from Supabase auth
                 "timezone": tzone,
                 "role_id": None,
                 "status": "active",
@@ -135,17 +178,20 @@ async def get_user_profile(
                 "organization_id": None,
                 "roles": None
             }
-
-        if user_profile["email"].lower() != user_context.email.lower():
-            logger.warning("Token email does not match user profile - Request ID: %s, ",request_id)
-            logger.warning(
-                "Token email: %s, Profile email: %s",
-                user_context.email,user_profile['email']
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Token email does not match user profile",
-            )
+        else:
+            # User has organization membership - update email and phone to current values from Supabase auth
+            # This ensures the profile shows the latest email/phone even if organization_members table is stale
+            if user_profile["email"].lower() != current_email.lower():
+                logger.info(
+                    "Updating profile email from '%s' to current email '%s' (from Supabase auth)",
+                    user_profile["email"], current_email
+                )
+                user_profile["email"] = current_email
+            
+            # Update phone if it differs from current phone in Supabase auth
+            profile_phone = user_profile.get("phone")
+            if current_phone and profile_phone != current_phone:
+                user_profile["phone"] = current_phone
 
         return user_profile
 
@@ -154,18 +200,32 @@ async def get_user_profile(
     async def _fetch_user_identities() -> list:
         """Fetch user identities."""
         identities_list = []
-        user_data = await get_user_by_id(user_context.user_id)
-        for identity in user_data.user.identities:
-            identity_data = {
-                "provider": identity.provider,
-                "created_at": identity.created_at,
-                "updated_at": identity.updated_at
-            }
-            if identity.provider != "email":
-                identity_data["provider_id"] = identity.identity_data.get("provider_id",identity.identity_data.get("sub",None))
-            else:
-                identity_data["provider_id"] = identity.identity_data.get("email",None)
-            identities_list.append(identity_data)
+        try:
+            user_data = await get_user_by_id(user_context.user_id)
+            if user_data and user_data.user and hasattr(user_data.user, 'identities'):
+                for identity in user_data.user.identities:
+                    identity_data = {
+                        "provider": identity.provider,
+                        "created_at": identity.created_at,
+                        "updated_at": identity.updated_at
+                    }
+                    if identity.provider != "email":
+                        identity_data["provider_id"] = identity.identity_data.get("provider_id",identity.identity_data.get("sub",None))
+                    else:
+                        identity_data["provider_id"] = identity.identity_data.get("email",None)
+                    identities_list.append(identity_data)
+        except Exception as identity_error:
+            # If we can't fetch identities from admin API, create a basic identity from JWT token
+            logger.warning("Could not fetch user identities from admin API: %s, creating from JWT token", str(identity_error))
+            # Create basic identity from JWT token
+            # Use current time for created_at and updated_at since we don't have the actual timestamps
+            current_time = datetime.now(timezone.utc)
+            identities_list = [{
+                "provider": "email",
+                "provider_id": user_context.email,
+                "created_at": current_time,
+                "updated_at": current_time
+            }]
         return identities_list
     
     identities_data = await _fetch_user_identities()

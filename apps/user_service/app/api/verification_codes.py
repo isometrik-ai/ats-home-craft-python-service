@@ -11,6 +11,8 @@ Last Updated: 2024-12-19
 
 import os
 import ipaddress
+import jwt
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -46,14 +48,14 @@ from libs.shared_db.postgres_db.user_service_operations.verification_operations 
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.email_utils import send_verification_code_email
 from libs.shared_db.supabase_db.admin_operations.user import (
-    update_email_of_user,
-    update_phone_of_user,
     get_user_by_id,
 )
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_auth_user_by_email,
 )
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from supabase import create_async_client
+import os
 
 # Create router for verification code endpoints
 router = APIRouter(prefix="/v1/verification-code", tags=["Verification Codes"])
@@ -162,9 +164,27 @@ async def _validate_email_for_update(email: str, user_id: str, current_user_emai
         logger.warning("Error checking email existence: %s", str(e))
 
 
+def _normalize_phone(phone: str) -> str:
+    """
+    Normalize phone number by removing '+' sign for comparison.
+    Supabase phone field may not preserve '+' sign, so we normalize for matching.
+    
+    Args:
+        phone: Phone number to normalize
+        
+    Returns:
+        Normalized phone number (without '+')
+    """
+    if not phone:
+        return phone
+    # Remove '+' sign if present for comparison
+    return phone.lstrip("+")
+
 async def _check_phone_exists_for_other_user(phone: str, user_id: str) -> None:
     """
     Check if phone number already exists for another user.
+    Checks the actual phone field in auth.users, not user_metadata.
+    Normalizes phone numbers (removes '+') for comparison.
 
     Args:
         phone: Phone number to check
@@ -173,23 +193,34 @@ async def _check_phone_exists_for_other_user(phone: str, user_id: str) -> None:
     Raises:
         HTTPException: If phone is already registered with another account
     """
-
+    # Normalize the input phone for comparison
+    normalized_input_phone = _normalize_phone(phone)
+    
     supabase = await get_supabase_admin_client()
     users_list = await supabase.auth.admin.list_users(per_page=1000)
 
     for user in users_list:
-        if user.id != user_id and user.user_metadata:
-            user_phone = user.user_metadata.get("phone")
-            if user_phone and user_phone == phone:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="This phone number is already registered with another account. Please use a different phone number."
-                )
+        if user.id != user_id:
+            # Check the actual phone field, not user_metadata
+            user_phone = None
+            if hasattr(user, 'phone') and user.phone:
+                user_phone = user.phone
+            
+            # Normalize both phones for comparison
+            if user_phone:
+                normalized_user_phone = _normalize_phone(user_phone)
+                if normalized_user_phone == normalized_input_phone:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="This phone number is already registered with another account. Please use a different phone number."
+                    )
 
 
 async def _check_auth_user_exists_by_phone(phone: str) -> bool:
     """
     Check if phone number already exists in auth.users.
+    Checks the actual phone field in auth.users, not user_metadata.
+    Normalizes phone numbers (removes '+') for comparison.
 
     Args:
         phone: Phone number to check
@@ -198,13 +229,22 @@ async def _check_auth_user_exists_by_phone(phone: str) -> bool:
         True if phone exists in auth.users, False otherwise
     """
     try:
+        # Normalize the input phone for comparison
+        normalized_input_phone = _normalize_phone(phone)
+        
         supabase = await get_supabase_admin_client()
         users_list = await supabase.auth.admin.list_users(per_page=1000)
 
         for user in users_list:
-            if user.user_metadata:
-                user_phone = user.user_metadata.get("phone")
-                if user_phone and user_phone == phone:
+            # Check the actual phone field, not user_metadata
+            user_phone = None
+            if hasattr(user, 'phone') and user.phone:
+                user_phone = user.phone
+            
+            # Normalize both phones for comparison
+            if user_phone:
+                normalized_user_phone = _normalize_phone(user_phone)
+                if normalized_user_phone == normalized_input_phone:
                     return True
         return False
     except Exception as e:
@@ -215,6 +255,7 @@ async def _check_auth_user_exists_by_phone(phone: str) -> bool:
 async def _validate_phone_for_update(phone: str, user_id: str) -> None:
     """
     Validate phone number for authenticated user update.
+    Normalizes phone numbers (removes '+') for comparison.
 
     Args:
         phone: Phone number to validate
@@ -226,10 +267,17 @@ async def _validate_phone_for_update(phone: str, user_id: str) -> None:
     try:
         user_data = await get_user_by_id(user_id)
         if user_data and hasattr(user_data, 'user') and user_data.user:
-            current_user_phone = user_data.user.user_metadata.get("phone") if user_data.user.user_metadata else None
+            # Check the actual phone field, not user_metadata
+            current_user_phone = None
+            if hasattr(user_data.user, 'phone') and user_data.user.phone:
+                current_user_phone = user_data.user.phone
 
-            # Check if entered phone is same as current phone
-            if current_user_phone and phone == current_user_phone:
+            # Normalize both phones for comparison (remove '+' if present)
+            normalized_input_phone = _normalize_phone(phone)
+            normalized_current_phone = _normalize_phone(current_user_phone) if current_user_phone else None
+
+            # Check if entered phone is same as current phone (after normalization)
+            if normalized_current_phone and normalized_input_phone == normalized_current_phone:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="The entered phone number is the same as your current phone number. No change needed."
@@ -406,18 +454,52 @@ async def _verify_code_and_update_record(
     return code_matched
 
 
+async def _get_supabase_client_with_token(access_token: str):
+    """
+    Create a Supabase client with user's access token.
+    
+    Args:
+        access_token: User's JWT access token
+        
+    Returns:
+        Supabase AsyncClient configured with user's token
+    """
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_anon_key = os.getenv("SUPABASE_ANON_KEY")
+    
+    if not supabase_url or not supabase_anon_key:
+        raise RuntimeError("Missing Supabase configuration. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set.")
+    
+    # Create client with user's access token in headers
+    from supabase.lib.client_options import AsyncClientOptions
+    
+    options = AsyncClientOptions(
+        headers={
+            "Authorization": f"Bearer {access_token}"
+        }
+    )
+    
+    client = await create_async_client(supabase_url, supabase_anon_key, options)
+    return client
+
+
 async def _update_email_or_phone(
     user_id: str,
     given_input: str,
-    triggered_text: str
+    triggered_text: str,
+    access_token: str
 ) -> tuple[bool, bool]:
     """
-    Update email or phone number based on triggered_text.
+    Update email or phone number using Supabase auth.update_user() with user's token.
+    
+    This function uses the authenticated user's token to update their own email/phone,
+    following Supabase's recommended approach for user updates.
 
     Args:
         user_id: User ID to update
         given_input: Email or phone number to set
         triggered_text: The trigger type from verification record
+        access_token: User's JWT access token for authentication
 
     Returns:
         Tuple of (email_updated, phone_updated)
@@ -425,28 +507,367 @@ async def _update_email_or_phone(
     email_updated = False
     phone_updated = False
 
-    if triggered_text == VerificationTrigger.EMAIL_UPDATE.value:
-        # Update email
+    try:
+        # Create Supabase client with user's access token
+        supabase = await _get_supabase_client_with_token(access_token)
+        
+        # Get user first to validate token and get user info
+        user_response = await supabase.auth.get_user(access_token)
+        if not user_response or not user_response.user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid access token or user not found"
+            )
+        
+        # Manually create and save session to storage
+        # This is required for update_user() to work
+        # We need to create a Session object and save it to the client's storage
         try:
-            email_updated = await update_email_of_user(user_id, given_input)
-            if email_updated:
-                logger.info("Email updated successfully for user %s: %s", user_id, given_input)
-            else:
-                logger.warning("Email update returned False for user %s: %s", user_id, given_input)
-        except Exception as e:
-            logger.error("Error updating email for user %s: %s", user_id, str(e), exc_info=True)
-            email_updated = False
-    elif triggered_text == VerificationTrigger.PHONE_NUMBER_UPDATE.value:
-        # Update phone number
-        try:
-            phone_updated = await update_phone_of_user(user_id, given_input)
-            if phone_updated:
-                logger.info("Phone number updated successfully for user %s: %s", user_id, given_input)
-            else:
-                logger.warning("Phone update returned False for user %s: %s", user_id, given_input)
-        except Exception as e:
-            logger.error("Error updating phone for user %s: %s", user_id, str(e), exc_info=True)
-            phone_updated = False
+            # Decode JWT to get expiration time
+            SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
+            if not SUPABASE_JWT_SECRET:
+                raise RuntimeError("SUPABASE_JWT_SECRET not found in environment")
+            
+            decoded = jwt.decode(
+                access_token,
+                SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated",
+                options={"verify_exp": False}
+            )
+            exp = decoded.get("exp", 0)
+            current_time = int(time.time())
+            
+            if exp > 0 and exp <= current_time:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Access token has expired. Please refresh your token."
+                )
+            
+            # Calculate expires_in
+            expires_in = max(exp - current_time, 3600) if exp > 0 else 3600
+            expires_at = exp if exp > 0 else current_time + expires_in
+            
+            # Create Session object manually
+            from supabase_auth.types import Session, User
+            from supabase_auth.helpers import model_dump_json, model_dump
+            
+            # Convert user to the format Session expects
+            # Try to get user as dict first, then create User object if needed
+            try:
+                # Try to convert to dict
+                if hasattr(user_response.user, 'model_dump'):
+                    user_data = user_response.user.model_dump()
+                elif hasattr(user_response.user, 'dict'):
+                    user_data = user_response.user.dict()
+                else:
+                    user_data = dict(user_response.user)
+                
+                # Create User object from dict to ensure type compatibility
+                user_obj = User(**user_data)
+            except Exception as user_error:
+                logger.warning("Could not convert user object: %s, trying direct assignment", str(user_error))
+                # Fallback: try using the user object directly
+                user_obj = user_response.user
+            
+            # Create session with access token and a placeholder refresh token
+            # The refresh token won't be used if the access token is still valid
+            session = Session(
+                access_token=access_token,
+                refresh_token="placeholder_refresh_token",  # Placeholder - won't be validated if token is valid
+                expires_in=expires_in,
+                expires_at=expires_at,
+                token_type="bearer",
+                user=user_obj
+            )
+            
+            # Save session directly to storage and set in-memory session
+            # This mimics what _save_session() does internally
+            storage_key = supabase.auth._storage_key
+            session_json = model_dump_json(session)
+            
+            # Set in-memory session first
+            supabase.auth._in_memory_session = session
+            
+            # Save to storage if persist_session is enabled
+            if supabase.auth._persist_session:
+                await supabase.auth._storage.set_item(storage_key, session_json)
+            
+            logger.info("Session manually created and saved for user %s", user_id)
+            
+        except HTTPException:
+            raise
+        except Exception as session_error:
+            logger.error("Error creating session: %s", str(session_error), exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create session: {str(session_error)}"
+            )
+        
+        if triggered_text == VerificationTrigger.EMAIL_UPDATE.value:
+            # Update email using Supabase admin API to update immediately without email confirmation
+            # Since the email is already verified through our verification code system,
+            # we use admin.update_user_by_id() which updates immediately
+            # Reference: https://supabase.com/docs/reference/python/auth-updateuser
+            try:
+                from libs.shared_db.supabase_db.db import get_supabase_admin_client
+                
+                admin_supabase = await get_supabase_admin_client()
+                # Use admin API to update email immediately
+                # Since we've already verified the email via verification code, we update it directly
+                # and set email_confirmed_at to make it active immediately (bypassing email confirmation)
+                # Also update user_metadata (raw_user_meta_data) to ensure consistency
+                current_time = datetime.now(timezone.utc).isoformat()
+                
+                # First, get current user metadata to preserve existing fields
+                try:
+                    user_data = await admin_supabase.auth.admin.get_user_by_id(user_id)
+                    existing_metadata = {}
+                    if user_data and user_data.user:
+                        existing_metadata = user_data.user.user_metadata or {}
+                except Exception as get_user_error:
+                    logger.warning("Could not get user metadata, using empty dict: %s", str(get_user_error))
+                    existing_metadata = {}
+                
+                # Update email in metadata as well (this updates raw_user_meta_data in database)
+                # Make sure we're creating a new dict to avoid any reference issues
+                updated_metadata = dict(existing_metadata)  # Create a copy
+                updated_metadata["email"] = given_input  # Update email in the copy
+                
+                logger.info("Updating email for user %s", user_id)
+                
+                # Update email field first
+                response = await admin_supabase.auth.admin.update_user_by_id(
+                    user_id,
+                    {
+                        "email": given_input,
+                        "email_confirmed_at": current_time
+                    }
+                )
+                
+                # Then update user_metadata separately to ensure raw_user_meta_data is updated
+                # This is important because sometimes updating both together might not work
+                try:
+                    metadata_response = await admin_supabase.auth.admin.update_user_by_id(
+                        user_id,
+                        {
+                            "user_metadata": updated_metadata  # This updates raw_user_meta_data
+                        }
+                    )
+                except Exception as metadata_error:
+                    logger.error("Failed to update user_metadata separately for email: %s", str(metadata_error))
+                    # Continue anyway as email field was updated
+                
+                # Verify the update by reading the user back
+                try:
+                    verify_user = await admin_supabase.auth.admin.get_user_by_id(user_id)
+                    if verify_user and verify_user.user:
+                        verified_metadata = verify_user.user.user_metadata or {}
+                        verified_email_in_metadata = verified_metadata.get("email")
+                        if verified_email_in_metadata != given_input:
+                            logger.warning("Email in user_metadata not updated correctly for user %s, retrying", user_id)
+                            await admin_supabase.auth.admin.update_user_by_id(
+                                user_id,
+                                {"user_metadata": updated_metadata}
+                            )
+                except Exception as verify_error:
+                    logger.warning("Could not verify email update: %s", str(verify_error))
+                
+                if response and response.user:
+                    email_updated = True
+                    logger.info("Email updated and confirmed in auth for user %s: %s", user_id, given_input)
+                    
+                    # Double-check: if email change is still pending, update again to force confirmation
+                    try:
+                        updated_user = await admin_supabase.auth.admin.get_user_by_id(user_id)
+                        if updated_user and updated_user.user:
+                            # If email hasn't changed yet (still showing old email), update again
+                            if updated_user.user.email != given_input:
+                                logger.warning("Email not updated on first attempt, retrying for user %s", user_id)
+                                # Update again to force the change
+                                retry_response = await admin_supabase.auth.admin.update_user_by_id(
+                                    user_id,
+                                    {
+                                        "email": given_input,
+                                        "email_confirmed_at": current_time,
+                                        "user_metadata": updated_metadata  # Also update raw_user_meta_data on retry
+                                    }
+                                )
+                                if retry_response and retry_response.user:
+                                    logger.info("Email updated on retry for user %s", user_id)
+                    except Exception as retry_error:
+                        logger.warning("Could not retry email update: %s", str(retry_error))
+                        # Continue anyway
+                    
+                    # Also update organization_members table using Supabase table update
+                    # This ensures the profile endpoint shows the updated email
+                    try:
+                        # Update all organization_members records for this user
+                        update_result = await admin_supabase.table("organization_members").update({
+                            "email": given_input,
+                            "updated_at": datetime.now(timezone.utc).isoformat()
+                        }).eq("user_id", user_id).execute()
+                        
+                        if update_result.data:
+                            logger.info("Email updated in organization_members for user %s: %d records updated", 
+                                      user_id, len(update_result.data))
+                        else:
+                            logger.warning("No organization_members records found to update for user %s", user_id)
+                    except Exception as org_update_error:
+                        # Log but don't fail - auth update was successful
+                        logger.warning("Could not update organization_members email: %s", str(org_update_error))
+                else:
+                    logger.warning("Email update returned no user for user %s: %s", user_id, given_input)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to update email"
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error("Error updating email for user %s: %s", user_id, str(e), exc_info=True)
+                email_updated = False
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to update email: {str(e)}"
+                )
+                
+        elif triggered_text == VerificationTrigger.PHONE_NUMBER_UPDATE.value:
+            # Update phone number using admin API to bypass SMS verification
+            # Since we've already verified the phone via verification code, we update it directly
+            try:
+                from libs.shared_db.supabase_db.db import get_supabase_admin_client
+                
+                admin_supabase = await get_supabase_admin_client()
+                # Use admin API to update phone immediately
+                # Update both the phone field and phone_confirmed_at to make it active
+                # Also update user_metadata (raw_user_meta_data) to ensure consistency
+                current_time = datetime.now(timezone.utc).isoformat()
+                
+                # First, get current user metadata to preserve existing fields
+                try:
+                    user_data = await admin_supabase.auth.admin.get_user_by_id(user_id)
+                    existing_metadata = {}
+                    if user_data and user_data.user:
+                        existing_metadata = user_data.user.user_metadata or {}
+                except Exception as get_user_error:
+                    logger.warning("Could not get user metadata, using empty dict: %s", str(get_user_error))
+                    existing_metadata = {}
+                
+                # Update phone in metadata as well (this updates raw_user_meta_data in database)
+                # Make sure we're creating a new dict to avoid any reference issues
+                updated_metadata = dict(existing_metadata)  # Create a copy
+                updated_metadata["phone"] = given_input  # Update phone in the copy
+                
+                logger.info("Updating phone for user %s", user_id)
+                
+                # Update phone field first - ensure we pass the phone exactly as received
+                # Supabase might normalize phone numbers, but we'll pass it as-is
+                phone_to_update = given_input  # Use the phone exactly as provided
+                response = await admin_supabase.auth.admin.update_user_by_id(
+                    user_id,
+                    {
+                        "phone": phone_to_update,
+                        "phone_confirmed_at": current_time
+                    }
+                )
+                
+                # Then update user_metadata separately to ensure raw_user_meta_data is updated
+                # This is important because sometimes updating both together might not work
+                try:
+                    metadata_response = await admin_supabase.auth.admin.update_user_by_id(
+                        user_id,
+                        {
+                            "user_metadata": updated_metadata  # This updates raw_user_meta_data
+                        }
+                    )
+                except Exception as metadata_error:
+                    logger.error("Failed to update user_metadata separately: %s", str(metadata_error))
+                    # Continue anyway as phone field was updated
+                
+                # Verify the update by reading the user back
+                try:
+                    verify_user = await admin_supabase.auth.admin.get_user_by_id(user_id)
+                    if verify_user and verify_user.user:
+                        verified_metadata = verify_user.user.user_metadata or {}
+                        verified_phone_in_metadata = verified_metadata.get("phone")
+                        if verified_phone_in_metadata != given_input:
+                            logger.warning("Phone in user_metadata not updated correctly for user %s, retrying", user_id)
+                            await admin_supabase.auth.admin.update_user_by_id(
+                                user_id,
+                                {"user_metadata": updated_metadata}
+                            )
+                except Exception as verify_error:
+                    logger.warning("Could not verify phone update: %s", str(verify_error))
+                
+                if response and response.user:
+                    phone_updated = True
+                    # Verify the phone was actually updated in both places
+                    updated_phone = response.user.phone if hasattr(response.user, 'phone') else None
+                    updated_metadata_phone = None
+                    if hasattr(response.user, 'user_metadata') and response.user.user_metadata:
+                        updated_metadata_phone = response.user.user_metadata.get("phone")
+                    
+                    # Check if "+" was stripped by Supabase
+                    if given_input.startswith("+") and updated_phone and not updated_phone.startswith("+"):
+                        logger.warning("Phone '+' sign was stripped by Supabase for user %s", user_id)
+                    
+                    # Verify both phone field and user_metadata were updated
+                    if updated_phone != given_input or updated_metadata_phone != given_input:
+                        logger.warning("Phone not fully updated on first attempt, retrying for user %s", user_id)
+                        retry_response = await admin_supabase.auth.admin.update_user_by_id(
+                            user_id,
+                            {
+                                "phone": given_input,
+                                "phone_confirmed_at": current_time,
+                                "user_metadata": updated_metadata  # Also update raw_user_meta_data on retry
+                            }
+                        )
+                        if retry_response and retry_response.user:
+                            retry_phone = retry_response.user.phone if hasattr(retry_response.user, 'phone') else None
+                            logger.info("Phone updated on retry for user %s", user_id)
+                    
+                    # Also update organization_members table using Supabase table update
+                    # This ensures the profile endpoint shows the updated phone
+                    try:
+                        # Update all organization_members records for this user
+                        update_result = await admin_supabase.table("organization_members").update({
+                            "phone": given_input,
+                            "updated_at": datetime.now(timezone.utc).isoformat()
+                        }).eq("user_id", user_id).execute()
+                        
+                        if update_result.data:
+                            logger.info("Phone updated in organization_members for user %s: %d records updated", 
+                                      user_id, len(update_result.data))
+                        else:
+                            logger.warning("No organization_members records found to update for user %s", user_id)
+                    except Exception as org_update_error:
+                        # Log but don't fail - auth update was successful
+                        logger.warning("Could not update organization_members phone: %s", str(org_update_error))
+                else:
+                    logger.warning("Phone update returned no user for user %s: %s", user_id, given_input)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to update phone number"
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error("Error updating phone for user %s: %s", user_id, str(e), exc_info=True)
+                phone_updated = False
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to update phone number: {str(e)}"
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error creating Supabase client or updating user %s: %s", user_id, str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user: {str(e)}"
+        )
 
     return email_updated, phone_updated
 
@@ -496,7 +917,19 @@ async def _validate_authenticated_user_input(
     user_id = current_user.get("sub")
     if not user_id:
         logger.warning("User ID not found in token: %s", current_user.keys())
-    current_user_email = current_user.get("email", "").lower()
+    
+    # Get current email from Supabase auth (actual email field, not user_metadata)
+    current_user_email = ""
+    try:
+        user_data = await get_user_by_id(user_id)
+        if user_data and hasattr(user_data, 'user') and user_data.user:
+            # Get the actual email field, not user_metadata
+            if hasattr(user_data.user, 'email') and user_data.user.email:
+                current_user_email = user_data.user.email.lower()
+    except Exception as e:
+        logger.warning("Could not get current email from auth, using JWT token email: %s", str(e))
+        # Fallback to JWT token email if we can't get it from auth
+        current_user_email = current_user.get("email", "").lower()
 
     if data.type == VerificationType.EMAIL:
         await _validate_email_for_update(data.email, user_id, current_user_email)
@@ -764,15 +1197,25 @@ async def verify_verification_code(
         elif stored_user_id:
             user_id = stored_user_id
 
-        # Update email/phone if needed
+        # Update email/phone if needed (only with token)
         email_updated = False
         phone_updated = False
-        if user_id and triggered_text in [VerificationTrigger.EMAIL_UPDATE.value, VerificationTrigger.PHONE_NUMBER_UPDATE.value]:
+        if current_user and user_id and triggered_text in [VerificationTrigger.EMAIL_UPDATE.value, VerificationTrigger.PHONE_NUMBER_UPDATE.value]:
+            # Get access token from request state (set by JWT middleware)
+            access_token = getattr(request.state, "access_token", None)
+            if not access_token:
+                logger.error("Access token not found in request state for user %s", user_id)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Access token required to update email/phone number"
+                )
+            
             logger.info("Attempting to update %s for user %s with triggered_text: %s", data.type.value, user_id, triggered_text)
             email_updated, phone_updated = await _update_email_or_phone(
                 user_id,
                 given_input,
-                triggered_text
+                triggered_text,
+                access_token
             )
         else:
             logger.info(

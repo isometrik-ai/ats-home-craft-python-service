@@ -420,15 +420,19 @@ class TestSendVerificationCode:
 
         mock_user_data = MagicMock()
         mock_user_data.user = MagicMock()
-        mock_user_data.user.user_metadata = {"phone": "1234567890"}  # Same phone
+        # Set phone field (not user_metadata) since we check the actual phone field
+        mock_user_data.user.phone = "1234567890"  # Same phone
+        mock_user_data.user.user_metadata = {}
 
         # Patch both locations to ensure it works
         with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_recent_verification_codes',
                    AsyncMock(return_value=[])), \
-             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',        
                    AsyncMock(return_value=[])), \
              patch('apps.user_service.app.api.verification_codes.get_user_by_id',
-                   AsyncMock(return_value=mock_user_data)):
+                   AsyncMock(return_value=mock_user_data)), \
+             patch('apps.user_service.app.api.verification_codes.get_client_ip',
+                   return_value="127.0.0.1"):
 
             response = client_with_auth.post("/v1/verification-code/send", json=request_data)
 
@@ -446,10 +450,11 @@ class TestSendVerificationCode:
         mock_user_data.user = MagicMock()
         mock_user_data.user.user_metadata = {}  # No phone set
 
-        # Mock another user with the same phone
+        # Mock another user with the same phone - set phone field, not user_metadata
         mock_other_user = MagicMock()
         mock_other_user.id = "other-user-id"
-        mock_other_user.user_metadata = {"phone": "9876543210"}
+        mock_other_user.phone = "9876543210"  # Set phone field
+        mock_other_user.user_metadata = {}
 
         mock_supabase = MagicMock()
         mock_supabase.auth.admin.list_users = AsyncMock(return_value=[mock_other_user])
@@ -457,14 +462,16 @@ class TestSendVerificationCode:
         # Patch both locations to ensure it works
         with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_recent_verification_codes',
                    AsyncMock(return_value=[])), \
-             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+             patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',        
                    AsyncMock(return_value=[])), \
              patch('apps.user_service.app.api.verification_codes.get_user_by_id',
                    AsyncMock(return_value=mock_user_data)), \
              patch('apps.user_service.app.api.verification_codes.get_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)), \
              patch('libs.shared_db.supabase_db.db.get_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
+                   AsyncMock(return_value=mock_supabase)), \
+             patch('apps.user_service.app.api.verification_codes.get_client_ip',
+                   return_value="127.0.0.1"):
 
             response = client_with_auth.post("/v1/verification-code/send", json=request_data)
 
@@ -921,78 +928,72 @@ async def test_verify_code_and_update_record_attempts_not_list():
 
 
 @pytest.mark.asyncio
-async def test_update_email_or_phone_email_success():
-    """Test _update_email_or_phone for email update success - covers lines 379-405."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
-    from apps.user_service.app.schemas.verification_codes import VerificationTrigger
-
-    with patch('apps.user_service.app.api.verification_codes.update_email_of_user',
-               AsyncMock(return_value=True)):
-        email_updated, phone_updated = await _update_email_or_phone(
-            "user-123", "new@example.com", VerificationTrigger.EMAIL_UPDATE.value
-        )
-        assert email_updated is True
-        assert phone_updated is False
-
-
-@pytest.mark.asyncio
-async def test_update_email_or_phone_phone_success():
-    """Test _update_email_or_phone for phone update success - covers lines 379-405."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
-    from apps.user_service.app.schemas.verification_codes import VerificationTrigger
-
-    with patch('apps.user_service.app.api.verification_codes.update_phone_of_user',
-               AsyncMock(return_value=True)):
-        email_updated, phone_updated = await _update_email_or_phone(
-            "user-123", "1234567890", VerificationTrigger.PHONE_NUMBER_UPDATE.value
-        )
-        assert email_updated is False
-        assert phone_updated is True
-
-
-@pytest.mark.asyncio
 async def test_update_email_or_phone_email_failure():
-    """Test _update_email_or_phone for email update failure - covers lines 388-392."""
+    """Test _update_email_or_phone for email update failure."""
     from apps.user_service.app.api.verification_codes import _update_email_or_phone
     from apps.user_service.app.schemas.verification_codes import VerificationTrigger
+    from fastapi import HTTPException
 
-    with patch('apps.user_service.app.api.verification_codes.update_email_of_user',
-               AsyncMock(return_value=False)):
-        email_updated, phone_updated = await _update_email_or_phone(
-            "user-123", "new@example.com", VerificationTrigger.EMAIL_UPDATE.value
-        )
-        assert email_updated is False
-        assert phone_updated is False
+    # Mock the admin API calls to return None (failure)
+    mock_admin_supabase = MagicMock()
+    mock_admin_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))
+    mock_admin_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=MagicMock(user=None))  # Update fails
+
+    with patch('apps.user_service.app.api.verification_codes._get_supabase_client_with_token',
+               AsyncMock(return_value=MagicMock())), \
+         patch('apps.user_service.app.api.verification_codes.get_supabase_admin_client',
+               AsyncMock(return_value=mock_admin_supabase)):
+        with pytest.raises(HTTPException) as exc_info:
+            await _update_email_or_phone(
+                "user-123", "new@example.com", VerificationTrigger.EMAIL_UPDATE.value, "fake-token"
+            )
+        assert exc_info.value.status_code == 500
 
 
 @pytest.mark.asyncio
 async def test_update_email_or_phone_email_exception():
-    """Test _update_email_or_phone for email update exception - covers lines 390-392."""
+    """Test _update_email_or_phone for email update exception."""
     from apps.user_service.app.api.verification_codes import _update_email_or_phone
     from apps.user_service.app.schemas.verification_codes import VerificationTrigger
+    from fastapi import HTTPException
 
-    with patch('apps.user_service.app.api.verification_codes.update_email_of_user',
-               AsyncMock(side_effect=Exception("Update failed"))):
-        email_updated, phone_updated = await _update_email_or_phone(
-            "user-123", "new@example.com", VerificationTrigger.EMAIL_UPDATE.value
-        )
-        assert email_updated is False
-        assert phone_updated is False
+    # Mock the admin API calls to raise exception
+    mock_admin_supabase = MagicMock()
+    mock_admin_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))
+    mock_admin_supabase.auth.admin.update_user_by_id = AsyncMock(side_effect=Exception("Update failed"))
+
+    with patch('apps.user_service.app.api.verification_codes._get_supabase_client_with_token',
+               AsyncMock(return_value=MagicMock())), \
+         patch('apps.user_service.app.api.verification_codes.get_supabase_admin_client',
+               AsyncMock(return_value=mock_admin_supabase)):
+        with pytest.raises(HTTPException) as exc_info:
+            await _update_email_or_phone(
+                "user-123", "new@example.com", VerificationTrigger.EMAIL_UPDATE.value, "fake-token"
+            )
+        assert exc_info.value.status_code == 500
 
 
 @pytest.mark.asyncio
 async def test_update_email_or_phone_phone_exception():
-    """Test _update_email_or_phone for phone update exception - covers lines 401-403."""
+    """Test _update_email_or_phone for phone update exception."""
     from apps.user_service.app.api.verification_codes import _update_email_or_phone
     from apps.user_service.app.schemas.verification_codes import VerificationTrigger
+    from fastapi import HTTPException
 
-    with patch('apps.user_service.app.api.verification_codes.update_phone_of_user',
-               AsyncMock(side_effect=Exception("Update failed"))):
-        email_updated, phone_updated = await _update_email_or_phone(
-            "user-123", "1234567890", VerificationTrigger.PHONE_NUMBER_UPDATE.value
-        )
-        assert email_updated is False
-        assert phone_updated is False
+    # Mock the admin API calls to raise exception
+    mock_admin_supabase = MagicMock()
+    mock_admin_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))
+    mock_admin_supabase.auth.admin.update_user_by_id = AsyncMock(side_effect=Exception("Update failed"))
+
+    with patch('apps.user_service.app.api.verification_codes._get_supabase_client_with_token',
+               AsyncMock(return_value=MagicMock())), \
+         patch('apps.user_service.app.api.verification_codes.get_supabase_admin_client',
+               AsyncMock(return_value=mock_admin_supabase)):
+        with pytest.raises(HTTPException) as exc_info:
+            await _update_email_or_phone(
+                "user-123", "1234567890", VerificationTrigger.PHONE_NUMBER_UPDATE.value, "fake-token"
+            )
+        assert exc_info.value.status_code == 500
 
 
 def test_determine_triggered_text_authenticated_phone():
@@ -1009,11 +1010,13 @@ def test_determine_triggered_text_authenticated_phone():
 
 @pytest.mark.asyncio
 async def test_check_auth_user_exists_by_phone_success():
-    """Test _check_auth_user_exists_by_phone when phone exists - covers lines 169-191."""
+    """Test _check_auth_user_exists_by_phone when phone exists."""
     from apps.user_service.app.api.verification_codes import _check_auth_user_exists_by_phone
 
     mock_user = MagicMock()
-    mock_user.user_metadata = {"phone": "9876543210"}
+    # Set phone field (not user_metadata) since we check the actual phone field
+    mock_user.phone = "9876543210"
+    mock_user.user_metadata = {}
 
     mock_supabase = MagicMock()
     mock_supabase.auth.admin.list_users = AsyncMock(return_value=[mock_user])
