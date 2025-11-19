@@ -5,32 +5,76 @@ Test cases for presigned URL API endpoints.
 Tests the GET /upload/presigned-url endpoint for generating presigned URLs for Cloudflare R2 uploads.
 """
 
+import sys
+from unittest.mock import MagicMock
+
+# Mock boto3 and botocore in sys.modules BEFORE any other imports
+# This prevents ImportError when presigned_url module tries to import boto3
+class MockClientError(Exception):
+    """Mock ClientError for testing."""
+    def __init__(self, error_response, operation_name):
+        self.response = error_response
+        self.operation_name = operation_name
+        super().__init__(f"{operation_name}: {error_response}")
+
+class MockConfig:
+    """Mock Config for testing."""
+    def __init__(self, **kwargs):
+        self.signature_version = kwargs.get("signature_version", "v4")
+
+# Create mock boto3 module with proper structure
+class MockBoto3Module:
+    """Mock boto3 module."""
+    @staticmethod
+    def client(*args, **kwargs):
+        """Mock boto3.client function."""
+        mock_client = MagicMock()
+        mock_client.generate_presigned_url = MagicMock(return_value="https://mock-url.com")
+        return mock_client
+
+mock_boto3_module = MockBoto3Module()
+
+# Create mock botocore module with proper structure
+class MockBotocoreExceptions:
+    """Mock botocore.exceptions module."""
+    ClientError = MockClientError
+
+class MockBotocoreConfig:
+    """Mock botocore.config module."""
+    Config = MockConfig
+
+class MockBotocoreModule:
+    """Mock botocore module."""
+    def __init__(self):
+        self.exceptions = MockBotocoreExceptions()
+        self.config = MockBotocoreConfig()
+
+mock_botocore_module = MockBotocoreModule()
+
+# Inject mocks into sys.modules BEFORE any imports that might use them
+sys.modules['boto3'] = mock_boto3_module
+sys.modules['botocore'] = mock_botocore_module
+sys.modules['botocore.exceptions'] = mock_botocore_module.exceptions
+sys.modules['botocore.config'] = mock_botocore_module.config
+
+# Now import other modules
 import pytest
 import uuid
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from fastapi import FastAPI, HTTPException
 
-# Handle botocore imports - it's a dependency of boto3
+# Import the router after mocking boto3
+from apps.user_service.app.api.presigned_url import router as presigned_url_router
+from libs.shared_middleware.jwt_auth import get_user_from_auth
+
+# Use actual classes if available, otherwise use mocks
 try:
     from botocore.exceptions import ClientError
     from botocore.config import Config
 except ImportError:
-    # Create mock classes if botocore is not available
-    class ClientError(Exception):
-        """Mock ClientError for testing when botocore is not available."""
-        def __init__(self, error_response, operation_name):
-            self.response = error_response
-            self.operation_name = operation_name
-            super().__init__(f"{operation_name}: {error_response}")
-    
-    class Config:
-        """Mock Config for testing when botocore is not available."""
-        def __init__(self, **kwargs):
-            self.signature_version = kwargs.get("signature_version", "v4")
-
-from apps.user_service.app.api.presigned_url import router as presigned_url_router
-from libs.shared_middleware.jwt_auth import get_user_from_auth
+    ClientError = MockClientError
+    Config = MockConfig
 
 
 @pytest.fixture
