@@ -159,18 +159,12 @@ async def get_user_profile(
             identity_data = {
                 "provider": identity.provider,
                 "created_at": identity.created_at,
-                "updated_at": identity.updated_at,
-                "last_sign_in_at": identity.last_sign_in_at
+                "updated_at": identity.updated_at
             }
             if identity.provider != "email":
-                temp_dict = {}
-                for x,y in identity.identity_data.items():
-                    if x in ['provider_id','iss','custom_claims']:
-                        temp_dict[x] = y
-                identity_data["identity_data"] = temp_dict
+                identity_data["provider_id"] = identity.identity_data.get("provider_id",identity.identity_data.get("sub",None))
             else:
-                identity_data["identity_data"] = identity.identity_data
-
+                identity_data["provider_id"] = identity.identity_data.get("email",None)
             identities_list.append(identity_data)
         return identities_list
     

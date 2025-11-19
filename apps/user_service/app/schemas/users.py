@@ -98,10 +98,9 @@ class Indentites(BaseModel):
     """Model for user indentites"""
 
     provider: str = Field(..., description="Provider of the indentite")
-    identity_data: dict = Field(..., description="Data of the indentite")
+    provider_id: str = Field(..., description="Data of the indentite")
     created_at: datetime.datetime = Field(..., description="ISO timestamp when the indentite was created")
     updated_at: datetime.datetime = Field(..., description="ISO timestamp when the indentite was updated")
-    last_sign_in_at: datetime.datetime = Field(..., description="ISO timestamp when the indentite was last signed in")
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
