@@ -42,3 +42,7 @@ typesense==0.20.0
 
 # Vector database support
 pgvector==0.2.4
+
+# AWS S3/Cloudflare R2 support
+boto3==1.35.0
+botocore>=1.35.0
