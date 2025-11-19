@@ -3,6 +3,7 @@
 import pytest
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from fastapi import FastAPI, HTTPException
@@ -15,9 +16,45 @@ from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 
 
+def _build_mock_supabase_user(metadata_override=None, identities_override=None):
+    """Helper to build Supabase user data with metadata and identities."""
+    base_metadata = {
+        "first_name": "Test",
+        "last_name": "User",
+        "full_name": "Test User",
+        "avatar_url": "https://example.com/avatar.jpg",
+        "phone": "+1234567890",
+        "timezone": "UTC",
+        "email": "test@example.com",
+    }
+    if metadata_override:
+        base_metadata.update(metadata_override)
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    default_identity = SimpleNamespace(
+        provider="email",
+        created_at=timestamp,
+        updated_at=timestamp,
+        last_sign_in_at=timestamp,
+        identity_data={
+            "email": base_metadata.get("email", "test@example.com"),
+        },
+    )
+
+    identities = identities_override if identities_override is not None else [
+        default_identity
+    ]
+
+    return SimpleNamespace(
+        user=SimpleNamespace(
+            user_metadata=base_metadata,
+            identities=identities,
+        )
+    )
+
+
 @pytest.fixture
 def app():
-    from types import SimpleNamespace
 
     app = FastAPI()
     app.include_router(users_router, prefix="/v1/admin")
@@ -89,18 +126,22 @@ def test_get_user_profile_success(client):
         user_type="organization_member"
     )
 
+    mock_supabase_user = _build_mock_supabase_user()
+
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
             "joined_at": None, "last_active_at": None
-        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_supabase_user)):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200
         body = res.json()
         assert body["data"]["email"] == "test@example.com"
         assert body["data"]["full_name"] == "Test User"
+        assert body["data"]["identities"][0]["provider"] == "email"
 
 
 def test_get_user_profile_email_mismatch(client):
@@ -137,6 +178,8 @@ def test_get_user_profile_invalid_user_type(client):
         user_type="organization_member"
     )
 
+    mock_supabase_user = _build_mock_supabase_user()
+
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active", "user_type": "invalid",
@@ -144,17 +187,18 @@ def test_get_user_profile_invalid_user_type(client):
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
             "joined_at": None, "last_active_at": None
         })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
-         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()):
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_supabase_user)):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200  # This endpoint doesn't check user_type
         body = res.json()
         assert body["data"]["email"] == "test@example.com"
+        assert body["data"]["identities"][0]["provider"] == "email"
 
 
 def test_get_user_profile_no_organization_linked(client):
     """Test user profile when user is not linked to any organization."""
     from apps.user_service.app.dependencies.common_utils import UserContext
-    from types import SimpleNamespace
 
     mock_user_context = UserContext(
         organization_id=None,
@@ -163,18 +207,15 @@ def test_get_user_profile_no_organization_linked(client):
         user_type="organization_member"
     )
 
-    # Mock user data from get_user_by_id
-    mock_user_data = SimpleNamespace(
-        user=SimpleNamespace(
-            user_metadata={
-                "first_name": "John",
-                "last_name": "Doe",
-                "full_name": "John Doe",
-                "avatar_url": "https://example.com/avatar.jpg",
-                "phone": "+1234567890",
-                "timezone": "America/New_York"
-            }
-        )
+    mock_user_data = _build_mock_supabase_user(
+        metadata_override={
+            "first_name": "John",
+            "last_name": "Doe",
+            "full_name": "John Doe",
+            "avatar_url": "https://example.com/avatar.jpg",
+            "phone": "+1234567890",
+            "timezone": "America/New_York",
+        }
     )
 
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
@@ -203,12 +244,15 @@ def test_get_user_profile_no_organization_id(client):
         user_type="organization_member"
     )
 
+    mock_supabase_user = _build_mock_supabase_user()
+
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
             "role_id": None, "organization_id": None, "avatar_url": None, "phone": None, "timezone": "UTC",
             "joined_at": None, "last_active_at": None
-        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
+        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_supabase_user)):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200
         body = res.json()
@@ -227,13 +271,16 @@ def test_get_user_profile_no_role_id(client):
         user_type="organization_member"
     )
 
+    mock_supabase_user = _build_mock_supabase_user()
+
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
             "role_id": None, "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
             "joined_at": None, "last_active_at": None
         })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
-         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()):
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_supabase_user)):
         res = client.get("/v1/admin/users/profile")
         assert res.status_code == 200
         body = res.json()

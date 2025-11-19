@@ -151,6 +151,34 @@ async def get_user_profile(
 
     user_profile = await _fetch_org_member_profile()
 
+    async def _fetch_user_identities() -> list:
+        """Fetch user identities."""
+        identities_list = []
+        user_data = await get_user_by_id(user_context.user_id)
+        for identity in user_data.user.identities:
+            identity_data = {
+                "provider": identity.provider,
+                "created_at": identity.created_at,
+                "updated_at": identity.updated_at,
+                "last_sign_in_at": identity.last_sign_in_at
+            }
+            if identity.provider != "email":
+                temp_dict = {}
+                for x,y in identity.identity_data.items():
+                    if x in ['provider_id','iss','custom_claims']:
+                        temp_dict[x] = y
+                identity_data["identity_data"] = temp_dict
+            else:
+                identity_data["identity_data"] = identity.identity_data
+
+            identities_list.append(identity_data)
+        return identities_list
+    
+    identities_data = await _fetch_user_identities()
+    user_profile.update({
+        "identities": identities_data
+    })
+
     async def _fetch_permissions() -> list:
         """Fetch user permissions and update activity."""
 
