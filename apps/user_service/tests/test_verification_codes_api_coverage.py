@@ -394,3 +394,29 @@ async def test_get_supabase_client_with_token():
         # Check that it was called (the actual call happens inside the function)
         assert mock_client is not None
 
+
+@pytest.mark.asyncio
+async def test_get_supabase_client_with_token_missing_url():
+    """Test _get_supabase_client_with_token when SUPABASE_URL is missing."""
+    with patch('apps.user_service.app.api.verification_codes.os.getenv') as mock_getenv:
+        mock_getenv.side_effect = lambda key, default=None: {
+            "SUPABASE_URL": None,
+            "SUPABASE_ANON_KEY": "test-key"
+        }.get(key, default)
+        
+        with pytest.raises(RuntimeError, match="Missing Supabase configuration"):
+            await _get_supabase_client_with_token("fake-token")
+
+
+@pytest.mark.asyncio
+async def test_get_supabase_client_with_token_missing_key():
+    """Test _get_supabase_client_with_token when SUPABASE_ANON_KEY is missing."""
+    with patch('apps.user_service.app.api.verification_codes.os.getenv') as mock_getenv:
+        mock_getenv.side_effect = lambda key, default=None: {
+            "SUPABASE_URL": "https://test.supabase.co",
+            "SUPABASE_ANON_KEY": None
+        }.get(key, default)
+        
+        with pytest.raises(RuntimeError, match="Missing Supabase configuration"):
+            await _get_supabase_client_with_token("fake-token")
+
