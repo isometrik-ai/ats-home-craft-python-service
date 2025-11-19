@@ -10,7 +10,25 @@ import uuid
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from fastapi import FastAPI, HTTPException
-from botocore.exceptions import ClientError
+
+# Handle botocore imports - it's a dependency of boto3
+try:
+    from botocore.exceptions import ClientError
+    from botocore.config import Config
+except ImportError:
+    # Create mock classes if botocore is not available
+    class ClientError(Exception):
+        """Mock ClientError for testing when botocore is not available."""
+        def __init__(self, error_response, operation_name):
+            self.response = error_response
+            self.operation_name = operation_name
+            super().__init__(f"{operation_name}: {error_response}")
+    
+    class Config:
+        """Mock Config for testing when botocore is not available."""
+        def __init__(self, **kwargs):
+            self.signature_version = kwargs.get("signature_version", "v4")
+
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 
@@ -346,7 +364,7 @@ def test_get_presigned_url_various_content_types(client, mock_r2_credentials, mo
 def test_get_r2_client_configuration():
     """Test that R2 client is configured correctly."""
     from apps.user_service.app.api.presigned_url import get_r2_client
-    from botocore.config import Config
+    # Config is imported at the top of the file
 
     with patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"), \
          patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"), \
