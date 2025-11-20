@@ -323,7 +323,7 @@ class UpdateUserRequest(BaseModel):
     last_name: Optional[str] = Field(None, description="Updated last name")
     phone: Optional[str] = Field(None, description="Updated phone number")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
-    avatar_url: Optional[str] = Field(None, description="Updated avatar URL")
+    avatar_url: Optional[str] = Field(None, description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')")
     role_id: Optional[str] = Field(None, description="Updated role assignment")
     status: Optional[UserStatus] = Field(
         None, description="User status: active, invited, or suspended"
@@ -332,8 +332,9 @@ class UpdateUserRequest(BaseModel):
     @field_validator("avatar_url")
     @classmethod
     def validate_avatar_url(cls, v):
-        """Validate avatar_url is a valid URL if provided"""
-        return validate_url_field(v, "avatar_url")
+        """Validate avatar_url is a valid path if provided (no URLs or base64 allowed)"""
+        from apps.user_service.app.schemas import validate_path_field
+        return validate_path_field(v, "avatar_url")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -341,7 +342,7 @@ class UpdateUserRequest(BaseModel):
                 "full_name": "Updated Name",
                 "phone": "+0987654321",
                 "timezone": "America/New_York",
-                "avatar_url": "https://example.com/new-avatar.jpg",
+                "avatar_url": "house-of-apps-legal-ai/user-id/new-avatar.jpg",
                 "role_id": "new-role-id",
             }
         }

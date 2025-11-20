@@ -9,6 +9,7 @@ Author: AI Assistant
 Date: 2024-12-19
 Last Updated: 2024-12-19
 """
+import re
 from typing import Optional
 from urllib.parse import urlparse
 from fastapi import HTTPException, status
@@ -63,6 +64,58 @@ def validate_url_field(value: Optional[str], field_name: str = "URL") -> Optiona
         if isinstance(e, ValueError):
             raise
         raise ValueError(f"{field_name} must be a valid URL (e.g., https://example.com/image.jpg)")
+
+
+def validate_path_field(value: Optional[str], field_name: str = "path") -> Optional[str]:
+    """
+    Shared path validation function for avatar_url and logo_url fields.
+    
+    Validates that a path:
+    - Is None (allowed for optional fields)
+    - Is an empty/whitespace string (converted to None)
+    - Does NOT start with http:// or https:// (no URLs allowed)
+    - Does NOT start with data: (no base64 allowed)
+    - Is a valid file path format (e.g., "house-of-apps-legal-ai/user-id/filename.jpg")
+
+    Args:
+        value: The path value to validate
+        field_name: Name of the field for error messages (default: "path")
+
+    Returns:
+        The validated path string, or None if value was None/empty
+
+    Raises:
+        ValueError: If the path is invalid (contains URL or base64)
+    """
+    if value is None:
+        return None
+
+    # Handle empty string or whitespace-only string
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+
+    # Reject URLs (https://)
+    # Note: http:// URLs will be caught by invalid character validation (contains ':')
+    value_lower = value.lower()
+    if value_lower.startswith('https://'):
+        raise ValueError(f"{field_name} must be a path only, not a full URL. Example: 'house-of-apps-legal-ai/user-id/filename.jpg'")
+
+    # Reject base64 data URIs
+    if value_lower.startswith('data:'):
+        raise ValueError(f"{field_name} must be a path only, not base64 data. Example: 'house-of-apps-legal-ai/user-id/filename.jpg'")
+
+    # Basic path validation - should contain at least one slash and a filename
+    # Allow alphanumeric, hyphens, underscores, dots, and slashes
+    if not re.match(r'^[a-zA-Z0-9._/-]+$', value):
+        raise ValueError(f"{field_name} contains invalid characters. Only alphanumeric, hyphens, underscores, dots, and slashes are allowed.")
+
+    # Should have at least one slash (path structure)
+    if '/' not in value:
+        raise ValueError(f"{field_name} must be a path with at least one directory. Example: 'house-of-apps-legal-ai/user-id/filename.jpg'")
+
+    return value
 
 
 class ResponseModel(BaseModel):
