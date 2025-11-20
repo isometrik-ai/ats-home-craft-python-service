@@ -5,7 +5,6 @@ This module contains all organisation-related database operations.
 All SQL queries for organisation management should be centralized here.
 """
 from datetime import datetime, timedelta
-from turtle import update
 import uuid
 from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
