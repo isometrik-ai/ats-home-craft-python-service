@@ -417,14 +417,15 @@ class OrganizationUpdate(BaseModel):
     )
     logo_url: Optional[str] = Field(
         None,
-        description="URL to the organisation's logo image",
+        description="Path to the organisation's logo image (e.g., 'house-of-apps-legal-ai/org-id/filename.jpg')",
     )
 
     @field_validator("logo_url", mode="before")
     @classmethod
     def validate_logo_url(cls, v):
-        """Validate logo_url is a valid URL if provided"""
-        return validate_url_field(v, "logo_url")
+        """Validate logo_url is a valid path if provided (no URLs or base64 allowed)"""
+        from apps.user_service.app.schemas import validate_path_field
+        return validate_path_field(v, "logo_url")
 
     industry: Optional[str] = Field(
         None,

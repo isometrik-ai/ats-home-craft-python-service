@@ -11,7 +11,6 @@ Date: 2024-12-19
 # Standard library imports
 import os
 import sys
-from typing import Optional
 
 # Third-party imports
 import boto3
@@ -87,9 +86,10 @@ def get_r2_client():
 @handle_api_exceptions("generate presigned URL")
 async def get_presigned_url(
     request: Request,
-    fileName: str,
-    bucket: Optional[str] = None,
-    content_type: Optional[str] = None,
+    file_name: str,
+    path: str,
+    bucket: str,
+    content_type: str,
     current_user: dict = Depends(get_user_from_auth),
 ):
     """
@@ -97,45 +97,58 @@ async def get_presigned_url(
 
     Args:
         request: FastAPI request object
-        fileName: Name of the file to upload
-        bucket: Optional bucket name (uses default from env if not provided)
-        content_type: Optional content type of the file
+        file_name: Name of the file to upload
+        path: Path prefix for the file (e.g., "user-id" or "org-id/user-id")
+        bucket: Bucket name
+        content_type: Content type of the file (e.g., "image/jpeg", "application/pdf")
         current_user: Authenticated user (from JWT token)
 
     Returns:
-        PresignedUrlResponse: Contains the presigned URL, fileName, and bucket
+        PresignedUrlResponse: Contains the presigned URL, file_name, and bucket
 
     Raises:
         HTTPException: If R2 credentials are not configured or URL generation fails
     """
     try:
         # Validate required parameters
-        if not fileName:
+        if not file_name:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="fileName is required",
+                detail="file_name is required",
             )
 
-        # Use provided bucket or default from environment
-        bucket_name = bucket or R2_BUCKET
-        if not bucket_name:
+        if not path:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Bucket name is required. Provide bucket parameter or set R2_BUCKET environment variable.",
+                detail="path is required",
+            )
+
+        if not bucket:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="bucket is required",
+            )
+
+        if not content_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="content_type is required",
             )
 
         # Get R2 client
         s3_client = get_r2_client()
 
+        # Build file key using path
+        # Remove leading/trailing slashes from path and join with file_name
+        path_clean = path.strip("/")
+        file_key = f"{path_clean}/{file_name}" if path_clean else file_name
+
         # Prepare parameters for presigned URL
         params = {
-            "Bucket": bucket_name,
-            "Key": fileName,
+            "Bucket": bucket,
+            "Key": file_key,
+            "ContentType": content_type,
         }
-
-        # Add content type if provided
-        if content_type:
-            params["ContentType"] = content_type
 
         # Generate presigned URL (expires in 5 minutes)
         try:
@@ -153,13 +166,13 @@ async def get_presigned_url(
 
         logger.info(
             f"Presigned URL generated for user {current_user.get('sub')}, "
-            f"file: {fileName}, bucket: {bucket_name}"
+            f"file: {file_name}, path: {file_key}, bucket: {bucket}"
         )
 
         return PresignedUrlResponse(
             url=presigned_url,
-            fileName=fileName,
-            bucket=bucket_name,
+            fileName=file_name,
+            bucket=bucket,
         )
 
     except HTTPException:

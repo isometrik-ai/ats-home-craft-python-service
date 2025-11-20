@@ -83,20 +83,21 @@ class UpdateUserProfileRequest(BaseModel):
     - first_name: Updated first name
     - last_name: Updated last name
     - timezone: Updated timezone preference
-    - avatar_url: Updated avatar URL
+    - avatar_url: Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')
 
     full_name will be automatically calculated from first_name + last_name.
     """
     first_name: Optional[str] = Field(None, description="Updated first name")
     last_name: Optional[str] = Field(None, description="Updated last name")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
-    avatar_url: Optional[str] = Field(None, description="Updated avatar URL")
+    avatar_url: Optional[str] = Field(None, description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')")
 
     @field_validator("avatar_url")
     @classmethod
     def validate_avatar_url(cls, v):
-        """Validate avatar_url is a valid URL if provided"""
-        return validate_url_field(v, "avatar_url")
+        """Validate avatar_url is a valid path if provided (no URLs or base64 allowed)"""
+        from apps.user_service.app.schemas import validate_path_field
+        return validate_path_field(v, "avatar_url")
 
     model_config = {
         "json_schema_extra": {
@@ -104,7 +105,7 @@ class UpdateUserProfileRequest(BaseModel):
                 "first_name": "John",
                 "last_name": "Doe",
                 "timezone": "America/New_York",
-                "avatar_url": "https://example.com/avatar.jpg"
+                "avatar_url": "house-of-apps-legal-ai/user-id/avatar.jpg"
             }
         }
     }
