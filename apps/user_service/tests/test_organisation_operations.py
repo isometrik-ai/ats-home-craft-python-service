@@ -350,6 +350,63 @@ class TestOrganisationCRUD:
             assert result == mock_updated_org
 
     @pytest.mark.asyncio
+    async def test_update_organisation_details_updates_settings_payload(self):
+        """Test organisation update correctly maps settings-related fields."""
+        organisation_id = str(uuid.uuid4())
+        organisation_data = _build_existing_org_data()
+        update_data = {
+            "name": "Updated Org Name",
+            "address": {
+                "address_line": "456 Justice St",
+                "city": "San Francisco",
+                "state": "CA",
+                "zip_code": "94105",
+                "country": "USA"
+            },
+            "primary_practice_areas": ["Corporate Law"],
+            "secondary_practice_areas": ["Tax Law"],
+            "specializations": ["AI Compliance"],
+            "preferred_integration": ["Clio"],
+            "need_help_importing_data": True,
+            "need_migration_assistance": True,
+            "compliance_security": {"required_compliance_standards": ["SOC2"]},
+            "enterprise_features": {"custom_reporting": ["Matter KPIs"]},
+        }
+
+        mock_result = MagicMock()
+        mock_result.data = [{"id": organisation_id}]
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_table = MagicMock()
+            mock_update = MagicMock()
+            mock_eq = MagicMock()
+            mock_execute = AsyncMock(return_value=mock_result)
+            mock_eq.execute = mock_execute
+            mock_update.eq.return_value = mock_eq
+            mock_table.update.return_value = mock_update
+            mock_supabase.table.return_value = mock_table
+            mock_get_client.return_value = mock_supabase
+
+            result = await update_organisation_details(organisation_id, organisation_data, update_data)
+
+        assert result["id"] == organisation_id
+        mock_table.update.assert_called_once()
+        payload = mock_table.update.call_args[0][0]
+
+        assert payload["name"] == "Updated Org Name"
+        assert payload["settings"]["address"] == update_data["address"]
+        assert payload["settings"]["practice_areas"]["primary"] == update_data["primary_practice_areas"]
+        assert payload["settings"]["practice_areas"]["secondary"] == update_data["secondary_practice_areas"]
+        assert payload["settings"]["practice_areas"]["specializations"] == update_data["specializations"]
+        assert payload["settings"]["preferred_integration"] == update_data["preferred_integration"]
+        assert payload["settings"]["need_help_importing_data"] is True
+        assert payload["settings"]["need_migration_assistance"] is True
+        assert payload["settings"]["compliance_security"] == update_data["compliance_security"]
+        assert payload["settings"]["enterprise_features"] == update_data["enterprise_features"]
+        assert "updated_at" in payload
+
+    @pytest.mark.asyncio
     async def test_delete_organisation_success(self):
         """Test successful organisation deletion."""
         organisation_id = str(uuid.uuid4())
