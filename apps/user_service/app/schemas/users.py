@@ -17,7 +17,7 @@ from enum import Enum
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
-from apps.user_service.app.schemas import ResponseModel, validate_url_field
+from apps.user_service.app.schemas import ResponseModel, validate_path_field
 
 class UserStatus(str, Enum):
     """Enumeration for user account status"""
@@ -333,7 +333,6 @@ class UpdateUserRequest(BaseModel):
     @classmethod
     def validate_avatar_url(cls, v):
         """Validate avatar_url is a valid path if provided (no URLs or base64 allowed)"""
-        from apps.user_service.app.schemas import validate_path_field
         return validate_path_field(v, "avatar_url")
 
     model_config = ConfigDict(

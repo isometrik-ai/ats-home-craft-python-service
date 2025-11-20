@@ -35,7 +35,7 @@ from apps.user_service.app.schemas.users import (
     ResponseModel,
     UpdateUserResponse,
 )
-from apps.user_service.app.schemas import validate_url_field
+from apps.user_service.app.schemas import validate_path_field
 
 # Audit logging imports
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
@@ -96,7 +96,6 @@ class UpdateUserProfileRequest(BaseModel):
     @classmethod
     def validate_avatar_url(cls, v):
         """Validate avatar_url is a valid path if provided (no URLs or base64 allowed)"""
-        from apps.user_service.app.schemas import validate_path_field
         return validate_path_field(v, "avatar_url")
 
     model_config = {

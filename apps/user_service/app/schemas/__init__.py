@@ -11,7 +11,6 @@ Last Updated: 2024-12-19
 """
 import re
 from typing import Optional
-from urllib.parse import urlparse
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -23,53 +22,10 @@ def _bad_request(detail: str) -> None:
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
-def validate_url_field(value: Optional[str], field_name: str = "URL") -> Optional[str]:
-    """
-    Shared URL validation function for avatar_url and logo_url fields.
-
-    Validates that a URL:
-    - Is None (allowed for optional fields)
-    - Is an empty/whitespace string (converted to None)
-    - Starts with http:// or https://
-    - Contains a valid domain or host
-
-    Args:
-        value: The URL value to validate
-        field_name: Name of the field for error messages (default: "URL")
-
-    Returns:
-        The validated URL string, or None if value was None/empty
-
-    Raises:
-        ValueError: If the URL is invalid
-    """
-    if value is None:
-        return None
-
-    # Handle empty string or whitespace-only string
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
-            return None
-
-    # Validate URL format
-    try:
-        result = urlparse(value)
-        if not result.scheme or result.scheme not in ('http', 'https'):
-            raise ValueError(f"{field_name} must start with http:// or https://")
-        if not result.netloc:
-            raise ValueError(f"{field_name} must contain a valid domain or host")
-        return value
-    except Exception as e:
-        if isinstance(e, ValueError):
-            raise
-        raise ValueError(f"{field_name} must be a valid URL (e.g., https://example.com/image.jpg)")
-
-
 def validate_path_field(value: Optional[str], field_name: str = "path") -> Optional[str]:
     """
     Shared path validation function for avatar_url and logo_url fields.
-    
+
     Validates that a path:
     - Is None (allowed for optional fields)
     - Is an empty/whitespace string (converted to None)

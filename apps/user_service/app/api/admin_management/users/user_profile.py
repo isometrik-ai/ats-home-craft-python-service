@@ -167,7 +167,7 @@ async def get_user_profile(
                 identity_data["provider_id"] = identity.identity_data.get("email",None)
             identities_list.append(identity_data)
         return identities_list
-    
+
     identities_data = await _fetch_user_identities()
     user_profile.update({
         "identities": identities_data
