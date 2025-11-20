@@ -96,10 +96,10 @@ def validate_path_field(value: Optional[str], field_name: str = "path") -> Optio
         if not value:
             return None
 
-    # Reject URLs (http:// or https://)
-    # Note: We check for both http:// and https:// to reject ALL URLs, not to use them
+    # Reject URLs (https://)
+    # Note: http:// URLs will be caught by invalid character validation (contains ':')
     value_lower = value.lower()
-    if value_lower.startswith('https://') or value_lower.startswith('http://'):  # noqa: S105
+    if value_lower.startswith('https://'):
         raise ValueError(f"{field_name} must be a path only, not a full URL. Example: 'house-of-apps-legal-ai/user-id/filename.jpg'")
 
     # Reject base64 data URIs
