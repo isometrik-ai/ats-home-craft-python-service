@@ -207,44 +207,57 @@ async def update_organisation_details(
     if any(field in settings_fields for field in payload.keys()):
         # payload["settings"] = {}
         temp_settings = organisation_data
+        temp_var = temp_settings["settings"]
 
         if payload.get("address") is not None:
-            temp_settings["settings"]["address"] = payload.get("address")
+            temp_var["address"] = payload.get("address")
             payload.pop("address")
 
-        if payload.get("primary_practice_areas") is not None:
-            temp_settings["settings"]["practice_areas"]["primary"] = payload.get("primary_practice_areas")
-            payload.pop("primary_practice_areas")
-
-        if payload.get("secondary_practice_areas") is not None:
-            temp_settings["settings"]["practice_areas"]["secondary"] = payload.get("secondary_practice_areas")
-            payload.pop("secondary_practice_areas")
-
-        if payload.get("specializations") is not None:
-            temp_settings["settings"]["practice_areas"]["specializations"] = payload.get("specializations")
-            payload.pop("specializations")
+        temp_practice_areas = temp_var.get("practice_areas",None)
+        if temp_practice_areas is not None:
+            if payload.get("primary_practice_areas") is not None:
+                temp_practice_areas["primary"] = payload.get("primary_practice_areas")
+                payload.pop("primary_practice_areas")
+            if payload.get("secondary_practice_areas") is not None:
+                temp_practice_areas["secondary"] = payload.get("secondary_practice_areas")
+                payload.pop("secondary_practice_areas")
+            if payload.get("specializations") is not None:
+                temp_practice_areas["specializations"] = payload.get("specializations")
+                payload.pop("specializations")
+        else:
+            temp_practice_areas = {"primary":None,"secondary":None,"specializations":None}
+            if payload.get("primary_practice_areas") is not None:
+                temp_practice_areas["primary"] = payload.get("primary_practice_areas")
+                payload.pop("primary_practice_areas")
+            if payload.get("secondary_practice_areas") is not None:
+                temp_practice_areas["secondary"] = payload.get("secondary_practice_areas")
+                payload.pop("secondary_practice_areas")
+            if payload.get("specializations") is not None:
+                temp_practice_areas["specializations"] = payload.get("specializations")
+                payload.pop("specializations")
+        temp_var["practice_areas"] = temp_practice_areas
 
         if payload.get("preferred_integration") is not None:
-            temp_settings["settings"].update({"preferred_integration":payload.get("preferred_integration")})
+            temp_var["preferred_integration"] = payload.get("preferred_integration")
             payload.pop("preferred_integration")
 
         if payload.get("need_help_importing_data") is not None:
-            temp_settings["settings"].update({"need_help_importing_data":payload.get("need_help_importing_data")})
+            temp_var["need_help_importing_data"] = payload.get("need_help_importing_data")
             payload.pop("need_help_importing_data")
 
         if payload.get("need_migration_assistance") is not None:
-            temp_settings["settings"].update({"need_migration_assistance":payload.get("need_migration_assistance")})
+            temp_var["need_migration_assistance"] = payload.get("need_migration_assistance")
             payload.pop("need_migration_assistance")
 
         if payload.get("compliance_security") is not None:
-            temp_settings["settings"].update({"compliance_security":payload.get("compliance_security")})
+            temp_var["compliance_security"] = payload.get("compliance_security")
             payload.pop("compliance_security")
 
         if payload.get("enterprise_features") is not None:
-            temp_settings["settings"].update({"enterprise_features":payload.get("enterprise_features")})
+            temp_var["enterprise_features"] = payload.get("enterprise_features")
             payload.pop("enterprise_features")
 
-        payload["settings"] = temp_settings["settings"]
+        payload["settings"] = temp_var
 
     if not payload:  # nothing to change (mimicking the early return logic)
         return {}

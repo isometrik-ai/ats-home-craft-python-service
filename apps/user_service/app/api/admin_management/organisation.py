@@ -120,7 +120,7 @@ def _create_organisation_info(org_data: dict) -> OrganisationInfo:
     Returns:
         OrganisationInfo: Formatted organisation info object
     """
-    return OrganisationInfo(
+    result = OrganisationInfo(
         organization_id=str(org_data["id"]),
         name=org_data["name"],
         slug=org_data["slug"],
@@ -133,19 +133,26 @@ def _create_organisation_info(org_data: dict) -> OrganisationInfo:
         created_at=org_data["created_at"],
         updated_at=org_data["updated_at"],
         member_count=org_data["member_count"],
-        address=org_data["settings"].get("address"),
-        primary_practice_areas=org_data["settings"].get("practice_areas").get("primary"),
-        secondary_practice_areas=org_data["settings"].get("practice_areas").get("secondary"),
-        specializations=org_data["settings"].get("practice_areas").get("specializations"),
-        preferred_integration=org_data["settings"].get("preferred_integration"),
-        need_help_importing_data=org_data["settings"].get("need_help_importing_data"),
-        need_migration_assistance=org_data["settings"].get("need_migration_assistance"),
-        compliance_security=org_data["settings"].get("compliance_security"),
-        enterprise_features=org_data["settings"].get("enterprise_features"),
-        team_setup=org_data["settings"].get("team_setup"),
+        address=org_data["settings"].get("address",None),
+        preferred_integration=org_data["settings"].get("preferred_integration",None),
+        need_help_importing_data=org_data["settings"].get("need_help_importing_data",None),
+        need_migration_assistance=org_data["settings"].get("need_migration_assistance",None),
+        compliance_security=org_data["settings"].get("compliance_security",None),
+        enterprise_features=org_data["settings"].get("enterprise_features",None),
+        team_setup=org_data["settings"].get("team_setup",None),
         description=org_data["description"],
         company_size=org_data["company_size"]
     )
+    if org_data["settings"].get("practice_areas",None):
+        prac_area = org_data["settings"].get("practice_areas")
+        result.primary_practice_areas=prac_area.get("primary",None)
+        result.secondary_practice_areas=prac_area.get("secondary",None)
+        result.specializations=prac_area.get("specializations",None)
+    else:
+        result.primary_practice_areas=None
+        result.secondary_practice_areas=None
+        result.specializations=None
+    return result
 
 
 def _process_organisations_data(organizations_data, count_result: dict | int) -> tuple:

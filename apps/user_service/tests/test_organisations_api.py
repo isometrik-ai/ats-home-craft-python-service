@@ -7,6 +7,7 @@ from copy import deepcopy
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
+from apps.user_service.app.schemas.auth import PracticeArea, PreferredIntegration
 
 _DEFAULT_ORG_SETTINGS = {
     "address": {
@@ -17,11 +18,11 @@ _DEFAULT_ORG_SETTINGS = {
         "country": "USA",
     },
     "practice_areas": {
-        "primary": ["Corporate Law"],
+        "primary": [PracticeArea.CORPORATE_LAW],
         "secondary": [],
         "specializations": [],
     },
-    "preferred_integration": [],
+    "preferred_integration": [PreferredIntegration.CLIO],
     "need_help_importing_data": False,
     "need_migration_assistance": False,
     "compliance_security": None,
