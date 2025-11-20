@@ -132,7 +132,19 @@ def _create_organisation_info(org_data: dict) -> OrganisationInfo:
         timezone=org_data["timezone"] or "UTC",
         created_at=org_data["created_at"],
         updated_at=org_data["updated_at"],
-        member_count=org_data["member_count"]
+        member_count=org_data["member_count"],
+        address=org_data["settings"].get("address"),
+        primary_practice_areas=org_data["settings"].get("practice_areas").get("primary"),
+        secondary_practice_areas=org_data["settings"].get("practice_areas").get("secondary"),
+        specializations=org_data["settings"].get("practice_areas").get("specializations"),
+        preferred_integration=org_data["settings"].get("preferred_integration"),
+        need_help_importing_data=org_data["settings"].get("need_help_importing_data"),
+        need_migration_assistance=org_data["settings"].get("need_migration_assistance"),
+        compliance_security=org_data["settings"].get("compliance_security"),
+        enterprise_features=org_data["settings"].get("enterprise_features"),
+        team_setup=org_data["settings"].get("team_setup"),
+        description=org_data["description"],
+        company_size=org_data["company_size"]
     )
 
 
@@ -505,11 +517,20 @@ async def create_organisation(
             "plan_type": body.plan_type.value,
             "status": "active",
             "user_id": user_context.user_id,
-            "email": user_context.email
+            "email": user_context.email,
+            "address": body.company_data.address,
+            "primary_practice_areas": body.company_data.primary_practice_areas,
+            "secondary_practice_areas": body.company_data.secondary_practice_areas,
+            "specializations": body.company_data.specializations,
+            "preferred_integration": body.company_data.preferred_integration,
+            "need_help_importing_data": body.company_data.need_help_importing_data,
+            "need_migration_assistance": body.company_data.need_migration_assistance,
+            "compliance_security": body.company_data.compliance_security,
+            "enterprise_features": body.company_data.enterprise_features,
+            "team_setup": body.company_data.team_setup
         }
         if body.user_data is not None:
-            for key, value in body.user_data.model_dump(
-                exclude_unset=True, exclude_none=True).items():
+            for key, value in body.user_data.model_dump().items():
                 org_data[key] = value
         await create_organisation_with_super_admin(org_data)
         request.state.audit_user_context = {
@@ -619,7 +640,7 @@ async def update_organisation(
 
     # Update organization using database operations
     update_data = body.model_dump(exclude_unset=True, exclude_none=True)
-    await update_organisation_details(organisation_id, update_data)
+    await update_organisation_details(organisation_id, organization_data, update_data)
 
     request.state.audit_new_values = update_data
 

@@ -3,9 +3,68 @@
 import pytest
 import uuid
 from datetime import datetime
+from copy import deepcopy
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
+
+_DEFAULT_ORG_SETTINGS = {
+    "address": {
+        "address_line": "123 Legal Ave",
+        "city": "Los Angeles",
+        "state": "CA",
+        "zip_code": "90001",
+        "country": "USA",
+    },
+    "practice_areas": {
+        "primary": ["Corporate Law"],
+        "secondary": [],
+        "specializations": [],
+    },
+    "preferred_integration": [],
+    "need_help_importing_data": False,
+    "need_migration_assistance": False,
+    "compliance_security": None,
+    "enterprise_features": None,
+    "team_setup": None,
+}
+
+_BASE_ORG_RECORD = {
+    "id": "org-template",
+    "name": "Base Org",
+    "slug": "base-org",
+    "domain": "example.com",
+    "logo_url": None,
+    "plan_type": "starter",
+    "status": "active",
+    "max_users": 10,
+    "timezone": "UTC",
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "member_count": 0,
+    "description": "Base organisation",
+    "company_size": "1-10",
+    "settings": deepcopy(_DEFAULT_ORG_SETTINGS),
+}
+
+
+def _build_org_record(**overrides):
+    """Return organisation dict with nested settings for API tests."""
+    record = deepcopy(_BASE_ORG_RECORD)
+    if not overrides:
+        return record
+
+    overrides_copy = deepcopy(overrides)
+    settings_override = overrides_copy.pop("settings", None)
+    record.update(overrides_copy)
+
+    if settings_override:
+        practice_override = settings_override.pop("practice_areas", None)
+        record["settings"].update(settings_override)
+        if practice_override:
+            record["settings"]["practice_areas"].update(practice_override)
+
+    return record
 
 
 @pytest.fixture
@@ -48,20 +107,32 @@ class TestOrganisationList:
     def test_organisations_list_success(self, client):
         """Test successful organisation list retrieval."""
         mock_organisations = [
-            {
-                "id": "org-1", "name": "Org 1", "slug": "org-1",
-                "domain": "example1.com", "logo_url": None, "plan_type": "free",
-                "status": "active", "max_users": 10, "timezone": "UTC",
-                "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
-                "member_count": 5
-            },
-            {
-                "id": "org-2", "name": "Org 2", "slug": "org-2",
-                "domain": "example2.com", "logo_url": None, "plan_type": "premium",
-                "status": "active", "max_users": 50, "timezone": "EST",
-                "created_at": "2024-01-02T00:00:00Z", "updated_at": "2024-01-02T00:00:00Z",
-                "member_count": 12
-            }
+            _build_org_record(
+                id="org-1",
+                name="Org 1",
+                slug="org-1",
+                domain="example1.com",
+                plan_type="free",
+                status="active",
+                max_users=10,
+                timezone="UTC",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+                member_count=5,
+            ),
+            _build_org_record(
+                id="org-2",
+                name="Org 2",
+                slug="org-2",
+                domain="example2.com",
+                plan_type="premium",
+                status="active",
+                max_users=50,
+                timezone="EST",
+                created_at="2024-01-02T00:00:00Z",
+                updated_at="2024-01-02T00:00:00Z",
+                member_count=12,
+            ),
         ]
 
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
@@ -93,13 +164,19 @@ class TestOrganisationList:
     def test_organisations_list_with_filters(self, client):
         """Test organisation list with query parameters."""
         mock_organisations = [
-            {
-                "id": "org-1", "name": "Test Org", "slug": "test-org",
-                "domain": "test.com", "logo_url": None, "plan_type": "free",
-                "status": "active", "max_users": 10, "timezone": "UTC",
-                "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
-                "member_count": 5
-            }
+            _build_org_record(
+                id="org-1",
+                name="Test Org",
+                slug="test-org",
+                domain="test.com",
+                plan_type="free",
+                status="active",
+                max_users=10,
+                timezone="UTC",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+                member_count=5,
+            )
         ]
 
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
@@ -116,13 +193,19 @@ class TestOrganisationList:
     def test_organisations_list_with_status_filter(self, client):
         """Test organisation list with status filter."""
         mock_organisations = [
-            {
-                "id": "org-1", "name": "Test Org", "slug": "test-org",
-                "domain": "test.com", "logo_url": None, "plan_type": "free",
-                "status": "active", "max_users": 10, "timezone": "UTC",
-                "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
-                "member_count": 5
-            }
+            _build_org_record(
+                id="org-1",
+                name="Test Org",
+                slug="test-org",
+                domain="test.com",
+                plan_type="free",
+                status="active",
+                max_users=10,
+                timezone="UTC",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+                member_count=5,
+            )
         ]
 
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
@@ -139,13 +222,19 @@ class TestOrganisationList:
     def test_organisations_list_count_result_as_int(self, client):
         """Test organisation list when count result is returned as int."""
         mock_organisations = [
-            {
-                "id": "org-1", "name": "Test Org", "slug": "test-org",
-                "domain": "test.com", "logo_url": None, "plan_type": "free",
-                "status": "active", "max_users": 10, "timezone": "UTC",
-                "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
-                "member_count": 5
-            }
+            _build_org_record(
+                id="org-1",
+                name="Test Org",
+                slug="test-org",
+                domain="test.com",
+                plan_type="free",
+                status="active",
+                max_users=10,
+                timezone="UTC",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+                member_count=5,
+            )
         ]
 
         with patch("apps.user_service.app.api.admin_management.organisation.get_list_of_organisations", AsyncMock(return_value=mock_organisations)), \
@@ -162,13 +251,19 @@ class TestOrganisationList:
     def test_organisations_list_count_result_unexpected_type(self, client):
         """Test organisation list when count result has unexpected type."""
         mock_organisations = [
-            {
-                "id": "org-1", "name": "Test Org", "slug": "test-org",
-                "domain": "test.com", "logo_url": None, "plan_type": "free",
-                "status": "active", "max_users": 10, "timezone": "UTC",
-                "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
-                "member_count": 5
-            }
+            _build_org_record(
+                id="org-1",
+                name="Test Org",
+                slug="test-org",
+                domain="test.com",
+                plan_type="free",
+                status="active",
+                max_users=10,
+                timezone="UTC",
+                created_at="2024-01-01T00:00:00Z",
+                updated_at="2024-01-01T00:00:00Z",
+                member_count=5,
+            )
         ]
 
         # Mock _process_organisations_data to test the else branch
@@ -179,11 +274,18 @@ class TestOrganisationList:
             # Create properly formatted organizations list for the mock
             formatted_orgs = [
                 {
-                    "organization_id": "org-1", "name": "Test Org", "slug": "test-org",
-                    "domain": "test.com", "logo_url": None, "plan_type": "free",
-                    "status": "active", "max_users": 10, "timezone": "UTC",
-                    "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
-                    "member_count": 5
+                    "organization_id": "org-1",
+                    "name": "Test Org",
+                    "slug": "test-org",
+                    "domain": "test.com",
+                    "logo_url": None,
+                    "plan_type": "free",
+                    "status": "active",
+                    "max_users": 10,
+                    "timezone": "UTC",
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "member_count": 5,
                 }
             ]
             mock_process.return_value = (formatted_orgs, 0)  # Simulate the else branch returning 0
@@ -202,13 +304,19 @@ class TestOrganisationDetails:
     def test_organisation_details_success(self, client):
         """Test successful organisation details retrieval."""
         valid_id = str(uuid.uuid4())
-        mock_organisation = {
-            "id": valid_id, "name": "Test Org", "slug": "test-org",
-            "domain": "example.com", "logo_url": None, "plan_type": "free",
-            "status": "active", "max_users": 10, "timezone": "UTC",
-            "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z",
-            "member_count": 5
-        }
+        mock_organisation = _build_org_record(
+            id=valid_id,
+            name="Test Org",
+            slug="test-org",
+            domain="example.com",
+            plan_type="free",
+            status="active",
+            max_users=10,
+            timezone="UTC",
+            created_at="2024-01-01T00:00:00Z",
+            updated_at="2024-01-01T00:00:00Z",
+            member_count=5,
+        )
 
         with patch("apps.user_service.app.api.admin_management.organisation.get_organisation_details_by_id", AsyncMock(return_value=mock_organisation)):
             response = client.get(f"/v1/admin/organisation/{valid_id}")

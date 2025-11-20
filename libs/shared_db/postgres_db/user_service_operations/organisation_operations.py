@@ -5,6 +5,7 @@ This module contains all organisation-related database operations.
 All SQL queries for organisation management should be centralized here.
 """
 from datetime import datetime, timedelta
+from turtle import update
 import uuid
 from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
@@ -78,6 +79,26 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "created_by_id":organisation_data.get("user_id")
     }
 
+    org_record["settings"] = {}
+
+    if organisation_data.get("address") is not None:
+        org_record["settings"].update({"address": organisation_data.get("address").model_dump(exclude_unset=True, exclude_none=True)})
+
+    org_record["settings"].update({"practice_areas":{"primary":None,"secondary":None,"specializations":None}})
+    org_record["settings"]["practice_areas"]["primary"] = organisation_data.get("primary_practice_areas",None)
+    org_record["settings"]["practice_areas"]["secondary"] = organisation_data.get("secondary_practice_areas",None)
+    org_record["settings"]["practice_areas"]["specializations"] = organisation_data.get("specializations",None)
+
+    org_record["settings"].update({"preferred_integration":organisation_data.get("preferred_integration",None)})
+
+    org_record["settings"].update({"need_help_importing_data":organisation_data.get("need_help_importing_data",None)})
+
+    org_record["settings"].update({"need_migration_assistance":organisation_data.get("need_migration_assistance",None)})
+
+    org_record["settings"].update({"compliance_security":organisation_data.get("compliance_security",None)})
+
+    org_record["settings"].update({"enterprise_features":organisation_data.get("enterprise_features",None)})
+
     table = supabase.table("organizations")
     # Use returning: 'minimal' to avoid SELECT permission requirements
     insert_query = table.insert(org_record, returning="minimal")
@@ -121,7 +142,7 @@ async def get_organisation_details_by_id(organisation_id: str) -> Optional[Dict[
     table = supabase.table("organizations")
     select_query = table.select(
         "id, name, slug, domain, logo_url, plan_type, status, max_users, timezone, settings, "
-        "created_at, updated_at, organization_members(status)"
+        "description, company_size, created_at, updated_at, organization_members(status)"
     )
     eq_query = select_query.eq("id", organisation_id)
     limit_query = eq_query.limit(1)
@@ -166,6 +187,7 @@ async def get_organisation_by_slug(slug: str) -> Optional[Dict[str, Any]]:
     custom_messages=create_error_messages("update_organisation_details", "updating"))
 async def update_organisation_details(
     organisation_id: str,
+    organisation_data: dict[str,Any],
     update_data: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Update organisation information, mimicking _build_organization_update_query logic.
@@ -178,9 +200,52 @@ async def update_organisation_details(
     # 1️⃣ Collect only keys the client actually sent(mimicking exclude_unset=True,exclude_none=True)
     payload = {k: v for k, v in update_data.items() if v is not None}
 
-    # 2️⃣ Strip out empty strings so "" doesn't overwrite existing data
-    #   (mimicking the empty string check)
-    payload = {k: v for k, v in payload.items() if not (isinstance(v, str) and v.strip() == "")}
+    settings_fields = [
+        "address", "primary_practice_areas", "secondary_practice_areas", "specializations",
+        "preferred_integration", "need_help_importing_data", "need_migration_assistance",
+        "compliance_security", "enterprise_features"]
+
+    if any(field in settings_fields for field in payload.keys()):
+        # payload["settings"] = {}
+        temp_settings = organisation_data
+
+        if payload.get("address") is not None:
+            temp_settings["settings"]["address"] = payload.get("address")
+            payload.pop("address")
+
+        if payload.get("primary_practice_areas") is not None:
+            temp_settings["settings"]["practice_areas"]["primary"] = payload.get("primary_practice_areas")
+            payload.pop("primary_practice_areas")
+
+        if payload.get("secondary_practice_areas") is not None:
+            temp_settings["settings"]["practice_areas"]["secondary"] = payload.get("secondary_practice_areas")
+            payload.pop("secondary_practice_areas")
+
+        if payload.get("specializations") is not None:
+            temp_settings["settings"]["practice_areas"]["specializations"] = payload.get("specializations")
+            payload.pop("specializations")
+
+        if payload.get("preferred_integration") is not None:
+            temp_settings["settings"].update({"preferred_integration":payload.get("preferred_integration")})
+            payload.pop("preferred_integration")
+
+        if payload.get("need_help_importing_data") is not None:
+            temp_settings["settings"].update({"need_help_importing_data":payload.get("need_help_importing_data")})
+            payload.pop("need_help_importing_data")
+
+        if payload.get("need_migration_assistance") is not None:
+            temp_settings["settings"].update({"need_migration_assistance":payload.get("need_migration_assistance")})
+            payload.pop("need_migration_assistance")
+
+        if payload.get("compliance_security") is not None:
+            temp_settings["settings"].update({"compliance_security":payload.get("compliance_security")})
+            payload.pop("compliance_security")
+
+        if payload.get("enterprise_features") is not None:
+            temp_settings["settings"].update({"enterprise_features":payload.get("enterprise_features")})
+            payload.pop("enterprise_features")
+
+        payload["settings"] = temp_settings["settings"]
 
     if not payload:  # nothing to change (mimicking the early return logic)
         return {}

@@ -347,7 +347,7 @@ async def refresh(request: Request):
         except jwt.ExpiredSignatureError:
             res = await refresh_session(refresh_token)
         res = await refresh_session(refresh_token)
-        # print("\n\nres:\n", res,end="\n\n")
+
         user_metadata = res.user.user_metadata or {}
         return AuthResponse(
             access_token=res.session.access_token,
