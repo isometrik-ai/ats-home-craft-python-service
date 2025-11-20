@@ -28,7 +28,6 @@ from apps.user_service.app.dependencies.exception_middleware import (
 )
 from apps.user_service.app.dependencies.logger import setup_logging
 from libs.shared_middleware.jwt_auth import JWTAuthMiddleware
-from libs.shared_db.supabase_db.admin_operations.session import get_session_by_id_admin
 
 # Setup paths and environment
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -63,9 +62,7 @@ async def health_check():
 
     Returns:
         HealthResponse: A response indicating the service is healthy
-        test
     """
-    await get_session_by_id_admin("b4575ad2-debc-4340-9427-bec3468b1cd7")
     return HealthResponse()
 
 
