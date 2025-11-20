@@ -420,6 +420,13 @@ class EnterpriseFeatures(BaseModel):
     custom_reporting: List[CustomReporting]
     primary_contact_information: PrimaryContactInformation
 
+class Address(BaseModel):
+    """Address information."""
+    address_line: Optional[str] = Field(None, min_length=1, max_length=100)
+    city: Optional[str] = Field(None, min_length=1, max_length=100)
+    state: Optional[str] = Field(None, min_length=1, max_length=100)
+    zip_code: Optional[str] = Field(None, min_length=1, max_length=7)
+    country: str = Field(..., min_length=1, max_length=100)
 
 
 class CompanyData(BaseModel):
@@ -432,6 +439,7 @@ class CompanyData(BaseModel):
     description: Optional[str] = None
     logo_url: Optional[str] = None
     max_users: Optional[int] = None
+    address: Optional[Address] = None
     referral_source: Optional[str] = None
     primary_practice_areas: List[PracticeArea] = Field(..., min_length=1, max_length=3)
     secondary_practice_areas: Optional[List[PracticeArea]] = None

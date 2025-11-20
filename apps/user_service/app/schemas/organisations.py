@@ -16,7 +16,10 @@ from fastapi import HTTPException, status
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
 from apps.user_service.app.schemas.auth import CompanyData, PlanType, User
 from apps.user_service.app.schemas import ResponseModel, validate_path_field
-
+from apps.user_service.app.schemas.auth import (
+    PreferredIntegration, ComplianceSecurity, EnterpriseFeatures, TeamSetup,
+    Address, CompanyData, PlanType, PracticeArea, Specialization, User
+)
 
 class OrganisationInfo(BaseModel):
     """Model for organisation information
@@ -64,9 +67,18 @@ class OrganisationInfo(BaseModel):
     member_count: int = Field(
         default=0, description="Number of active members in the organisation"
     )
-    # user_role: Optional[str] = Field(
-    #     None, description="Current user's role in this organisation"
-    # )
+    address: Optional[Address] = Field(None, description="Organisation's address")
+    primary_practice_areas: Optional[List[PracticeArea]] = Field(None, description="Organisation's primary practice areas")
+    secondary_practice_areas: Optional[List[PracticeArea]] = Field(None, description="Organisation's secondary practice areas")
+    specializations: Optional[List[Specialization]] = Field(None, description="Organisation's specializations")
+    preferred_integration: Optional[List[PreferredIntegration]] = Field(None, description="Organisation's preferred integrations")
+    need_help_importing_data: Optional[bool] = Field(None, description="Organisation's need help importing data")
+    need_migration_assistance: Optional[bool] = Field(None, description="Organisation's need migration assistance")
+    compliance_security: Optional[ComplianceSecurity] = Field(None, description="Organisation's compliance security")
+    enterprise_features: Optional[EnterpriseFeatures] = Field(None, description="Organisation's enterprise features")
+    team_setup: Optional[TeamSetup] = Field(None, description="Organisation's team setup")
+    description: Optional[str] = Field(None, description="Organisation's description")
+    company_size: Optional[str] = Field(None, description="Organisation's company size")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -445,13 +457,15 @@ class OrganizationUpdate(BaseModel):
         max_length=100,
         description="How the organisation first heard about the platform",
     )
+    address: Optional[Address] = Field(None, description="Organisation's address")
+    primary_practice_areas: Optional[List[PracticeArea]] = Field(None, description="Organisation's primary practice areas")
+    secondary_practice_areas: Optional[List[PracticeArea]] = Field(None, description="Organisation's secondary practice areas")
+    specializations: Optional[List[Specialization]] = Field(None, description="Organisation's specializations")
+    preferred_integration: Optional[List[PreferredIntegration]] = Field(None, description="Organisation's preferred integrations")
+    compliance_security: Optional[ComplianceSecurity] = Field(None, description="Organisation's compliance security")
+    enterprise_features: Optional[EnterpriseFeatures] = Field(None, description="Organisation's enterprise features")
+    team_setup: Optional[TeamSetup] = Field(None, description="Organisation's team setup")
 
-    # ─── Preferences ───
-    settings: Optional[dict] = Field(
-        None,
-        description="Custom JSON settings that apply organisation-wide",
-        examples=[{}]
-    )
     timezone: Optional[str] = Field(
         None,
         max_length=50,

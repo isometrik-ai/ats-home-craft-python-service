@@ -50,6 +50,35 @@ from libs.shared_db.postgres_db.user_service_operations.exception_handling impor
 from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE
 
 
+def _build_existing_org_data():
+    """Return minimal organisation data with populated settings for update flows."""
+    return {
+        "settings": {
+            "address": {
+                "line1": "123 Legal Ave",
+                "line2": None,
+                "city": "Los Angeles",
+                "state": "CA",
+                "postal_code": "90001",
+                "country": "USA",
+            },
+            "practice_areas": {
+                "primary": ["Corporate Law"],
+                "secondary": [],
+                "specializations": [],
+            },
+            "preferred_integration": [],
+            "need_help_importing_data": False,
+            "need_migration_assistance": False,
+            "compliance_security": {},
+            "enterprise_features": {},
+            "team_setup": {},
+        },
+        "description": "Existing organisation",
+        "company_size": "1-10",
+    }
+
+
 class TestOrganisationCRUD:
     """Test cases for organisation CRUD operations."""
 
@@ -274,7 +303,8 @@ class TestOrganisationCRUD:
             mock_supabase.table.return_value.update.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
-            result = await update_organisation_details(organisation_id, update_data)
+            existing_org_data = _build_existing_org_data()
+            result = await update_organisation_details(organisation_id, existing_org_data, update_data)
 
             assert result == mock_updated_org
 
@@ -283,8 +313,9 @@ class TestOrganisationCRUD:
         """Test organisation update with no fields to update."""
         organisation_id = str(uuid.uuid4())
         update_data = {}
+        existing_org_data = _build_existing_org_data()
 
-        result = await update_organisation_details(organisation_id, update_data)
+        result = await update_organisation_details(organisation_id, existing_org_data, update_data)
 
         assert result == {}
 
@@ -313,7 +344,8 @@ class TestOrganisationCRUD:
             mock_supabase.table.return_value.update.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
-            result = await update_organisation_details(organisation_id, update_data)
+            existing_org_data = _build_existing_org_data()
+            result = await update_organisation_details(organisation_id, existing_org_data, update_data)
 
             assert result == mock_updated_org
 
@@ -1460,7 +1492,8 @@ class TestOrganisationErrorHandling:
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(DataValidationError):
-                await update_organisation_details(organisation_id, update_data)
+                existing_org_data = _build_existing_org_data()
+                await update_organisation_details(organisation_id, existing_org_data, update_data)
 
 
 class TestOrganisationPermissionsAndBulk:
