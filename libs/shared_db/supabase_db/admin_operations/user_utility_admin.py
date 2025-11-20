@@ -4,6 +4,7 @@ This module contains all user-related admin operations.
 All Supabase Auth admin API operations for user management should be centralized here.
 """
 
+import os
 import urllib.parse
 from typing import Optional, Tuple, get_args
 
@@ -507,7 +508,7 @@ async def supabase_user_oauth(provider: str) -> dict:
 
         params = {
             "provider": provider,
-            "redirect_to": "http://localhost:5000/v1/admin/auth/oauth-callback",
+            "redirect_to": f"{os.getenv('BASE_URL')}/v1/admin/auth/oauth-callback",
             "code_challenge": CODE_CHALLENGE,
             "code_challenge_method": "S256"
         }
@@ -545,7 +546,7 @@ async def get_oauth_link_url(user_id: str, user_email: str, provider: str) -> di
 
         params = {
             "provider": provider,
-            "redirect_to": "http://localhost:5000/v1/admin/auth/oauth-callback",
+            "redirect_to": f"{os.getenv('BASE_URL')}/v1/admin/auth/oauth-callback",
             "user_id": user_id,
             "code_challenge": CODE_CHALLENGE,
             "code_challenge_method": "S256"
