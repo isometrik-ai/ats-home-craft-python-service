@@ -37,7 +37,7 @@ def mock_current_user():
             "first_name": "Old",
             "last_name": "User",
             "timezone": "UTC",
-            "avatar_url": "https://old.com/avatar.jpg"
+            "avatar_url": "house-of-apps-legal-ai/user-123/old-avatar.jpg"
         }
     }
 
@@ -70,7 +70,7 @@ class TestUpdateUserProfile:
             "last_name": "User",
             "full_name": "Old User",
             "timezone": "UTC",
-            "avatar_url": "https://old.com/avatar.jpg"
+            "avatar_url": "house-of-apps-legal-ai/user-123/old-avatar.jpg"
         }
 
         updated_user_data = {
@@ -80,7 +80,7 @@ class TestUpdateUserProfile:
             "last_name": "Name",
             "full_name": "New Name",
             "timezone": "America/New_York",
-            "avatar_url": "https://new.com/avatar.jpg"
+            "avatar_url": "house-of-apps-legal-ai/user-123/new-avatar.jpg"
         }
 
         mock_user_data = MagicMock()
@@ -110,7 +110,7 @@ class TestUpdateUserProfile:
                     "first_name": "New",
                     "last_name": "Name",
                     "timezone": "America/New_York",
-                    "avatar_url": "https://new.com/avatar.jpg"
+                    "avatar_url": "house-of-apps-legal-ai/user-123/new-avatar.jpg"
                 }
             )
 
@@ -719,7 +719,7 @@ class TestUpdateUserProfile:
             "last_name": "User",
             "full_name": "Old User",
             "timezone": "UTC",
-            "avatar_url": "https://old.com/avatar.jpg"
+            "avatar_url": "house-of-apps-legal-ai/user-123/old-avatar.jpg"
         }
 
         updated_user_data = {
@@ -816,12 +816,12 @@ class TestUpdateUserProfile:
         current_user_data = {
             "user_id": mock_user_context.user_id,
             "email": "test@example.com",
-            "avatar_url": "https://old.com/avatar.jpg"
+            "avatar_url": "house-of-apps-legal-ai/user-123/old-avatar.jpg"
         }
 
         updated_user_data = {
             "user_id": mock_user_context.user_id,
-            "avatar_url": "https://new.com/avatar.jpg"
+            "avatar_url": "house-of-apps-legal-ai/user-123/new-avatar.jpg"
         }
 
         mock_user_data = MagicMock()
@@ -830,7 +830,7 @@ class TestUpdateUserProfile:
 
         updated_profile = {
             "user_id": mock_user_context.user_id,
-            "avatar_url": "https://new.com/avatar.jpg"
+            "avatar_url": "house-of-apps-legal-ai/user-123/new-avatar.jpg"
         }
 
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
@@ -853,7 +853,7 @@ class TestUpdateUserProfile:
             response = client.put(
                 "/v1/admin/users/update",
                 json={
-                    "avatar_url": "https://new.com/avatar.jpg"
+                    "avatar_url": "house-of-apps-legal-ai/user-123/new-avatar.jpg"
                 }
             )
 

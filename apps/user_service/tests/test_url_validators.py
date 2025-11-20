@@ -1,9 +1,9 @@
 # pylint: disable=all
 
 """
-Test module for URL validators in user and organisation schemas.
+Test module for path validators in user and organisation schemas.
 
-This module contains comprehensive tests for URL validation in:
+This module contains comprehensive tests for path validation in:
 - UpdateUserRequest.avatar_url
 - UpdateUserProfileRequest.avatar_url
 - OrganizationUpdate.logo_url
@@ -21,33 +21,33 @@ from apps.user_service.app.api.admin_management.users.update_user import UpdateU
 from apps.user_service.app.schemas.organisations import OrganizationUpdate, UpdateOrganisationRequest
 
 
-class TestAvatarUrlValidation:
-    """Test avatar_url validation in UpdateUserRequest and UpdateUserProfileRequest."""
+class TestAvatarPathValidation:
+    """Test avatar_url path validation in UpdateUserRequest and UpdateUserProfileRequest."""
 
-    def test_valid_https_url(self):
-        """Test valid HTTPS URL."""
-        request = UpdateUserRequest(avatar_url="https://example.com/avatar.jpg")
-        assert request.avatar_url == "https://example.com/avatar.jpg"
+    def test_valid_path_simple(self):
+        """Test valid simple path."""
+        request = UpdateUserRequest(avatar_url="user-123/avatar.jpg")
+        assert request.avatar_url == "user-123/avatar.jpg"
 
-    def test_valid_http_url(self):
-        """Test valid HTTP URL."""
-        request = UpdateUserRequest(avatar_url="http://example.com/avatar.jpg")
-        assert request.avatar_url == "http://example.com/avatar.jpg"
+    def test_valid_path_with_org(self):
+        """Test valid path with organization."""
+        request = UpdateUserRequest(avatar_url="house-of-apps-legal-ai/user-123/avatar.jpg")
+        assert request.avatar_url == "house-of-apps-legal-ai/user-123/avatar.jpg"
 
-    def test_valid_url_with_path(self):
-        """Test valid URL with path."""
-        request = UpdateUserRequest(avatar_url="https://cdn.example.com/images/user/avatar.png")
-        assert request.avatar_url == "https://cdn.example.com/images/user/avatar.png"
+    def test_valid_path_with_nested_directories(self):
+        """Test valid path with nested directories."""
+        request = UpdateUserRequest(avatar_url="org-456/user-123/images/avatar.png")
+        assert request.avatar_url == "org-456/user-123/images/avatar.png"
 
-    def test_valid_url_with_query_params(self):
-        """Test valid URL with query parameters."""
-        request = UpdateUserRequest(avatar_url="https://example.com/avatar.jpg?size=large&v=1")
-        assert request.avatar_url == "https://example.com/avatar.jpg?size=large&v=1"
+    def test_valid_path_with_underscores(self):
+        """Test valid path with underscores."""
+        request = UpdateUserRequest(avatar_url="user_123/avatar_image.jpg")
+        assert request.avatar_url == "user_123/avatar_image.jpg"
 
-    def test_valid_url_with_port(self):
-        """Test valid URL with port number."""
-        request = UpdateUserRequest(avatar_url="https://example.com:8080/avatar.jpg")
-        assert request.avatar_url == "https://example.com:8080/avatar.jpg"
+    def test_valid_path_with_hyphens(self):
+        """Test valid path with hyphens."""
+        request = UpdateUserRequest(avatar_url="user-123/avatar-image.jpg")
+        assert request.avatar_url == "user-123/avatar-image.jpg"
 
     def test_none_avatar_url(self):
         """Test None avatar_url (optional field)."""
@@ -64,50 +64,59 @@ class TestAvatarUrlValidation:
         request = UpdateUserRequest(avatar_url="   ")
         assert request.avatar_url is None
 
-    def test_invalid_url_missing_scheme(self):
-        """Test invalid URL without http:// or https://."""
+    def test_invalid_url_https(self):
+        """Test that HTTPS URLs are rejected."""
         with pytest.raises(ValidationError) as exc_info:
-            UpdateUserRequest(avatar_url="example.com/avatar.jpg")
+            UpdateUserRequest(avatar_url="https://example.com/avatar.jpg")
         errors = exc_info.value.errors()
         assert len(errors) == 1
         assert errors[0]["loc"] == ("avatar_url",)
-        assert "must start with http:// or https://" in str(errors[0]["msg"]).lower()
+        assert "must be a path only, not a full url" in str(errors[0]["msg"]).lower()
 
-    def test_invalid_url_just_filename(self):
-        """Test invalid URL that's just a filename."""
+    def test_invalid_url_http(self):
+        """Test that HTTP URLs are rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            UpdateUserRequest(avatar_url="http://example.com/avatar.jpg")
+        errors = exc_info.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("avatar_url",)
+
+    def test_invalid_base64(self):
+        """Test that base64 data URIs are rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            UpdateUserRequest(avatar_url="data:image/jpeg;base64,/9j/4AAQSkZJRg==")
+        errors = exc_info.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("avatar_url",)
+        assert "must be a path only, not base64 data" in str(errors[0]["msg"]).lower()
+
+    def test_invalid_path_no_slash(self):
+        """Test invalid path without directory separator."""
         with pytest.raises(ValidationError) as exc_info:
             UpdateUserRequest(avatar_url="avatar.jpg")
         errors = exc_info.value.errors()
         assert len(errors) == 1
         assert errors[0]["loc"] == ("avatar_url",)
+        assert "must be a path with at least one directory" in str(errors[0]["msg"]).lower()
 
-    def test_invalid_url_ftp_scheme(self):
-        """Test invalid URL with FTP scheme (not allowed)."""
+    def test_invalid_path_invalid_characters(self):
+        """Test invalid path with invalid characters."""
         with pytest.raises(ValidationError) as exc_info:
-            UpdateUserRequest(avatar_url="ftp://example.com/avatar.jpg")
+            UpdateUserRequest(avatar_url="user-123/avatar@image.jpg")
         errors = exc_info.value.errors()
         assert len(errors) == 1
         assert errors[0]["loc"] == ("avatar_url",)
-        assert "must start with http:// or https://" in str(errors[0]["msg"]).lower()
+        assert "contains invalid characters" in str(errors[0]["msg"]).lower()
 
-    def test_invalid_url_no_netloc(self):
-        """Test invalid URL without domain/host."""
-        with pytest.raises(ValidationError) as exc_info:
-            UpdateUserRequest(avatar_url="https://")
-        errors = exc_info.value.errors()
-        assert len(errors) == 1
-        assert errors[0]["loc"] == ("avatar_url",)
-        assert "must contain a valid domain or host" in str(errors[0]["msg"]).lower()
-
-    def test_update_user_profile_request_valid_url(self):
-        """Test UpdateUserProfileRequest with valid URL."""
-        request = UpdateUserProfileRequest(avatar_url="https://example.com/profile.jpg")
-        assert request.avatar_url == "https://example.com/profile.jpg"
+    def test_update_user_profile_request_valid_path(self):
+        """Test UpdateUserProfileRequest with valid path."""
+        request = UpdateUserProfileRequest(avatar_url="house-of-apps-legal-ai/user-123/profile.jpg")
+        assert request.avatar_url == "house-of-apps-legal-ai/user-123/profile.jpg"
 
     def test_update_user_profile_request_invalid_url(self):
         """Test UpdateUserProfileRequest with invalid URL."""
         with pytest.raises(ValidationError) as exc_info:
-            UpdateUserProfileRequest(avatar_url="invalid-url")
+            UpdateUserProfileRequest(avatar_url="https://example.com/avatar.jpg")
         errors = exc_info.value.errors()
         assert len(errors) == 1
         assert errors[0]["loc"] == ("avatar_url",)
@@ -117,39 +126,24 @@ class TestAvatarUrlValidation:
         request = UpdateUserProfileRequest(avatar_url=None)
         assert request.avatar_url is None
 
-    def test_url_with_whitespace_trimmed(self):
-        """Test URL with leading/trailing whitespace is trimmed."""
-        request = UpdateUserRequest(avatar_url="  https://example.com/avatar.jpg  ")
-        assert request.avatar_url == "https://example.com/avatar.jpg"
+    def test_path_with_whitespace_trimmed(self):
+        """Test path with leading/trailing whitespace is trimmed."""
+        request = UpdateUserRequest(avatar_url="  user-123/avatar.jpg  ")
+        assert request.avatar_url == "user-123/avatar.jpg"
 
 
-class TestLogoUrlValidation:
-    """Test logo_url validation in OrganizationUpdate and UpdateOrganisationRequest."""
+class TestLogoPathValidation:
+    """Test logo_url path validation in OrganizationUpdate and UpdateOrganisationRequest."""
 
-    def test_valid_https_logo_url(self):
-        """Test valid HTTPS logo URL."""
-        org = OrganizationUpdate(logo_url="https://example.com/logo.png")
-        assert org.logo_url == "https://example.com/logo.png"
+    def test_valid_path_simple(self):
+        """Test valid simple path."""
+        org = OrganizationUpdate(logo_url="org-123/logo.png")
+        assert org.logo_url == "org-123/logo.png"
 
-    def test_valid_http_logo_url(self):
-        """Test valid HTTP logo URL."""
-        org = OrganizationUpdate(logo_url="http://example.com/logo.png")
-        assert org.logo_url == "http://example.com/logo.png"
-
-    def test_valid_logo_url_with_path(self):
-        """Test valid logo URL with path."""
-        org = OrganizationUpdate(logo_url="https://cdn.example.com/branding/logo.svg")
-        assert org.logo_url == "https://cdn.example.com/branding/logo.svg"
-
-    def test_valid_logo_url_with_query_params(self):
-        """Test valid logo URL with query parameters."""
-        org = OrganizationUpdate(logo_url="https://example.com/logo.png?w=200&h=200")
-        assert org.logo_url == "https://example.com/logo.png?w=200&h=200"
-
-    def test_valid_logo_url_with_port(self):
-        """Test valid logo URL with port number."""
-        org = OrganizationUpdate(logo_url="https://example.com:443/logo.png")
-        assert org.logo_url == "https://example.com:443/logo.png"
+    def test_valid_path_with_nested_directories(self):
+        """Test valid path with nested directories."""
+        org = OrganizationUpdate(logo_url="house-of-apps-legal-ai/org-123/branding/logo.svg")
+        assert org.logo_url == "house-of-apps-legal-ai/org-123/branding/logo.svg"
 
     def test_none_logo_url(self):
         """Test None logo_url (optional field)."""
@@ -166,50 +160,59 @@ class TestLogoUrlValidation:
         org = OrganizationUpdate(logo_url="   ")
         assert org.logo_url is None
 
-    def test_invalid_logo_url_missing_scheme(self):
-        """Test invalid logo URL without http:// or https://."""
+    def test_invalid_url_https(self):
+        """Test that HTTPS URLs are rejected."""
         with pytest.raises(ValidationError) as exc_info:
-            OrganizationUpdate(logo_url="example.com/logo.png")
+            OrganizationUpdate(logo_url="https://example.com/logo.png")
         errors = exc_info.value.errors()
         assert len(errors) == 1
         assert errors[0]["loc"] == ("logo_url",)
-        assert "must start with http:// or https://" in str(errors[0]["msg"]).lower()
+        assert "must be a path only, not a full url" in str(errors[0]["msg"]).lower()
 
-    def test_invalid_logo_url_just_filename(self):
-        """Test invalid logo URL that's just a filename."""
+    def test_invalid_url_http(self):
+        """Test that HTTP URLs are rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            OrganizationUpdate(logo_url="http://example.com/logo.png")
+        errors = exc_info.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("logo_url",)
+
+    def test_invalid_base64(self):
+        """Test that base64 data URIs are rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            OrganizationUpdate(logo_url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==")
+        errors = exc_info.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("logo_url",)
+        assert "must be a path only, not base64 data" in str(errors[0]["msg"]).lower()
+
+    def test_invalid_path_no_slash(self):
+        """Test invalid path without directory separator."""
         with pytest.raises(ValidationError) as exc_info:
             OrganizationUpdate(logo_url="logo.png")
         errors = exc_info.value.errors()
         assert len(errors) == 1
         assert errors[0]["loc"] == ("logo_url",)
+        assert "must be a path with at least one directory" in str(errors[0]["msg"]).lower()
 
-    def test_invalid_logo_url_ftp_scheme(self):
-        """Test invalid logo URL with FTP scheme (not allowed)."""
+    def test_invalid_path_invalid_characters(self):
+        """Test invalid path with invalid characters."""
         with pytest.raises(ValidationError) as exc_info:
-            OrganizationUpdate(logo_url="ftp://example.com/logo.png")
+            OrganizationUpdate(logo_url="org-123/logo@image.png")
         errors = exc_info.value.errors()
         assert len(errors) == 1
         assert errors[0]["loc"] == ("logo_url",)
-        assert "must start with http:// or https://" in str(errors[0]["msg"]).lower()
+        assert "contains invalid characters" in str(errors[0]["msg"]).lower()
 
-    def test_invalid_logo_url_no_netloc(self):
-        """Test invalid logo URL without domain/host."""
-        with pytest.raises(ValidationError) as exc_info:
-            OrganizationUpdate(logo_url="https://")
-        errors = exc_info.value.errors()
-        assert len(errors) == 1
-        assert errors[0]["loc"] == ("logo_url",)
-        assert "must contain a valid domain or host" in str(errors[0]["msg"]).lower()
-
-    def test_update_organisation_request_valid_url(self):
-        """Test UpdateOrganisationRequest with valid logo URL."""
-        org = UpdateOrganisationRequest(logo_url="https://example.com/org-logo.png")
-        assert org.logo_url == "https://example.com/org-logo.png"
+    def test_update_organisation_request_valid_path(self):
+        """Test UpdateOrganisationRequest with valid path."""
+        org = UpdateOrganisationRequest(logo_url="house-of-apps-legal-ai/org-123/org-logo.png")
+        assert org.logo_url == "house-of-apps-legal-ai/org-123/org-logo.png"
 
     def test_update_organisation_request_invalid_url(self):
-        """Test UpdateOrganisationRequest with invalid logo URL."""
+        """Test UpdateOrganisationRequest with invalid URL."""
         with pytest.raises(ValidationError) as exc_info:
-            UpdateOrganisationRequest(logo_url="invalid-url")
+            UpdateOrganisationRequest(logo_url="https://example.com/logo.png")
         errors = exc_info.value.errors()
         assert len(errors) == 1
         assert errors[0]["loc"] == ("logo_url",)
@@ -219,19 +222,19 @@ class TestLogoUrlValidation:
         org = UpdateOrganisationRequest(logo_url=None)
         assert org.logo_url is None
 
-    def test_logo_url_with_whitespace_trimmed(self):
-        """Test logo URL with leading/trailing whitespace is trimmed."""
-        org = OrganizationUpdate(logo_url="  https://example.com/logo.png  ")
-        assert org.logo_url == "https://example.com/logo.png"
+    def test_logo_path_with_whitespace_trimmed(self):
+        """Test logo path with leading/trailing whitespace is trimmed."""
+        org = OrganizationUpdate(logo_url="  org-123/logo.png  ")
+        assert org.logo_url == "org-123/logo.png"
 
     def test_organization_update_with_multiple_fields(self):
-        """Test OrganizationUpdate with multiple fields including valid logo_url."""
+        """Test OrganizationUpdate with multiple fields including valid logo_path."""
         org = OrganizationUpdate(
             name="Test Org",
-            logo_url="https://example.com/logo.png",
+            logo_url="house-of-apps-legal-ai/org-123/logo.png",
             industry="Technology"
         )
-        assert org.logo_url == "https://example.com/logo.png"
+        assert org.logo_url == "house-of-apps-legal-ai/org-123/logo.png"
         assert org.name == "Test Org"
 
     def test_organization_update_with_invalid_logo_url(self):
@@ -239,65 +242,44 @@ class TestLogoUrlValidation:
         with pytest.raises(ValidationError):
             OrganizationUpdate(
                 name="Test Org",
-                logo_url="invalid-url",
+                logo_url="https://example.com/logo.png",
                 industry="Technology"
             )
 
 
-class TestUrlValidationEdgeCases:
-    """Test edge cases for URL validation."""
+class TestPathValidationEdgeCases:
+    """Test edge cases for path validation."""
 
-    def test_url_with_localhost(self):
-        """Test URL with localhost (should be valid)."""
-        request = UpdateUserRequest(avatar_url="http://localhost:3000/avatar.jpg")
-        assert request.avatar_url == "http://localhost:3000/avatar.jpg"
+    def test_path_with_uuid(self):
+        """Test path with UUID."""
+        request = UpdateUserRequest(avatar_url="house-of-apps-legal-ai/0abb3450-2cc8-416a-8ff7-e7de77f2825b/women_4.jpg")
+        assert request.avatar_url == "house-of-apps-legal-ai/0abb3450-2cc8-416a-8ff7-e7de77f2825b/women_4.jpg"
 
-    def test_url_with_ip_address(self):
-        """Test URL with IP address (should be valid)."""
-        request = UpdateUserRequest(avatar_url="https://192.168.1.1/avatar.jpg")
-        assert request.avatar_url == "https://192.168.1.1/avatar.jpg"
+    def test_path_with_dots(self):
+        """Test path with dots in filename."""
+        request = UpdateUserRequest(avatar_url="user-123/image.v2.jpg")
+        assert request.avatar_url == "user-123/image.v2.jpg"
 
-    def test_url_with_subdomain(self):
-        """Test URL with subdomain."""
-        request = UpdateUserRequest(avatar_url="https://cdn.example.com/avatar.jpg")
-        assert request.avatar_url == "https://cdn.example.com/avatar.jpg"
+    def test_path_with_multiple_slashes(self):
+        """Test path with multiple directory levels."""
+        request = UpdateUserRequest(avatar_url="org-123/user-456/images/avatars/profile.jpg")
+        assert request.avatar_url == "org-123/user-456/images/avatars/profile.jpg"
 
-    def test_url_with_multiple_subdomains(self):
-        """Test URL with multiple subdomains."""
-        request = UpdateUserRequest(avatar_url="https://static.cdn.example.com/avatar.jpg")
-        assert request.avatar_url == "https://static.cdn.example.com/avatar.jpg"
-
-    def test_url_with_hash_fragment(self):
-        """Test URL with hash fragment."""
-        request = UpdateUserRequest(avatar_url="https://example.com/avatar.jpg#section")
-        assert request.avatar_url == "https://example.com/avatar.jpg#section"
-
-    def test_url_with_encoded_characters(self):
-        """Test URL with URL-encoded characters."""
-        request = UpdateUserRequest(avatar_url="https://example.com/avatar%20image.jpg")
-        assert request.avatar_url == "https://example.com/avatar%20image.jpg"
-
-    def test_url_with_unicode_characters(self):
-        """Test URL with unicode characters in domain."""
-        request = UpdateUserRequest(avatar_url="https://example.com/avatar.jpg")
-        assert request.avatar_url == "https://example.com/avatar.jpg"
-
-    def test_multiple_fields_with_valid_url(self):
-        """Test UpdateUserRequest with multiple fields including valid avatar_url."""
+    def test_multiple_fields_with_valid_path(self):
+        """Test UpdateUserRequest with multiple fields including valid avatar_path."""
         request = UpdateUserRequest(
             full_name="Test User",
-            avatar_url="https://example.com/avatar.jpg",
+            avatar_url="house-of-apps-legal-ai/user-123/avatar.jpg",
             timezone="UTC"
         )
-        assert request.avatar_url == "https://example.com/avatar.jpg"
+        assert request.avatar_url == "house-of-apps-legal-ai/user-123/avatar.jpg"
         assert request.full_name == "Test User"
 
     def test_multiple_fields_with_invalid_url(self):
-        """Test UpdateUserRequest with multiple fields including invalid avatar_url."""
+        """Test UpdateUserRequest with multiple fields including invalid URL."""
         with pytest.raises(ValidationError):
             UpdateUserRequest(
                 full_name="Test User",
-                avatar_url="invalid-url",
+                avatar_url="https://example.com/avatar.jpg",
                 timezone="UTC"
             )
-

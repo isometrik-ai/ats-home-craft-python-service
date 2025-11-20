@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator, field_valida
 from fastapi import HTTPException, status
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
 from apps.user_service.app.schemas.auth import CompanyData, PlanType, User
-from apps.user_service.app.schemas import ResponseModel, validate_url_field
+from apps.user_service.app.schemas import ResponseModel, validate_path_field
 
 
 class OrganisationInfo(BaseModel):
@@ -218,8 +218,8 @@ class UpdateOrganisationRequest(BaseModel):
     @field_validator("logo_url", mode="before")
     @classmethod
     def validate_logo_url(cls, v):
-        """Validate logo_url is a valid URL if provided"""
-        return validate_url_field(v, "logo_url")
+        """Validate logo_url is a valid path if provided (no URLs or base64 allowed)"""
+        return validate_path_field(v, "logo_url")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -424,7 +424,6 @@ class OrganizationUpdate(BaseModel):
     @classmethod
     def validate_logo_url(cls, v):
         """Validate logo_url is a valid path if provided (no URLs or base64 allowed)"""
-        from apps.user_service.app.schemas import validate_path_field
         return validate_path_field(v, "logo_url")
 
     industry: Optional[str] = Field(
