@@ -74,13 +74,11 @@ def async_main_app_client():
 
 def test_health_endpoint(main_app_client):
     """Test the health check endpoint - covers main.py"""
-    with patch('apps.user_service.app.main.get_session_by_id_admin') as mock_get_session:
-        mock_get_session.return_value = {"session_id": "test-session"}
-        response = main_app_client.get("/health")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "healthy"
-        assert data["version"] == "1.0.0"
+    response = main_app_client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["version"] == "1.0.0"
 
 def test_api_status_endpoint():
     """Test API status endpoint - covers routes.py"""
@@ -101,12 +99,10 @@ async def test_health_endpoint_async(async_main_app_client):
     """Test the health check endpoint asynchronously - covers main.py"""
     from apps.user_service.app.main import health_check
 
-    with patch('apps.user_service.app.main.get_session_by_id_admin') as mock_get_session:
-        mock_get_session.return_value = {"session_id": "test-session"}
-        # Test the async function directly
-        result = await health_check()
-        assert result.status == "healthy"
-        assert result.version == "1.0.0"
+    # Test the async function directly
+    result = await health_check()
+    assert result.status == "healthy"
+    assert result.version == "1.0.0"
 
 @pytest.mark.asyncio
 async def test_api_status_endpoint_async(async_main_app_client):
