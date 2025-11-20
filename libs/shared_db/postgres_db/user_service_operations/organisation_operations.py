@@ -60,8 +60,6 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
     """Create a new organisation."""
     supabase = await get_supabase_admin_client()
 
-    print("\n\norganisation_data",organisation_data,sep="\n",end="\n\n")
-
     org_record = {
         "id": organisation_data["organization_id"],
         "name": organisation_data["name"],
@@ -100,8 +98,6 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
     org_record["settings"].update({"compliance_security":organisation_data.get("compliance_security",None)})
 
     org_record["settings"].update({"enterprise_features":organisation_data.get("enterprise_features",None)})
-
-    print("\n\norg_record",org_record,sep="\n",end="\n\n")
 
     table = supabase.table("organizations")
     # Use returning: 'minimal' to avoid SELECT permission requirements
