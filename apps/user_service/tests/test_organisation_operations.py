@@ -81,6 +81,14 @@ def _build_existing_org_data():
 
 class TestOrganisationCRUD:
     """Test cases for organisation CRUD operations."""
+    
+    class FakeAddress:
+        """Helper to mimic Pydantic model for address."""
+        def __init__(self, **data):
+            self._data = data
+        
+        def model_dump(self, **kwargs):
+            return self._data
 
     @pytest.mark.asyncio
     async def test_create_new_organisation_success(self):
@@ -143,6 +151,45 @@ class TestOrganisationCRUD:
             assert result["max_users"] == mock_created_org["max_users"]
             assert result["created_by_id"] == mock_created_org["created_by_id"]
             mock_supabase.table.assert_called_once_with("organizations")
+
+    @pytest.mark.asyncio
+    async def test_create_new_organisation_with_settings_payload(self):
+        """Ensure nested settings are serialized correctly."""
+        organisation_data = {
+            "organization_id": str(uuid.uuid4()),
+            "name": "Settings Org",
+            "slug": "settings-org",
+            "status": "active",
+            "max_users": 15,
+            "user_id": str(uuid.uuid4()),
+            "address": self.FakeAddress(city="LA", country="USA"),
+            "primary_practice_areas": ["Corporate"],
+            "secondary_practice_areas": ["Tax"],
+            "specializations": ["FinTech"],
+            "preferred_integration": ["Clio"],
+            "need_help_importing_data": True,
+            "need_migration_assistance": True,
+        }
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_table = MagicMock()
+            insert_query = MagicMock()
+            insert_query.execute = AsyncMock(return_value=MagicMock())
+            mock_table.insert.return_value = insert_query
+            mock_supabase.table.return_value = mock_table
+            mock_get_client.return_value = mock_supabase
+
+            await create_new_organisation(organisation_data)
+
+            inserted_record = mock_table.insert.call_args[0][0]
+            settings = inserted_record["settings"]
+            assert settings["address"]["city"] == "LA"
+            assert settings["practice_areas"]["primary"] == ["Corporate"]
+            assert settings["practice_areas"]["secondary"] == ["Tax"]
+            assert settings["practice_areas"]["specializations"] == ["FinTech"]
+            assert settings["preferred_integration"] == ["Clio"]
+            assert settings["need_help_importing_data"] is True
 
     @pytest.mark.asyncio
     async def test_create_new_organisation_no_data_returned(self):
@@ -348,6 +395,57 @@ class TestOrganisationCRUD:
             result = await update_organisation_details(organisation_id, existing_org_data, update_data)
 
             assert result == mock_updated_org
+
+    @pytest.mark.asyncio
+    async def test_update_organisation_details_returns_empty_when_no_rows(self):
+        """Ensure update returns empty dict when Supabase returns no rows."""
+        organisation_id = str(uuid.uuid4())
+        update_data = {"name": "No Rows Org"}
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_table = MagicMock()
+            update_query = MagicMock()
+            eq_query = MagicMock()
+            eq_query.execute = AsyncMock(return_value=MagicMock(data=[]))
+            update_query.eq.return_value = eq_query
+            mock_table.update.return_value = update_query
+            mock_supabase.table.return_value = mock_table
+            mock_get_client.return_value = mock_supabase
+
+            result = await update_organisation_details(organisation_id, _build_existing_org_data(), update_data)
+
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_update_organisation_details_handles_missing_practice_areas(self):
+        """Ensure update builds practice area dict when missing from existing settings."""
+        organisation_id = str(uuid.uuid4())
+        organisation_data = {"settings": {}}
+        update_data = {
+            "primary_practice_areas": ["Corporate"],
+            "secondary_practice_areas": ["Tax"],
+            "specializations": ["M&A"]
+        }
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_table = MagicMock()
+            update_query = MagicMock()
+            eq_query = MagicMock()
+            eq_query.execute = AsyncMock(return_value=MagicMock(data=[{"id": organisation_id}]))
+            update_query.eq.return_value = eq_query
+            mock_table.update.return_value = update_query
+            mock_supabase.table.return_value = mock_table
+            mock_get_client.return_value = mock_supabase
+
+            result = await update_organisation_details(organisation_id, organisation_data, update_data)
+
+        assert result["id"] == organisation_id
+        payload = mock_table.update.call_args[0][0]
+        assert payload["settings"]["practice_areas"]["primary"] == ["Corporate"]
+        assert payload["settings"]["practice_areas"]["secondary"] == ["Tax"]
+        assert payload["settings"]["practice_areas"]["specializations"] == ["M&A"]
 
     @pytest.mark.asyncio
     async def test_update_organisation_details_updates_settings_payload(self):
