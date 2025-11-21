@@ -4,18 +4,14 @@ This module contains all user-related admin operations.
 All Supabase Auth admin API operations for user management should be centralized here.
 """
 
-import os
-import urllib.parse
-from typing import Optional, Tuple, get_args
+from typing import Optional, Tuple
 
 from fastapi import HTTPException, status
 from supabase_auth.errors import AuthApiError
-from supabase_auth.types import Provider as AUTH_PROVIDER
 
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.users import CreateUserRequest
 from apps.user_service.app.dependencies.common_utils import UserContext
-from apps.user_service.app.schemas.auth import CODE_VERIFIER, CODE_CHALLENGE
 
 from libs.shared_utils.email_utils import send_email
 from libs.shared_utils.common_query import log_exception
@@ -493,122 +489,6 @@ async def update_password_with_token(token: str, new_password: str) -> dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unexpected error occurred while updating password with token.",
         ) from e
-
-async def supabase_user_oauth(provider: str) -> dict:
-    """
-    Link user identity using Supabase Auth Admin API.
-    """
-    try:
-        supabase = await get_supabase_admin_client()
-        _provider_validity_check(provider)
-
-        # Get the Supabase URL dynamically from the client
-        supabase_url = supabase.supabase_url
-        base_url = f"{supabase_url}/auth/v1/authorize"
-
-        params = {
-            "provider": provider,
-            "redirect_to": f"{os.getenv('BASE_URL')}/v1/admin/auth/oauth-callback",
-            "code_challenge": CODE_CHALLENGE,
-            "code_challenge_method": "S256"
-        }
-
-        # Construct the URL manually with our custom PKCE parameters
-        query_string = urllib.parse.urlencode(params)
-        oauth_url = f"{base_url}?{query_string}"
-
-        return {
-            "provider": provider,
-            "url": oauth_url,
-            "code_verifier": CODE_VERIFIER,  # Include this for reference
-            "code_challenge": CODE_CHALLENGE
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Unexpected error while creating OAuth URL: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected error occurred while creating OAuth URL.",
-        ) from e
-
-
-async def get_oauth_link_url(user_id: str, user_email: str, provider: str) -> dict:
-    """
-    Generate Google OAuth URL for linking to existing email/password user.
-    """
-    try:
-        supabase = await get_supabase_admin_client()
-        _provider_validity_check(provider)
-
-        # Generate OAuth URL with special parameters for linking
-        base_url = f"{supabase.supabase_url}/auth/v1/authorize"
-
-        params = {
-            "provider": provider,
-            "redirect_to": f"{os.getenv('BASE_URL')}/v1/admin/auth/oauth-callback",
-            "user_id": user_id,
-            "code_challenge": CODE_CHALLENGE,
-            "code_challenge_method": "S256"
-        }
-
-        query_string = urllib.parse.urlencode(params)
-        oauth_url = f"{base_url}?{query_string}"
-
-        return {
-            "success": True,
-            "oauth_url": oauth_url,
-            "user_email": user_email,
-            "message": f"Redirect user to this URL to link {provider} account"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error generating %s OAuth URL: %s", provider, str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate {provider} OAuth URL"
-        )
-
-async def link_google_identity_to_existing_user(user_id: str, google_user) -> bool:
-    """
-    Link Google identity to existing email/password user.
-    """
-    try:
-        supabase_admin = await get_supabase_admin_client()
-
-        # Update user to include Google provider
-        result = await supabase_admin.auth.admin.update_user_by_id(
-            user_id,
-            {
-                "app_metadata": {
-                    "provider": "email",
-                    "providers": ["email", "google"],
-                    "google_identity": {
-                        "google_id": google_user.id,
-                        "avatar_url": google_user.user_metadata.get("avatar_url"),
-                        "name": google_user.user_metadata.get("full_name"),
-                        "verified_email": google_user.email_confirmed_at is not None
-                    }
-                }
-            }
-        )
-
-        return result.user is not None
-
-    except Exception as e:
-        logger.error("Error linking Google identity: %s", str(e))
-        return False
-
-def _provider_validity_check(provider: str):
-    """
-    Check if provider is valid.
-    """
-    if provider not in get_args(AUTH_PROVIDER):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid provider"
-        )
 
 async def refresh_session(refresh_token: str) -> dict:
     """
