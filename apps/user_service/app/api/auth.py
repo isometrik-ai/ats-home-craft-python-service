@@ -80,11 +80,8 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     reset_the_password_email,
     update_password_with_token,
     log_exception,
-    supabase_user_oauth,
-    get_oauth_link_url,
     refresh_session
 )
-from libs.shared_db.supabase_db.admin_operations.session import get_session_by_id_admin
 from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
     get_verification_code_by_id,
 )
@@ -806,99 +803,6 @@ async def delete_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete user: {str(error)}"
         ) from error
-
-
-@router.get("/link-user-oauth-url/{provider}", status_code=status.HTTP_200_OK)
-async def get_oauth_link_url_endpoint(
-    provider: str,
-    current_user: dict = Depends(get_user_from_auth)
-):
-    """
-    Generate Google OAuth URL for linking to existing email/password user.
-    User calls this after signing up with email/password.
-    """
-    try:
-        # Extract user info from JWT token
-        user_id = current_user['sub']
-        user_email = current_user['email']
-
-        # Check if user already has linked provider
-        providers = current_user.get('app_metadata', {}).get('providers', [])
-        if provider in providers:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"{provider} account is already linked to this user"
-            )
-
-        result = await get_oauth_link_url(user_id, user_email, provider)
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error in get_oauth_link_url: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate {provider} OAuth URL"
-        )
-
-@router.get("/oauth-connect/{provider}", status_code=status.HTTP_200_OK)
-async def oauth_connect(provider: str):
-    """
-    Generate OAuth URL for frontend redirect.
-    """
-    try:
-        return await supabase_user_oauth(provider)
-    except Exception as e:
-        logger.error("Error in oauth_connect: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate {provider} OAuth URL"
-        )
-
-@router.get("/oauth-callback", status_code=status.HTTP_200_OK)
-async def oauth_callback(request: Request):
-    """
-    Handle OAuth callback for both linking identity and general OAuth flow.
-    """
-    try:
-        # Get parameters
-        code = request.query_params.get("code")
-
-        if not code:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Missing authorization code"
-            )
-
-        # Exchange code for session
-        session_result = await get_session_by_id_admin(code)
-
-        if not session_result.session:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to exchange authorization code"
-            )
-
-        # # If user_id is provided, this is a linking flow
-        # if user_id:
-        #     return await link_google_identity_to_existing_user(user_id, provider, session_result)
-
-        # Otherwise, this is a general OAuth flow
-        return {
-            "success": True,
-            "message": "OAuth authentication successful",
-            "data": session_result
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error in OAuth callback: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process OAuth callback"
-        )
 
 
 # ============================================================================
