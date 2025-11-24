@@ -25,6 +25,26 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def _apply_organization_filter(query, organization_id: Optional[str]):
+    """
+    Apply organization_id filter to a query, handling NULL values properly.
+    
+    Args:
+        query: Supabase query object
+        organization_id: Optional organization ID (can be None)
+        
+    Returns:
+        Query with organization filter applied
+    """
+    if organization_id is None:
+        return query.is_("organization_id", "null")
+    return query.eq("organization_id", organization_id)
+
+
+# ============================================================================
 # SESSION CRUD OPERATIONS
 # ============================================================================
 
@@ -92,11 +112,7 @@ async def get_session_by_id(session_id: str, organization_id: Optional[str] = No
         "accessed_phi, phi_access_purpose"
     ).eq("id", session_id)
     
-    # Handle NULL organization_id properly
-    if organization_id is None:
-        query = query.is_("organization_id", "null")
-    else:
-        query = query.eq("organization_id", organization_id)
+    query = _apply_organization_filter(query, organization_id)
     
     result = await query.execute()
 
@@ -138,12 +154,7 @@ async def update_session(session_id: str, organization_id: Optional[str] = None,
         update_payload["phi_access_purpose"] = phi_access_purpose_value
 
     query = supabase.table("user_sessions").update(update_payload).eq("id", session_id)
-    
-    # Handle NULL organization_id properly
-    if organization_id is None:
-        query = query.is_("organization_id", "null")
-    else:
-        query = query.eq("organization_id", organization_id)
+    query = _apply_organization_filter(query, organization_id)
     
     result = await query.execute()
 
@@ -164,12 +175,7 @@ async def check_session_exists(session_id: str, organization_id: Optional[str] =
     supabase = await get_supabase_admin_client()
 
     query = supabase.table("user_sessions").select("id").eq("id", session_id)
-    
-    # Handle NULL organization_id properly
-    if organization_id is None:
-        query = query.is_("organization_id", "null")
-    else:
-        query = query.eq("organization_id", organization_id)
+    query = _apply_organization_filter(query, organization_id)
     
     result = await query.execute()
 
@@ -215,12 +221,7 @@ async def get_sessions_list(
         query = supabase.table("user_sessions").select(
             SESSION_FIELDS
         ).eq("user_id", user_id)
-        
-        # Handle NULL organization_id properly
-        if organization_id is None:
-            query = query.is_("organization_id", "null")
-        else:
-            query = query.eq("organization_id", organization_id)
+        query = _apply_organization_filter(query, organization_id)
 
     # Apply additional filters
     if filters.session_status:
@@ -249,12 +250,7 @@ async def get_sessions_count(organization_id: Optional[str], user_id: str, filte
     query = supabase.table("user_sessions").select(
         "id", count="exact"
     ).eq("user_id", user_id)
-    
-    # Handle NULL organization_id properly
-    if organization_id is None:
-        query = query.is_("organization_id", "null")
-    else:
-        query = query.eq("organization_id", organization_id)
+    query = _apply_organization_filter(query, organization_id)
 
     # Apply filters
     if filters.session_status:
@@ -304,12 +300,7 @@ async def get_sessions_with_count(
         query = supabase.table("user_sessions").select(
             SESSION_FIELDS
         ).eq("user_id", user_id)
-        
-        # Handle NULL organization_id properly
-        if organization_id is None:
-            query = query.is_("organization_id", "null")
-        else:
-            query = query.eq("organization_id", organization_id)
+        query = _apply_organization_filter(query, organization_id)
 
     # Apply additional filters
     if filters.session_status:
