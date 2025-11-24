@@ -31,12 +31,9 @@ logger = logging.getLogger(__name__)
 @handle_database_errors(
     "create_session",
     custom_messages=create_error_messages("create_session", "creating"))
-async def create_session(session_data: Dict[str, Any], organization_id: str) -> Dict[str, Any]:
+async def create_session(session_data: Dict[str, Any], organization_id: Optional[str] = None) -> Dict[str, Any]:
     """Create a new user session."""
     # Validate input parameters
-    if not organization_id or organization_id is None:
-        raise ValueError("Organization ID cannot be None or empty")
-
     if not session_data.get("session_id") or session_data.get("session_id") is None:
         raise ValueError("Session ID cannot be None or empty")
 
@@ -48,7 +45,7 @@ async def create_session(session_data: Dict[str, Any], organization_id: str) -> 
     session_record = {
         "id": session_data["session_id"],
         "user_id": session_data["user_id"],
-        "organization_id": organization_id,
+        "organization_id": organization_id,  # Can be None now
         "ip_address": session_data["ip_address"],
         "user_agent": session_data["user_agent"],
         "device_fingerprint": session_data["device_fingerprint"],
@@ -60,18 +57,19 @@ async def create_session(session_data: Dict[str, Any], organization_id: str) -> 
         "phi_access_purpose": session_data.get("phi_access_purpose")
     }
 
-    # Try to set user context for RLS policies
-    try:
-        # Set the user context in the Supabase client
-        supabase.auth.set_user({
-            "id": session_data["user_id"],
-            "email": session_data.get("user_email", ""),
-            "user_metadata": {
-                "organization_id": organization_id
-            }
-        })
-    except Exception as e:
-        logger.warning("Could not set user context: %s", str(e))
+    # Try to set user context for RLS policies (only if organization_id is not None)
+    if organization_id:
+        try:
+            # Set the user context in the Supabase client
+            supabase.auth.set_user({
+                "id": session_data["user_id"],
+                "email": session_data.get("user_email", ""),
+                "user_metadata": {
+                    "organization_id": organization_id
+                }
+            })
+        except Exception as e:
+            logger.warning("Could not set user context: %s", str(e))
 
     result = await supabase.table("user_sessions").insert(session_record).execute()
 
@@ -83,16 +81,24 @@ async def create_session(session_data: Dict[str, Any], organization_id: str) -> 
 @handle_database_errors(
     "get_session_by_id",
     custom_messages=create_error_messages("get_session_by_id", "getting"))
-async def get_session_by_id(session_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
-    """Get session by ID and organization ID."""
+async def get_session_by_id(session_id: str, organization_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Get session by ID and organization ID (organization_id can be None)."""
     supabase = await get_supabase_admin_client()
 
-    result = await supabase.table("user_sessions").select(
+    query = supabase.table("user_sessions").select(
         "id, user_id, organization_id, ip_address, user_agent, "
         "device_fingerprint, risk_score, login_timestamp, "
         "logout_timestamp, session_status, login_method, "
         "accessed_phi, phi_access_purpose"
-    ).eq("id", session_id).eq("organization_id", organization_id).execute()
+    ).eq("id", session_id)
+    
+    # Handle NULL organization_id properly
+    if organization_id is None:
+        query = query.is_("organization_id", "null")
+    else:
+        query = query.eq("organization_id", organization_id)
+    
+    result = await query.execute()
 
     if result.data and len(result.data) > 0:
         return result.data[0]
@@ -102,9 +108,9 @@ async def get_session_by_id(session_id: str, organization_id: str) -> Optional[D
 @handle_database_errors(
     "update_session",
     custom_messages=create_error_messages("update_session", "updating"))
-async def update_session(session_id: str, organization_id: str,
-                        update_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Update session information."""
+async def update_session(session_id: str, organization_id: Optional[str] = None,
+                        update_data: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Update session information (organization_id can be None)."""
     supabase = await get_supabase_admin_client()
 
     # Prepare update data with logout_timestamp
@@ -116,7 +122,7 @@ async def update_session(session_id: str, organization_id: str,
     def _get(field_name: str):
         if isinstance(update_data, dict):
             return update_data.get(field_name)
-        return getattr(update_data, field_name, None)
+        return getattr(update_data, field_name, None) if update_data else None
 
     # Add optional fields if provided
     session_status_value = _get("session_status")
@@ -131,9 +137,15 @@ async def update_session(session_id: str, organization_id: str,
     if phi_access_purpose_value is not None:
         update_payload["phi_access_purpose"] = phi_access_purpose_value
 
-    result = await supabase.table("user_sessions").update(update_payload).eq(
-        "id", session_id
-    ).eq("organization_id", organization_id).execute()
+    query = supabase.table("user_sessions").update(update_payload).eq("id", session_id)
+    
+    # Handle NULL organization_id properly
+    if organization_id is None:
+        query = query.is_("organization_id", "null")
+    else:
+        query = query.eq("organization_id", organization_id)
+    
+    result = await query.execute()
 
     if result.data and len(result.data) > 0:
         return result.data[0]
@@ -143,20 +155,23 @@ async def update_session(session_id: str, organization_id: str,
 @handle_database_errors(
     "check_session_exists",
     custom_messages=create_error_messages("check_session_exists", "checking"))
-async def check_session_exists(session_id: str, organization_id: str) -> bool:
-    """Check if session exists."""
+async def check_session_exists(session_id: str, organization_id: Optional[str] = None) -> bool:
+    """Check if session exists (organization_id can be None)."""
     # Validate input parameters
     if not session_id or session_id is None:
         raise ValueError("Session ID cannot be None or empty")
 
-    if not organization_id or organization_id is None:
-        raise ValueError("Organization ID cannot be None or empty")
-
     supabase = await get_supabase_admin_client()
 
-    result = await supabase.table("user_sessions").select("id").eq(
-        "id", session_id
-    ).eq("organization_id", organization_id).execute()
+    query = supabase.table("user_sessions").select("id").eq("id", session_id)
+    
+    # Handle NULL organization_id properly
+    if organization_id is None:
+        query = query.is_("organization_id", "null")
+    else:
+        query = query.eq("organization_id", organization_id)
+    
+    result = await query.execute()
 
     return len(result.data) > 0 if result.data else False
 
@@ -177,15 +192,15 @@ SESSION_FIELDS = (
     "get_sessions_list",
     custom_messages=create_error_messages("get_sessions_list", "getting"))
 async def get_sessions_list(
-    organization_id: str, user_id: str,
+    organization_id: Optional[str], user_id: str,
     filters: SessionFilter) -> List[Dict[str, Any]]:
-    """Get paginated list of sessions with optional search and filtering."""
+    """Get paginated list of sessions with optional search and filtering (organization_id can be None)."""
     # Use fresh admin client to avoid state corruption
     supabase = await get_fresh_supabase_admin_client()
 
     # Build the query with filters
-    if filters.search:
-        # Include join with organization_members for search functionality
+    if filters.search and organization_id:
+        # Include join with organization_members for search functionality (only if organization_id exists)
         query = supabase.table("user_sessions").select(
             f"{SESSION_FIELDS}, "
             "organization_members!inner(email, full_name)"
@@ -196,11 +211,16 @@ async def get_sessions_list(
             f"organization_members.full_name.ilike.*{filters.search}*"
         )
     else:
-        # Simple query without join when no search is needed
+        # Simple query without join when no search is needed or organization_id is NULL
         query = supabase.table("user_sessions").select(
             SESSION_FIELDS
-        ).eq("organization_id", organization_id
         ).eq("user_id", user_id)
+        
+        # Handle NULL organization_id properly
+        if organization_id is None:
+            query = query.is_("organization_id", "null")
+        else:
+            query = query.eq("organization_id", organization_id)
 
     # Apply additional filters
     if filters.session_status:
@@ -220,17 +240,21 @@ async def get_sessions_list(
 @handle_database_errors(
     "get_sessions_count",
     custom_messages=create_error_messages("get_sessions_count", "getting"))
-async def get_sessions_count(organization_id: str, user_id: str, filters: SessionFilter) -> int:
-    """Get total count of sessions matching search criteria."""
+async def get_sessions_count(organization_id: Optional[str], user_id: str, filters: SessionFilter) -> int:
+    """Get total count of sessions matching search criteria (organization_id can be None)."""
     # Use fresh admin client to avoid state corruption
     supabase = await get_fresh_supabase_admin_client()
 
     # Build the count query with filters
     query = supabase.table("user_sessions").select(
         "id", count="exact"
-    ).eq("organization_id", organization_id).eq(
-        "user_id", user_id
-    )
+    ).eq("user_id", user_id)
+    
+    # Handle NULL organization_id properly
+    if organization_id is None:
+        query = query.is_("organization_id", "null")
+    else:
+        query = query.eq("organization_id", organization_id)
 
     # Apply filters
     if filters.session_status:
@@ -239,8 +263,8 @@ async def get_sessions_count(organization_id: str, user_id: str, filters: Sessio
     if filters.login_method:
         query = query.eq("login_method", filters.login_method)
 
-    if filters.search:
-        # For search, we need to join with organization_members
+    if filters.search and organization_id:
+        # For search, we need to join with organization_members (only if organization_id exists)
         query = query.select(
             "id, organization_members!inner(email, full_name)", count="exact"
         ).or_(
@@ -257,15 +281,15 @@ async def get_sessions_count(organization_id: str, user_id: str, filters: Sessio
     "get_sessions_with_count",
     custom_messages=create_error_messages("get_sessions_with_count", "getting"))
 async def get_sessions_with_count(
-    organization_id: str, user_id: str,
+    organization_id: Optional[str], user_id: str,
     filters: SessionFilter) -> Dict[str, Any]:
-    """Get paginated list of sessions with total count in a single database call."""
+    """Get paginated list of sessions with total count in a single database call (organization_id can be None)."""
     # Use fresh admin client to avoid state corruption
     supabase = await get_fresh_supabase_admin_client()
 
     # Build the query with filters
-    if filters.search:
-        # Include join with organization_members for search functionality
+    if filters.search and organization_id:
+        # Include join with organization_members for search functionality (only if organization_id exists)
         query = supabase.table("user_sessions").select(
             f"{SESSION_FIELDS}, "
             "organization_members!inner(email, full_name)"
@@ -276,11 +300,16 @@ async def get_sessions_with_count(
             f"organization_members.full_name.ilike.%{filters.search}%"
         )
     else:
-        # Simple query without join when no search is needed
+        # Simple query without join when no search is needed or organization_id is NULL
         query = supabase.table("user_sessions").select(
             SESSION_FIELDS
-        ).eq("organization_id", organization_id
         ).eq("user_id", user_id)
+        
+        # Handle NULL organization_id properly
+        if organization_id is None:
+            query = query.is_("organization_id", "null")
+        else:
+            query = query.eq("organization_id", organization_id)
 
     # Apply additional filters
     if filters.session_status:
