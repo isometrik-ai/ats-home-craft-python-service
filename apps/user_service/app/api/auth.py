@@ -303,7 +303,6 @@ async def login(request: Request, data: AuthLogin):
         # AuthApiError from Supabase for invalid credentials
         # login_user already handles "Email not confirmed" as HTTPException 403
         # So any AuthApiError here is likely invalid credentials
-        print("\n\nError:", error,error.to_dict(),sep='\n',end='\n\n')
         if error.status == 400 and error.message == "Invalid login credentials":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
