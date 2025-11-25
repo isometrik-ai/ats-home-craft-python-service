@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from apps.user_service.app.dependencies.common_utils import UserContext
 from apps.user_service.app.dependencies.logger import get_logger
+from libs.shared_db.postgres_db.user_service_operations.organisation_operations import get_organisation_members_count
 
 # Initialize logger
 logger = get_logger("invite_utils")
@@ -325,7 +326,7 @@ def extract_token_from_url(url: str) -> Optional[str]:
 # ORGANIZATION MEMBER UTILITIES
 # ============================================================================
 
-def check_organization_capacity(organization_data: Dict[str, Any]) -> bool:
+async def check_organization_capacity(organization_data: Dict[str, Any]):
     """
     Check if organization has capacity for new members.
 
@@ -335,10 +336,16 @@ def check_organization_capacity(organization_data: Dict[str, Any]) -> bool:
     Returns:
         bool: True if organization has capacity
     """
-    max_users = organization_data.get("max_users", 0)
-    current_members = organization_data.get("member_count", 0)
-
-    return current_members < max_users
+    total_members = await get_organisation_members_count(organization_data["id"])
+    max_users = organization_data.get("settings",{}).get("subscription",{}).get("max_users",None)
+    if max_users is None or isinstance(max_users, int) is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable To Check Organization Capacity")
+    elif total_members >= max_users:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Organization has reached maximum user capacity of {max_users} users")
 
 
 async def validate_organization_access(user_context, organization_id: str) -> bool:

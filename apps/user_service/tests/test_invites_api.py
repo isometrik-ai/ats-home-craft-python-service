@@ -386,7 +386,7 @@ class TestCreateInvitation:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=False):
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(side_effect=HTTPException(status_code=400, detail="Organization has reached maximum user capacity of 10 users"))):
 
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 

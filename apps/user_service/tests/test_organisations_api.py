@@ -28,6 +28,10 @@ _DEFAULT_ORG_SETTINGS = {
     "compliance_security": None,
     "enterprise_features": None,
     "team_setup": None,
+    "subscription": {
+        "max_users": 10,
+        "plan_type": "starter",
+    },
 }
 
 _BASE_ORG_RECORD = {
@@ -36,9 +40,7 @@ _BASE_ORG_RECORD = {
     "slug": "base-org",
     "domain": "example.com",
     "logo_url": None,
-    "plan_type": "starter",
     "status": "active",
-    "max_users": 10,
     "timezone": "UTC",
     "created_at": "2024-01-01T00:00:00Z",
     "updated_at": "2024-01-01T00:00:00Z",
@@ -57,13 +59,32 @@ def _build_org_record(**overrides):
 
     overrides_copy = deepcopy(overrides)
     settings_override = overrides_copy.pop("settings", None)
+
+    # Handle plan_type and max_users - move them to settings.subscription
+    plan_type = overrides_copy.pop("plan_type", None)
+    max_users = overrides_copy.pop("max_users", None)
+
     record.update(overrides_copy)
+
+    # Update subscription if plan_type or max_users are provided
+    if plan_type is not None or max_users is not None:
+        if "subscription" not in record["settings"]:
+            record["settings"]["subscription"] = {}
+        if plan_type is not None:
+            record["settings"]["subscription"]["plan_type"] = plan_type
+        if max_users is not None:
+            record["settings"]["subscription"]["max_users"] = max_users
 
     if settings_override:
         practice_override = settings_override.pop("practice_areas", None)
+        subscription_override = settings_override.pop("subscription", None)
         record["settings"].update(settings_override)
         if practice_override:
             record["settings"]["practice_areas"].update(practice_override)
+        if subscription_override:
+            if "subscription" not in record["settings"]:
+                record["settings"]["subscription"] = {}
+            record["settings"]["subscription"].update(subscription_override)
 
     return record
 

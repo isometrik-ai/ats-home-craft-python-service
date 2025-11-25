@@ -9,13 +9,11 @@ from httpx import HTTPError
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
     create_new_organisation,
     get_organisation_details_by_id,
-    get_organisation_by_slug,
     update_organisation_details,
     delete_organisation,
     check_organisation_exists,
     get_list_of_organisations,
     get_organisations_count,
-    get_organisations_with_members,
     check_organisation_slug_unique,
     check_organisation_name_unique,
     get_organisation_members,
@@ -33,6 +31,9 @@ from libs.shared_db.postgres_db.user_service_operations.organisation_operations 
     get_organisation_usage_stats,
     get_organisation_health_status,
     get_organisation_compliance_status,
+    cleanup_organisation_data,
+    archive_organisation,
+    restore_organisation,
     bulk_delete_organisations,
     bulk_add_members,
     create_default_permissions_for_organisation,
@@ -81,12 +82,12 @@ def _build_existing_org_data():
 
 class TestOrganisationCRUD:
     """Test cases for organisation CRUD operations."""
-    
+
     class FakeAddress:
         """Helper to mimic Pydantic model for address."""
         def __init__(self, **data):
             self._data = data
-        
+
         def model_dump(self, **kwargs):
             return self._data
 
@@ -270,51 +271,6 @@ class TestOrganisationCRUD:
             mock_get_client.return_value = mock_supabase
 
             result = await get_organisation_details_by_id(organisation_id)
-
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_organisation_by_slug_success(self):
-        """Test successful organisation retrieval by slug."""
-        slug = "test-org"
-
-        mock_org = {
-            "id": str(uuid.uuid4()),
-            "name": "Test Organisation",
-            "slug": slug,
-            "domain": "test.com",
-            "logo_url": None,
-            "plan_type": "starter",
-            "status": "active",
-            "account_type": "business",
-            "created_at": "2024-01-01T00:00:00Z",
-            "updated_at": "2024-01-01T00:00:00Z"
-        }
-
-        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
-            mock_supabase = MagicMock()
-            mock_result = MagicMock()
-            mock_result.data = [mock_org]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
-            mock_get_client.return_value = mock_supabase
-
-            result = await get_organisation_by_slug(slug)
-
-            assert result == mock_org
-
-    @pytest.mark.asyncio
-    async def test_get_organisation_by_slug_not_found(self):
-        """Test organisation retrieval by slug when not found."""
-        slug = "non-existent-org"
-
-        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
-            mock_supabase = MagicMock()
-            mock_result = MagicMock()
-            mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
-            mock_get_client.return_value = mock_supabase
-
-            result = await get_organisation_by_slug(slug)
 
             assert result is None
 
@@ -503,6 +459,76 @@ class TestOrganisationCRUD:
         assert payload["settings"]["compliance_security"] == update_data["compliance_security"]
         assert payload["settings"]["enterprise_features"] == update_data["enterprise_features"]
         assert "updated_at" in payload
+
+    @pytest.mark.asyncio
+    async def test_update_organisation_details_with_existing_subscription(self):
+        """Test organisation update with existing subscription - updates max_users and plan_type."""
+        organisation_id = str(uuid.uuid4())
+        # Note: The code expects a nested "settings" key inside settings due to line 232 logic
+        organisation_data = {
+            "settings": {
+                "subscription": {
+                    "max_users": 10,
+                    "plan_type": "starter"
+                }
+            }
+        }
+        update_data = {
+            "max_users": 25,
+            "plan_type": "professional"
+        }
+
+        mock_result = MagicMock()
+        mock_result.data = [{"id": organisation_id}]
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_table = MagicMock()
+            update_query = MagicMock()
+            eq_query = MagicMock()
+            eq_query.execute = AsyncMock(return_value=mock_result)
+            update_query.eq.return_value = eq_query
+            mock_table.update.return_value = update_query
+            mock_supabase.table.return_value = mock_table
+            mock_get_client.return_value = mock_supabase
+
+            result = await update_organisation_details(organisation_id, organisation_data, update_data)
+
+            assert result["id"] == organisation_id
+            payload = mock_table.update.call_args[0][0]
+            assert payload["settings"]["subscription"]["max_users"] == 25
+            assert payload["settings"]["subscription"]["plan_type"] == "professional"
+
+    @pytest.mark.asyncio
+    async def test_update_organisation_details_without_subscription(self):
+        """Test organisation update without existing subscription - creates subscription with plan_type."""
+        organisation_id = str(uuid.uuid4())
+        organisation_data = {
+            "settings": {}
+        }
+        update_data = {
+            "plan_type": "enterprise"
+        }
+
+        mock_result = MagicMock()
+        mock_result.data = [{"id": organisation_id}]
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_table = MagicMock()
+            update_query = MagicMock()
+            eq_query = MagicMock()
+            eq_query.execute = AsyncMock(return_value=mock_result)
+            update_query.eq.return_value = eq_query
+            mock_table.update.return_value = update_query
+            mock_supabase.table.return_value = mock_table
+            mock_get_client.return_value = mock_supabase
+
+            result = await update_organisation_details(organisation_id, organisation_data, update_data)
+
+            assert result["id"] == organisation_id
+            payload = mock_table.update.call_args[0][0]
+            assert payload["settings"]["subscription"]["plan_type"] == "enterprise"
+            assert "start_date" in payload["settings"]["subscription"]
+            assert "end_date" in payload["settings"]["subscription"]
 
     @pytest.mark.asyncio
     async def test_delete_organisation_success(self):
@@ -759,38 +785,6 @@ class TestOrganisationListingAndCount:
             result = await get_organisations_count(None, None)
 
             assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_get_organisations_with_members_success(self):
-        """Test successful organisation retrieval with members."""
-        mock_organisations = [
-            {
-                "id": "org-1",
-                "name": "Org 1",
-                "slug": "org-1",
-                "domain": "example1.com",
-                "logo_url": None,
-                "plan_type": "free",
-                "status": "active",
-                "account_type": "business",
-                "created_at": "2024-01-01T00:00:00Z",
-                "updated_at": "2024-01-01T00:00:00Z",
-                "organization_members": [{"id": "1"}, {"id": "2"}]
-            }
-        ]
-
-        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
-            mock_supabase = MagicMock()
-            mock_result = MagicMock()
-            mock_result.data = mock_organisations
-            mock_supabase.table.return_value.select.return_value.order.return_value.range.return_value.execute = AsyncMock(return_value=mock_result)
-            mock_get_client.return_value = mock_supabase
-
-            result = await get_organisations_with_members()
-
-            assert len(result) == 1
-            assert result[0]["member_count"] == 2
-            assert "organization_members" not in result[0]  # Should be removed
 
 
 class TestOrganisationValidation:
@@ -1483,6 +1477,23 @@ class TestOrganisationStatistics:
             assert result["period_days"] == 30
 
     @pytest.mark.asyncio
+    async def test_get_organisation_activity_stats_count_none(self):
+        """Test organisation activity statistics when count is None."""
+        organisation_id = str(uuid.uuid4())
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_result = MagicMock()
+            mock_result.count = None
+            mock_supabase.table.return_value.select.return_value.eq.return_value.gte.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_get_client.return_value = mock_supabase
+
+            result = await get_organisation_activity_stats(organisation_id)
+
+            assert result["recent_activity_count"] == 0
+            assert result["period_days"] == 30
+
+    @pytest.mark.asyncio
     async def test_get_organisation_usage_stats_success(self):
         """Test successful organisation usage statistics retrieval."""
         organisation_id = str(uuid.uuid4())
@@ -1558,7 +1569,6 @@ class TestOrganisationStatistics:
             mock_result = MagicMock()
             mock_result.data = [{
                 "status": "active",
-                "plan_type": "premium",
                 "created_at": "2024-01-01T00:00:00Z"
             }]
             mock_supabase.table.return_value.select.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
@@ -1568,7 +1578,6 @@ class TestOrganisationStatistics:
 
             assert result["compliant"] is True
             assert result["status"] == "active"
-            assert result["plan_type"] == "premium"
 
     @pytest.mark.asyncio
     async def test_get_organisation_compliance_status_not_compliant(self):
@@ -1580,7 +1589,6 @@ class TestOrganisationStatistics:
             mock_result = MagicMock()
             mock_result.data = [{
                 "status": "suspended",
-                "plan_type": None,
                 "created_at": "2024-01-01T00:00:00Z"
             }]
             mock_supabase.table.return_value.select.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
@@ -1590,7 +1598,123 @@ class TestOrganisationStatistics:
 
             assert result["compliant"] is False
             assert result["status"] == "suspended"
-            assert result["plan_type"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_organisation_compliance_status_not_found(self):
+        """Test organisation compliance status when organisation not found."""
+        organisation_id = str(uuid.uuid4())
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_result = MagicMock()
+            mock_result.data = []
+            mock_supabase.table.return_value.select.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_get_client.return_value = mock_supabase
+
+            result = await get_organisation_compliance_status(organisation_id)
+
+            assert result["compliant"] is False
+            assert result["status"] == "not_found"
+
+
+class TestOrganisationLifecycle:
+    """Test cases for organisation lifecycle operations (cleanup, archive, restore)."""
+
+    @pytest.mark.asyncio
+    async def test_cleanup_organisation_data_success(self):
+        """Test successful cleanup of organisation data."""
+        organisation_id = str(uuid.uuid4())
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+
+            # Mock members deletion
+            mock_members_table = MagicMock()
+            mock_members_query = MagicMock()
+            mock_members_result = MagicMock()
+            mock_members_result.data = [{"id": "member1"}, {"id": "member2"}]
+            mock_members_query.execute = AsyncMock(return_value=mock_members_result)
+            mock_members_table.delete.return_value.eq.return_value = mock_members_query
+
+            # Mock roles deletion
+            mock_roles_table = MagicMock()
+            mock_roles_query = MagicMock()
+            mock_roles_result = MagicMock()
+            mock_roles_result.data = [{"id": "role1"}]
+            mock_roles_query.execute = AsyncMock(return_value=mock_roles_result)
+            mock_roles_table.delete.return_value.eq.return_value = mock_roles_query
+
+            # Mock permissions deletion
+            mock_permissions_table = MagicMock()
+            mock_permissions_query = MagicMock()
+            mock_permissions_result = MagicMock()
+            mock_permissions_result.data = [{"id": "perm1"}, {"id": "perm2"}, {"id": "perm3"}]
+            mock_permissions_query.execute = AsyncMock(return_value=mock_permissions_result)
+            mock_permissions_table.delete.return_value.eq.return_value = mock_permissions_query
+
+            def table_side_effect(table_name):
+                if table_name == "organization_members":
+                    return mock_members_table
+                elif table_name == "roles":
+                    return mock_roles_table
+                elif table_name == "permissions":
+                    return mock_permissions_table
+                return MagicMock()
+
+            mock_supabase.table.side_effect = table_side_effect
+            mock_get_client.return_value = mock_supabase
+
+            result = await cleanup_organisation_data(organisation_id)
+
+            assert result["members_deleted"] == 2
+            assert result["roles_deleted"] == 1
+            assert result["permissions_deleted"] == 3
+
+    @pytest.mark.asyncio
+    async def test_archive_organisation_success(self):
+        """Test successful organisation archiving."""
+        organisation_id = str(uuid.uuid4())
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_table = MagicMock()
+            mock_query = MagicMock()
+            mock_result = MagicMock()
+            mock_result.data = [{"id": organisation_id, "status": "archived"}]
+            mock_query.execute = AsyncMock(return_value=mock_result)
+            mock_table.update.return_value.eq.return_value = mock_query
+            mock_supabase.table.return_value = mock_table
+            mock_get_client.return_value = mock_supabase
+
+            result = await archive_organisation(organisation_id)
+
+            assert result is True
+            update_call = mock_table.update.call_args[0][0]
+            assert update_call["status"] == "archived"
+            assert "updated_at" in update_call
+
+    @pytest.mark.asyncio
+    async def test_restore_organisation_success(self):
+        """Test successful organisation restoration."""
+        organisation_id = str(uuid.uuid4())
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_table = MagicMock()
+            mock_query = MagicMock()
+            mock_result = MagicMock()
+            mock_result.data = [{"id": organisation_id, "status": "active"}]
+            mock_query.execute = AsyncMock(return_value=mock_result)
+            mock_table.update.return_value.eq.return_value = mock_query
+            mock_supabase.table.return_value = mock_table
+            mock_get_client.return_value = mock_supabase
+
+            result = await restore_organisation(organisation_id)
+
+            assert result is True
+            update_call = mock_table.update.call_args[0][0]
+            assert update_call["status"] == "active"
+            assert "updated_at" in update_call
 
 
 class TestOrganisationErrorHandling:

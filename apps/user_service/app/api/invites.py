@@ -608,11 +608,7 @@ async def create_invitation(
         )
 
     # Check organization capacity
-    if not check_organization_capacity(organization_data):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Organization has reached maximum user capacity"
-        )
+    await check_organization_capacity(organization_data)
 
     # Check if user is already a member
     existing_member = await check_user_membership(organization_id, body.email)
