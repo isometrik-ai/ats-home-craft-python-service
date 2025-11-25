@@ -268,6 +268,183 @@ def _is_password_strong(password: str) -> bool:
 # ============================================================================
 
 
+def _is_2fa_enabled(user_metadata: dict) -> tuple[bool, Optional[dict]]:
+    """
+    Check if 2FA is enabled in user metadata.
+
+    Args:
+        user_metadata: User metadata from auth.users
+
+    Returns:
+        Tuple of (is_enabled, verification_preference_dict)
+    """
+    verification_preference = user_metadata.get("verification_preference")
+    if verification_preference and isinstance(verification_preference, dict):
+        enabled = verification_preference.get("enabled", False)
+        if enabled is True:
+            return True, verification_preference
+    return False, None
+
+
+def _validate_2fa_credentials_required(
+    verification_id: Optional[str],
+    verification_code: Optional[str]
+) -> None:
+    """
+    Validate that 2FA credentials are provided when required.
+
+    Args:
+        verification_id: Optional verification code ID
+        verification_code: Optional verification code
+
+    Raises:
+        HTTPException: If credentials are missing
+    """
+    if not verification_id or not verification_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=TWO_FA_REQUIRED
+        )
+
+
+async def _get_and_validate_verification_record(verification_id: str) -> dict:
+    """
+    Get and validate verification code record.
+
+    Args:
+        verification_id: Verification code ID
+
+    Returns:
+        Verification record dictionary
+
+    Raises:
+        HTTPException: If record not found or invalid
+    """
+    verification_record = await get_verification_code_by_id(verification_id)
+    
+    if not verification_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Verification code not found"
+        )
+    
+    stored_given_input = verification_record.get("given_input")
+    if not stored_given_input:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=TWO_FA_VERIFICATION_FAILED
+        )
+    
+    return verification_record
+
+
+def _validate_phone_match(stored_given_input: str, user_phone: Optional[str]) -> None:
+    """
+    Validate that stored phone matches user's phone.
+
+    Args:
+        stored_given_input: Stored phone from verification record
+        user_phone: User's phone number
+
+    Raises:
+        HTTPException: If phones don't match
+    """
+    if user_phone and stored_given_input != user_phone:
+        normalized_stored = stored_given_input.lstrip("+")
+        normalized_user = user_phone.lstrip("+")
+        if normalized_stored != normalized_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=TWO_FA_VERIFICATION_FAILED
+            )
+
+
+def _create_verification_request(
+    verification_preference: dict,
+    verification_id: str,
+    verification_code: str,
+    stored_given_input: str,
+    email: str
+) -> VerifyVerificationCodeRequest:
+    """
+    Create VerifyVerificationCodeRequest based on verification type.
+
+    Args:
+        verification_preference: Verification preference dict
+        verification_id: Verification code ID
+        verification_code: Verification code
+        stored_given_input: Stored email or phone
+        email: User email
+
+    Returns:
+        VerifyVerificationCodeRequest object
+
+    Raises:
+        HTTPException: If email doesn't match for EMAIL type
+    """
+    verification_type = verification_preference.get("type", "EMAIL").upper()
+    
+    if verification_type == "PHONE":
+        return VerifyVerificationCodeRequest(
+            type=VerificationType.PHONE_NUMBER,
+            verificationId=verification_id,
+            verificationCode=verification_code,
+            phoneNumber=stored_given_input
+        )
+    else:
+        # For email verification, verify that stored_given_input matches user's email
+        if stored_given_input.lower() != email.lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=TWO_FA_VERIFICATION_FAILED
+            )
+        return VerifyVerificationCodeRequest(
+            type=VerificationType.EMAIL,
+            verificationId=verification_id,
+            verificationCode=verification_code,
+            email=stored_given_input
+        )
+
+
+async def _verify_2fa_code(
+    verification_record: dict,
+    verify_data: VerifyVerificationCodeRequest,
+    verification_code: str,
+    verification_id: str
+) -> None:
+    """
+    Verify 2FA code and update record.
+
+    Args:
+        verification_record: Verification record dictionary
+        verify_data: VerifyVerificationCodeRequest object
+        verification_code: Verification code
+        verification_id: Verification code ID
+
+    Raises:
+        HTTPException: If verification fails
+    """
+    try:
+        _validate_verification_record(verification_record, verify_data)
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=TWO_FA_VERIFICATION_FAILED
+        ) from e
+    
+    try:
+        await _verify_code_and_update_record(
+            verification_record,
+            verification_code,
+            verification_id
+        )
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=TWO_FA_VERIFICATION_FAILED
+        ) from e
+
+
 async def _check_and_verify_2fa(
     user_metadata: dict,
     verification_id: Optional[str],
@@ -288,91 +465,34 @@ async def _check_and_verify_2fa(
     Raises:
         HTTPException: If 2FA is enabled but verification fails
     """
-    # Check if 2FA is enabled in user metadata
-    verification_preference = user_metadata.get("verification_preference")
-    if verification_preference and isinstance(verification_preference, dict):
-        enabled = verification_preference.get("enabled", False)
-        if enabled is True:
-            # 2FA is enabled - verification is required
-            if not verification_id or not verification_code:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=TWO_FA_REQUIRED
-                )
-            
-            # Get verification code record
-            verification_record = await get_verification_code_by_id(verification_id)
-            
-            if not verification_record:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Verification code not found"
-                )
-            
-            # Get the given_input from verification record (email or phone)
-            stored_given_input = verification_record.get("given_input")
-            if not stored_given_input:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=TWO_FA_VERIFICATION_FAILED
-                )
-            
-            # Create VerifyVerificationCodeRequest for validation
-            verification_type = verification_preference.get("type", "EMAIL").upper()
-            if verification_type == "PHONE":
-                # For phone verification, verify that stored_given_input matches user's phone
-                if user_phone and stored_given_input != user_phone:
-                    # Normalize phone numbers for comparison (remove + if present)
-                    normalized_stored = stored_given_input.lstrip("+")
-                    normalized_user = user_phone.lstrip("+")
-                    if normalized_stored != normalized_user:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=TWO_FA_VERIFICATION_FAILED
-                        )
-                verify_data = VerifyVerificationCodeRequest(
-                    type=VerificationType.PHONE_NUMBER,
-                    verificationId=verification_id,
-                    verificationCode=verification_code,
-                    phoneNumber=stored_given_input
-                )
-            else:
-                # For email verification, verify that stored_given_input matches user's email
-                if stored_given_input.lower() != email.lower():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=TWO_FA_VERIFICATION_FAILED
-                    )
-                verify_data = VerifyVerificationCodeRequest(
-                    type=VerificationType.EMAIL,
-                    verificationId=verification_id,
-                    verificationCode=verification_code,
-                    email=stored_given_input
-                )
-            
-            # Validate verification record (checks if stored_given_input matches provided email/phone)
-            try:
-                _validate_verification_record(verification_record, verify_data)
-            except HTTPException as e:
-                # Re-raise with 2FA specific message
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=TWO_FA_VERIFICATION_FAILED
-                ) from e
-            
-            # Verify the code
-            try:
-                await _verify_code_and_update_record(
-                    verification_record,
-                    verification_code,
-                    verification_id
-                )
-            except HTTPException as e:
-                # Re-raise with 2FA specific message
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=TWO_FA_VERIFICATION_FAILED
-                ) from e
+    is_enabled, verification_preference = _is_2fa_enabled(user_metadata)
+    if not is_enabled:
+        return
+    
+    _validate_2fa_credentials_required(verification_id, verification_code)
+    
+    verification_record = await _get_and_validate_verification_record(verification_id)
+    stored_given_input = verification_record.get("given_input")
+    
+    # Validate phone match if PHONE type
+    verification_type = verification_preference.get("type", "EMAIL").upper()
+    if verification_type == "PHONE":
+        _validate_phone_match(stored_given_input, user_phone)
+    
+    verify_data = _create_verification_request(
+        verification_preference,
+        verification_id,
+        verification_code,
+        stored_given_input,
+        email
+    )
+    
+    await _verify_2fa_code(
+        verification_record,
+        verify_data,
+        verification_code,
+        verification_id
+    )
 
 
 @router.post("/login", response_model=AuthResponse, status_code=status.HTTP_200_OK)
