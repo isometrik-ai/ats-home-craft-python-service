@@ -50,6 +50,7 @@ class SendVerificationCodeRequest(BaseModel):
     type: VerificationType = Field(..., description="Type of verification: EMAIL or PHONE_NUMBER")
     email: Optional[EmailStr] = Field(None, description="Email address for verification")
     phoneNumber: Optional[str] = Field(None, description="Phone number for verification")
+    verification_type: Optional[str] = Field(None, description="Optional verification type field (e.g., 'signup_verification')")
 
     @model_validator(mode='after')
     def validate_email_or_phone(self):

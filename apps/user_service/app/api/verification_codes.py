@@ -1006,29 +1006,56 @@ async def send_verification_code(
         given_input = data.email if data.type == VerificationType.EMAIL else data.phoneNumber
 
         # Validate and determine triggered_text based on authentication status
-        if current_user:
-            user_id, triggered_text = await _validate_authenticated_user_input(data, current_user)
+        # If verification_type is provided, use it as triggered_text; otherwise use existing logic
+        if data.verification_type:
+            # Use verification_type as triggered_text if provided
+            triggered_text = data.verification_type
+            if current_user:
+                user_id, _ = await _validate_authenticated_user_input(data, current_user)
+            else:
+                # For unauthenticated requests (signup flow), check if user already exists
+                if data.type == VerificationType.EMAIL:
+                    # Check if email already exists in auth.users
+                    existing_auth_user = await get_auth_user_by_email(data.email)
+                    if existing_auth_user:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="This email is already registered. Please login instead of signing up."
+                        )
+                else:  # PHONE_NUMBER
+                    # Check if phone already exists in auth.users
+                    phone_exists = await _check_auth_user_exists_by_phone(data.phoneNumber)
+                    if phone_exists:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="This phone number is already registered. Please login instead of signing up."
+                        )
+                user_id = None
         else:
-            # For unauthenticated requests (signup flow), check if user already exists
-            if data.type == VerificationType.EMAIL:
-                # Check if email already exists in auth.users
-                existing_auth_user = await get_auth_user_by_email(data.email)
-                if existing_auth_user:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="This email is already registered. Please login instead of signing up."
-                    )
-            else:  # PHONE_NUMBER
-                # Check if phone already exists in auth.users
-                phone_exists = await _check_auth_user_exists_by_phone(data.phoneNumber)
-                if phone_exists:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="This phone number is already registered. Please login instead of signing up."
-                    )
+            # Use existing logic if verification_type is not provided
+            if current_user:
+                user_id, triggered_text = await _validate_authenticated_user_input(data, current_user)
+            else:
+                # For unauthenticated requests (signup flow), check if user already exists
+                if data.type == VerificationType.EMAIL:
+                    # Check if email already exists in auth.users
+                    existing_auth_user = await get_auth_user_by_email(data.email)
+                    if existing_auth_user:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="This email is already registered. Please login instead of signing up."
+                        )
+                else:  # PHONE_NUMBER
+                    # Check if phone already exists in auth.users
+                    phone_exists = await _check_auth_user_exists_by_phone(data.phoneNumber)
+                    if phone_exists:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="This phone number is already registered. Please login instead of signing up."
+                        )
 
-            user_id = None
-            triggered_text = _determine_triggered_text(data, current_user)
+                user_id = None
+                triggered_text = _determine_triggered_text(data, current_user)
 
         # Check for recent verification codes to count attempts
         recent_codes = await get_recent_verification_codes(
