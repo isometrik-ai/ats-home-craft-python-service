@@ -57,6 +57,7 @@ from apps.user_service.app.schemas.auth import (
     EnterpriseFeatures,
     CompanyData,
     SignupWizardResponse,
+    Subscription,
 )
 
 
@@ -74,7 +75,12 @@ class TestEnums:
         assert PlanType.STARTER == "starter"
         assert PlanType.PROFESSIONAL == "professional"
         assert PlanType.ENTERPRISE == "enterprise"
-        assert list(PlanType) == ["starter", "professional", "enterprise"]
+        assert [plan.value for plan in PlanType] == [
+            "starter",
+            "professional",
+            "enterprise",
+            "trial",
+        ]
 
     def test_firm_size_enum(self):
         """Test FirmSize enum values."""
@@ -702,7 +708,7 @@ class TestEdgeCases:
         assert company_data.company_size == FirmSize.SOLO_PRACTITIONER
         assert company_data.description is None
         assert company_data.logo_url is None
-        assert company_data.max_users is None
+        assert company_data.subscription is None
         assert company_data.referral_source is None
         assert company_data.secondary_practice_areas is None
         assert company_data.specializations is None
@@ -728,6 +734,13 @@ class TestEdgeCases:
             compliance_officer_email="compliance@test.com"
         )
 
+        subscription = Subscription(
+            max_users=1000,
+            plan_type=PlanType.ENTERPRISE,
+            start_date="2024-01-01T00:00:00Z",
+            end_date="2025-01-01T00:00:00Z",
+        )
+
         company_data = CompanyData(
             company_name="Full Test Company",
             company_website="https://example.com",
@@ -735,7 +748,6 @@ class TestEdgeCases:
             company_size=FirmSize.ENTERPRISE_FIRM,
             description="A comprehensive test company",
             logo_url="https://example.com/logo.png",
-            max_users=1000,
             referral_source="Google",
             primary_practice_areas=[PracticeArea.LITIGATION, PracticeArea.CORPORATE_LAW],
             secondary_practice_areas=[PracticeArea.REAL_ESTATE],
@@ -745,7 +757,8 @@ class TestEdgeCases:
             need_help_importing_data=True,
             need_migration_assistance=True,
             compliance_security=compliance_security,
-            enterprise_features=None  # Enterprise firms should not have enterprise_features according to validation
+            enterprise_features=None,  # Enterprise firms should not have enterprise_features according to validation
+            subscription=subscription,
         )
 
         assert company_data.company_name == "Full Test Company"
@@ -754,7 +767,7 @@ class TestEdgeCases:
         assert company_data.company_size == FirmSize.ENTERPRISE_FIRM
         assert company_data.description == "A comprehensive test company"
         assert company_data.logo_url == "https://example.com/logo.png"
-        assert company_data.max_users == 1000
+        assert company_data.subscription == subscription
         assert company_data.referral_source == "Google"
         assert company_data.primary_practice_areas == [PracticeArea.LITIGATION, PracticeArea.CORPORATE_LAW]
         assert company_data.secondary_practice_areas == [PracticeArea.REAL_ESTATE]

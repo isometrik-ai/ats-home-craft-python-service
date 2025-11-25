@@ -36,6 +36,7 @@ class PlanType(str, Enum):
     STARTER = "starter"
     PROFESSIONAL = "professional"
     ENTERPRISE = "enterprise"
+    TRIAL = "trial"
 
 
 # ============================================================================
@@ -429,6 +430,27 @@ class Address(BaseModel):
     country: str = Field(..., min_length=1, max_length=100)
 
 
+class Subscription(BaseModel):
+    """Subscription information."""
+
+    max_users: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Maximum number of licensed seats for the organisation",
+    )
+    plan_type: PlanType = Field(
+        default=PlanType.TRIAL,
+        description="Current subscription plan type",
+    )
+    start_date: Optional[str] = Field(
+        default=None,
+        description="ISO timestamp when the subscription becomes active",
+    )
+    end_date: Optional[str] = Field(
+        default=None,
+        description="ISO timestamp when the subscription expires",
+    )
+
 class CompanyData(BaseModel):
     """Company signup data model"""
 
@@ -438,7 +460,7 @@ class CompanyData(BaseModel):
     company_size: Optional[FirmSize] = None
     description: Optional[str] = None
     logo_url: Optional[str] = None
-    max_users: Optional[int] = None
+    subscription: Optional[Subscription] = None
     address: Optional[Address] = None
     referral_source: Optional[str] = None
     primary_practice_areas: List[PracticeArea] = Field(..., min_length=1, max_length=3)

@@ -336,16 +336,59 @@ async def check_organization_capacity(organization_data: Dict[str, Any]):
     Returns:
         bool: True if organization has capacity
     """
-    total_members = await get_organisation_members_count(organization_data["id"])
-    max_users = organization_data.get("settings",{}).get("subscription",{}).get("max_users",None)
-    if max_users is None or isinstance(max_users, int) is False:
+    try:
+        organization_id = organization_data["id"]
+        subscription = organization_data.get("subscription") or {}
+        max_users = subscription.get("max_users")
+        subscription_end = subscription.get("end_date")
+
+        if max_users is None or not isinstance(max_users, int):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unable To Check Organization Capacity"
+            )
+        if not subscription_end:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Organization subscription end date is missing"
+            )
+
+        end_date = datetime.fromisoformat(subscription_end)
+        total_members = await get_organisation_members_count(organization_id)
+
+        if datetime.now(timezone.utc) > end_date:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Organization subscription has expired. Please renew your subscription to continue using the platform."
+            )
+        if total_members >= max_users:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Organization has reached maximum user capacity of {max_users} users"
+            )
+
+        return True
+    except HTTPException:
+        # Bubble up HTTP-specific errors for FastAPI to handle them.
+        raise
+    except KeyError as exc:
+        logger.exception("Missing key in organization data while checking capacity: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unable To Check Organization Capacity")
-    elif total_members >= max_users:
+            detail="Organization data is incomplete"
+        ) from exc
+    except (TypeError, ValueError) as exc:
+        logger.exception("Invalid subscription data for organization %s: %s", organization_data.get("id"), exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Organization has reached maximum user capacity of {max_users} users")
+            detail="Invalid subscription data"
+        ) from exc
+    except Exception as exc:
+        logger.exception("Unexpected error while checking capacity for organization %s", organization_data.get("id"))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to verify organization capacity at this time"
+        ) from exc
 
 
 async def validate_organization_access(user_context, organization_id: str) -> bool:

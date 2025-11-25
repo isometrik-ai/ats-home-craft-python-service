@@ -80,6 +80,15 @@ def _build_existing_org_data():
     }
 
 
+def _build_subscription(plan_type="starter", max_users=10):
+    return {
+        "plan_type": plan_type,
+        "max_users": max_users,
+        "start_date": "2024-01-01T00:00:00Z",
+        "end_date": "2024-12-31T23:59:59Z",
+    }
+
+
 class TestOrganisationCRUD:
     """Test cases for organisation CRUD operations."""
 
@@ -100,14 +109,13 @@ class TestOrganisationCRUD:
             "slug": "test-org",
             "domain": "test.com",
             "logo_url": "https://example.com/logo.png",
-            "plan_type": "starter",
             "status": "trial",
             "industry": "Technology",
             "company_size": "10-50",
             "description": "Test organisation",
             "referral_source": "organic",
-            "max_users": 10,
-            "user_id": str(uuid.uuid4())
+            "user_id": str(uuid.uuid4()),
+            "subscription": _build_subscription(plan_type="starter", max_users=10),
         }
 
         mock_created_org = {
@@ -116,16 +124,15 @@ class TestOrganisationCRUD:
             "slug": organisation_data["slug"],
             "domain": organisation_data["domain"],
             "logo_url": organisation_data["logo_url"],
-            "plan_type": organisation_data["plan_type"],
             "status": organisation_data["status"],
             "industry": organisation_data["industry"],
             "company_size": organisation_data["company_size"],
             "description": organisation_data["description"],
             "referral_source": organisation_data["referral_source"],
-            "max_users": organisation_data["max_users"],
             "created_at": "2024-01-01T00:00:00Z",
             "updated_at": "2024-01-01T00:00:00Z",
-            "created_by_id": organisation_data["user_id"]
+            "created_by_id": organisation_data["user_id"],
+            "subscription": organisation_data["subscription"],
         }
 
         with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
@@ -143,14 +150,13 @@ class TestOrganisationCRUD:
             assert result["slug"] == mock_created_org["slug"]
             assert result["domain"] == mock_created_org["domain"]
             assert result["logo_url"] == mock_created_org["logo_url"]
-            assert result["plan_type"] == mock_created_org["plan_type"]
             assert result["status"] == mock_created_org["status"]
             assert result["industry"] == mock_created_org["industry"]
             assert result["company_size"] == mock_created_org["company_size"]
             assert result["description"] == mock_created_org["description"]
             assert result["referral_source"] == mock_created_org["referral_source"]
-            assert result["max_users"] == mock_created_org["max_users"]
             assert result["created_by_id"] == mock_created_org["created_by_id"]
+            assert result["subscription"] == mock_created_org["subscription"]
             mock_supabase.table.assert_called_once_with("organizations")
 
     @pytest.mark.asyncio
@@ -161,8 +167,8 @@ class TestOrganisationCRUD:
             "name": "Settings Org",
             "slug": "settings-org",
             "status": "active",
-            "max_users": 15,
             "user_id": str(uuid.uuid4()),
+            "subscription": _build_subscription(plan_type="starter", max_users=15),
             "address": self.FakeAddress(city="LA", country="USA"),
             "primary_practice_areas": ["Corporate"],
             "secondary_practice_areas": ["Tax"],
@@ -199,7 +205,8 @@ class TestOrganisationCRUD:
             "organization_id": str(uuid.uuid4()),
             "name": "Test Organisation",
             "slug": "test-org",
-            "user_id": str(uuid.uuid4())
+            "user_id": str(uuid.uuid4()),
+            "subscription": _build_subscription(plan_type="starter", max_users=5),
         }
 
         with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
@@ -471,6 +478,10 @@ class TestOrganisationCRUD:
                     "max_users": 10,
                     "plan_type": "starter"
                 }
+            },
+            "subscription": {
+                "max_users": 10,
+                "plan_type": "starter"
             }
         }
         update_data = {
@@ -495,15 +506,16 @@ class TestOrganisationCRUD:
 
             assert result["id"] == organisation_id
             payload = mock_table.update.call_args[0][0]
-            assert payload["settings"]["subscription"]["max_users"] == 25
-            assert payload["settings"]["subscription"]["plan_type"] == "professional"
+            assert payload["max_users"] == 25
+            assert payload["plan_type"] == "professional"
 
     @pytest.mark.asyncio
     async def test_update_organisation_details_without_subscription(self):
         """Test organisation update without existing subscription - creates subscription with plan_type."""
         organisation_id = str(uuid.uuid4())
         organisation_data = {
-            "settings": {}
+            "settings": {},
+            "subscription": {}
         }
         update_data = {
             "plan_type": "enterprise"
@@ -526,9 +538,7 @@ class TestOrganisationCRUD:
 
             assert result["id"] == organisation_id
             payload = mock_table.update.call_args[0][0]
-            assert payload["settings"]["subscription"]["plan_type"] == "enterprise"
-            assert "start_date" in payload["settings"]["subscription"]
-            assert "end_date" in payload["settings"]["subscription"]
+            assert payload["plan_type"] == "enterprise"
 
     @pytest.mark.asyncio
     async def test_delete_organisation_success(self):
@@ -1727,7 +1737,8 @@ class TestOrganisationErrorHandling:
             "organization_id": str(uuid.uuid4()),
             "name": "Test Organisation",
             "slug": "test-org",
-            "user_id": str(uuid.uuid4())
+            "user_id": str(uuid.uuid4()),
+            "subscription": _build_subscription(),
         }
 
         with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
@@ -1745,7 +1756,8 @@ class TestOrganisationErrorHandling:
             "organization_id": str(uuid.uuid4()),
             "name": "Test Organisation",
             "slug": "test-org",
-            "user_id": str(uuid.uuid4())
+            "user_id": str(uuid.uuid4()),
+            "subscription": _build_subscription(),
         }
 
         with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:

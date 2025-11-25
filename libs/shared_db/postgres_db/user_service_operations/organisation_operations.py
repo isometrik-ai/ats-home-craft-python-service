@@ -4,11 +4,11 @@ Organisation Database Operations Module
 This module contains all organisation-related database operations.
 All SQL queries for organisation management should be centralized here.
 """
-from datetime import datetime, timedelta, timezone
-import json
+from datetime import datetime, timedelta
 import uuid
 from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.schemas.auth import PlanType
 from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_metadata_of_user
 from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
@@ -71,8 +71,7 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "company_size": organisation_data.get("company_size"),
         "description": organisation_data.get("description"),
         "referral_source": organisation_data.get("referral_source"),
-        # "max_users": organisation_data.get("max_users"),
-        # "account_type": organisation_data.get("account_type", "personal"),
+        "subscription": organisation_data.get("subscription"),
         "created_at": NOW_CONSTANT,
         "updated_at":NOW_CONSTANT,
         "created_by_id":organisation_data.get("user_id")
@@ -101,11 +100,11 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
     subscription_dict = {
         'start_date' : NOW_CONSTANT,
         'end_date' : NOW_CONSTANT + " + interval '7 days'",
-        'plan_type' : "trial",
-        'max_users' : organisation_data.get("max_users",None),
+        'plan_type' : PlanType.TRIAL,
+        'max_users' : organisation_data.get("subscription").get("max_users",None),
     }
 
-    org_record['settings']['subscription'] = subscription_dict
+    org_record['subscription'] = subscription_dict
 
     table = supabase.table("organizations")
     # Use returning: 'minimal' to avoid SELECT permission requirements
@@ -120,13 +119,12 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "slug": organisation_data["slug"],
         "domain": organisation_data.get("domain"),
         "logo_url": organisation_data.get("logo_url"),
-        "plan_type": organisation_data.get("plan_type", "starter"),
         "status": organisation_data.get("status", "trial"),
         "industry": organisation_data.get("industry"),
         "company_size": organisation_data.get("company_size"),
         "description": organisation_data.get("description"),
         "referral_source": organisation_data.get("referral_source"),
-        "max_users": organisation_data.get("max_users"),
+        "subscription": organisation_data.get("subscription"),
         "created_at": NOW_CONSTANT,
         "updated_at": NOW_CONSTANT,
         "created_by_id": organisation_data.get("user_id")
@@ -149,7 +147,7 @@ async def get_organisation_details_by_id(organisation_id: str) -> Optional[Dict[
     # Fetch organisation with embedded members (only fields needed to compute count)
     table = supabase.table("organizations")
     select_query = table.select(
-        "id, name, slug, domain, logo_url, status, timezone, settings, "
+        "id, name, slug, domain, logo_url, status, timezone, settings, subscription,"
         "description, company_size, created_at, updated_at, organization_members(status)"
     )
     eq_query = select_query.eq("id", organisation_id)
@@ -194,7 +192,7 @@ async def update_organisation_details(
     settings_fields = [
         "address", "primary_practice_areas", "secondary_practice_areas", "specializations",
         "preferred_integration", "need_help_importing_data", "need_migration_assistance",
-        "compliance_security", "enterprise_features","max_users","plan_type"]
+        "compliance_security", "enterprise_features"]
 
     if any(field in settings_fields for field in payload.keys()):
         # payload["settings"] = {}
@@ -228,24 +226,6 @@ async def update_organisation_details(
                 temp_practice_areas["specializations"] = payload.get("specializations")
                 payload.pop("specializations")
         temp_var["practice_areas"] = temp_practice_areas
-
-        temp_subscription = temp_var.get("subscription",None)
-        if temp_subscription is not None:
-            if payload.get("max_users") is not None:
-                temp_subscription["max_users"] = payload.get("max_users")
-                payload.pop("max_users")
-            if payload.get("plan_type") is not None:
-                temp_subscription["plan_type"] = payload.get("plan_type")
-                payload.pop("plan_type")
-        else:
-            temp_subscription = {"start_date":NOW_CONSTANT,"end_date":NOW_CONSTANT + " + interval '7 days'","plan_type":"trial","max_users":None}
-            if payload.get("max_users") is not None:
-                temp_subscription["max_users"] = payload.get("max_users")
-                payload.pop("max_users")
-            if payload.get("plan_type") is not None:
-                temp_subscription["plan_type"] = payload.get("plan_type")
-                payload.pop("plan_type")
-        temp_var["subscription"] = temp_subscription
 
         if payload.get("preferred_integration") is not None:
             temp_var["preferred_integration"] = payload.get("preferred_integration")

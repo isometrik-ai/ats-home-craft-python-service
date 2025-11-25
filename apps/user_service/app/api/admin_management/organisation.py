@@ -147,7 +147,8 @@ def _create_organisation_info(org_data: dict) -> OrganisationInfo:
         enterprise_features=org_data["settings"].get("enterprise_features",None),
         team_setup=org_data["settings"].get("team_setup",None),
         description=org_data["description"],
-        company_size=org_data["company_size"]
+        company_size=org_data["company_size"],
+        subscription=org_data["subscription"]
     )
     if org_data["settings"].get("practice_areas",None):
         prac_area = org_data["settings"].get("practice_areas")
@@ -525,9 +526,8 @@ async def create_organisation(
             "company_size": body.company_data.company_size,
             "description": body.company_data.description,
             "referral_source": body.company_data.referral_source,
-            "max_users": body.company_data.max_users,
+            "subscription": body.company_data.subscription,
             "logo_url": body.company_data.logo_url,
-            "plan_type": body.plan_type.value,
             "status": "active",
             "user_id": user_context.user_id,
             "email": user_context.email,
