@@ -490,11 +490,6 @@ class OrganizationAdminUpdate(OrganizationUpdate):
         max_length=255,
         description="Primary domain name associated with the organisation",
     )
-    max_users: Optional[int] = Field(
-        None,
-        description="Maximum number of users allowed",
-        ge=1,
-    )
     status: Optional[str] = Field(
         None,
         description="Organisation's account status (active, suspended, trial)",

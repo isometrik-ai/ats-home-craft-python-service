@@ -739,7 +739,6 @@ class TestEdgeCases:
             company_size=FirmSize.ENTERPRISE_FIRM,
             description="A comprehensive test company",
             logo_url="https://example.com/logo.png",
-            max_users=1000,
             referral_source="Google",
             primary_practice_areas=[PracticeArea.LITIGATION, PracticeArea.CORPORATE_LAW],
             secondary_practice_areas=[PracticeArea.REAL_ESTATE],
@@ -758,7 +757,6 @@ class TestEdgeCases:
         assert company_data.company_size == FirmSize.ENTERPRISE_FIRM
         assert company_data.description == "A comprehensive test company"
         assert company_data.logo_url == "https://example.com/logo.png"
-        assert company_data.max_users == 1000
         assert company_data.referral_source == "Google"
         assert company_data.primary_practice_areas == [PracticeArea.LITIGATION, PracticeArea.CORPORATE_LAW]
         assert company_data.secondary_practice_areas == [PracticeArea.REAL_ESTATE]

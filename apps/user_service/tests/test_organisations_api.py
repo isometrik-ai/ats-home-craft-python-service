@@ -64,8 +64,7 @@ def _build_org_record(**overrides):
     overrides_copy = deepcopy(overrides)
     settings_override = overrides_copy.pop("settings", None)
     subscription_override = overrides_copy.pop("subscription", None)
-
-    # Handle plan_type/max_users convenience overrides
+    # Extract plan_type and max_users before updating record (they belong in subscription, not top-level)
     plan_type = overrides_copy.pop("plan_type", None)
     max_users = overrides_copy.pop("max_users", None)
 
@@ -843,8 +842,7 @@ class TestUpdateOrganisation:
         request_data = {
             "name": "Updated Organization",
             "domain": "updated.com",
-            "timezone": "EST",
-            "max_users": 25
+            "timezone": "EST"
         }
 
         mock_organisation_data = {
