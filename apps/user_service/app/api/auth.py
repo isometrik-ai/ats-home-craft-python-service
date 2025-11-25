@@ -49,6 +49,8 @@ from apps.user_service.app.schemas.auth import (
     SetPasswordRequest,
     ChangePasswordRequest,
     ChangePasswordResponse,
+    Check2FAStatusRequest,
+    Check2FAStatusResponse,
     PASSWORD_CONDITION_MESSAGE_EXTENDED
 
 )
@@ -109,7 +111,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # Initialize logger for auth module
 logger = get_logger("auth-api")
 
-EMAIL_NOT_FOUND_MESSAGE = "Email Is Not Registered! Please Signup First To Login."
+EMAIL_NOT_FOUND_MESSAGE = "Account Is Not Registered! Please Signup First To Login."
 INVALID_LOGIN_CREDS = "Invalid login credentials"
 TWO_FA_VERIFICATION_FAILED = "2FA verification failed"
 TWO_FA_REQUIRED = "2FA verification is required. Please provide verificationId and verificationCode"
@@ -1203,3 +1205,104 @@ async def change_password(
     return ChangePasswordResponse(
         message="Password changed successfully"
     )
+
+
+# ============================================================================
+# CHECK 2FA STATUS API
+# ============================================================================
+
+@router.post(
+    "/verify/account",
+    response_model=Check2FAStatusResponse,
+    status_code=status.HTTP_200_OK
+)
+@limiter.limit("10/minute")
+# pylint: disable=unused-argument  # Required by @limiter.limit
+@handle_api_exceptions("check_2fa_status")
+async def check_2fa_status(
+    request: Request,  # pylint: disable=unused-argument
+    data: Check2FAStatusRequest = Body(...),
+):
+    """
+    Check if 2FA is enabled for a user account.
+
+    This endpoint validates the user's credentials (email and password) and
+    returns whether 2FA is enabled for their account.
+
+    Args:
+        request (Request): FastAPI request object
+        data (Check2FAStatusRequest): Email and password for validation
+
+    Returns:
+        Check2FAStatusResponse: Response containing two_fa_enabled boolean
+
+    Raises:
+        HTTPException:
+            - 400: Email not registered or invalid credentials
+            - 500: Internal server error
+    """
+    try:
+        # Step 1: Check if user account exists
+        all_user = await get_auth_user_by_email(data.email)
+        if all_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=EMAIL_NOT_FOUND_MESSAGE
+            )
+
+        # Step 2: Validate email and password are correct
+        try:
+            await login_user(data.email, data.password)
+        except HTTPException as e:
+            # Re-raise HTTPException as-is (e.g., invalid credentials)
+            raise e
+        except AuthApiError as error:
+            # AuthApiError from Supabase for invalid credentials
+            if error.status == 400 and error.message == INVALID_LOGIN_CREDS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=INVALID_LOGIN_CREDS
+                ) from error
+            elif hasattr(error, 'status') and hasattr(error, 'message'):
+                raise HTTPException(
+                    status_code=error.status,
+                    detail=error.message
+                ) from error
+            # For any other AuthApiError, treat as invalid credentials
+            logger.warning("AuthApiError during 2FA status check (treating as invalid credentials): %s", str(error))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=INVALID_LOGIN_CREDS
+            ) from error
+        except Exception as error:
+            error_str = str(error).lower()
+            # Check for invalid credentials in error message
+            if INVALID_LOGIN_CREDS in error_str or \
+               ("invalid" in error_str and "credential" in error_str):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=INVALID_LOGIN_CREDS
+                ) from error
+            # For other errors, log and re-raise as generic error
+            log_exception()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to validate credentials"
+            ) from error
+
+        # Step 3: Check if 2FA is enabled
+        user_metadata = all_user.user_metadata or {}
+        is_enabled, _ = _is_2fa_enabled(user_metadata)
+
+        return Check2FAStatusResponse(
+            two_fa_enabled=is_enabled
+        )
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        log_exception()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to check 2FA status"
+        ) from error
