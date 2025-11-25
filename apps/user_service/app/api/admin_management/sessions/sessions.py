@@ -284,11 +284,8 @@ async def get_sessions_details(
         action_description="view sessions list"
     )
 
-    if not user_context.organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is not a member of any organization",
-        )
+    # Allow users without organization_id to view their sessions (organization_id can be None)
+    # This supports personal accounts that don't belong to an organization
 
     # Set audit context for session list access
     request.state.audit_table = "user_sessions"
