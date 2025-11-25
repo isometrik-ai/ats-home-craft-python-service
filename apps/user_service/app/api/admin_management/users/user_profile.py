@@ -193,6 +193,13 @@ async def get_user_profile(
             if current_phone and profile_phone != current_phone:
                 user_profile["phone"] = current_phone
 
+        # Extract verification_preference from user_metadata
+        verification_preference_data = user_metadata.get("verification_preference")
+        if verification_preference_data and isinstance(verification_preference_data, dict):
+            user_profile["verification_preference"] = verification_preference_data
+        else:
+            user_profile["verification_preference"] = None
+
         return user_profile
 
     user_profile = await _fetch_org_member_profile()
