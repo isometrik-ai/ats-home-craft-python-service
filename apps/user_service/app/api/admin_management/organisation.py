@@ -121,20 +121,20 @@ def _create_organisation_info(org_data: dict) -> OrganisationInfo:
         OrganisationInfo: Formatted organisation info object
     """
     if org_data["settings"].get("subscription",None):
-        maxUsers=org_data["settings"].get("subscription",{}).get("max_users",None)
-        planType=org_data["settings"].get("subscription",{}).get("plan_type",None)
+        max_user_var=org_data["settings"].get("subscription",{}).get("max_users",None)
+        plan_type_var=org_data["settings"].get("subscription",{}).get("plan_type",None)
     else:
-        maxUsers=None
-        planType=None
+        max_user_var=None
+        plan_type_var=None
     result = OrganisationInfo(
         organization_id=str(org_data["id"]),
         name=org_data["name"],
         slug=org_data["slug"],
         domain=org_data["domain"],
         logo_url=org_data["logo_url"],
-        max_users=maxUsers,
+        max_users=max_user_var,
         status=org_data["status"],
-        plan_type=planType,
+        plan_type=plan_type_var,
         timezone=org_data["timezone"] or "UTC",
         created_at=org_data["created_at"],
         updated_at=org_data["updated_at"],
