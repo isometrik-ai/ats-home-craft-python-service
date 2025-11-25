@@ -59,6 +59,8 @@ class AuthLogin(BaseModel):
 
     email: EmailStr = Field(..., examples=["test@example.com"])
     password: str
+    verificationId: Optional[str] = Field(None, description="Verification code ID for 2FA (required if 2FA is enabled)")
+    verificationCode: Optional[str] = Field(None, description="Verification code for 2FA (required if 2FA is enabled)")
 
 
 class MemberBody(BaseModel):

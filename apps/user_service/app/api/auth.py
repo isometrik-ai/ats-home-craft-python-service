@@ -14,6 +14,7 @@ import re
 import os
 import sys
 from datetime import datetime
+from typing import Optional
 
 # Third-party imports
 import jwt
@@ -85,6 +86,14 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
 from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
     get_verification_code_by_id,
 )
+from apps.user_service.app.api.verification_codes import (
+    _validate_verification_record,
+    _verify_code_and_update_record,
+)
+from apps.user_service.app.schemas.verification_codes import (
+    VerificationType,
+    VerifyVerificationCodeRequest,
+)
 
 # Modify sys.path to support monorepo imports
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -102,6 +111,8 @@ logger = get_logger("auth-api")
 
 EMAIL_NOT_FOUND_MESSAGE = "Email Is Not Registered! Please Signup First To Login."
 INVALID_LOGIN_CREDS = "Invalid login credentials"
+TWO_FA_VERIFICATION_FAILED = "2FA verification failed"
+TWO_FA_REQUIRED = "2FA verification is required. Please provide verificationId and verificationCode"
 
 # ============================================================================
 # SIGNUP HELPER FUNCTIONS
@@ -257,22 +268,131 @@ def _is_password_strong(password: str) -> bool:
 # ============================================================================
 
 
+async def _check_and_verify_2fa(
+    user_metadata: dict,
+    verification_id: Optional[str],
+    verification_code: Optional[str],
+    email: str,
+    user_phone: Optional[str] = None
+) -> None:
+    """
+    Check if user has 2FA enabled and verify the code if required.
+
+    Args:
+        user_metadata: User metadata from auth.users
+        verification_id: Optional verification code ID
+        verification_code: Optional verification code
+        email: User email for verification
+        user_phone: Optional user phone number (for PHONE type verification)
+
+    Raises:
+        HTTPException: If 2FA is enabled but verification fails
+    """
+    # Check if 2FA is enabled in user metadata
+    verification_preference = user_metadata.get("verification_preference")
+    if verification_preference and isinstance(verification_preference, dict):
+        enabled = verification_preference.get("enabled", False)
+        if enabled is True:
+            # 2FA is enabled - verification is required
+            if not verification_id or not verification_code:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=TWO_FA_REQUIRED
+                )
+            
+            # Get verification code record
+            verification_record = await get_verification_code_by_id(verification_id)
+            
+            if not verification_record:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Verification code not found"
+                )
+            
+            # Get the given_input from verification record (email or phone)
+            stored_given_input = verification_record.get("given_input")
+            if not stored_given_input:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=TWO_FA_VERIFICATION_FAILED
+                )
+            
+            # Create VerifyVerificationCodeRequest for validation
+            verification_type = verification_preference.get("type", "EMAIL").upper()
+            if verification_type == "PHONE":
+                # For phone verification, verify that stored_given_input matches user's phone
+                if user_phone and stored_given_input != user_phone:
+                    # Normalize phone numbers for comparison (remove + if present)
+                    normalized_stored = stored_given_input.lstrip("+")
+                    normalized_user = user_phone.lstrip("+")
+                    if normalized_stored != normalized_user:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=TWO_FA_VERIFICATION_FAILED
+                        )
+                verify_data = VerifyVerificationCodeRequest(
+                    type=VerificationType.PHONE_NUMBER,
+                    verificationId=verification_id,
+                    verificationCode=verification_code,
+                    phoneNumber=stored_given_input
+                )
+            else:
+                # For email verification, verify that stored_given_input matches user's email
+                if stored_given_input.lower() != email.lower():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=TWO_FA_VERIFICATION_FAILED
+                    )
+                verify_data = VerifyVerificationCodeRequest(
+                    type=VerificationType.EMAIL,
+                    verificationId=verification_id,
+                    verificationCode=verification_code,
+                    email=stored_given_input
+                )
+            
+            # Validate verification record (checks if stored_given_input matches provided email/phone)
+            try:
+                _validate_verification_record(verification_record, verify_data)
+            except HTTPException as e:
+                # Re-raise with 2FA specific message
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=TWO_FA_VERIFICATION_FAILED
+                ) from e
+            
+            # Verify the code
+            try:
+                await _verify_code_and_update_record(
+                    verification_record,
+                    verification_code,
+                    verification_id
+                )
+            except HTTPException as e:
+                # Re-raise with 2FA specific message
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=TWO_FA_VERIFICATION_FAILED
+                ) from e
+
+
 @router.post("/login", response_model=AuthResponse, status_code=status.HTTP_200_OK)
 @limiter.limit("100/minute")
 # pylint: disable=unused-argument  # Required by @limiter.limit
 async def login(request: Request, data: AuthLogin):
     """
-    User login endpoint
+    User login endpoint with optional 2FA support
 
     Args:
         request (Request): FastAPI request object
-        data (AuthLogin): Login credentials containing email and password
+        data (AuthLogin): Login credentials containing email, password, and optional 2FA fields
 
     Returns:
         AuthResponse: Access token and user information
 
     Raises:
-        HTTPException: 400 for invalid credentials, 500 for other errors
+        HTTPException: 
+            - 400 for invalid credentials or 2FA verification failure
+            - 500 for other errors
     """
     try:
         all_user = await get_auth_user_by_email(data.email)
@@ -281,6 +401,18 @@ async def login(request: Request, data: AuthLogin):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=EMAIL_NOT_FOUND_MESSAGE
             )
+        
+        # Check if user has 2FA enabled and verify if needed
+        user_metadata = all_user.user_metadata or {}
+        user_phone = getattr(all_user, 'phone', None)  # Get phone from auth.users
+        await _check_and_verify_2fa(
+            user_metadata=user_metadata,
+            verification_id=data.verificationId,
+            verification_code=data.verificationCode,
+            email=data.email,
+            user_phone=user_phone
+        )
+        
         result = await login_user(data.email, data.password)
         return AuthResponse(
             access_token=result.session.access_token,

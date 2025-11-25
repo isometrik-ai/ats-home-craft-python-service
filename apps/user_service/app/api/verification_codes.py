@@ -1014,22 +1014,24 @@ async def send_verification_code(
                 user_id, _ = await _validate_authenticated_user_input(data, current_user)
             else:
                 # For unauthenticated requests (signup flow), check if user already exists
-                if data.type == VerificationType.EMAIL:
-                    # Check if email already exists in auth.users
-                    existing_auth_user = await get_auth_user_by_email(data.email)
-                    if existing_auth_user:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="This email is already registered. Please login instead of signing up."
-                        )
-                else:  # PHONE_NUMBER
-                    # Check if phone already exists in auth.users
-                    phone_exists = await _check_auth_user_exists_by_phone(data.phoneNumber)
-                    if phone_exists:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="This phone number is already registered. Please login instead of signing up."
-                        )
+                # Skip this check for TWO_FACTOR_AUTH verification type
+                if data.verification_type.upper() != "TWO_FACTOR_AUTH":
+                    if data.type == VerificationType.EMAIL:
+                        # Check if email already exists in auth.users
+                        existing_auth_user = await get_auth_user_by_email(data.email)
+                        if existing_auth_user:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="This email is already registered. Please login instead of signing up."
+                            )
+                    else:  # PHONE_NUMBER
+                        # Check if phone already exists in auth.users
+                        phone_exists = await _check_auth_user_exists_by_phone(data.phoneNumber)
+                        if phone_exists:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="This phone number is already registered. Please login instead of signing up."
+                            )
                 user_id = None
         else:
             # Use existing logic if verification_type is not provided
