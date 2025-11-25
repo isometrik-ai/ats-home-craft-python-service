@@ -275,8 +275,6 @@ async def update_organisation_details(
     # 3️⃣ Always set updated_at (mimicking the audit column logic)
     payload["updated_at"] = NOW_CONSTANT
 
-    print("payload: ", json.dumps(payload, indent=4))
-
     # 4️⃣ Execute update with Supabase SDK (mimicking the WHERE id = $N logic)
     table = supabase.table("organizations")
     result = await table.update(payload).eq("id", organisation_id).execute()
