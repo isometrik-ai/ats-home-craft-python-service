@@ -19,6 +19,7 @@ from apps.user_service.app.dependencies.common_utils import (
     format_iso_datetime,
     validate_pagination_params,
     check_permissions,
+    extract_user_context,
 )
 
 # Schema imports
@@ -278,14 +279,18 @@ async def get_sessions_details(
     # # Generate request ID for tracking
     # request_id = str(uuid.uuid4())
 
-    # Extract and validate user context from JWT token
-    user_context = await check_permissions(current_user=current_user,
-        permission_codes=SETTINGS_SYSTEM_MANAGE,
-        action_description="view sessions list"
-    )
-
+    # Extract user context from JWT token
+    user_context = await extract_user_context(current_user)
+    
+    # Check permissions only if user has an organization_id
     # Allow users without organization_id to view their sessions (organization_id can be None)
     # This supports personal accounts that don't belong to an organization
+    if user_context.organization_id:
+        await check_permissions(
+            current_user=current_user,
+            permission_codes=SETTINGS_SYSTEM_MANAGE,
+            action_description="view sessions list"
+        )
 
     # Set audit context for session list access
     request.state.audit_table = "user_sessions"

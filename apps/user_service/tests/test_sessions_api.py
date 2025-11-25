@@ -30,9 +30,12 @@ def app():
     app = FastAPI()
     app.include_router(sessions_router, prefix="/v1/admin")
     app.dependency_overrides[get_user_from_auth] = lambda: {
-        "user_id": str(uuid.uuid4()),
-        "organization_id": str(uuid.uuid4()),
+        "sub": str(uuid.uuid4()),  # Use "sub" instead of "user_id" for JWT token format
         "email": "e@e.com",
+        "user_metadata": {
+            "organization_id": str(uuid.uuid4()),
+            "type": "organization_member"
+        },
         "role": "admin",
         "permissions": ["*"],
         "session_id": "test-session-id"
@@ -53,28 +56,43 @@ def client(app):
 
 def test_sessions_list_success(client):
     """Test successful sessions list API endpoint."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     later = datetime(2025, 1, 2, tzinfo=timezone.utc)
     test_user_id = str(uuid.uuid4())
     test_org_id = str(uuid.uuid4())
-    with patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count", AsyncMock(return_value={
-        "data": [{
-            "id": str(uuid.uuid4()),
-            "user_id": test_user_id,
-            "organization_id": test_org_id,
-            "ip_address": "127.0.0.1",
-            "user_agent": "agent",
-            "device_fingerprint": None,
-            "risk_score": 0,
-            "login_timestamp": now.isoformat(),
-            "logout_timestamp": later.isoformat(),
-            "session_status": "active",
-            "login_method": "password",
-            "accessed_phi": False,
-            "phi_access_purpose": None,
-        }],
-        "total_count": 1
-    })):
+    
+    mock_user_context = UserContext(
+        organization_id=test_org_id,
+        user_id=test_user_id,
+        email="e@e.com",
+        user_type="organization_member"
+    )
+    
+    with patch("apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count", 
+               AsyncMock(return_value={
+                   "data": [{
+                       "id": str(uuid.uuid4()),
+                       "user_id": test_user_id,
+                       "organization_id": test_org_id,
+                       "ip_address": "127.0.0.1",
+                       "user_agent": "agent",
+                       "device_fingerprint": None,
+                       "risk_score": 0,
+                       "login_timestamp": now.isoformat(),
+                       "logout_timestamp": later.isoformat(),
+                       "session_status": "active",
+                       "login_method": "password",
+                       "accessed_phi": False,
+                       "phi_access_purpose": None,
+                   }],
+                   "total_count": 1
+               })):
         res = client.get("/v1/admin/sessions")
         assert res.status_code == 200
         assert res.json()["total_count"] == 1
@@ -82,10 +100,27 @@ def test_sessions_list_success(client):
 
 def test_sessions_list_with_filters(client):
     """Test sessions list API with query parameters."""
-    with patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count", AsyncMock(return_value={
-        "data": [],
-        "total_count": 0
-    })):
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    
+    test_user_id = str(uuid.uuid4())
+    test_org_id = str(uuid.uuid4())
+    
+    mock_user_context = UserContext(
+        organization_id=test_org_id,
+        user_id=test_user_id,
+        email="e@e.com",
+        user_type="organization_member"
+    )
+    
+    with patch("apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count", 
+               AsyncMock(return_value={
+                   "data": [],
+                   "total_count": 0
+               })):
         res = client.get("/v1/admin/sessions?status=active&limit=10&offset=0")
         assert res.status_code == 200
         assert res.json()["total_count"] == 0
@@ -93,7 +128,23 @@ def test_sessions_list_with_filters(client):
 
 def test_sessions_list_database_error(client):
     """Test sessions list API with database error."""
-    with patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count",
+    from apps.user_service.app.dependencies.common_utils import UserContext
+    
+    test_user_id = str(uuid.uuid4())
+    test_org_id = str(uuid.uuid4())
+    
+    mock_user_context = UserContext(
+        organization_id=test_org_id,
+        user_id=test_user_id,
+        email="e@e.com",
+        user_type="organization_member"
+    )
+    
+    with patch("apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count",
                AsyncMock(side_effect=DatabaseOperationError("Database connection failed"))):
         # The API doesn't have error handling, so it will raise the exception
         with pytest.raises(DatabaseOperationError):
@@ -111,9 +162,9 @@ def test_sessions_list_no_organization_id(client):
         user_type="organization_member"
     )
 
-    # Mock the get_sessions_with_count function to return empty results
+    # Mock the extract_user_context and get_sessions_with_count functions
     mock_result = {"data": [], "total_count": 0}
-    with patch("apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+    with patch("apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
                AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count",
                AsyncMock(return_value=mock_result)):
@@ -1041,6 +1092,7 @@ class TestSessionOperationsIntegration:
         mock_get_query = MagicMock()
         mock_get_table.select.return_value = mock_get_query
         mock_get_query.eq.return_value = mock_get_query
+        mock_get_query.is_ = MagicMock(return_value=mock_get_query)
         mock_get_query.execute = AsyncMock(return_value=mock_get_result)
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
@@ -1055,6 +1107,7 @@ class TestSessionOperationsIntegration:
         mock_update_query = MagicMock()
         mock_update_table.update.return_value = mock_update_query
         mock_update_query.eq.return_value = mock_update_query
+        mock_update_query.is_ = MagicMock(return_value=mock_update_query)
         mock_update_query.execute = AsyncMock(return_value=mock_update_result)
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
@@ -1069,6 +1122,7 @@ class TestSessionOperationsIntegration:
         mock_exists_query = MagicMock()
         mock_exists_table.select.return_value = mock_exists_query
         mock_exists_query.eq.return_value = mock_exists_query
+        mock_exists_query.is_ = MagicMock(return_value=mock_exists_query)
         mock_exists_query.limit.return_value = mock_exists_query
         mock_exists_query.execute = AsyncMock(return_value=mock_exists_result)
 
