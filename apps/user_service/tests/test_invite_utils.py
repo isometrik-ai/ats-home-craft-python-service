@@ -7,8 +7,8 @@ This module tests all utility functions for organization invitation management.
 
 import pytest
 import uuid
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi import HTTPException, status
 from apps.user_service.app.dependencies.invite_utils import (
     validate_email_format,
@@ -464,45 +464,154 @@ class TestExtractTokenFromUrl:
         assert result is None
 
 
+def _build_subscription(max_users=10, days_until_expiry=30):
+    return {
+        "max_users": max_users,
+        "plan_type": "starter",
+        "end_date": (datetime.now(timezone.utc) + timedelta(days=days_until_expiry)).isoformat(),
+    }
+
+
 class TestCheckOrganizationCapacity:
     """Test cases for check_organization_capacity function."""
 
-    def test_check_organization_capacity_within_limit(self):
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_within_limit(self):
         """Test capacity check when within limit."""
         org_data = {
-            "max_users": 10,
-            "member_count": 5
+            "id": "org-123",
+            "subscription": _build_subscription(max_users=10),
         }
-        assert check_organization_capacity(org_data) is True
+        with patch("apps.user_service.app.dependencies.invite_utils.get_organisation_members_count", AsyncMock(return_value=5)):
+            # Should not raise exception when within limit
+            try:
+                await check_organization_capacity(org_data)
+            except HTTPException:
+                pytest.fail("check_organization_capacity raised HTTPException unexpectedly")
 
-    def test_check_organization_capacity_at_limit(self):
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_at_limit(self):
         """Test capacity check when at limit."""
         org_data = {
-            "max_users": 10,
-            "member_count": 10
+            "id": "org-123",
+            "subscription": _build_subscription(max_users=10),
         }
-        assert check_organization_capacity(org_data) is False
+        with patch("apps.user_service.app.dependencies.invite_utils.get_organisation_members_count", AsyncMock(return_value=10)):
+            with pytest.raises(HTTPException) as exc_info:
+                await check_organization_capacity(org_data)
+            assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+            assert "maximum user capacity" in exc_info.value.detail
 
-    def test_check_organization_capacity_over_limit(self):
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_over_limit(self):
         """Test capacity check when over limit."""
         org_data = {
-            "max_users": 10,
-            "member_count": 15
+            "id": "org-123",
+            "subscription": _build_subscription(max_users=10),
         }
-        assert check_organization_capacity(org_data) is False
+        with patch("apps.user_service.app.dependencies.invite_utils.get_organisation_members_count", AsyncMock(return_value=15)):
+            with pytest.raises(HTTPException) as exc_info:
+                await check_organization_capacity(org_data)
+            assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+            assert "maximum user capacity" in exc_info.value.detail
 
-    def test_check_organization_capacity_zero_max_users(self):
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_zero_max_users(self):
         """Test capacity check with zero max users."""
         org_data = {
-            "max_users": 0,
-            "member_count": 0
+            "id": "org-123",
+            "subscription": _build_subscription(max_users=0),
         }
-        assert check_organization_capacity(org_data) is False
+        with patch("apps.user_service.app.dependencies.invite_utils.get_organisation_members_count", AsyncMock(return_value=0)):
+            with pytest.raises(HTTPException) as exc_info:
+                await check_organization_capacity(org_data)
+            assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+            assert "maximum user capacity" in exc_info.value.detail
 
-    def test_check_organization_capacity_missing_fields(self):
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_missing_fields(self):
         """Test capacity check with missing fields."""
-        org_data = {}
-        assert check_organization_capacity(org_data) is False  # 0 < 0 = False
+        org_data = {
+            "id": "org-123",
+            "subscription": {},
+        }
+        with patch("apps.user_service.app.dependencies.invite_utils.get_organisation_members_count", AsyncMock(return_value=0)):
+            with pytest.raises(HTTPException) as exc_info:
+                await check_organization_capacity(org_data)
+            assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+            assert "Unable To Check Organization Capacity" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_missing_end_date(self):
+        """Ensure we raise when subscription end date is absent."""
+        org_data = {
+            "id": "org-123",
+            "subscription": {
+                "plan_type": "starter",
+                "max_users": 5,
+            },
+        }
+        with pytest.raises(HTTPException) as exc_info:
+            await check_organization_capacity(org_data)
+        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert "subscription end date" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_expired_subscription(self):
+        """Expired subscriptions should block new members."""
+        org_data = {
+            "id": "org-123",
+            "subscription": _build_subscription(max_users=5, days_until_expiry=-1),
+        }
+        with patch("apps.user_service.app.dependencies.invite_utils.get_organisation_members_count", AsyncMock(return_value=1)):
+            with pytest.raises(HTTPException) as exc_info:
+                await check_organization_capacity(org_data)
+            assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+            assert "subscription has expired" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_missing_org_id(self):
+        """Missing org id should trigger KeyError handler."""
+        org_data = {
+            "subscription": _build_subscription(),
+        }
+        with pytest.raises(HTTPException) as exc_info:
+            await check_organization_capacity(org_data)
+        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Organization data is incomplete" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_invalid_end_date_format(self):
+        """Invalid end date format should raise validation error."""
+        org_data = {
+            "id": "org-123",
+            "subscription": {
+                "max_users": 5,
+                "plan_type": "starter",
+                "end_date": "not-a-date",
+            },
+        }
+        with patch("apps.user_service.app.dependencies.invite_utils.get_organisation_members_count", AsyncMock(return_value=1)):
+            with pytest.raises(HTTPException) as exc_info:
+                await check_organization_capacity(org_data)
+            assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+            assert "Invalid subscription data" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_check_organization_capacity_unexpected_error(self):
+        """Unexpected exceptions should map to 500."""
+        org_data = {
+            "id": "org-123",
+            "subscription": _build_subscription(),
+        }
+        with patch(
+            "apps.user_service.app.dependencies.invite_utils.get_organisation_members_count",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await check_organization_capacity(org_data)
+            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "Unable to verify organization capacity" in exc_info.value.detail
 
 
 class TestValidateOrganizationAccess:
