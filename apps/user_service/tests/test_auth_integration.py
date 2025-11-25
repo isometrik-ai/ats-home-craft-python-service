@@ -79,8 +79,15 @@ def test_login_endpoint_success(auth_client):
         ),
     )
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
         response = auth_client.post("/auth/login", json=login_data)
         assert response.status_code == 200
@@ -125,8 +132,15 @@ async def test_login_endpoint_success_async(async_auth_client):
         ),
     )
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
         # Create a mock request
         mock_request = MagicMock(spec=Request)
@@ -147,8 +161,15 @@ def test_login_endpoint_invalid_credentials(auth_client):
         "password": "wrongpassword"
     }
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("Invalid login credentials"))):
         response = auth_client.post("/auth/login", json=login_data)
@@ -178,10 +199,17 @@ def test_login_endpoint_invalid_credentials_authapierror(auth_client):
 
     from supabase_auth.errors import AuthApiError
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     # Mock AuthApiError for invalid credentials
     auth_error = AuthApiError("Invalid login credentials", status=400, code="invalid_credentials")
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=auth_error)):
         response = auth_client.post("/auth/login", json=login_data)
@@ -198,10 +226,17 @@ def test_login_endpoint_authapierror_server_error(auth_client):
 
     from supabase_auth.errors import AuthApiError
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     auth_error = AuthApiError("Service unavailable", status=503, code="service_error")
 
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=auth_error)):
         response = auth_client.post("/auth/login", json=login_data)
@@ -220,8 +255,15 @@ async def test_login_endpoint_invalid_credentials_async(async_auth_client):
         password="wrongpassword"
     )
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("Invalid login credentials"))):
         mock_request = MagicMock(spec=Request)
@@ -664,11 +706,18 @@ async def test_login_endpoint_http_exception_re_raise():
         password="TestPass123!"
     )
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     # Mock login_user to raise HTTPException directly
     # Note: HTTPException with 401/403 will be converted to 400 for invalid credentials
     # But if it's not 401/403, it will be re-raised as-is
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=HTTPException(status_code=500, detail="Server error"))):
         mock_request = MagicMock(spec=Request)
@@ -1690,8 +1739,15 @@ def test_login_general_exception(auth_client):
         "password": "TestPass123!"
     }
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("General authentication error"))):
         response = auth_client.post("/auth/login", json=login_data)
