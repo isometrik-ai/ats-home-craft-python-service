@@ -79,7 +79,9 @@ def test_login_endpoint_success(auth_client):
         ),
     )
 
-    with patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+         patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
         response = auth_client.post("/auth/login", json=login_data)
         assert response.status_code == 200
         data = response.json()
@@ -123,7 +125,9 @@ async def test_login_endpoint_success_async(async_auth_client):
         ),
     )
 
-    with patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+         patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
         # Create a mock request
         mock_request = MagicMock(spec=Request)
         result = await login(request=mock_request, data=login_data)
@@ -143,11 +147,27 @@ def test_login_endpoint_invalid_credentials(auth_client):
         "password": "wrongpassword"
     }
 
-    with patch('apps.user_service.app.api.auth.login_user',
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+         patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("Invalid login credentials"))):
         response = auth_client.post("/auth/login", json=login_data)
         assert response.status_code == 400
         assert "Invalid login credentials" in response.json()["detail"]
+
+
+def test_login_endpoint_email_not_found(auth_client):
+    """Ensure login returns proper 400 when Supabase user record is missing."""
+    login_data = {
+        "email": "missing@example.com",
+        "password": "TestPass123!"
+    }
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=None)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Email Is Not Registered! Please Signup First To Login."
 
 def test_login_endpoint_invalid_credentials_authapierror(auth_client):
     """Test login with AuthApiError for invalid credentials - covers AuthApiError handling"""
@@ -160,11 +180,33 @@ def test_login_endpoint_invalid_credentials_authapierror(auth_client):
 
     # Mock AuthApiError for invalid credentials
     auth_error = AuthApiError("Invalid login credentials", status=400, code="invalid_credentials")
-    with patch('apps.user_service.app.api.auth.login_user',
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+         patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=auth_error)):
         response = auth_client.post("/auth/login", json=login_data)
         assert response.status_code == 400
         assert "Invalid login credentials" in response.json()["detail"]
+
+
+def test_login_endpoint_authapierror_server_error(auth_client):
+    """AuthApiError with non-credential failure should bubble up original status/detail."""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+    }
+
+    from supabase_auth.errors import AuthApiError
+
+    auth_error = AuthApiError("Service unavailable", status=503, code="service_error")
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=auth_error)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Service unavailable"
 
 @pytest.mark.asyncio
 async def test_login_endpoint_invalid_credentials_async(async_auth_client):
@@ -178,7 +220,9 @@ async def test_login_endpoint_invalid_credentials_async(async_auth_client):
         password="wrongpassword"
     )
 
-    with patch('apps.user_service.app.api.auth.login_user',
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+         patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("Invalid login credentials"))):
         mock_request = MagicMock(spec=Request)
 
@@ -236,6 +280,41 @@ def test_signup_endpoint_success(auth_client):
         assert data["refresh_token"] == "test-refresh-token"
         assert data["user"]["id"] == "new-user-id"
         assert data["user"]["email"] == "newuser@example.com"
+
+
+def test_signup_endpoint_session_creation_failure(auth_client):
+    """Signup should fail with 500 when session creation cannot be completed."""
+    signup_data = {
+        "email": "newuser@example.com",
+        "password": "NewPass123!",
+        "first_name": "New",
+        "last_name": "User",
+        "verificationId": "test-verification-id",
+        "verificationCode": "1111"
+    }
+
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "newuser@example.com",
+        "verification_code": "1111",
+        "verified": True
+    }
+
+    mock_signup_result = MagicMock()
+    mock_signup_result.user.id = "new-user-id"
+    mock_signup_result.user.email = "newuser@example.com"
+    mock_signup_result.user.user_metadata = {"first_name": "New"}
+
+    with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)), \
+         patch('apps.user_service.app.api.auth.sign_up_supabase_user',
+               AsyncMock(return_value=mock_signup_result)), \
+         patch('apps.user_service.app.api.auth._get_session_after_signup',
+               AsyncMock(return_value=None)):
+        response = auth_client.post("/auth/signup", json=signup_data)
+        assert response.status_code == 500
+        assert "Failed to create session after signup" in response.json()["detail"]
 
 @pytest.mark.asyncio
 async def test_signup_endpoint_success_async(async_auth_client):
@@ -422,6 +501,15 @@ def test_extract_session_none():
     result = _extract_session(session_no_token)
     assert result is None
 
+
+def test_extract_session_with_access_token():
+    """Session objects that already contain tokens should be returned untouched."""
+    from apps.user_service.app.api.auth import _extract_session
+    from types import SimpleNamespace
+
+    session = SimpleNamespace(access_token="token-123")
+    assert _extract_session(session) is session
+
     # Test with None session
     result = _extract_session(None)
     assert result is None
@@ -481,6 +569,26 @@ async def test_get_session_after_signup_login_fails():
 
         assert result is None
 
+
+@pytest.mark.asyncio
+async def test_get_session_after_signup_returns_signup_session():
+    """If signup already returned a session, no fallback login should run."""
+    from apps.user_service.app.api.auth import _get_session_after_signup
+    from types import SimpleNamespace
+
+    signup_session = SimpleNamespace(access_token="signup-token")
+    signup_result = SimpleNamespace(session=signup_session)
+
+    with patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=AssertionError("login_user should not be called"))):
+        result = await _get_session_after_signup(
+            signup_result=signup_result,
+            email="test@example.com",
+            password="password"
+        )
+
+    assert result is signup_session
+
 def test_send_welcome_email_safely_failure():
     """Test _send_welcome_email_safely when email fails - covers lines 204-206"""
     from apps.user_service.app.api.auth import _send_welcome_email_safely
@@ -516,6 +624,16 @@ def test_extract_user_type_strict_app_meta_none():
     result = _extract_user_type_strict(mock_row)
     assert result is None
 
+
+def test_extract_user_type_strict_non_dict_metadata():
+    """When metadata containers are missing, helper should fall through to final return."""
+    from apps.user_service.app.api.auth import _extract_user_type_strict
+
+    mock_row = MagicMock()
+    mock_row.user_metadata = None
+    mock_row.app_metadata = None
+    assert _extract_user_type_strict(mock_row) is None
+
 def test_verify_email_non_organization_member(auth_client):
     """Test verify_email when user_type is not organization_member - covers line 726"""
     verify_data = {"email": "test@example.com"}
@@ -549,7 +667,9 @@ async def test_login_endpoint_http_exception_re_raise():
     # Mock login_user to raise HTTPException directly
     # Note: HTTPException with 401/403 will be converted to 400 for invalid credentials
     # But if it's not 401/403, it will be re-raised as-is
-    with patch('apps.user_service.app.api.auth.login_user',
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+         patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=HTTPException(status_code=500, detail="Server error"))):
         mock_request = MagicMock(spec=Request)
 
@@ -634,6 +754,58 @@ def test_reset_password_endpoint_success(auth_client):
         assert response.status_code == 200
         data = response.json()
         assert "Password reset successfully" in data["message"]
+
+
+def test_reset_password_email_not_sent_warning(auth_client):
+    """Reset password should still succeed even if success email returns False."""
+    reset_data = {
+        "token": "valid-reset-token",
+        "new_password": "NewPass123!"
+    }
+
+    mock_user = {
+        "sub": "user-id",
+        "email": "test@example.com",
+        "user_metadata": {"first_name": "Reset"}
+    }
+    mock_result = MagicMock()
+    mock_result.user = MagicMock()
+
+    with patch('apps.user_service.app.api.auth.get_user_from_token',
+               return_value=mock_user), \
+         patch('apps.user_service.app.api.auth.update_password_with_token',
+               AsyncMock(return_value=mock_result)), \
+         patch('apps.user_service.app.api.auth.send_password_reset_success_email',
+               return_value=False):
+        response = auth_client.post("/auth/reset-password", json=reset_data)
+        assert response.status_code == 200
+        assert "Password reset successfully" in response.json()["message"]
+
+
+def test_reset_password_email_exception_is_swallowed(auth_client):
+    """Reset password should swallow success-email exceptions."""
+    reset_data = {
+        "token": "valid-reset-token",
+        "new_password": "NewPass123!"
+    }
+
+    mock_user = {
+        "sub": "user-id",
+        "email": "test@example.com",
+        "user_metadata": {"first_name": "Reset"}
+    }
+    mock_result = MagicMock()
+    mock_result.user = MagicMock()
+
+    with patch('apps.user_service.app.api.auth.get_user_from_token',
+               return_value=mock_user), \
+         patch('apps.user_service.app.api.auth.update_password_with_token',
+               AsyncMock(return_value=mock_result)), \
+         patch('apps.user_service.app.api.auth.send_password_reset_success_email',
+               side_effect=Exception("email down")):
+        response = auth_client.post("/auth/reset-password", json=reset_data)
+        assert response.status_code == 200
+        assert "Password reset successfully" in response.json()["message"]
 
 @pytest.mark.asyncio
 async def test_reset_password_endpoint_success_async(async_auth_client):
@@ -1363,6 +1535,66 @@ def test_change_password_same_as_current(auth_client):
         assert "New password must be different from current password" in response.json()["detail"]
 
 
+@pytest.mark.asyncio
+async def test_change_password_email_uses_first_name_and_handles_false_send():
+    """Change password should prefer first_name and warn when email send returns False."""
+    from fastapi import Request
+    from apps.user_service.app.api.auth import change_password
+    from apps.user_service.app.schemas.auth import ChangePasswordRequest
+
+    data = ChangePasswordRequest(current_password="OldPass123!", new_password="NewPass123!")
+    mock_request = MagicMock(spec=Request)
+    current_user = {
+        "sub": "user-id",
+        "email": "user@example.com",
+        "user_metadata": {"first_name": "Tester"}
+    }
+
+    with patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=MagicMock())), \
+         patch('apps.user_service.app.api.auth.update_password_with_link_identity',
+               AsyncMock(return_value=True)), \
+         patch('apps.user_service.app.api.auth.send_password_change_success_email',
+               return_value=False):
+        result = await change_password(
+            request=mock_request,
+            data=data,
+            current_user=current_user,
+        )
+
+    assert result.message == "Password changed successfully"
+
+
+@pytest.mark.asyncio
+async def test_change_password_email_uses_full_name_and_handles_exception():
+    """Change password should fall back to full_name and swallow email errors."""
+    from fastapi import Request
+    from apps.user_service.app.api.auth import change_password
+    from apps.user_service.app.schemas.auth import ChangePasswordRequest
+
+    data = ChangePasswordRequest(current_password="OldPass123!", new_password="NewPass123!")
+    mock_request = MagicMock(spec=Request)
+    current_user = {
+        "sub": "user-id",
+        "email": "user@example.com",
+        "user_metadata": {"full_name": "Test User"}
+    }
+
+    with patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=MagicMock())), \
+         patch('apps.user_service.app.api.auth.update_password_with_link_identity',
+               AsyncMock(return_value=True)), \
+         patch('apps.user_service.app.api.auth.send_password_change_success_email',
+               side_effect=Exception("email down")):
+        result = await change_password(
+            request=mock_request,
+            data=data,
+            current_user=current_user,
+        )
+
+    assert result.message == "Password changed successfully"
+
+
 def test_set_password_general_exception(auth_client):
     """Test set_password general exception handling - covers line 159"""
     set_password_data = {"password": "NewPass123!"}
@@ -1458,7 +1690,9 @@ def test_login_general_exception(auth_client):
         "password": "TestPass123!"
     }
 
-    with patch('apps.user_service.app.api.auth.login_user',
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+         patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("General authentication error"))):
         response = auth_client.post("/auth/login", json=login_data)
         assert response.status_code == 500

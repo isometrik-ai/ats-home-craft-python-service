@@ -395,14 +395,16 @@ async def update_user_email(user_id: str, organization_id: str, new_email: str) 
 async def get_auth_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     """Get user from auth.users table by email."""
     supabase = await get_fresh_supabase_admin_client()
-
-    result = await supabase.auth.admin.list_users(per_page=1000)
-    for user in result:
-        if user.email == email:
-            return user
+    
+    total_users = 0
+    while total_users < 1000:
+        result = await supabase.auth.admin.list_users(page=total_users//1000, per_page=1000)
+        for user in result:
+            if user.email == email:
+                return user
+        total_users += 1000
     logger.error("User with email %s not found", email)
     return None
-
 
 @handle_database_errors(
     "get_organization_member_status_by_email",

@@ -219,53 +219,6 @@ async def send_admin_update_email(user: dict) -> bool:
             detail="Failed to send admin update email"
         ) from error
 
-# async def create_supabase_user(body, organization_id):
-#     """
-#     Create user in Supabase Auth with organization metadata using admin.createUser.
-#     This is for admin-initiated user creation (like in create_organisation API).
-
-#     Args:
-#         body: Request body with user data
-#         organization_id: Organization ID to associate with user
-
-#     Returns:
-#         str: Created user ID
-
-#     Raises:
-#         HTTPException: For duplicate email or Supabase errors
-#     """
-#     try:
-#         supabase = await get_supabase_admin_client()
-#         supabase_response = supabase.auth.admin.create_user(
-#             {
-#                 "email": body.email,
-#                 "password": body.password,
-#                 "email_confirm": True,  # Auto-confirm email for admin user
-#                 "user_metadata": {
-#                     "organization_id": organization_id,
-#                     "full_name": body.full_name,
-#                     "phone": body.phone,
-#                     "is_super_admin": True,
-#                     "type": "",
-#                 },
-#             }
-#         )
-#         return supabase_response.user.id
-
-#     except (ConnectionError, TimeoutError, ValueError) as supabase_error:
-#         if (
-#             "already_exists" in str(supabase_error).lower()
-#             or "duplicate" in str(supabase_error).lower()
-#         ):
-#             raise HTTPException(
-#                 status_code=status.HTTP_409_CONFLICT, detail="Email already exists"
-#             ) from supabase_error
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to create user account",
-#         ) from supabase_error
-
-
 async def sign_up_supabase_user(body):
     """
     Create user in Supabase Auth using auth.signUp for user-initiated registration.
@@ -387,7 +340,7 @@ async def login_user(email: str, password: str) -> dict:
         if error.status == 400 and error.message == "Email not confirmed":
             raise HTTPException(status_code=403, detail="Email not confirmed. Please check your email Inbox for the confirmation link.") from error
         elif error.status == 400 and error.message == "Invalid login credentials":
-            raise HTTPException(status_code=400, detail="Invalid login credentials") from error
+            raise HTTPException(status_code=400, detail="Invalid Password") from error
         else:
             raise HTTPException(status_code=error.status, detail=error.message) from error
     except Exception as error:
