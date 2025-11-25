@@ -460,7 +460,7 @@ class CompanyData(BaseModel):
     company_size: Optional[FirmSize] = None
     description: Optional[str] = None
     logo_url: Optional[str] = None
-    subscription: Optional[Subscription] = None
+    max_users: Optional[int] = Field(None, description="Maximum number of users allowed",ge=1)
     address: Optional[Address] = None
     referral_source: Optional[str] = None
     primary_practice_areas: List[PracticeArea] = Field(..., min_length=1, max_length=3)

@@ -506,7 +506,7 @@ class TestOrganisationCRUD:
 
             assert result["id"] == organisation_id
             payload = mock_table.update.call_args[0][0]
-            assert payload["max_users"] == 25
+            assert payload["subscription"]["max_users"] == 25
             assert payload["plan_type"] == "professional"
 
     @pytest.mark.asyncio
@@ -538,6 +538,7 @@ class TestOrganisationCRUD:
 
             assert result["id"] == organisation_id
             payload = mock_table.update.call_args[0][0]
+            assert "subscription" not in payload
             assert payload["plan_type"] == "enterprise"
 
     @pytest.mark.asyncio

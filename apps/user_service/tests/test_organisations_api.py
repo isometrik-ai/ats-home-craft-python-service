@@ -844,10 +844,7 @@ class TestUpdateOrganisation:
             "name": "Updated Organization",
             "domain": "updated.com",
             "timezone": "EST",
-            "subscription": {
-                "plan_type": PlanType.STARTER.value,
-                "max_users": 25
-            }
+            "max_users": 25
         }
 
         mock_organisation_data = {
