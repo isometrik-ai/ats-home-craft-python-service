@@ -191,7 +191,7 @@ def test_login_endpoint_email_not_found(auth_client):
                AsyncMock(return_value=None)):
         response = auth_client.post("/auth/login", json=login_data)
         assert response.status_code == 400
-        assert response.json()["detail"] == "Account Is Not Registered! Please Signup First To Login."
+        assert response.json()["detail"] == "Email Is Not Registered! Please Signup First To Login."
 
 def test_login_endpoint_invalid_credentials_authapierror(auth_client):
     """Test login with AuthApiError for invalid credentials - covers AuthApiError handling"""
@@ -2528,7 +2528,7 @@ def test_check_2fa_status_email_not_found(auth_client):
                AsyncMock(return_value=None)):
         response = auth_client.post("/auth/verify/account", json=check_data)
         assert response.status_code == 400
-        assert "Account Is Not Registered" in response.json()["detail"]
+        assert "Email Is Not Registered" in response.json()["detail"]
 
 
 def test_check_2fa_status_invalid_credentials(auth_client):

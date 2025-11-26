@@ -287,12 +287,37 @@ class TestUpdateUserProfile:
     @pytest.mark.asyncio
     async def test_update_user_profile_user_not_found_in_organization(self, client, mock_current_user, mock_user_context):
         """Test profile update when user not found in organization."""
+        updated_profile = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "New"
+        }
+
+        # Create a mock user context without organization_id
+        mock_user_context_no_org = MagicMock(
+            user_id=mock_user_context.user_id,
+            organization_id=None,  # User not in organization
+            email="test@example.com"
+        )
+
+        # Mock get_user_by_id to raise AuthApiError (simulating user not found)
+        # The code catches this exception and uses JWT token metadata instead
+        # get_user_by_id is called at line 462 (when user not in org) and at line 579 (when updating metadata)
+        # Both calls should raise the exception, which will be caught
+        from supabase_auth.errors import AuthApiError
+        auth_error = AuthApiError("User not found", status=404, code="user_not_found")
+
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
-                   AsyncMock(return_value=mock_user_context)), \
+                   AsyncMock(return_value=mock_user_context_no_org)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
                    AsyncMock(return_value=None)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_by_id',
-                   AsyncMock(return_value=None)):
+                   AsyncMock(side_effect=auth_error)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_metadata_of_user',
+                   AsyncMock(return_value=True)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_profile_by_id',
+                   AsyncMock(return_value=updated_profile)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
+                   return_value=None):
 
             client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
 
@@ -305,6 +330,7 @@ class TestUpdateUserProfile:
             )
 
             # Should succeed because we handle users not in organization
+            # The exception from get_user_by_id is caught and handled gracefully at both call sites
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -653,8 +679,8 @@ class TestUpdateUserProfile:
                 }
             )
 
-            # Should still succeed, just logs warning
-            assert response.status_code == 200
+            # Should raise 500 error when metadata update fails
+            assert response.status_code == 500
 
     @pytest.mark.asyncio
     async def test_update_user_profile_metadata_update_exception(self, client, mock_current_user, mock_user_context):
@@ -706,8 +732,8 @@ class TestUpdateUserProfile:
                 }
             )
 
-            # Should still succeed, just logs warning
-            assert response.status_code == 200
+            # Should raise 500 error when metadata update raises exception
+            assert response.status_code == 500
 
     @pytest.mark.asyncio
     async def test_update_user_profile_get_user_profile_by_id_returns_none(self, client, mock_current_user, mock_user_context):
@@ -1140,7 +1166,7 @@ class TestUpdateUserProfile:
 
     @pytest.mark.asyncio
     async def test_update_user_profile_verification_preference_only_enabled_error(self, client, mock_current_user, mock_user_context):
-        """Test error when only two_fa_enabled is provided."""
+        """Test success when only two_fa_enabled is provided (verification_method defaults to EMAIL)."""
         current_user_data = {
             "user_id": mock_user_context.user_id,
             "email": "test@example.com",
@@ -1148,10 +1174,31 @@ class TestUpdateUserProfile:
             "last_name": "User"
         }
 
+        mock_user_data = MagicMock()
+        mock_user_data.user = MagicMock()
+        mock_user_data.user.user_metadata = {}
+
+        updated_profile = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        # get_user_by_id is called during metadata update (line 579) when metadata_update is not empty
+        # Since user is in organization, get_user_by_id is only called once at line 579
+        # update_metadata_of_user is called and must return True to avoid 500 error
         with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
                    AsyncMock(return_value=mock_user_context)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
                    AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_by_id',
+                   AsyncMock(return_value=mock_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_metadata_of_user',
+                   AsyncMock(return_value=True)) as mock_update_metadata, \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_user_info',
+                   AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_profile_by_id',
+                   AsyncMock(return_value=updated_profile)), \
              patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
                    return_value=None):
 
@@ -1164,8 +1211,14 @@ class TestUpdateUserProfile:
                 }
             )
 
-            assert response.status_code == 400
-            assert "Both two_fa_enabled and verification_method must be provided together" in response.json()["detail"]
+            assert response.status_code == 200
+            # Verify that verification_method defaulted to EMAIL
+            call_args = mock_update_metadata.call_args
+            assert call_args is not None
+            updated_metadata = call_args[0][1]
+            assert "verification_preference" in updated_metadata
+            assert updated_metadata["verification_preference"]["enabled"] is True
+            assert updated_metadata["verification_preference"]["type"] == "EMAIL"
 
     @pytest.mark.asyncio
     async def test_update_user_profile_verification_preference_only_type_error(self, client, mock_current_user, mock_user_context):
@@ -1194,7 +1247,7 @@ class TestUpdateUserProfile:
             )
 
             assert response.status_code == 400
-            assert "Both two_fa_enabled and verification_method must be provided together" in response.json()["detail"]
+            assert "two_fa_enabled must be provided when updating verification_method" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_update_user_profile_verification_preference_invalid_type_error(self, client, mock_current_user, mock_user_context):

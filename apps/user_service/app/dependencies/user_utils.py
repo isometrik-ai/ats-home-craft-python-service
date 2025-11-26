@@ -40,6 +40,8 @@ def create_user_profile_data(
     verification_pref_data = user_profile.get("verification_preference")
     if verification_pref_data and isinstance(verification_pref_data, dict):
         try:
+            # Use aliases (enabled, type) to match internal storage format
+            # Pydantic will automatically map to field names (two_fa_enabled, verification_method) in response
             verification_preference = VerificationPreference(
                 enabled=verification_pref_data.get("enabled", False),
                 type=verification_pref_data.get("type", "")

@@ -1595,7 +1595,7 @@ class TestUpdateMetadataOfUser:
             "timezone": "UTC"
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.user = {"id": user_id, "email": "test@example.com"}
@@ -1617,7 +1617,7 @@ class TestUpdateMetadataOfUser:
         metadata = {"first_name": "John"}
         api_error = APIError({"message": "Invalid user ID"})
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=api_error)
             mock_get_client.return_value = mock_supabase
@@ -1633,7 +1633,7 @@ class TestUpdateMetadataOfUser:
         metadata = {"first_name": "John"}
         network_error = HTTPError("Connection failed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=network_error)
             mock_get_client.return_value = mock_supabase
@@ -1649,7 +1649,7 @@ class TestUpdateMetadataOfUser:
         metadata = {"first_name": "John"}
         validation_error = ValueError("Invalid metadata format")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client", AsyncMock()) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=validation_error)
             mock_get_client.return_value = mock_supabase
