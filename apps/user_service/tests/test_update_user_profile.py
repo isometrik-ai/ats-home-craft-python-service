@@ -1004,8 +1004,8 @@ class TestUpdateUserProfile:
             response = client.put(
                 "/v1/admin/users/update",
                 json={
-                    "verification_enabled": True,
-                    "verification_type": "PHONE"
+                    "two_fa_enabled": True,
+                    "verification_method": "PHONE"
                 }
             )
 
@@ -1064,8 +1064,8 @@ class TestUpdateUserProfile:
             response = client.put(
                 "/v1/admin/users/update",
                 json={
-                    "verification_enabled": True,
-                    "verification_type": "EMAIL"
+                    "two_fa_enabled": True,
+                    "verification_method": "EMAIL"
                 }
             )
 
@@ -1124,8 +1124,8 @@ class TestUpdateUserProfile:
             response = client.put(
                 "/v1/admin/users/update",
                 json={
-                    "verification_enabled": False,
-                    "verification_type": "PHONE"
+                    "two_fa_enabled": False,
+                    "verification_method": "PHONE"
                 }
             )
 
@@ -1140,7 +1140,7 @@ class TestUpdateUserProfile:
 
     @pytest.mark.asyncio
     async def test_update_user_profile_verification_preference_only_enabled_error(self, client, mock_current_user, mock_user_context):
-        """Test error when only verification_enabled is provided."""
+        """Test error when only two_fa_enabled is provided."""
         current_user_data = {
             "user_id": mock_user_context.user_id,
             "email": "test@example.com",
@@ -1160,16 +1160,16 @@ class TestUpdateUserProfile:
             response = client.put(
                 "/v1/admin/users/update",
                 json={
-                    "verification_enabled": True
+                    "two_fa_enabled": True
                 }
             )
 
             assert response.status_code == 400
-            assert "Both verification_enabled and verification_type must be provided together" in response.json()["detail"]
+            assert "Both two_fa_enabled and verification_method must be provided together" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_update_user_profile_verification_preference_only_type_error(self, client, mock_current_user, mock_user_context):
-        """Test error when only verification_type is provided."""
+        """Test error when only verification_method is provided."""
         current_user_data = {
             "user_id": mock_user_context.user_id,
             "email": "test@example.com",
@@ -1189,16 +1189,16 @@ class TestUpdateUserProfile:
             response = client.put(
                 "/v1/admin/users/update",
                 json={
-                    "verification_type": "PHONE"
+                    "verification_method": "PHONE"
                 }
             )
 
             assert response.status_code == 400
-            assert "Both verification_enabled and verification_type must be provided together" in response.json()["detail"]
+            assert "Both two_fa_enabled and verification_method must be provided together" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_update_user_profile_verification_preference_invalid_type_error(self, client, mock_current_user, mock_user_context):
-        """Test error when verification_type is invalid."""
+        """Test error when verification_method is invalid."""
         current_user_data = {
             "user_id": mock_user_context.user_id,
             "email": "test@example.com",
@@ -1218,13 +1218,13 @@ class TestUpdateUserProfile:
             response = client.put(
                 "/v1/admin/users/update",
                 json={
-                    "verification_enabled": True,
-                    "verification_type": "INVALID"
+                    "two_fa_enabled": True,
+                    "verification_method": "INVALID"
                 }
             )
 
             assert response.status_code == 400
-            assert "verification_type must be either 'PHONE' or 'EMAIL'" in response.json()["detail"]
+            assert "verification_method must be either 'PHONE' or 'EMAIL'" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_update_user_profile_verification_preference_with_other_fields(self, client, mock_current_user, mock_user_context):
@@ -1276,8 +1276,8 @@ class TestUpdateUserProfile:
                 json={
                     "first_name": "New",
                     "last_name": "Name",
-                    "verification_enabled": True,
-                    "verification_type": "EMAIL"
+                    "two_fa_enabled": True,
+                    "verification_method": "EMAIL"
                 }
             )
 
@@ -1295,7 +1295,7 @@ class TestUpdateUserProfile:
 
     @pytest.mark.asyncio
     async def test_update_user_profile_verification_preference_case_insensitive(self, client, mock_current_user, mock_user_context):
-        """Test that verification_type is case-insensitive and stored as uppercase."""
+        """Test that verification_method is case-insensitive and stored as uppercase."""
         current_user_data = {
             "user_id": mock_user_context.user_id,
             "email": "test@example.com",
@@ -1339,8 +1339,8 @@ class TestUpdateUserProfile:
             response = client.put(
                 "/v1/admin/users/update",
                 json={
-                    "verification_enabled": True,
-                    "verification_type": "phone"  # lowercase
+                    "two_fa_enabled": True,
+                    "verification_method": "phone"  # lowercase
                 }
             )
 

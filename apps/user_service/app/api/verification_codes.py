@@ -340,7 +340,7 @@ def _validate_verification_record(verification_record: dict, data: VerifyVerific
         logger.warning(
             "Given input mismatch for verification %s: "
             "stored='%s', provided='%s'",
-            data.verificationId,
+            data.verification_id,
             stored_given_input,
             given_input
         )
@@ -982,7 +982,7 @@ async def send_verification_code(
 
     Returns:
         SendVerificationCodeResponse:
-            - verificationId: ID of the created verification code
+            - verification_id: ID of the created verification code
             - expiryAt: Expiry timestamp
             - message: Success message
             - attemptsLeft: Number of send OTP attempts remaining for today (per day limit)
@@ -1006,16 +1006,16 @@ async def send_verification_code(
         given_input = data.email if data.type == VerificationType.EMAIL else data.phoneNumber
 
         # Validate and determine triggered_text based on authentication status
-        # If verification_type is provided, use it as triggered_text; otherwise use existing logic
-        if data.verification_type:
-            # Use verification_type as triggered_text if provided
-            triggered_text = data.verification_type
+        # If verification_method is provided, use it as triggered_text; otherwise use existing logic
+        if data.verification_method:
+            # Use verification_method as triggered_text if provided
+            triggered_text = data.verification_method
             if current_user:
                 user_id, _ = await _validate_authenticated_user_input(data, current_user)
             else:
                 # For unauthenticated requests (signup flow), check if user already exists
-                # Skip this check for TWO_FACTOR_AUTH verification type
-                if data.verification_type.upper() != "TWO_FACTOR_AUTH":
+                # Skip this check for TWO_FACTOR_AUTH verification method
+                if data.verification_method.upper() != "TWO_FACTOR_AUTH":
                     if data.type == VerificationType.EMAIL:
                         # Check if email already exists in auth.users
                         existing_auth_user = await get_auth_user_by_email(data.email)
@@ -1034,7 +1034,7 @@ async def send_verification_code(
                             )
                 user_id = None
         else:
-            # Use existing logic if verification_type is not provided
+            # Use existing logic if verification_method is not provided
             if current_user:
                 user_id, triggered_text = await _validate_authenticated_user_input(data, current_user)
             else:
@@ -1120,7 +1120,7 @@ async def send_verification_code(
 
         # Return response
         return SendVerificationCodeResponse(
-            verificationId=verification_record["id"],
+            verification_id=verification_record["id"],
             expiryAt=verification_record["expiry_at"],
             message="Verification code sent successfully",
             attemptsLeft=attempts_left_after
@@ -1189,22 +1189,22 @@ async def verify_verification_code(
     """
     try:
         # Get verification code record
-        verification_record = await get_verification_code_by_id(data.verificationId)
+        verification_record = await get_verification_code_by_id(data.verification_id)
 
         # Validate verification record and get given_input
         given_input = _validate_verification_record(verification_record, data)
 
         # Security check: If authenticated user, verify they own the verification code
-        _check_verification_code_ownership(verification_record, current_user, data.verificationId)
+        _check_verification_code_ownership(verification_record, current_user, data.verification_id)
 
         # Verify code and update record
         await _verify_code_and_update_record(
             verification_record,
-            data.verificationCode,
-            data.verificationId
+            data.verification_code,
+            data.verification_id
         )
 
-        logger.info("Verification code verified successfully: %s", data.verificationId)
+        logger.info("Verification code verified successfully: %s", data.verification_id)
 
         # After successful verification, check if we need to update email/phone
         triggered_text = verification_record.get("triggered_text", "")

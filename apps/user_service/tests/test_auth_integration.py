@@ -281,8 +281,8 @@ def test_signup_endpoint_success(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     # Mock verification code record (verified and matching)
@@ -331,8 +331,8 @@ def test_signup_endpoint_session_creation_failure(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     mock_verification_record = {
@@ -368,8 +368,8 @@ async def test_signup_endpoint_success_async(async_auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     # Mock verification code record (verified and matching)
@@ -448,8 +448,8 @@ def test_signup_endpoint_verification_code_not_found(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "non-existent-id",
-        "verificationCode": "1111"
+        "verification_id": "non-existent-id",
+        "verification_code": "1111"
     }
 
     with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
@@ -465,8 +465,8 @@ def test_signup_endpoint_verification_code_not_verified(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     mock_verification_record = {
@@ -490,8 +490,8 @@ def test_signup_endpoint_email_mismatch(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     mock_verification_record = {
@@ -515,8 +515,8 @@ def test_signup_endpoint_invalid_verification_code(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "9999"  # Wrong code
+        "verification_id": "test-verification-id",
+        "verification_code": "9999"  # Wrong code
     }
 
     mock_verification_record = {
@@ -1776,8 +1776,8 @@ def test_login_with_2fa_email_enabled_success(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!",
-        "verificationId": "test-verification-id",
-        "verificationCode": "123456"
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
     }
 
     # Mock user with 2FA enabled (EMAIL type)
@@ -1840,8 +1840,8 @@ def test_login_with_2fa_phone_enabled_success(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!",
-        "verificationId": "test-verification-id",
-        "verificationCode": "123456"
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
     }
 
     # Mock user with 2FA enabled (PHONE type)
@@ -1901,7 +1901,7 @@ def test_login_with_2fa_enabled_missing_credentials(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!"
-        # Missing verificationId and verificationCode
+        # Missing verification_id and verification_code
     }
 
     # Mock user with 2FA enabled
@@ -1928,8 +1928,8 @@ def test_login_with_2fa_enabled_verification_not_found(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!",
-        "verificationId": "non-existent-id",
-        "verificationCode": "123456"
+        "verification_id": "non-existent-id",
+        "verification_code": "123456"
     }
 
     # Mock user with 2FA enabled
@@ -1958,8 +1958,8 @@ def test_login_with_2fa_enabled_verification_missing_given_input(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!",
-        "verificationId": "test-verification-id",
-        "verificationCode": "123456"
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
     }
 
     # Mock user with 2FA enabled
@@ -1996,8 +1996,8 @@ def test_login_with_2fa_enabled_email_mismatch(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!",
-        "verificationId": "test-verification-id",
-        "verificationCode": "123456"
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
     }
 
     # Mock user with 2FA enabled
@@ -2034,8 +2034,8 @@ def test_login_with_2fa_enabled_phone_mismatch(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!",
-        "verificationId": "test-verification-id",
-        "verificationCode": "123456"
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
     }
 
     # Mock user with 2FA enabled (PHONE type)
@@ -2072,8 +2072,8 @@ def test_login_with_2fa_enabled_phone_normalized_match(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!",
-        "verificationId": "test-verification-id",
-        "verificationCode": "123456"
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
     }
 
     # Mock user with 2FA enabled (PHONE type)
@@ -2130,8 +2130,8 @@ def test_login_with_2fa_enabled_verification_validation_fails(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!",
-        "verificationId": "test-verification-id",
-        "verificationCode": "123456"
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
     }
 
     # Mock user with 2FA enabled
@@ -2172,8 +2172,8 @@ def test_login_with_2fa_enabled_code_verification_fails(auth_client):
     login_data = {
         "email": "test@example.com",
         "password": "TestPass123!",
-        "verificationId": "test-verification-id",
-        "verificationCode": "wrong-code"
+        "verification_id": "test-verification-id",
+        "verification_code": "wrong-code"
     }
 
     # Mock user with 2FA enabled
@@ -2221,8 +2221,8 @@ async def test_login_with_2fa_enabled_async(async_auth_client):
     login_data = AuthLogin(
         email="test@example.com",
         password="TestPass123!",
-        verificationId="test-verification-id",
-        verificationCode="123456"
+        verification_id="test-verification-id",
+        verification_code="123456"
     )
 
     # Mock user with 2FA enabled
@@ -2423,8 +2423,8 @@ def test_validate_verification_record_with_none_record():
     
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId="test-id",
-        verificationCode="123456",
+        verification_id="test-id",
+        verification_code="123456",
         email="test@example.com"
     )
     
@@ -2450,8 +2450,8 @@ def test_validate_verification_record_already_verified():
     
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId="test-id",
-        verificationCode="123456",
+        verification_id="test-id",
+        verification_code="123456",
         email="test@example.com"
     )
     
@@ -2478,8 +2478,8 @@ def test_validate_verification_record_expired():
     
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId="test-id",
-        verificationCode="123456",
+        verification_id="test-id",
+        verification_code="123456",
         email="test@example.com"
     )
     

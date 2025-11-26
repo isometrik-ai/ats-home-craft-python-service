@@ -114,7 +114,7 @@ logger = get_logger("auth-api")
 EMAIL_NOT_FOUND_MESSAGE = "Account Is Not Registered! Please Signup First To Login."
 INVALID_LOGIN_CREDS = "Invalid login credentials"
 TWO_FA_VERIFICATION_FAILED = "2FA verification failed"
-TWO_FA_REQUIRED = "2FA verification is required. Please provide verificationId and verificationCode"
+TWO_FA_REQUIRED = "2FA verification is required. Please provide verification_id and verification_code"
 
 # ============================================================================
 # SIGNUP HELPER FUNCTIONS
@@ -384,13 +384,13 @@ def _create_verification_request(
     Raises:
         HTTPException: If email doesn't match for EMAIL type
     """
-    verification_type = verification_preference.get("type", "EMAIL").upper()
+    verification_method = verification_preference.get("type", "EMAIL").upper()
     
-    if verification_type == "PHONE":
+    if verification_method == "PHONE":
         return VerifyVerificationCodeRequest(
             type=VerificationType.PHONE_NUMBER,
-            verificationId=verification_id,
-            verificationCode=verification_code,
+            verification_id=verification_id,
+            verification_code=verification_code,
             phoneNumber=stored_given_input
         )
     else:
@@ -402,8 +402,8 @@ def _create_verification_request(
             )
         return VerifyVerificationCodeRequest(
             type=VerificationType.EMAIL,
-            verificationId=verification_id,
-            verificationCode=verification_code,
+            verification_id=verification_id,
+            verification_code=verification_code,
             email=stored_given_input
         )
 
@@ -477,8 +477,8 @@ async def _check_and_verify_2fa(
     stored_given_input = verification_record.get("given_input")
     
     # Validate phone match if PHONE type
-    verification_type = verification_preference.get("type", "EMAIL").upper()
-    if verification_type == "PHONE":
+    verification_method = verification_preference.get("type", "EMAIL").upper()
+    if verification_method == "PHONE":
         _validate_phone_match(stored_given_input, user_phone)
     
     verify_data = _create_verification_request(
@@ -529,8 +529,8 @@ async def login(request: Request, data: AuthLogin):
         user_phone = getattr(all_user, 'phone', None)  # Get phone from auth.users
         await _check_and_verify_2fa(
             user_metadata=user_metadata,
-            verification_id=data.verificationId,
-            verification_code=data.verificationCode,
+            verification_id=data.verification_id,
+            verification_code=data.verification_code,
             email=data.email,
             user_phone=user_phone
         )
@@ -904,9 +904,9 @@ async def signup(
     _validate_password_strength(signup_data.password)
 
     await _validate_verification_code_for_signup(
-        verification_id=signup_data.verificationId,
+        verification_id=signup_data.verification_id,
         email=signup_data.email,
-        verification_code=signup_data.verificationCode
+        verification_code=signup_data.verification_code
     )
 
     signup_result = await sign_up_supabase_user(signup_data)
@@ -1211,6 +1211,57 @@ async def change_password(
 # CHECK 2FA STATUS API
 # ============================================================================
 
+async def _validate_credentials_for_2fa_check(email: str, password: str) -> None:
+    """
+    Validate user credentials for 2FA status check.
+    
+    Args:
+        email: User email
+        password: User password
+        
+    Raises:
+        HTTPException: If credentials are invalid
+    """
+    try:
+        await login_user(email, password)
+    except HTTPException as e:
+        # Re-raise HTTPException as-is (e.g., invalid credentials)
+        raise e
+    except AuthApiError as error:
+        # AuthApiError from Supabase for invalid credentials
+        if error.status == 400 and error.message == INVALID_LOGIN_CREDS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=INVALID_LOGIN_CREDS
+            ) from error
+        if hasattr(error, 'status') and hasattr(error, 'message'):
+            raise HTTPException(
+                status_code=error.status,
+                detail=error.message
+            ) from error
+        # For any other AuthApiError, treat as invalid credentials
+        logger.warning("AuthApiError during 2FA status check (treating as invalid credentials): %s", str(error))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=INVALID_LOGIN_CREDS
+        ) from error
+    except Exception as error:
+        error_str = str(error).lower()
+        # Check for invalid credentials in error message
+        if INVALID_LOGIN_CREDS in error_str or \
+           ("invalid" in error_str and "credential" in error_str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=INVALID_LOGIN_CREDS
+            ) from error
+        # For other errors, log and re-raise as generic error
+        log_exception()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to validate credentials"
+        ) from error
+
+
 @router.post(
     "/verify/account",
     response_model=Check2FAStatusResponse,
@@ -1251,44 +1302,7 @@ async def check_2fa_status(
             )
 
         # Step 2: Validate email and password are correct
-        try:
-            await login_user(data.email, data.password)
-        except HTTPException as e:
-            # Re-raise HTTPException as-is (e.g., invalid credentials)
-            raise e
-        except AuthApiError as error:
-            # AuthApiError from Supabase for invalid credentials
-            if error.status == 400 and error.message == INVALID_LOGIN_CREDS:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=INVALID_LOGIN_CREDS
-                ) from error
-            elif hasattr(error, 'status') and hasattr(error, 'message'):
-                raise HTTPException(
-                    status_code=error.status,
-                    detail=error.message
-                ) from error
-            # For any other AuthApiError, treat as invalid credentials
-            logger.warning("AuthApiError during 2FA status check (treating as invalid credentials): %s", str(error))
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=INVALID_LOGIN_CREDS
-            ) from error
-        except Exception as error:
-            error_str = str(error).lower()
-            # Check for invalid credentials in error message
-            if INVALID_LOGIN_CREDS in error_str or \
-               ("invalid" in error_str and "credential" in error_str):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=INVALID_LOGIN_CREDS
-                ) from error
-            # For other errors, log and re-raise as generic error
-            log_exception()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to validate credentials"
-            ) from error
+        await _validate_credentials_for_2fa_check(data.email, data.password)
 
         # Step 3: Check if 2FA is enabled
         user_metadata = all_user.user_metadata or {}
