@@ -111,7 +111,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # Initialize logger for auth module
 logger = get_logger("auth-api")
 
-EMAIL_NOT_FOUND_MESSAGE = "Account Is Not Registered! Please Signup First To Login."
+EMAIL_NOT_FOUND_MESSAGE = "Email Is Not Registered! Please Signup First To Login."
 INVALID_LOGIN_CREDS = "Invalid login credentials"
 TWO_FA_VERIFICATION_FAILED = "2FA verification failed"
 TWO_FA_REQUIRED = "2FA verification is required. Please provide verification_id and verification_code"
