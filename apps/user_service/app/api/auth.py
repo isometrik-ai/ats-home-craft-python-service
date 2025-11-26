@@ -690,28 +690,6 @@ async def signup(
     )
 
 
-def _get_not_found_response():
-    """Return response for email not found (200 status with email_found=False)."""
-    return VerifyEmailResponse(
-        message="Email not found.",
-        email_found=False,
-        status=None,
-        can_login=False,
-    )
-
-def _extract_user_type_strict(row) -> str|None:
-    if not row:
-        return None
-    user_meta = row.user_metadata
-    app_meta = row.app_metadata
-    if isinstance(user_meta, dict):
-        utype = user_meta.get("type") or user_meta.get("user_type")
-        if utype:
-            return utype
-    if isinstance(app_meta, dict):
-        return app_meta.get("type") or app_meta.get("user_type")
-    return None
-
 @handle_api_exceptions("verify email")
 @router.post(
     "/email/verify", response_model=VerifyEmailResponse, status_code=status.HTTP_200_OK
@@ -727,43 +705,53 @@ async def verify_email(
 
     Returns email_found=True if email exists in auth.users, regardless of user type or status.
     """
+    try:
+        # 1) Get user from auth.users using centralized operation
+        auth_user = await get_auth_user_by_email(body.email)
+        if not auth_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "message": "Email not found."
+                }
+            )
 
-    # 1) Get user from auth.users using centralized operation
-    auth_user = await get_auth_user_by_email(body.email)
-    if not auth_user:
-        return _get_not_found_response()
-
-    # 2) Extract user type (if available)
-    user_type = _extract_user_type_strict(auth_user)
-
-    # 3) If user is organization_member, check status in organization_members table
-    if user_type == "organization_member":
+        # 2) Get organization member status by email
         status_value = await get_organization_member_status_by_email(body.email)
-        if status_value:
-            can_login_local = status_value == "active"
-            return VerifyEmailResponse(
-                message="Email found." if can_login_local else "Account is suspended.",
-                email_found=True,
-                status=status_value,
-                can_login=can_login_local,
+        if status_value is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "message": "Email not found."
+                }
+            )
+        elif status_value != "active":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "message": "Account is not active."
+                }
             )
         else:
             # User exists in auth.users but not in organization_members table
             return VerifyEmailResponse(
-                message="Email found.",
+                message="Email found",
                 email_found=True,
-                status=None,
-                can_login=False,
+                status="active",
+                can_login=True
             )
 
-    # 4) User exists in auth.users but is not organization_member or has no user type
-    # Still return email_found=True since email exists
-    return VerifyEmailResponse(
-        message="Email found.",
-        email_found=True,
-        status=None,
-        can_login=False,
-    )
+        # 4) User exists in auth.users but is not organization_member or has no user type
+        # Still return email_found=True since email exists
+    except HTTPException as error:
+        raise error
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "message": "Failed to verify email"
+            }
+        ) from error
 
 
 @handle_api_exceptions("delete user")

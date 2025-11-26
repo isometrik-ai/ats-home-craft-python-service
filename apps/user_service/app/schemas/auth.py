@@ -8,7 +8,7 @@ import base64
 import secrets
 import hashlib
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field, model_validator, EmailStr, field_validator
 from fastapi import HTTPException, status
@@ -81,7 +81,7 @@ class VerifyEmailResponse(BaseModel):
 
     message: str
     email_found: bool
-    status: Optional[str]  # 'active', 'suspended', or None
+    status: Optional[Literal["active", "suspended"]]  # 'active', 'suspended', or None
     can_login: bool
 
 
