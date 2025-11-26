@@ -74,8 +74,8 @@ class TestCreateUserProfileData:
         result = create_user_profile_data(user_profile)
 
         assert result.verification_preference is not None
-        assert result.verification_preference.enabled is True
-        assert result.verification_preference.type == "email"
+        assert result.verification_preference.two_fa_enabled is True
+        assert result.verification_preference.verification_method == "email"
         assert result.timezone == "UTC"  # Default when None
 
     def test_create_user_profile_data_verification_preference_invalid(self):

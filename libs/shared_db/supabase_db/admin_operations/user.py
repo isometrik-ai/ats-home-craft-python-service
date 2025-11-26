@@ -102,7 +102,7 @@ async def update_email_of_user(user_id: str, email: str) -> bool:
 
 async def update_metadata_of_user(user_id: str, metadata: dict) -> bool:
     """Update metadata of user in auth.users table."""
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
     try:
         result = await supabase.auth.admin.update_user_by_id(user_id,{"user_metadata": metadata})
         return result.user is not None

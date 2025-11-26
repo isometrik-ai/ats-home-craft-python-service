@@ -230,7 +230,7 @@ class TestUserOperations:
             "updated_at": "2024-01-01T00:00:00Z"
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_updated_user]
@@ -271,7 +271,7 @@ class TestUserOperations:
             "updated_at": "2024-01-01T00:00:00Z"
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_updated_user]

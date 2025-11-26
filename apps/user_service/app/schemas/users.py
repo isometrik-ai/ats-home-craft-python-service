@@ -96,14 +96,15 @@ class PermissionInfo(BaseModel):
 
 class VerificationPreference(BaseModel):
     """Model for verification preference settings"""
-    enabled: bool = Field(..., description="Whether verification is enabled or disabled")
-    type: str = Field(..., description="Type of verification: PHONE or EMAIL")
+    two_fa_enabled: bool = Field(..., description="Whether 2FA verification is enabled or disabled", alias="enabled")
+    verification_method: str = Field(..., description="Type of verification: PHONE or EMAIL", alias="type")
 
     model_config = ConfigDict(
+        populate_by_name=True,  # Allow both field name and alias
         json_schema_extra={
             "example": {
-                "enabled": True,
-                "type": "PHONE"
+                "two_fa_enabled": True,
+                "verification_method": "PHONE"
             }
         }
     )
@@ -231,6 +232,10 @@ class UserProfileData(BaseModel):
                         "last_sign_in_at": "2024-12-19T10:00:00Z",
                     }
                 ],
+                "verification_preference": {
+                    "two_fa_enabled": True,
+                    "verification_method": "PHONE"
+                },
             }
         }
     )
