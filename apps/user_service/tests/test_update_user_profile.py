@@ -958,3 +958,396 @@ class TestUpdateUserProfile:
 
             assert response.status_code == 200
 
+    @pytest.mark.asyncio
+    async def test_update_user_profile_verification_preference_phone_enabled(self, client, mock_current_user, mock_user_context):
+        """Test updating verification preference with PHONE enabled."""
+        current_user_data = {
+            "user_id": mock_user_context.user_id,
+            "email": "test@example.com",
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        updated_user_data = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        mock_user_data = MagicMock()
+        mock_user_data.user = MagicMock()
+        mock_user_data.user.user_metadata = {}
+
+        updated_profile = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
+                   AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
+                   AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_user_info',
+                   AsyncMock(return_value=updated_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_by_id',
+                   AsyncMock(return_value=mock_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_metadata_of_user',
+                   AsyncMock(return_value=True)) as mock_update_metadata, \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_profile_by_id',
+                   AsyncMock(return_value=updated_profile)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
+                   return_value=None):
+
+            client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
+
+            response = client.put(
+                "/v1/admin/users/update",
+                json={
+                    "two_fa_enabled": True,
+                    "verification_method": "PHONE"
+                }
+            )
+
+            assert response.status_code == 200
+            # Verify that update_metadata_of_user was called with verification_preference
+            call_args = mock_update_metadata.call_args
+            assert call_args is not None
+            updated_metadata = call_args[0][1]  # Second argument is the metadata dict
+            assert "verification_preference" in updated_metadata
+            assert updated_metadata["verification_preference"]["enabled"] is True
+            assert updated_metadata["verification_preference"]["type"] == "PHONE"
+
+    @pytest.mark.asyncio
+    async def test_update_user_profile_verification_preference_email_enabled(self, client, mock_current_user, mock_user_context):
+        """Test updating verification preference with EMAIL enabled."""
+        current_user_data = {
+            "user_id": mock_user_context.user_id,
+            "email": "test@example.com",
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        updated_user_data = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        mock_user_data = MagicMock()
+        mock_user_data.user = MagicMock()
+        mock_user_data.user.user_metadata = {}
+
+        updated_profile = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
+                   AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
+                   AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_user_info',
+                   AsyncMock(return_value=updated_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_by_id',
+                   AsyncMock(return_value=mock_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_metadata_of_user',
+                   AsyncMock(return_value=True)) as mock_update_metadata, \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_profile_by_id',
+                   AsyncMock(return_value=updated_profile)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
+                   return_value=None):
+
+            client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
+
+            response = client.put(
+                "/v1/admin/users/update",
+                json={
+                    "two_fa_enabled": True,
+                    "verification_method": "EMAIL"
+                }
+            )
+
+            assert response.status_code == 200
+            # Verify that update_metadata_of_user was called with verification_preference
+            call_args = mock_update_metadata.call_args
+            assert call_args is not None
+            updated_metadata = call_args[0][1]
+            assert "verification_preference" in updated_metadata
+            assert updated_metadata["verification_preference"]["enabled"] is True
+            assert updated_metadata["verification_preference"]["type"] == "EMAIL"
+
+    @pytest.mark.asyncio
+    async def test_update_user_profile_verification_preference_disabled(self, client, mock_current_user, mock_user_context):
+        """Test updating verification preference to disabled."""
+        current_user_data = {
+            "user_id": mock_user_context.user_id,
+            "email": "test@example.com",
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        updated_user_data = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        mock_user_data = MagicMock()
+        mock_user_data.user = MagicMock()
+        mock_user_data.user.user_metadata = {}
+
+        updated_profile = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
+                   AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
+                   AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_user_info',
+                   AsyncMock(return_value=updated_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_by_id',
+                   AsyncMock(return_value=mock_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_metadata_of_user',
+                   AsyncMock(return_value=True)) as mock_update_metadata, \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_profile_by_id',
+                   AsyncMock(return_value=updated_profile)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
+                   return_value=None):
+
+            client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
+
+            response = client.put(
+                "/v1/admin/users/update",
+                json={
+                    "two_fa_enabled": False,
+                    "verification_method": "PHONE"
+                }
+            )
+
+            assert response.status_code == 200
+            # Verify that update_metadata_of_user was called with verification_preference
+            call_args = mock_update_metadata.call_args
+            assert call_args is not None
+            updated_metadata = call_args[0][1]
+            assert "verification_preference" in updated_metadata
+            assert updated_metadata["verification_preference"]["enabled"] is False
+            assert updated_metadata["verification_preference"]["type"] == "PHONE"
+
+    @pytest.mark.asyncio
+    async def test_update_user_profile_verification_preference_only_enabled_error(self, client, mock_current_user, mock_user_context):
+        """Test error when only two_fa_enabled is provided."""
+        current_user_data = {
+            "user_id": mock_user_context.user_id,
+            "email": "test@example.com",
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
+                   AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
+                   AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
+                   return_value=None):
+
+            client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
+
+            response = client.put(
+                "/v1/admin/users/update",
+                json={
+                    "two_fa_enabled": True
+                }
+            )
+
+            assert response.status_code == 400
+            assert "Both two_fa_enabled and verification_method must be provided together" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_update_user_profile_verification_preference_only_type_error(self, client, mock_current_user, mock_user_context):
+        """Test error when only verification_method is provided."""
+        current_user_data = {
+            "user_id": mock_user_context.user_id,
+            "email": "test@example.com",
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
+                   AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
+                   AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
+                   return_value=None):
+
+            client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
+
+            response = client.put(
+                "/v1/admin/users/update",
+                json={
+                    "verification_method": "PHONE"
+                }
+            )
+
+            assert response.status_code == 400
+            assert "Both two_fa_enabled and verification_method must be provided together" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_update_user_profile_verification_preference_invalid_type_error(self, client, mock_current_user, mock_user_context):
+        """Test error when verification_method is invalid."""
+        current_user_data = {
+            "user_id": mock_user_context.user_id,
+            "email": "test@example.com",
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
+                   AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
+                   AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
+                   return_value=None):
+
+            client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
+
+            response = client.put(
+                "/v1/admin/users/update",
+                json={
+                    "two_fa_enabled": True,
+                    "verification_method": "INVALID"
+                }
+            )
+
+            assert response.status_code == 400
+            assert "verification_method must be either 'PHONE' or 'EMAIL'" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_update_user_profile_verification_preference_with_other_fields(self, client, mock_current_user, mock_user_context):
+        """Test updating verification preference along with other fields."""
+        current_user_data = {
+            "user_id": mock_user_context.user_id,
+            "email": "test@example.com",
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        updated_user_data = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "New",
+            "last_name": "Name",
+            "full_name": "New Name"
+        }
+
+        mock_user_data = MagicMock()
+        mock_user_data.user = MagicMock()
+        mock_user_data.user.user_metadata = {}
+
+        updated_profile = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "New",
+            "last_name": "Name",
+            "full_name": "New Name"
+        }
+
+        with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
+                   AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
+                   AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_user_info',
+                   AsyncMock(return_value=updated_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_by_id',
+                   AsyncMock(return_value=mock_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_metadata_of_user',
+                   AsyncMock(return_value=True)) as mock_update_metadata, \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_profile_by_id',
+                   AsyncMock(return_value=updated_profile)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
+                   return_value=None):
+
+            client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
+
+            response = client.put(
+                "/v1/admin/users/update",
+                json={
+                    "first_name": "New",
+                    "last_name": "Name",
+                    "two_fa_enabled": True,
+                    "verification_method": "EMAIL"
+                }
+            )
+
+            assert response.status_code == 200
+            # Verify that update_metadata_of_user was called with both fields
+            call_args = mock_update_metadata.call_args
+            assert call_args is not None
+            updated_metadata = call_args[0][1]
+            assert "first_name" in updated_metadata
+            assert "last_name" in updated_metadata
+            assert "full_name" in updated_metadata
+            assert "verification_preference" in updated_metadata
+            assert updated_metadata["verification_preference"]["enabled"] is True
+            assert updated_metadata["verification_preference"]["type"] == "EMAIL"
+
+    @pytest.mark.asyncio
+    async def test_update_user_profile_verification_preference_case_insensitive(self, client, mock_current_user, mock_user_context):
+        """Test that verification_method is case-insensitive and stored as uppercase."""
+        current_user_data = {
+            "user_id": mock_user_context.user_id,
+            "email": "test@example.com",
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        updated_user_data = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        mock_user_data = MagicMock()
+        mock_user_data.user = MagicMock()
+        mock_user_data.user.user_metadata = {}
+
+        updated_profile = {
+            "user_id": mock_user_context.user_id,
+            "first_name": "Old",
+            "last_name": "User"
+        }
+
+        with patch('apps.user_service.app.api.admin_management.users.update_user.extract_user_context',
+                   AsyncMock(return_value=mock_user_context)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization',
+                   AsyncMock(return_value=current_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_user_info',
+                   AsyncMock(return_value=updated_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_by_id',
+                   AsyncMock(return_value=mock_user_data)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.update_metadata_of_user',
+                   AsyncMock(return_value=True)) as mock_update_metadata, \
+             patch('apps.user_service.app.api.admin_management.users.update_user.get_user_profile_by_id',
+                   AsyncMock(return_value=updated_profile)), \
+             patch('apps.user_service.app.api.admin_management.users.update_user.set_audit_old_data_from_user',
+                   return_value=None):
+
+            client.app.dependency_overrides[get_user_from_auth] = lambda: mock_current_user
+
+            response = client.put(
+                "/v1/admin/users/update",
+                json={
+                    "two_fa_enabled": True,
+                    "verification_method": "phone"  # lowercase
+                }
+            )
+
+            assert response.status_code == 200
+            # Verify that type is stored as uppercase
+            call_args = mock_update_metadata.call_args
+            assert call_args is not None
+            updated_metadata = call_args[0][1]
+            assert updated_metadata["verification_preference"]["type"] == "PHONE"
+

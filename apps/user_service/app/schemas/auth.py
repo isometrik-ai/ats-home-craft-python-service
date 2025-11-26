@@ -59,6 +59,15 @@ class AuthLogin(BaseModel):
 
     email: EmailStr = Field(..., examples=["test@example.com"])
     password: str
+    verification_id: Optional[str] = Field(None, description="Verification code ID for 2FA (required if 2FA is enabled)")
+    verification_code: Optional[str] = Field(None, description="Verification code for 2FA (required if 2FA is enabled)")
+
+
+class Check2FAStatusRequest(BaseModel):
+    """Request model for checking 2FA status"""
+
+    email: EmailStr = Field(..., examples=["test@example.com"])
+    password: str
 
 
 class MemberBody(BaseModel):
@@ -95,8 +104,8 @@ class SignupRequest(BaseModel):
     # job_title: Optional[str] = None
     phone: Optional[str] = None
     timezone: Optional[str] = Field(default="UTC",max_length=3)
-    verificationId: str = Field(..., description="Verification code ID from verification-code/send endpoint")
-    verificationCode: str = Field(..., description="Verification code to verify email")
+    verification_id: str = Field(..., description="Verification code ID from verification-code/send endpoint")
+    verification_code: str = Field(..., description="Verification code to verify email")
 
     @classmethod
     @field_validator("first_name")
@@ -218,6 +227,12 @@ class ChangePasswordRequest(BaseModel):
 class ChangePasswordResponse(ResponseModel):
     """Response model for change password operations"""
     message: str = Field(default="Password changed successfully", description="Response message")
+
+
+class Check2FAStatusResponse(BaseModel):
+    """Response model for checking 2FA status"""
+
+    two_fa_enabled: bool = Field(..., description="Whether 2FA is enabled for the user")
 
 
 # """

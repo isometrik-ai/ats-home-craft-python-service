@@ -84,6 +84,8 @@ class UpdateUserProfileRequest(BaseModel):
     - last_name: Updated last name
     - timezone: Updated timezone preference
     - avatar_url: Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')
+    - two_fa_enabled: Enable or disable verification preference
+    - verification_method: Type of verification preference (PHONE or EMAIL)
 
     full_name will be automatically calculated from first_name + last_name.
     """
@@ -91,6 +93,8 @@ class UpdateUserProfileRequest(BaseModel):
     last_name: Optional[str] = Field(None, description="Updated last name")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
     avatar_url: Optional[str] = Field(None, description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')")
+    two_fa_enabled: Optional[bool] = Field(None, description="Enable or disable verification preference")
+    verification_method: Optional[str] = Field(None, description="Type of verification preference: PHONE or EMAIL")
 
     @field_validator("avatar_url")
     @classmethod
@@ -104,7 +108,9 @@ class UpdateUserProfileRequest(BaseModel):
                 "first_name": "John",
                 "last_name": "Doe",
                 "timezone": "America/New_York",
-                "avatar_url": "house-of-apps-legal-ai/user-id/avatar.jpg"
+                "avatar_url": "house-of-apps-legal-ai/user-id/avatar.jpg",
+                "two_fa_enabled": True,
+                "verification_method": "PHONE"
             }
         }
     }
@@ -512,8 +518,30 @@ async def update_user_profile(
         update_data["avatar_url"] = body.avatar_url
         metadata_update["avatar_url"] = body.avatar_url
 
+    # Update verification preference if provided
+    # Both two_fa_enabled and verification_method must be provided together
+    if body.two_fa_enabled is not None and body.verification_method is not None:
+        # Validate verification_method
+        if body.verification_method.upper() not in ["PHONE", "EMAIL"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="verification_method must be either 'PHONE' or 'EMAIL'"
+            )
+        # Create verification preference object (always replace existing one)
+        verification_preference = {
+            "enabled": body.two_fa_enabled,
+            "type": body.verification_method.upper()
+        }
+        metadata_update["verification_preference"] = verification_preference
+    elif body.two_fa_enabled is not None or body.verification_method is not None:
+        # If only one is provided, raise error
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Both two_fa_enabled and verification_method must be provided together"
+        )
+
     # Check if there's anything to update
-    if not update_data:
+    if not update_data and not metadata_update:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields provided for update"
