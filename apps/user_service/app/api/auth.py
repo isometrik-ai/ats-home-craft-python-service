@@ -100,6 +100,8 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # Initialize logger for auth module
 logger = get_logger("auth-api")
 
+EMAIL_NOT_FOUND_MESSAGE = "Email Is Not Registered! Please Signup First To Login."
+INVALID_LOGIN_CREDS = "Invalid login credentials"
 
 # ============================================================================
 # SIGNUP HELPER FUNCTIONS
@@ -273,6 +275,12 @@ async def login(request: Request, data: AuthLogin):
         HTTPException: 400 for invalid credentials, 500 for other errors
     """
     try:
+        all_user = await get_auth_user_by_email(data.email)
+        if all_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=EMAIL_NOT_FOUND_MESSAGE
+            )
         result = await login_user(data.email, data.password)
         return AuthResponse(
             access_token=result.session.access_token,
@@ -296,30 +304,31 @@ async def login(request: Request, data: AuthLogin):
         # AuthApiError from Supabase for invalid credentials
         # login_user already handles "Email not confirmed" as HTTPException 403
         # So any AuthApiError here is likely invalid credentials
-        error_message = str(error).lower()
-        error_msg = getattr(error, 'message', '')
-        if (hasattr(error, 'status') and error.status == 400) or \
-           "invalid login credentials" in error_message or \
-           (error_msg and "invalid login credentials" in str(error_msg).lower()):
+        if error.status == 400 and error.message == INVALID_LOGIN_CREDS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid login credentials"
+                detail=INVALID_LOGIN_CREDS
+            ) from error
+        elif hasattr(error, 'status') and hasattr(error, 'message'):
+            raise HTTPException(
+                status_code=error.status,
+                detail=error.message
             ) from error
         # For any other AuthApiError, treat as invalid credentials (most common case)
         logger.warning("AuthApiError during login (treating as invalid credentials): %s", str(error))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid login credentials"
+            detail=INVALID_LOGIN_CREDS
         ) from error
     except Exception as error:
         log_exception()
         error_str = str(error).lower()
         # Check for invalid credentials in error message
-        if "invalid login credentials" in error_str or \
+        if INVALID_LOGIN_CREDS in error_str or \
            ("invalid" in error_str and "credential" in error_str):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid login credentials"
+                detail=INVALID_LOGIN_CREDS
             ) from error
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -892,7 +901,7 @@ async def change_password(
         await login_user(user_email, data.current_password)
     except HTTPException as e:
         # if e.status_code == 401 or e.status_code == 403:
-        if e.status_code == 400 and e.detail == "Invalid login credentials":
+        if e.status_code == 400 and e.detail == INVALID_LOGIN_CREDS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Current password is incorrect"

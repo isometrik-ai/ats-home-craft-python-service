@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import uuid
 from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.schemas.auth import PlanType
 from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_metadata_of_user
 from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
@@ -65,14 +66,11 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "slug": organisation_data["slug"],
         "domain": organisation_data.get("domain"),
         "logo_url": organisation_data.get("logo_url"),
-        "plan_type": organisation_data.get("plan_type", "starter"),
         "status": organisation_data.get("status", "trial"),
         "industry": organisation_data.get("industry"),
         "company_size": organisation_data.get("company_size"),
         "description": organisation_data.get("description"),
         "referral_source": organisation_data.get("referral_source"),
-        "max_users": organisation_data.get("max_users"),
-        # "account_type": organisation_data.get("account_type", "personal"),
         "created_at": NOW_CONSTANT,
         "updated_at":NOW_CONSTANT,
         "created_by_id":organisation_data.get("user_id")
@@ -98,6 +96,15 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
 
     org_record["settings"].update({"enterprise_features":organisation_data.get("enterprise_features",None)})
 
+    subscription_dict = {
+        'start_date' : NOW_CONSTANT,
+        'end_date' : NOW_CONSTANT + " + interval '7 days'",
+        'plan_type' : PlanType.TRIAL,
+        'max_users' : organisation_data.get("max_users",None),
+    }
+
+    org_record['subscription'] = subscription_dict
+
     table = supabase.table("organizations")
     # Use returning: 'minimal' to avoid SELECT permission requirements
     insert_query = table.insert(org_record, returning="minimal")
@@ -111,13 +118,12 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "slug": organisation_data["slug"],
         "domain": organisation_data.get("domain"),
         "logo_url": organisation_data.get("logo_url"),
-        "plan_type": organisation_data.get("plan_type", "starter"),
         "status": organisation_data.get("status", "trial"),
         "industry": organisation_data.get("industry"),
         "company_size": organisation_data.get("company_size"),
         "description": organisation_data.get("description"),
         "referral_source": organisation_data.get("referral_source"),
-        "max_users": organisation_data.get("max_users"),
+        "subscription": organisation_data.get("subscription"),
         "created_at": NOW_CONSTANT,
         "updated_at": NOW_CONSTANT,
         "created_by_id": organisation_data.get("user_id")
@@ -140,7 +146,7 @@ async def get_organisation_details_by_id(organisation_id: str) -> Optional[Dict[
     # Fetch organisation with embedded members (only fields needed to compute count)
     table = supabase.table("organizations")
     select_query = table.select(
-        "id, name, slug, domain, logo_url, plan_type, status, max_users, timezone, settings, "
+        "id, name, slug, domain, logo_url, status, timezone, settings, subscription,"
         "description, company_size, created_at, updated_at, organization_members(status)"
     )
     eq_query = select_query.eq("id", organisation_id)
@@ -165,23 +171,6 @@ async def get_organisation_details_by_id(organisation_id: str) -> Optional[Dict[
 
 
 @handle_database_errors(
-    "get_organisation_by_slug",
-    custom_messages=create_error_messages("get_organisation_by_slug", "getting"))
-async def get_organisation_by_slug(slug: str) -> Optional[Dict[str, Any]]:
-    """Get organisation by slug."""
-    supabase = await get_supabase_admin_client()
-
-    table = supabase.table("organizations")
-    result = await table.select(
-        "id, name, slug, domain, logo_url, plan_type, status, account_type, "
-        "created_at, updated_at"
-    ).eq("slug", slug).execute()
-
-    if result.data and len(result.data) > 0:
-        return result.data[0]
-    return None
-
-@handle_database_errors(
     "update_organisation_details",
     custom_messages=create_error_messages("update_organisation_details", "updating"))
 async def update_organisation_details(
@@ -202,7 +191,7 @@ async def update_organisation_details(
     settings_fields = [
         "address", "primary_practice_areas", "secondary_practice_areas", "specializations",
         "preferred_integration", "need_help_importing_data", "need_migration_assistance",
-        "compliance_security", "enterprise_features"]
+        "compliance_security", "enterprise_features","max_users"]
 
     if any(field in settings_fields for field in payload.keys()):
         # payload["settings"] = {}
@@ -256,6 +245,20 @@ async def update_organisation_details(
         if payload.get("enterprise_features") is not None:
             temp_var["enterprise_features"] = payload.get("enterprise_features")
             payload.pop("enterprise_features")
+
+        if payload.get("max_users") is not None:
+            subscription_dict = organisation_data.get("subscription",None)
+            if subscription_dict is not None:
+                subscription_dict["max_users"] = payload.get("max_users")
+                payload.pop("max_users")
+            else:
+                subscription_dict = {
+                    "max_users":payload.get("max_users"),
+                    "plan_type":PlanType.TRIAL,
+                    "start_date":NOW_CONSTANT,
+                    "end_date":NOW_CONSTANT + " + interval '7 days'"}
+                payload.pop("max_users")
+            payload["subscription"] = subscription_dict
 
         payload["settings"] = temp_var
 
@@ -324,7 +327,7 @@ async def get_list_of_organisations(search: Optional[str] = None, status: Option
 
     # Build the query using the same logic as build_organisations_filter_query
     select_query = table.select(
-        "id, name, slug, domain, logo_url, plan_type, status, account_type, "
+        "id, name, slug, domain, logo_url, status, account_type, "
         "created_at, updated_at, organization_members(id)"
     )
 
@@ -376,41 +379,6 @@ async def get_organisations_count(search: Optional[str], status: Optional[str]) 
 
     return result.count if result.count is not None else 0
 
-@handle_database_errors(
-    "get_organisations_with_members",
-    custom_messages=create_error_messages("get_organisations_with_members", "getting"))
-async def get_organisations_with_members(search: Optional[str] = None, status: Optional[str] = None,
-                                       limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
-    """Get organisations with member count information."""
-    supabase = await _get_supabase_client()
-
-    # Build the query with joins and filters
-    table = supabase.table("organizations")
-    select_query = table.select(
-        "id, name, slug, domain, logo_url, plan_type, status, account_type, "
-        "created_at, updated_at, "
-        "organization_members(id)"
-    )
-
-    # Apply search filter using helper function
-    query = _apply_search_filter(select_query, search, ["name", "slug", "domain"])
-
-    # Apply status filter
-    if status:
-        query = query.eq("status", status)
-
-    # Apply pagination using helper function
-    paginated_query = _apply_pagination(query, limit, offset)
-    result = await paginated_query.execute()
-
-    # Process results to add member count using helper function
-    organisations = _get_result_data(result)
-    for org in organisations:
-        org["member_count"] = len(org.get("organization_members", []))
-        # Remove the organization_members array as it's not needed in response
-        org.pop("organization_members", None)
-
-    return organisations
 
 # ============================================================================
 # ORGANISATION VALIDATION OPERATIONS
@@ -1084,7 +1052,7 @@ async def get_organisation_compliance_status(organisation_id: str) -> Dict[str, 
 
     # Get organization status
     table = supabase.table("organizations")
-    select_query = table.select("status, plan_type, created_at")
+    select_query = table.select("status, created_at")
     query = select_query.eq("id", organisation_id)
     org_result = await query.execute()
 
@@ -1095,11 +1063,9 @@ async def get_organisation_compliance_status(organisation_id: str) -> Dict[str, 
 
     # Basic compliance check
     is_active = org_data.get("status") == "active"
-    has_plan = org_data.get("plan_type") is not None
 
     return {
-        "compliant": is_active and has_plan,
+        "compliant": is_active,
         "status": org_data.get("status"),
-        "plan_type": org_data.get("plan_type"),
         "created_at": org_data.get("created_at")
     }

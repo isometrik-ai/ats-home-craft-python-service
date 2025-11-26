@@ -47,6 +47,8 @@ def _build_mock_supabase_user(metadata_override=None, identities_override=None):
 
     return SimpleNamespace(
         user=SimpleNamespace(
+            email=base_metadata.get("email", "test@example.com"),  # Add email field
+            phone=base_metadata.get("phone"),  # Add phone field if present
             user_metadata=base_metadata,
             identities=identities,
         )
@@ -145,7 +147,7 @@ def test_get_user_profile_success(client):
 
 
 def test_get_user_profile_email_mismatch(client):
-    """Test user profile email mismatch."""
+    """Test user profile email mismatch - now updates email instead of raising error."""
     from apps.user_service.app.dependencies.common_utils import UserContext
 
     mock_user_context = UserContext(
@@ -155,16 +157,23 @@ def test_get_user_profile_email_mismatch(client):
         user_type="organization_member"
     )
 
+    # Mock user data with email from Supabase auth
+    mock_user_data = _build_mock_supabase_user()
+    mock_user_data.user.email = "test@example.com"  # Email from auth matches token
+
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "different@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
             "joined_at": None, "last_active_at": None
-        })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
+        })), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_user_data)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
         res = client.get("/v1/admin/users/profile")
-        assert res.status_code == 403
-        assert "Token email does not match user profile" in res.json()["detail"]
+        assert res.status_code == 200
+        # Email should be updated to match token email
+        assert res.json()["data"]["email"] == "test@example.com"
 
 
 def test_get_user_profile_invalid_user_type(client):
@@ -215,8 +224,11 @@ def test_get_user_profile_no_organization_linked(client):
             "avatar_url": "https://example.com/avatar.jpg",
             "phone": "+1234567890",
             "timezone": "America/New_York",
+            "email": "test@example.com",  # Ensure email matches token
         }
     )
+    # Ensure email field is set on user object (not just metadata)
+    mock_user_data.user.email = "test@example.com"
 
     with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context", AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value=None)), \

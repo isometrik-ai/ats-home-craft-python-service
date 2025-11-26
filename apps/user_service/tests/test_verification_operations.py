@@ -205,7 +205,7 @@ class TestVerificationOperations:
 
     @pytest.mark.asyncio
     async def test_create_verification_code_with_default_otp(self):
-        """Test create_verification_code when OTP_ENABLED is False (covers DEFAULT_OTP branch)."""
+        """Test create_verification_code when EMAIL_OTP_ENABLED is False (covers EMAIL_DEFAULT_OTP branch)."""
         mock_result = {
             "id": str(uuid.uuid4()),
             "type_text": "EMAIL",
@@ -228,8 +228,8 @@ class TestVerificationOperations:
 
         with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
                    AsyncMock(return_value=mock_supabase)), \
-             patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.OTP_ENABLED', False), \
-             patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.DEFAULT_OTP', "1111"):
+             patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.EMAIL_OTP_ENABLED', False), \
+             patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.EMAIL_DEFAULT_OTP', "1111"):
 
             result = await create_verification_code(
                 type_text="EMAIL",
@@ -238,7 +238,7 @@ class TestVerificationOperations:
             )
 
             assert result["id"] == mock_result["id"]
-            # Verify insert was called with DEFAULT_OTP
+            # Verify insert was called with EMAIL_DEFAULT_OTP
             mock_table.insert.assert_called_once()
             call_data = mock_table.insert.call_args[0][0]
             assert call_data["verification_code"] == "1111"

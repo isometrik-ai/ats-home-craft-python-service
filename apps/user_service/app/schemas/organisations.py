@@ -14,11 +14,11 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 from fastapi import HTTPException, status
 from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
-from apps.user_service.app.schemas.auth import CompanyData, PlanType, User
+from apps.user_service.app.schemas.auth import CompanyData, User, Subscription
 from apps.user_service.app.schemas import ResponseModel, validate_path_field
 from apps.user_service.app.schemas.auth import (
     PreferredIntegration, ComplianceSecurity, EnterpriseFeatures, TeamSetup,
-    Address, CompanyData, PlanType, PracticeArea, Specialization, User
+    Address, CompanyData, PracticeArea, Specialization, User
 )
 
 class OrganisationInfo(BaseModel):
@@ -33,9 +33,8 @@ class OrganisationInfo(BaseModel):
         slug (str): URL-friendly slug for the organisation
         domain (Optional[str]): Organisation's domain name
         logo_url (Optional[str]): URL to organisation's logo
-        plan_type (str): Type of plan (starter, professional, enterprise)
         status (str): Organisation's current status (active, suspended, trial)
-        max_users (int): Maximum number of users allowed
+        subscription (Optional[Subscription]): Subscription information
         timezone (str): Organisation's timezone setting
         created_at (Optional[str]): ISO timestamp when organisation was created
         updated_at (Optional[str]): ISO timestamp when organisation was last updated
@@ -50,13 +49,13 @@ class OrganisationInfo(BaseModel):
     slug: str = Field(..., description="URL-friendly slug for the organisation")
     domain: Optional[str] = Field(None, description="Organisation's domain name")
     logo_url: Optional[str] = Field(None, description="URL to organisation's logo")
-    plan_type: str = Field(
-        ..., description="Type of plan (starter, professional, enterprise)"
+    subscription: Optional[Subscription] = Field(
+        default=None,
+        description="Subscription information stored in the dedicated column",
     )
     status: str = Field(
         ..., description="Organisation's current status (active, suspended, trial)"
     )
-    max_users: int = Field(..., description="Maximum number of users allowed")
     timezone: str = Field(default="UTC", description="Organisation's timezone setting")
     created_at: Optional[str] = Field(
         None, description="ISO timestamp when organisation was created"
@@ -382,11 +381,9 @@ class NewOrganisationBody(BaseModel):
     Attributes:
         user_data (Optional[User]): Information about the initial user to be created.
         company_data (Optional[CompanyData]): Information about the organisation/company.
-        plan_type (PlanType): The subscription plan type for the organisation (default: starter).
     """
     user_data: Optional[User] = None
     company_data: CompanyData
-    plan_type: PlanType = PlanType.STARTER
 
 
 class CreateOrganisationWithUserResponse(ResponseModel):
@@ -493,18 +490,9 @@ class OrganizationAdminUpdate(OrganizationUpdate):
         max_length=255,
         description="Primary domain name associated with the organisation",
     )
-    plan_type: Optional[str] = Field(
-        None,
-        description="Subscription plan type (starter, professional, enterprise)",
-    )
     status: Optional[str] = Field(
         None,
         description="Organisation's account status (active, suspended, trial)",
-    )
-    max_users: Optional[int] = Field(
-        None,
-        ge=1,
-        description="Maximum number of users allowed under the current plan",
     )
 
     @model_validator(mode='after')

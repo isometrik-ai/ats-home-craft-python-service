@@ -28,8 +28,14 @@ logger = get_logger("verification_operations")
 
 # Environment variables
 MAX_ATTEMPT_VERIFICATION = int(os.getenv("MAX_ATTEMPT_VERIFICATION", "5"))
+# Legacy OTP settings (for backward compatibility)
 OTP_ENABLED = os.getenv("OTP_ENABLED", "true").lower() == "true"
 DEFAULT_OTP = os.getenv("DEFAULT_OTP", "1111")
+# Type-specific OTP settings
+EMAIL_OTP_ENABLED = os.getenv("EMAIL_OTP_ENABLED", "true").lower() == "true"
+EMAIL_DEFAULT_OTP = os.getenv("EMAIL_DEFAULT_OTP", "1111")
+PHONE_OTP_ENABLED = os.getenv("PHONE_OTP_ENABLED", "true").lower() == "true"
+PHONE_DEFAULT_OTP = os.getenv("PHONE_DEFAULT_OTP", "1111")
 VERIFICATION_CODE_EXPIRY_MINUTES = int(os.getenv("VERIFICATION_CODE_EXPIRY_MINUTES", "10"))
 # Time window for counting attempts (in hours, 24 = per day, None = based on expiry only)
 # Default: 24 hours (per day)
@@ -66,14 +72,29 @@ async def create_verification_code(
     """
     supabase = await get_fresh_supabase_admin_client()
 
-    # Generate verification code
-    if OTP_ENABLED:
+    # Generate verification code based on type
+    # Use type-specific OTP settings (EMAIL_OTP_ENABLED/PHONE_OTP_ENABLED)
+    # Fall back to legacy OTP_ENABLED if type-specific not set
+    type_upper = type_text.upper()
+    if type_upper == "EMAIL":
+        otp_enabled = EMAIL_OTP_ENABLED
+        default_otp = EMAIL_DEFAULT_OTP
+    elif type_upper == "PHONE_NUMBER":
+        otp_enabled = PHONE_OTP_ENABLED
+        default_otp = PHONE_DEFAULT_OTP
+    else:
+        # Fallback to legacy settings for unknown types
+        otp_enabled = OTP_ENABLED
+        default_otp = DEFAULT_OTP
+        logger.warning("Unknown verification type '%s', using legacy OTP settings", type_text)
+    
+    if otp_enabled:
         # Generate cryptographically secure random 4-digit code (1000-9999)
         # Using secrets.randbelow for secure random number generation
         verification_code = str(secrets.randbelow(9000) + 1000)
     else:
         # Use default OTP from config
-        verification_code = DEFAULT_OTP
+        verification_code = default_otp
 
     # Calculate expiry time (current time + expiry minutes in milliseconds)
     current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
