@@ -712,7 +712,7 @@ async def verify_email(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
-                    "message": "Email not found."
+                    "message": EMAIL_NOT_FOUND_MESSAGE
                 }
             )
 
@@ -722,20 +722,20 @@ async def verify_email(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
-                    "message": "Email not found."
+                    "message": EMAIL_NOT_FOUND_MESSAGE
                 }
             )
         elif status_value != "active":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
-                    "message": "Account is not active."
+                    "message": "Account is not active. Please contact support."
                 }
             )
         else:
             # User exists in auth.users but not in organization_members table
             return VerifyEmailResponse(
-                message="Email found",
+                message="Email verified and active.",
                 email_found=True,
                 status="active",
                 can_login=True

@@ -13,7 +13,10 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from types import SimpleNamespace
 from datetime import datetime, timedelta
 import asyncio
+
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+
+EMAIL_NOT_FOUND_MESSAGE = "Email Is Not Registered! Please Signup First To Login."
 
 @pytest.fixture
 def auth_client():
@@ -843,7 +846,7 @@ def test_verify_email_endpoint_success(auth_client):
         assert data["email_found"] is True
         assert data["can_login"] is True
         assert data["status"] == "active"
-        assert data["message"] == "Email found"
+        assert data["message"] == "Email verified and active."
 
 @pytest.mark.asyncio
 async def test_verify_email_endpoint_success_async(async_auth_client):
@@ -868,7 +871,7 @@ async def test_verify_email_endpoint_success_async(async_auth_client):
         assert result.email_found is True
         assert result.can_login is True
         assert result.status == "active"
-        assert result.message == "Email found"
+        assert result.message == "Email verified and active."
 
 def test_verify_email_endpoint_not_found(auth_client):
     """Test verify email with non-existent email - covers auth.py error handling"""
@@ -879,7 +882,7 @@ def test_verify_email_endpoint_not_found(auth_client):
         response = auth_client.post("/auth/email/verify", json=verify_data)
         assert response.status_code == 404
         data = response.json()
-        assert data["detail"]["message"] == "Email not found."
+        assert data["detail"]["message"] == EMAIL_NOT_FOUND_MESSAGE
 
 
 def test_verify_email_endpoint_inactive_member(auth_client):
@@ -897,7 +900,7 @@ def test_verify_email_endpoint_inactive_member(auth_client):
         response = auth_client.post("/auth/email/verify", json=verify_data)
         assert response.status_code == 403
         data = response.json()
-        assert data["detail"]["message"] == "Account is not active."
+        assert data["detail"]["message"] == "Account is not active. Please contact support."
 
 def test_verify_email_endpoint_member_missing_in_org_table(auth_client):
     """User exists in auth.users but membership row missing should return 404."""
@@ -914,7 +917,7 @@ def test_verify_email_endpoint_member_missing_in_org_table(auth_client):
         response = auth_client.post("/auth/email/verify", json=verify_data)
         assert response.status_code == 404
         data = response.json()
-        assert data["detail"]["message"] == "Email not found."
+        assert data["detail"]["message"] == EMAIL_NOT_FOUND_MESSAGE
 
 
 @pytest.mark.asyncio
@@ -933,7 +936,7 @@ async def test_verify_email_endpoint_not_found_async(async_auth_client):
             await verify_email(request=mock_request, body=verify_data)
 
     assert exc_info.value.status_code == 404
-    assert exc_info.value.detail["message"] == "Email not found."
+    assert exc_info.value.detail["message"] == EMAIL_NOT_FOUND_MESSAGE
 
 
 def test_refresh_endpoint_success(auth_client):
