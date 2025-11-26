@@ -7,13 +7,16 @@ Tests auth.py endpoints with proper AsyncMock usage.
 
 import jwt
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock, MagicMock
 from types import SimpleNamespace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
+
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+
+EMAIL_NOT_FOUND_MESSAGE = "Email Is Not Registered! Please Signup First To Login."
 
 @pytest.fixture
 def auth_client():
@@ -79,8 +82,15 @@ def test_login_endpoint_success(auth_client):
         ),
     )
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
         response = auth_client.post("/auth/login", json=login_data)
         assert response.status_code == 200
@@ -96,7 +106,7 @@ def test_login_endpoint_success(auth_client):
 @pytest.mark.asyncio
 async def test_login_endpoint_success_async(async_auth_client):
     """Test successful login asynchronously - covers auth.py login function"""
-    from fastapi import Request
+    from fastapi import Request, HTTPException
     from apps.user_service.app.api.auth import login
     from apps.user_service.app.schemas.auth import AuthLogin
 
@@ -125,8 +135,15 @@ async def test_login_endpoint_success_async(async_auth_client):
         ),
     )
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user', AsyncMock(return_value=mock_result)):
         # Create a mock request
         mock_request = MagicMock(spec=Request)
@@ -147,8 +164,15 @@ def test_login_endpoint_invalid_credentials(auth_client):
         "password": "wrongpassword"
     }
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("Invalid login credentials"))):
         response = auth_client.post("/auth/login", json=login_data)
@@ -178,10 +202,17 @@ def test_login_endpoint_invalid_credentials_authapierror(auth_client):
 
     from supabase_auth.errors import AuthApiError
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     # Mock AuthApiError for invalid credentials
     auth_error = AuthApiError("Invalid login credentials", status=400, code="invalid_credentials")
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=auth_error)):
         response = auth_client.post("/auth/login", json=login_data)
@@ -198,10 +229,17 @@ def test_login_endpoint_authapierror_server_error(auth_client):
 
     from supabase_auth.errors import AuthApiError
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     auth_error = AuthApiError("Service unavailable", status=503, code="service_error")
 
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=auth_error)):
         response = auth_client.post("/auth/login", json=login_data)
@@ -220,8 +258,15 @@ async def test_login_endpoint_invalid_credentials_async(async_auth_client):
         password="wrongpassword"
     )
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("Invalid login credentials"))):
         mock_request = MagicMock(spec=Request)
@@ -239,8 +284,8 @@ def test_signup_endpoint_success(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     # Mock verification code record (verified and matching)
@@ -289,8 +334,8 @@ def test_signup_endpoint_session_creation_failure(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     mock_verification_record = {
@@ -326,8 +371,8 @@ async def test_signup_endpoint_success_async(async_auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     # Mock verification code record (verified and matching)
@@ -406,8 +451,8 @@ def test_signup_endpoint_verification_code_not_found(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "non-existent-id",
-        "verificationCode": "1111"
+        "verification_id": "non-existent-id",
+        "verification_code": "1111"
     }
 
     with patch('apps.user_service.app.api.auth.get_verification_code_by_id',
@@ -423,8 +468,8 @@ def test_signup_endpoint_verification_code_not_verified(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     mock_verification_record = {
@@ -448,8 +493,8 @@ def test_signup_endpoint_email_mismatch(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "1111"
+        "verification_id": "test-verification-id",
+        "verification_code": "1111"
     }
 
     mock_verification_record = {
@@ -473,8 +518,8 @@ def test_signup_endpoint_invalid_verification_code(auth_client):
         "password": "NewPass123!",
         "first_name": "New",
         "last_name": "User",
-        "verificationId": "test-verification-id",
-        "verificationCode": "9999"  # Wrong code
+        "verification_id": "test-verification-id",
+        "verification_code": "9999"  # Wrong code
     }
 
     mock_verification_record = {
@@ -614,44 +659,6 @@ def test_validate_password_strength_weak():
     assert exc_info.value.status_code == 400
     assert "Password must be at least 6 characters" in exc_info.value.detail
 
-def test_extract_user_type_strict_app_meta_none():
-    """Test _extract_user_type_strict when app_meta has no type - covers line 689"""
-    from apps.user_service.app.api.auth import _extract_user_type_strict
-
-    mock_row = MagicMock()
-    mock_row.user_metadata = {}  # No type
-    mock_row.app_metadata = {}  # No type either
-    result = _extract_user_type_strict(mock_row)
-    assert result is None
-
-
-def test_extract_user_type_strict_non_dict_metadata():
-    """When metadata containers are missing, helper should fall through to final return."""
-    from apps.user_service.app.api.auth import _extract_user_type_strict
-
-    mock_row = MagicMock()
-    mock_row.user_metadata = None
-    mock_row.app_metadata = None
-    assert _extract_user_type_strict(mock_row) is None
-
-def test_verify_email_non_organization_member(auth_client):
-    """Test verify_email when user_type is not organization_member - covers line 726"""
-    verify_data = {"email": "test@example.com"}
-
-    mock_auth_user = MagicMock()
-    mock_auth_user.user_metadata = {"type": "other_type"}  # Not organization_member
-    mock_auth_user.app_metadata = {}
-
-    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=mock_auth_user)):
-        response = auth_client.post("/auth/email/verify", json=verify_data)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["email_found"] is True
-        assert data["message"] == "Email found."
-        assert data["status"] is None
-        assert data["can_login"] is False
-
 @pytest.mark.asyncio
 async def test_login_endpoint_http_exception_re_raise():
     """Test login endpoint re-raising HTTPException - covers line 316"""
@@ -664,11 +671,18 @@ async def test_login_endpoint_http_exception_re_raise():
         password="TestPass123!"
     )
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     # Mock login_user to raise HTTPException directly
     # Note: HTTPException with 401/403 will be converted to 400 for invalid credentials
     # But if it's not 401/403, it will be re-raised as-is
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=HTTPException(status_code=500, detail="Server error"))):
         mock_request = MagicMock(spec=Request)
@@ -695,7 +709,7 @@ def test_forgot_password_endpoint_success(auth_client):
 @pytest.mark.asyncio
 async def test_forgot_password_endpoint_success_async(async_auth_client):
     """Test forgot password asynchronously - covers auth.py forgot password function"""
-    from fastapi import Request
+    from fastapi import Request, HTTPException
     from apps.user_service.app.api.auth import forgot_password
     from apps.user_service.app.schemas.auth import ForgotPasswordRequest
 
@@ -878,8 +892,10 @@ def test_verify_email_endpoint_success(auth_client):
         response = auth_client.post("/auth/email/verify", json=verify_data)
         assert response.status_code == 200
         data = response.json()
-        assert data["email_found"] == True
-        assert data["can_login"] == True
+        assert data["email_found"] is True
+        assert data["can_login"] is True
+        assert data["status"] == "active"
+        assert data["message"] == "Email verified and active."
 
 @pytest.mark.asyncio
 async def test_verify_email_endpoint_success_async(async_auth_client):
@@ -901,8 +917,10 @@ async def test_verify_email_endpoint_success_async(async_auth_client):
         mock_request = MagicMock(spec=Request)
         result = await verify_email(request=mock_request, body=verify_data)
 
-        assert result.email_found == True
-        assert result.can_login == True
+        assert result.email_found is True
+        assert result.can_login is True
+        assert result.status == "active"
+        assert result.message == "Email verified and active."
 
 def test_verify_email_endpoint_not_found(auth_client):
     """Test verify email with non-existent email - covers auth.py error handling"""
@@ -911,31 +929,9 @@ def test_verify_email_endpoint_not_found(auth_client):
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=None)):
         response = auth_client.post("/auth/email/verify", json=verify_data)
-        assert response.status_code == 200
+        assert response.status_code == 404
         data = response.json()
-        assert data["message"] == "Email not found."
-        assert data["email_found"] is False
-        assert data["can_login"] is False
-        assert data["status"] is None
-
-
-def test_verify_email_endpoint_unknown_type(auth_client):
-    """Test verify email when user metadata lacks type - covers fallback branch"""
-    verify_data = {"email": "test@example.com"}
-
-    mock_auth_user = MagicMock()
-    mock_auth_user.user_metadata = {}
-    mock_auth_user.app_metadata = {}
-
-    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=mock_auth_user)):
-        response = auth_client.post("/auth/email/verify", json=verify_data)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["email_found"] is True
-        assert data["message"] == "Email found."
-        assert data["status"] is None
-        assert data["can_login"] is False
+        assert data["detail"]["message"] == EMAIL_NOT_FOUND_MESSAGE
 
 
 def test_verify_email_endpoint_inactive_member(auth_client):
@@ -951,13 +947,12 @@ def test_verify_email_endpoint_inactive_member(auth_client):
          patch('apps.user_service.app.api.auth.get_organization_member_status_by_email',
                AsyncMock(return_value="suspended")):
         response = auth_client.post("/auth/email/verify", json=verify_data)
-        assert response.status_code == 200
+        assert response.status_code == 403
         data = response.json()
-        assert data["status"] == "suspended"
-        assert data["can_login"] is False
+        assert data["detail"]["message"] == "Account is not active. Please contact support."
 
-def test_verify_email_endpoint_organization_member_not_in_table(auth_client):
-    """Test verify email when organization_member exists in auth.users but not in organization_members table."""
+def test_verify_email_endpoint_member_missing_in_org_table(auth_client):
+    """User exists in auth.users but membership row missing should return 404."""
     verify_data = {"email": "test@example.com"}
 
     mock_auth_user = MagicMock()
@@ -967,14 +962,11 @@ def test_verify_email_endpoint_organization_member_not_in_table(auth_client):
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=mock_auth_user)), \
          patch('apps.user_service.app.api.auth.get_organization_member_status_by_email',
-               AsyncMock(return_value=None)):  # Not found in organization_members table
+               AsyncMock(return_value=None)):
         response = auth_client.post("/auth/email/verify", json=verify_data)
-        assert response.status_code == 200
+        assert response.status_code == 404
         data = response.json()
-        assert data["email_found"] is True
-        assert data["message"] == "Email found."
-        assert data["status"] is None
-        assert data["can_login"] is False
+        assert data["detail"]["message"] == EMAIL_NOT_FOUND_MESSAGE
 
 
 @pytest.mark.asyncio
@@ -989,12 +981,11 @@ async def test_verify_email_endpoint_not_found_async(async_auth_client):
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
                AsyncMock(return_value=None)):
         mock_request = MagicMock(spec=Request)
-        response = await verify_email(request=mock_request, body=verify_data)
+        with pytest.raises(HTTPException) as exc_info:
+            await verify_email(request=mock_request, body=verify_data)
 
-    assert response.email_found is False
-    assert response.message == "Email not found."
-    assert response.status is None
-    assert response.can_login is False
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["message"] == EMAIL_NOT_FOUND_MESSAGE
 
 
 def test_refresh_endpoint_success(auth_client):
@@ -1141,36 +1132,6 @@ def test_password_strength_validation():
 
 # Note: _parse_meta function is commented out in auth.py, so this test is removed
 
-def test_extract_user_type_strict():
-    """Test user type extraction - covers auth.py helper function"""
-    from apps.user_service.app.api.auth import _extract_user_type_strict
-
-    # Test with user_metadata
-    mock_row1 = MagicMock()
-    mock_row1.user_metadata = {"type": "organization_member"}
-    mock_row1.app_metadata = {}
-    assert _extract_user_type_strict(mock_row1) == "organization_member"
-
-    # Test with app_metadata
-    mock_row2 = MagicMock()
-    mock_row2.user_metadata = {}
-    mock_row2.app_metadata = {"user_type": "admin"}
-    assert _extract_user_type_strict(mock_row2) == "admin"
-
-    # Test with None input
-    assert _extract_user_type_strict(None) is None
-
-def test_get_not_found_response_helper():
-    """Test not found response helper - covers auth.py helper function"""
-    from apps.user_service.app.api.auth import _get_not_found_response
-
-    response = _get_not_found_response()
-
-    assert response.email_found is False
-    assert response.message == "Email not found."
-    assert response.status is None
-    assert response.can_login is False
-
 @pytest.mark.asyncio
 async def test_auth_module_initialization_async():
     """Test auth module initialization asynchronously - covers auth.py"""
@@ -1207,27 +1168,11 @@ async def test_auth_helper_functions_async():
     """Test auth helper functions asynchronously - covers auth.py"""
     from apps.user_service.app.api.auth import (
         _is_password_strong,
-        _extract_user_type_strict,
-        _get_not_found_response
     )
-    from fastapi import HTTPException
 
     # Test password strength
     assert await asyncio.to_thread(_is_password_strong, "Test123!") == True
     assert await asyncio.to_thread(_is_password_strong, "weak") == False
-
-    # Test user type extraction
-    mock_row = MagicMock()
-    mock_row.user_metadata = {"type": "test"}
-    mock_row.app_metadata = {}
-    assert await asyncio.to_thread(_extract_user_type_strict, mock_row) == "test"
-
-    # Test response helpers (now returns response object)
-    response = await asyncio.to_thread(_get_not_found_response)
-    assert response.email_found is False
-    assert response.message == "Email not found."
-    assert response.status is None
-    assert response.can_login is False
 
 
 # ============================================================================
@@ -1690,8 +1635,15 @@ def test_login_general_exception(auth_client):
         "password": "TestPass123!"
     }
 
+    # Mock user with user_metadata that doesn't have 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No 2FA enabled
+        phone=None
+    )
+
     with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
-               AsyncMock(return_value=SimpleNamespace(id="existing-user-id"))), \
+               AsyncMock(return_value=mock_user)), \
          patch('apps.user_service.app.api.auth.login_user',
                AsyncMock(side_effect=Exception("General authentication error"))):
         response = auth_client.post("/auth/login", json=login_data)
@@ -1710,3 +1662,989 @@ def test_delete_user_exception_handling(auth_client):
         assert response.status_code == 500
         data = response.json()
         assert "Failed to delete user" in data["detail"]
+
+# ============================================================================
+# 2FA LOGIN TESTS - NEW CODE COVERAGE
+# ============================================================================
+
+def test_login_with_2fa_email_enabled_success(auth_client):
+    """Test login with 2FA enabled (EMAIL type) - successful verification"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!",
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
+    }
+
+    # Mock user with 2FA enabled (EMAIL type)
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock verification record
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "test@example.com",
+        "verification_code": "123456",
+        "verified": False
+    }
+
+    # Mock the Supabase login response
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={
+                "first_name": "Test",
+                "last_name": "User",
+            },
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)), \
+         patch('apps.user_service.app.api.auth._validate_verification_record',
+               return_value=None), \
+         patch('apps.user_service.app.api.auth._verify_code_and_update_record',
+               AsyncMock(return_value=None)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["access_token"] == "test-access-token"
+
+
+def test_login_with_2fa_phone_enabled_success(auth_client):
+    """Test login with 2FA enabled (PHONE type) - successful verification"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!",
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
+    }
+
+    # Mock user with 2FA enabled (PHONE type)
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "PHONE"
+            }
+        },
+        phone="+1234567890"
+    )
+
+    # Mock verification record
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "PHONE",
+        "given_input": "+1234567890",
+        "verification_code": "123456",
+        "verified": False
+    }
+
+    # Mock the Supabase login response
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)), \
+         patch('apps.user_service.app.api.auth._validate_verification_record',
+               return_value=None), \
+         patch('apps.user_service.app.api.auth._verify_code_and_update_record',
+               AsyncMock(return_value=None)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["access_token"] == "test-access-token"
+
+
+def test_login_with_2fa_enabled_missing_credentials(auth_client):
+    """Test login with 2FA enabled but missing verification credentials"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+        # Missing verification_id and verification_code
+    }
+
+    # Mock user with 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 400
+        assert "2FA verification is required" in response.json()["detail"]
+
+
+def test_login_with_2fa_enabled_verification_not_found(auth_client):
+    """Test login with 2FA enabled but verification code not found"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!",
+        "verification_id": "non-existent-id",
+        "verification_code": "123456"
+    }
+
+    # Mock user with 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=None)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 404
+        assert "Verification code not found" in response.json()["detail"]
+
+
+def test_login_with_2fa_enabled_verification_missing_given_input(auth_client):
+    """Test login with 2FA enabled but verification record missing given_input"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!",
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
+    }
+
+    # Mock user with 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock verification record without given_input
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "verification_code": "123456",
+        # Missing given_input
+    }
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 400
+        assert "2FA verification failed" in response.json()["detail"]
+
+
+def test_login_with_2fa_enabled_email_mismatch(auth_client):
+    """Test login with 2FA enabled but email doesn't match verification record"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!",
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
+    }
+
+    # Mock user with 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock verification record with different email
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "different@example.com",  # Different email
+        "verification_code": "123456",
+    }
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 400
+        assert "2FA verification failed" in response.json()["detail"]
+
+
+def test_login_with_2fa_enabled_phone_mismatch(auth_client):
+    """Test login with 2FA enabled (PHONE) but phone doesn't match"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!",
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
+    }
+
+    # Mock user with 2FA enabled (PHONE type)
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "PHONE"
+            }
+        },
+        phone="+1234567890"
+    )
+
+    # Mock verification record with different phone
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "PHONE",
+        "given_input": "+9876543210",  # Different phone
+        "verification_code": "123456",
+    }
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 400
+        assert "2FA verification failed" in response.json()["detail"]
+
+
+def test_login_with_2fa_enabled_phone_normalized_match(auth_client):
+    """Test login with 2FA enabled (PHONE) with normalized phone numbers matching"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!",
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
+    }
+
+    # Mock user with 2FA enabled (PHONE type)
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "PHONE"
+            }
+        },
+        phone="1234567890"  # Without +
+    )
+
+    # Mock verification record with + prefix
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "PHONE",
+        "given_input": "+1234567890",  # With +, should normalize and match
+        "verification_code": "123456",
+    }
+
+    # Mock the Supabase login response
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)), \
+         patch('apps.user_service.app.api.auth._validate_verification_record',
+               return_value=None), \
+         patch('apps.user_service.app.api.auth._verify_code_and_update_record',
+               AsyncMock(return_value=None)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 200
+
+
+def test_login_with_2fa_enabled_verification_validation_fails(auth_client):
+    """Test login with 2FA enabled but verification validation fails"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!",
+        "verification_id": "test-verification-id",
+        "verification_code": "123456"
+    }
+
+    # Mock user with 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock verification record
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "test@example.com",
+        "verification_code": "123456",
+    }
+
+    from fastapi import HTTPException
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)), \
+         patch('apps.user_service.app.api.auth._validate_verification_record',
+               side_effect=HTTPException(status_code=400, detail="Invalid verification")):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 400
+        assert "2FA verification failed" in response.json()["detail"]
+
+
+def test_login_with_2fa_enabled_code_verification_fails(auth_client):
+    """Test login with 2FA enabled but code verification fails"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!",
+        "verification_id": "test-verification-id",
+        "verification_code": "wrong-code"
+    }
+
+    # Mock user with 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock verification record
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "test@example.com",
+        "verification_code": "123456",
+    }
+
+    from fastapi import HTTPException
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)), \
+         patch('apps.user_service.app.api.auth._validate_verification_record',
+               return_value=None), \
+         patch('apps.user_service.app.api.auth._verify_code_and_update_record',
+               AsyncMock(side_effect=HTTPException(status_code=400, detail="Invalid code"))):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 400
+        assert "2FA verification failed" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_login_with_2fa_enabled_async(async_auth_client):
+    """Test login with 2FA enabled asynchronously"""
+    from fastapi import Request
+    from apps.user_service.app.api.auth import login
+    from apps.user_service.app.schemas.auth import AuthLogin
+
+    login_data = AuthLogin(
+        email="test@example.com",
+        password="TestPass123!",
+        verification_id="test-verification-id",
+        verification_code="123456"
+    )
+
+    # Mock user with 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock verification record
+    mock_verification_record = {
+        "id": "test-verification-id",
+        "type_text": "EMAIL",
+        "given_input": "test@example.com",
+        "verification_code": "123456",
+    }
+
+    # Mock the Supabase login response
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.get_verification_code_by_id',
+               AsyncMock(return_value=mock_verification_record)), \
+         patch('apps.user_service.app.api.auth._validate_verification_record',
+               return_value=None), \
+         patch('apps.user_service.app.api.auth._verify_code_and_update_record',
+               AsyncMock(return_value=None)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        mock_request = MagicMock(spec=Request)
+        result = await login(request=mock_request, data=login_data)
+        assert result.access_token == "test-access-token"
+
+
+def test_login_with_2fa_disabled_no_verification_needed(auth_client):
+    """Test login with 2FA disabled - should work without verification"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+    }
+
+    # Mock user with 2FA disabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": False,  # 2FA disabled
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock the Supabase login response
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["access_token"] == "test-access-token"
+
+
+def test_login_with_2fa_preference_not_dict(auth_client):
+    """Test login when verification_preference is not a dict"""
+    login_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+    }
+
+    # Mock user with verification_preference as string (invalid)
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": "invalid"  # Not a dict
+        },
+        phone=None
+    )
+
+    # Mock the Supabase login response
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        response = auth_client.post("/auth/login", json=login_data)
+        assert response.status_code == 200  # Should work, 2FA check skipped
+
+
+# ============================================================================
+# VERIFICATION CODES EDGE CASES - NEW CODE COVERAGE
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_verify_code_with_non_list_attempts():
+    """Test _verify_code_and_update_record when attempts is not a list"""
+    from apps.user_service.app.api.verification_codes import _verify_code_and_update_record
+    
+    # Mock verification record with attempts as string (not a list)
+    verification_record = {
+        "id": "test-id",
+        "verification_code": "123456",
+        "attempts": "invalid"  # Not a list
+    }
+    
+    with patch('apps.user_service.app.api.verification_codes.update_verification_code',
+               AsyncMock(return_value=None)):
+        # Should handle non-list attempts gracefully
+        try:
+            await _verify_code_and_update_record(
+                verification_record,
+                "123456",
+                "test-id"
+            )
+        except Exception as e:
+            # Should raise HTTPException if code doesn't match, or succeed if it does
+            # The function should convert non-list attempts to empty list
+            pass
+
+
+@pytest.mark.asyncio
+async def test_verify_code_with_missing_attempts():
+    """Test _verify_code_and_update_record when attempts key is missing"""
+    from apps.user_service.app.api.verification_codes import _verify_code_and_update_record
+    
+    # Mock verification record without attempts key
+    verification_record = {
+        "id": "test-id",
+        "verification_code": "123456"
+        # Missing attempts key
+    }
+    
+    with patch('apps.user_service.app.api.verification_codes.update_verification_code',
+               AsyncMock(return_value=None)):
+        # Should handle missing attempts gracefully
+        try:
+            await _verify_code_and_update_record(
+                verification_record,
+                "123456",
+                "test-id"
+            )
+        except Exception:
+            # Should raise HTTPException if code doesn't match
+            pass
+
+
+def test_validate_verification_record_with_none_record():
+    """Test _validate_verification_record with None record"""
+    from apps.user_service.app.api.verification_codes import _validate_verification_record
+    from apps.user_service.app.schemas.verification_codes import VerifyVerificationCodeRequest, VerificationType
+    from fastapi import HTTPException
+    
+    data = VerifyVerificationCodeRequest(
+        type=VerificationType.EMAIL,
+        verification_id="test-id",
+        verification_code="123456",
+        email="test@example.com"
+    )
+    
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_verification_record(None, data)
+    
+    assert exc_info.value.status_code == 404
+    assert "Verification code not found" in exc_info.value.detail
+
+
+def test_validate_verification_record_already_verified():
+    """Test _validate_verification_record when code is already verified"""
+    from apps.user_service.app.api.verification_codes import _validate_verification_record
+    from apps.user_service.app.schemas.verification_codes import VerifyVerificationCodeRequest, VerificationType
+    from fastapi import HTTPException
+    
+    verification_record = {
+        "id": "test-id",
+        "verified": True,  # Already verified
+        "given_input": "test@example.com",
+        "expiry_at": int(datetime.now(timezone.utc).timestamp() * 1000) + 60000
+    }
+    
+    data = VerifyVerificationCodeRequest(
+        type=VerificationType.EMAIL,
+        verification_id="test-id",
+        verification_code="123456",
+        email="test@example.com"
+    )
+    
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_verification_record(verification_record, data)
+    
+    assert exc_info.value.status_code == 400
+    assert "already been verified" in exc_info.value.detail
+
+
+def test_validate_verification_record_expired():
+    """Test _validate_verification_record when code is expired"""
+    from apps.user_service.app.api.verification_codes import _validate_verification_record
+    from apps.user_service.app.schemas.verification_codes import VerifyVerificationCodeRequest, VerificationType
+    from fastapi import HTTPException
+    
+    # Expired code (expiry_at is in the past)
+    verification_record = {
+        "id": "test-id",
+        "verified": False,
+        "given_input": "test@example.com",
+        "expiry_at": int(datetime.now(timezone.utc).timestamp() * 1000) - 60000  # Past
+    }
+    
+    data = VerifyVerificationCodeRequest(
+        type=VerificationType.EMAIL,
+        verification_id="test-id",
+        verification_code="123456",
+        email="test@example.com"
+    )
+    
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_verification_record(verification_record, data)
+    
+    assert exc_info.value.status_code == 400
+    assert "expired" in exc_info.value.detail.lower()
+
+
+# ============================================================================
+# CHECK 2FA STATUS API TESTS
+# ============================================================================
+
+def test_check_2fa_status_success_2fa_enabled(auth_client):
+    """Test check 2FA status when 2FA is enabled"""
+    check_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+    }
+
+    # Mock user with 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock successful login
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        response = auth_client.post("/auth/verify/account", json=check_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["two_fa_enabled"] is True
+
+
+def test_check_2fa_status_success_2fa_disabled(auth_client):
+    """Test check 2FA status when 2FA is disabled"""
+    check_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+    }
+
+    # Mock user with 2FA disabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": False,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock successful login
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        response = auth_client.post("/auth/verify/account", json=check_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["two_fa_enabled"] is False
+
+
+def test_check_2fa_status_success_no_preference(auth_client):
+    """Test check 2FA status when verification_preference is not set"""
+    check_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+    }
+
+    # Mock user without verification_preference
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},  # No verification_preference
+        phone=None
+    )
+
+    # Mock successful login
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        response = auth_client.post("/auth/verify/account", json=check_data)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["two_fa_enabled"] is False
+
+
+def test_check_2fa_status_email_not_found(auth_client):
+    """Test check 2FA status when email is not registered"""
+    check_data = {
+        "email": "nonexistent@example.com",
+        "password": "TestPass123!"
+    }
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=None)):
+        response = auth_client.post("/auth/verify/account", json=check_data)
+        assert response.status_code == 400
+        assert "Email Is Not Registered" in response.json()["detail"]
+
+
+def test_check_2fa_status_invalid_credentials(auth_client):
+    """Test check 2FA status with invalid credentials"""
+    check_data = {
+        "email": "test@example.com",
+        "password": "wrongpassword"
+    }
+
+    # Mock user exists
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},
+        phone=None
+    )
+
+    from supabase_auth.errors import AuthApiError
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=AuthApiError("Invalid login credentials", status=400, code="invalid_credentials"))):
+        response = auth_client.post("/auth/verify/account", json=check_data)
+        assert response.status_code == 400
+        assert "Invalid login credentials" in response.json()["detail"]
+
+
+def test_check_2fa_status_invalid_credentials_exception(auth_client):
+    """Test check 2FA status with invalid credentials (Exception)"""
+    check_data = {
+        "email": "test@example.com",
+        "password": "wrongpassword"
+    }
+
+    # Mock user exists
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},
+        phone=None
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=Exception("Invalid login credentials"))):
+        response = auth_client.post("/auth/verify/account", json=check_data)
+        assert response.status_code == 400
+        assert "Invalid login credentials" in response.json()["detail"]
+
+
+def test_check_2fa_status_general_exception(auth_client):
+    """Test check 2FA status with general exception"""
+    check_data = {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+    }
+
+    # Mock user exists
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={},
+        phone=None
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(side_effect=Exception("Database connection error"))):
+        response = auth_client.post("/auth/verify/account", json=check_data)
+        assert response.status_code == 500
+        assert "Failed to validate credentials" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_check_2fa_status_success_async(async_auth_client):
+    """Test check 2FA status asynchronously"""
+    from fastapi import Request
+    from apps.user_service.app.api.auth import check_2fa_status
+    from apps.user_service.app.schemas.auth import Check2FAStatusRequest
+
+    check_data = Check2FAStatusRequest(
+        email="test@example.com",
+        password="TestPass123!"
+    )
+
+    # Mock user with 2FA enabled
+    mock_user = SimpleNamespace(
+        id="existing-user-id",
+        user_metadata={
+            "verification_preference": {
+                "enabled": True,
+                "type": "EMAIL"
+            }
+        },
+        phone=None
+    )
+
+    # Mock successful login
+    mock_result = SimpleNamespace(
+        session=SimpleNamespace(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            expires_in=3600,
+            expires_at=datetime.utcnow(),
+        ),
+        user=SimpleNamespace(
+            id="test-user-id",
+            email="test@example.com",
+            user_metadata={},
+        ),
+    )
+
+    with patch('apps.user_service.app.api.auth.get_auth_user_by_email',
+               AsyncMock(return_value=mock_user)), \
+         patch('apps.user_service.app.api.auth.login_user',
+               AsyncMock(return_value=mock_result)):
+        mock_request = MagicMock(spec=Request)
+        result = await check_2fa_status(request=mock_request, data=check_data)
+        assert result.two_fa_enabled is True

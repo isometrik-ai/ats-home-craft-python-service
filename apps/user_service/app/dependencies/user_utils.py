@@ -9,7 +9,8 @@ from apps.user_service.app.schemas.users import (
     RoleInfo,
     PermissionInfo,
     RoleInfoWithDescription,
-    UserProfileData
+    UserProfileData,
+    VerificationPreference
 )
 
 # Initialize logger
@@ -34,6 +35,21 @@ def create_user_profile_data(
     Returns:
         UserProfileData object with formatted user profile
     """
+    # Extract verification_preference from user_profile dict
+    verification_preference = None
+    verification_pref_data = user_profile.get("verification_preference")
+    if verification_pref_data and isinstance(verification_pref_data, dict):
+        try:
+            # Use aliases (enabled, type) to match internal storage format
+            # Pydantic will automatically map to field names (two_fa_enabled, verification_method) in response
+            verification_preference = VerificationPreference(
+                enabled=verification_pref_data.get("enabled", False),
+                type=verification_pref_data.get("type", "")
+            )
+        except Exception as e:
+            logger.warning("Failed to parse verification_preference: %s", str(e))
+            verification_preference = None
+
     return UserProfileData(
         user_id=str(user_profile["user_id"]),
         email=user_profile["email"],
@@ -59,5 +75,6 @@ def create_user_profile_data(
         user_type=user_type,
         role=role_info,
         permissions=permissions or [],
-        identities=user_profile["identities"]
+        identities=user_profile["identities"],
+        verification_preference=verification_preference
     )

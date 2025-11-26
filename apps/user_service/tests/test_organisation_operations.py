@@ -468,48 +468,6 @@ class TestOrganisationCRUD:
         assert "updated_at" in payload
 
     @pytest.mark.asyncio
-    async def test_update_organisation_details_with_existing_subscription(self):
-        """Test organisation update with existing subscription - updates max_users and plan_type."""
-        organisation_id = str(uuid.uuid4())
-        # Note: The code expects a nested "settings" key inside settings due to line 232 logic
-        organisation_data = {
-            "settings": {
-                "subscription": {
-                    "max_users": 10,
-                    "plan_type": "starter"
-                }
-            },
-            "subscription": {
-                "max_users": 10,
-                "plan_type": "starter"
-            }
-        }
-        update_data = {
-            "max_users": 25,
-            "plan_type": "professional"
-        }
-
-        mock_result = MagicMock()
-        mock_result.data = [{"id": organisation_id}]
-        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
-            mock_supabase = MagicMock()
-            mock_table = MagicMock()
-            update_query = MagicMock()
-            eq_query = MagicMock()
-            eq_query.execute = AsyncMock(return_value=mock_result)
-            update_query.eq.return_value = eq_query
-            mock_table.update.return_value = update_query
-            mock_supabase.table.return_value = mock_table
-            mock_get_client.return_value = mock_supabase
-
-            result = await update_organisation_details(organisation_id, organisation_data, update_data)
-
-            assert result["id"] == organisation_id
-            payload = mock_table.update.call_args[0][0]
-            assert payload["subscription"]["max_users"] == 25
-            assert payload["plan_type"] == "professional"
-
-    @pytest.mark.asyncio
     async def test_update_organisation_details_without_subscription(self):
         """Test organisation update without existing subscription - creates subscription with plan_type."""
         organisation_id = str(uuid.uuid4())

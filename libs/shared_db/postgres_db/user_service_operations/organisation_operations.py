@@ -4,7 +4,7 @@ Organisation Database Operations Module
 This module contains all organisation-related database operations.
 All SQL queries for organisation management should be centralized here.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
@@ -97,10 +97,10 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
     org_record["settings"].update({"enterprise_features":organisation_data.get("enterprise_features",None)})
 
     subscription_dict = {
-        'start_date' : NOW_CONSTANT,
-        'end_date' : NOW_CONSTANT + " + interval '7 days'",
+        'start_date' : datetime.now(timezone.utc).isoformat(),
+        'end_date' : (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
         'plan_type' : PlanType.TRIAL,
-        'max_users' : organisation_data.get("max_users",None),
+        'max_users' : 5,
     }
 
     org_record['subscription'] = subscription_dict
@@ -191,7 +191,7 @@ async def update_organisation_details(
     settings_fields = [
         "address", "primary_practice_areas", "secondary_practice_areas", "specializations",
         "preferred_integration", "need_help_importing_data", "need_migration_assistance",
-        "compliance_security", "enterprise_features","max_users"]
+        "compliance_security", "enterprise_features"]
 
     if any(field in settings_fields for field in payload.keys()):
         # payload["settings"] = {}
@@ -245,20 +245,6 @@ async def update_organisation_details(
         if payload.get("enterprise_features") is not None:
             temp_var["enterprise_features"] = payload.get("enterprise_features")
             payload.pop("enterprise_features")
-
-        if payload.get("max_users") is not None:
-            subscription_dict = organisation_data.get("subscription",None)
-            if subscription_dict is not None:
-                subscription_dict["max_users"] = payload.get("max_users")
-                payload.pop("max_users")
-            else:
-                subscription_dict = {
-                    "max_users":payload.get("max_users"),
-                    "plan_type":PlanType.TRIAL,
-                    "start_date":NOW_CONSTANT,
-                    "end_date":NOW_CONSTANT + " + interval '7 days'"}
-                payload.pop("max_users")
-            payload["subscription"] = subscription_dict
 
         payload["settings"] = temp_var
 

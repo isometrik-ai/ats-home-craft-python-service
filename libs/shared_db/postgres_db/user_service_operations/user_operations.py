@@ -160,7 +160,7 @@ async def update_user_info(
     update_data: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Update user information."""
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
 
     # Prepare update data
     update_payload = {}

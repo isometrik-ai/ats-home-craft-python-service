@@ -349,3 +349,169 @@ def test_get_user_profile_with_organization_permissions(client):
         assert permissions[0]["permission_name"] == "read_users"
         assert permissions[1]["permission_name"] == "write_users"
 
+
+def test_get_user_profile_with_verification_preference(client):
+    """Test user profile with verification preference in metadata."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+
+    mock_user_context = UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+
+    mock_user_data = _build_mock_supabase_user()
+    mock_user_data.user.email = "test@example.com"
+    mock_user_data.user.user_metadata = {
+        "verification_preference": {
+            "enabled": True,
+            "type": "PHONE"
+        }
+    }
+
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+               AsyncMock(return_value={
+                   "user_id": "u1", "email": "test@example.com", "full_name": "Test User",
+                   "first_name": "Test", "last_name": "User", "status": "active",
+                   "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Admin role",
+                   "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
+                   "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+               })), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+               AsyncMock(return_value=mock_user_data)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+               AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity",
+               AsyncMock()):
+        res = client.get("/v1/admin/users/profile")
+        assert res.status_code == 200
+        data = res.json()["data"]
+        assert "verification_preference" in data
+        assert data["verification_preference"] is not None
+        assert data["verification_preference"]["enabled"] is True
+        assert data["verification_preference"]["type"] == "PHONE"
+
+
+def test_get_user_profile_without_verification_preference(client):
+    """Test user profile without verification preference in metadata."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+
+    mock_user_context = UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+
+    mock_user_data = _build_mock_supabase_user()
+    mock_user_data.user.email = "test@example.com"
+    mock_user_data.user.user_metadata = {}  # No verification_preference
+
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+               AsyncMock(return_value={
+                   "user_id": "u1", "email": "test@example.com", "full_name": "Test User",
+                   "first_name": "Test", "last_name": "User", "status": "active",
+                   "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Admin role",
+                   "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
+                   "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+               })), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+               AsyncMock(return_value=mock_user_data)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+               AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity",
+               AsyncMock()):
+        res = client.get("/v1/admin/users/profile")
+        assert res.status_code == 200
+        data = res.json()["data"]
+        assert "verification_preference" in data
+        assert data["verification_preference"] is None
+
+
+def test_get_user_profile_verification_preference_email(client):
+    """Test user profile with EMAIL verification preference."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+
+    mock_user_context = UserContext(
+        organization_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+
+    mock_user_data = _build_mock_supabase_user()
+    mock_user_data.user.email = "test@example.com"
+    mock_user_data.user.user_metadata = {
+        "verification_preference": {
+            "enabled": False,
+            "type": "EMAIL"
+        }
+    }
+
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+               AsyncMock(return_value={
+                   "user_id": "u1", "email": "test@example.com", "full_name": "Test User",
+                   "first_name": "Test", "last_name": "User", "status": "active",
+                   "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Admin role",
+                   "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
+                   "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+               })), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+               AsyncMock(return_value=mock_user_data)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+               AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity",
+               AsyncMock()):
+        res = client.get("/v1/admin/users/profile")
+        assert res.status_code == 200
+        data = res.json()["data"]
+        assert "verification_preference" in data
+        assert data["verification_preference"] is not None
+        assert data["verification_preference"]["enabled"] is False
+        assert data["verification_preference"]["type"] == "EMAIL"
+
+
+def test_get_user_profile_verification_preference_no_organization(client):
+    """Test user profile with verification preference when user has no organization."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+
+    mock_user_context = UserContext(
+        organization_id=None,
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member"
+    )
+
+    mock_user_data = _build_mock_supabase_user()
+    mock_user_data.user.email = "test@example.com"
+    mock_user_data.user.user_metadata = {
+        "verification_preference": {
+            "enabled": True,
+            "type": "PHONE"
+        }
+    }
+
+    with patch("apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+               AsyncMock(return_value=mock_user_context)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+               AsyncMock(return_value=None)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+               AsyncMock(return_value=mock_user_data)), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+               AsyncMock(return_value=[])), \
+         patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity",
+               AsyncMock()):
+        res = client.get("/v1/admin/users/profile")
+        assert res.status_code == 200
+        data = res.json()["data"]
+        assert "verification_preference" in data
+        assert data["verification_preference"] is not None
+        assert data["verification_preference"]["enabled"] is True
+        assert data["verification_preference"]["type"] == "PHONE"

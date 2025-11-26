@@ -94,6 +94,22 @@ class PermissionInfo(BaseModel):
         }
     )
 
+class VerificationPreference(BaseModel):
+    """Model for verification preference settings"""
+    two_fa_enabled: bool = Field(..., description="Whether 2FA verification is enabled or disabled", alias="enabled")
+    verification_method: str = Field(..., description="Type of verification: PHONE or EMAIL", alias="type")
+
+    model_config = ConfigDict(
+        populate_by_name=True,  # Allow both field name and alias
+        json_schema_extra={
+            "example": {
+                "two_fa_enabled": True,
+                "verification_method": "PHONE"
+            }
+        }
+    )
+
+
 class Indentites(BaseModel):
     """Model for user indentites"""
 
@@ -174,6 +190,10 @@ class UserProfileData(BaseModel):
         None,
         description="List of all user identities (only for organization_member)",
     )
+    verification_preference: Optional[VerificationPreference] = Field(
+        None,
+        description="Verification preference settings (enabled/disabled and type: PHONE or EMAIL)",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -212,6 +232,10 @@ class UserProfileData(BaseModel):
                         "last_sign_in_at": "2024-12-19T10:00:00Z",
                     }
                 ],
+                "verification_preference": {
+                    "two_fa_enabled": True,
+                    "verification_method": "PHONE"
+                },
             }
         }
     )

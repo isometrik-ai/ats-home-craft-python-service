@@ -84,6 +84,8 @@ class UpdateUserProfileRequest(BaseModel):
     - last_name: Updated last name
     - timezone: Updated timezone preference
     - avatar_url: Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')
+    - two_fa_enabled: Enable or disable verification preference
+    - verification_method: Type of verification preference (PHONE or EMAIL, defaults to EMAIL)
 
     full_name will be automatically calculated from first_name + last_name.
     """
@@ -91,6 +93,8 @@ class UpdateUserProfileRequest(BaseModel):
     last_name: Optional[str] = Field(None, description="Updated last name")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
     avatar_url: Optional[str] = Field(None, description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')")
+    two_fa_enabled: Optional[bool] = Field(None, description="Enable or disable verification preference")
+    verification_method: str = Field("EMAIL", description="Type of verification preference: PHONE or EMAIL (defaults to EMAIL)")
 
     @field_validator("avatar_url")
     @classmethod
@@ -104,7 +108,9 @@ class UpdateUserProfileRequest(BaseModel):
                 "first_name": "John",
                 "last_name": "Doe",
                 "timezone": "America/New_York",
-                "avatar_url": "house-of-apps-legal-ai/user-id/avatar.jpg"
+                "avatar_url": "house-of-apps-legal-ai/user-id/avatar.jpg",
+                "two_fa_enabled": True,
+                "verification_method": "EMAIL"
             }
         }
     }
@@ -512,8 +518,38 @@ async def update_user_profile(
         update_data["avatar_url"] = body.avatar_url
         metadata_update["avatar_url"] = body.avatar_url
 
+    # Update verification preference if provided
+    # verification_method defaults to "EMAIL" if not provided
+    if body.two_fa_enabled is not None:
+        # verification_method defaults to "EMAIL" from the field definition
+        verification_method = body.verification_method.upper()
+        
+        # Validate verification_method
+        if verification_method not in ["PHONE", "EMAIL"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="verification_method must be either 'PHONE' or 'EMAIL'"
+            )
+        # Create verification preference object (always replace existing one)
+        verification_preference = {
+            "enabled": body.two_fa_enabled,
+            "type": verification_method
+        }
+        metadata_update["verification_preference"] = verification_preference
+        logger.info(
+            "Updating verification preference for user %s: enabled=%s, type=%s",
+            user_id, body.two_fa_enabled, verification_method
+        )
+    elif body.verification_method and body.verification_method.upper() != "EMAIL":
+        # If only verification_method is provided (and it's not the default EMAIL), raise error
+        # This handles the case where user explicitly sets verification_method without two_fa_enabled
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="two_fa_enabled must be provided when updating verification_method"
+        )
+
     # Check if there's anything to update
-    if not update_data:
+    if not update_data and not metadata_update:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields provided for update"
@@ -536,29 +572,64 @@ async def update_user_profile(
 
     # Update Supabase Auth user_metadata if we have metadata to update
     if metadata_update:
-        # Get current user metadata to preserve existing fields
+        # Always fetch fresh metadata from Supabase Auth to avoid race conditions
+        # JWT token metadata is stale and should not be used for updates
+        existing_metadata = {}
         try:
             user_data = await get_user_by_id(user_id)
-            existing_metadata = {}
             if user_data and hasattr(user_data, 'user') and user_data.user:
                 existing_metadata = user_data.user.user_metadata or {}
+                logger.info(
+                    "Fetched fresh metadata from Supabase Auth for user %s. Existing metadata keys: %s",
+                    user_id, list(existing_metadata.keys())
+                )
         except Exception as e:
-            # If get_user_by_id fails, use JWT token metadata as fallback
-            logger.warning("Could not fetch user metadata from Supabase Auth: %s. Using JWT token metadata.", str(e))
-            existing_metadata = current_user.get("user_metadata", {})
+            # If we can't fetch fresh metadata, log error but continue with update
+            # This ensures we don't lose the update even if fetch fails
+            logger.error(
+                "Could not fetch fresh user metadata from Supabase Auth for user %s: %s. "
+                "Proceeding with update using only new metadata fields.",
+                user_id, str(e)
+            )
+            # Don't use JWT token metadata as it's stale - start with empty dict
+            existing_metadata = {}
 
-        # Merge with existing metadata
+        # Merge with existing metadata - this preserves all existing fields
+        # For nested objects like verification_preference, we replace the entire object
         updated_metadata = {**existing_metadata, **metadata_update}
+        
+        # Log the metadata update for debugging
+        logger.info(
+            "Updating user metadata for user %s. Metadata update: %s. Updated metadata keys: %s",
+            user_id, metadata_update, list(updated_metadata.keys())
+        )
 
-        # Update metadata in Supabase Auth
+        # Update metadata in Supabase Auth using Admin API
+        # This uses supabase.auth.admin.update_user_by_id which updates the auth.users table
         try:
             metadata_updated = await update_metadata_of_user(user_id, updated_metadata)
             if not metadata_updated:
                 logger.warning(
                     "Failed to update user metadata in Supabase Auth for user: %s", user_id)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update user metadata"
+                )
+            else:
+                logger.info(
+                    "Successfully updated user metadata in Supabase Auth for user: %s. "
+                    "Verification preference: %s",
+                    user_id, updated_metadata.get("verification_preference")
+                )
+        except HTTPException:
+            # Re-raise HTTPException
+            raise
         except Exception as e:
-            logger.warning("Error updating user metadata in Supabase Auth: %s", str(e))
-            # Don't fail the entire operation if metadata update fails
+            logger.error("Error updating user metadata in Supabase Auth: %s", str(e), exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update user metadata: {str(e)}"
+            )
 
     # Get updated user profile for response
     updated_profile = await get_user_profile_by_id(user_id, user_context.organization_id)

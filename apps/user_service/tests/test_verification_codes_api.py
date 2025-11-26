@@ -219,7 +219,7 @@ class TestSendVerificationCode:
 
             assert response.status_code == 200
             data = response.json()
-            assert "verificationId" in data
+            assert "verification_id" in data
             assert "expiryAt" in data
             assert data["message"] == "Verification code sent successfully"
 
@@ -247,7 +247,7 @@ class TestSendVerificationCode:
 
             assert response.status_code == 200
             data = response.json()
-            assert "verificationId" in data
+            assert "verification_id" in data
             assert "expiryAt" in data
 
     def test_send_verification_code_validation_error_missing_email(self, client):
@@ -407,7 +407,7 @@ class TestSendVerificationCode:
 
             assert response.status_code == 200
             data = response.json()
-            assert "verificationId" in data
+            assert "verification_id" in data
             assert "expiryAt" in data
 
             # Verify create_verification_code was called with user_id
@@ -485,7 +485,7 @@ class TestSendVerificationCode:
 
             assert response.status_code == 200
             data = response.json()
-            assert "verificationId" in data
+            assert "verification_id" in data
 
     def test_send_verification_code_authenticated_user_same_phone(self, client_with_auth):
         """Test send verification code with authenticated user using same phone (should fail)."""
@@ -628,8 +628,8 @@ class TestVerifyVerificationCode:
         verification_id = mock_verification_record["id"]
         request_data = {
             "type": "EMAIL",
-            "verificationId": verification_id,
-            "verificationCode": "1111",
+            "verification_id": verification_id,
+            "verification_code": "1111",
             "email": "test@example.com"
         }
 
@@ -649,8 +649,8 @@ class TestVerifyVerificationCode:
         """Test verify with non-existent verification ID."""
         request_data = {
             "type": "EMAIL",
-            "verificationId": str(uuid.uuid4()),
-            "verificationCode": "1111",
+            "verification_id": str(uuid.uuid4()),
+            "verification_code": "1111",
             "email": "test@example.com"
         }
 
@@ -667,8 +667,8 @@ class TestVerifyVerificationCode:
         verification_id = mock_verified_record["id"]
         request_data = {
             "type": "EMAIL",
-            "verificationId": verification_id,
-            "verificationCode": "1111",
+            "verification_id": verification_id,
+            "verification_code": "1111",
             "email": "test@example.com"
         }
 
@@ -685,8 +685,8 @@ class TestVerifyVerificationCode:
         verification_id = mock_expired_record["id"]
         request_data = {
             "type": "EMAIL",
-            "verificationId": verification_id,
-            "verificationCode": "1111",
+            "verification_id": verification_id,
+            "verification_code": "1111",
             "email": "test@example.com"
         }
 
@@ -703,8 +703,8 @@ class TestVerifyVerificationCode:
         verification_id = mock_verification_record["id"]
         request_data = {
             "type": "EMAIL",
-            "verificationId": verification_id,
-            "verificationCode": "9999",
+            "verification_id": verification_id,
+            "verification_code": "9999",
             "email": "test@example.com"
         }
 
@@ -724,8 +724,8 @@ class TestVerifyVerificationCode:
         verification_id = mock_verification_record["id"]
         request_data = {
             "type": "EMAIL",
-            "verificationId": verification_id,
-            "verificationCode": "1111",
+            "verification_id": verification_id,
+            "verification_code": "1111",
             "email": "different@example.com"
         }
 
@@ -750,8 +750,8 @@ class TestVerifyVerificationCode:
 
         request_data = {
             "type": "EMAIL",
-            "verificationId": verification_id,
-            "verificationCode": "9999",
+            "verification_id": verification_id,
+            "verification_code": "9999",
             "email": "test@example.com"
         }
 
@@ -776,8 +776,8 @@ class TestVerifyVerificationCode:
         verification_id = phone_record["id"]
         request_data = {
             "type": "PHONE_NUMBER",
-            "verificationId": verification_id,
-            "verificationCode": "1111",
+            "verification_id": verification_id,
+            "verification_code": "1111",
             "phoneNumber": "9558985338"
         }
 
@@ -806,8 +806,8 @@ class TestVerifyVerificationCode:
         """Test verify with wrong type (email for PHONE_NUMBER)."""
         request_data = {
             "type": "PHONE_NUMBER",
-            "verificationId": str(uuid.uuid4()),
-            "verificationCode": "1111",
+            "verification_id": str(uuid.uuid4()),
+            "verification_code": "1111",
             "email": "test@example.com"
         }
 
@@ -820,8 +820,8 @@ class TestVerifyVerificationCode:
         verification_id = mock_verification_record["id"]
         request_data = {
             "type": "EMAIL",
-            "verificationId": verification_id,
-            "verificationCode": "1111",
+            "verification_id": verification_id,
+            "verification_code": "1111",
             "email": "test@example.com"
         }
 
@@ -840,8 +840,8 @@ class TestVerifyVerificationCode:
         verification_id = mock_verification_record["id"]
         request_data = {
             "type": "EMAIL",
-            "verificationId": verification_id,
-            "verificationCode": "1111",
+            "verification_id": verification_id,
+            "verification_code": "1111",
             "email": "test@example.com"
         }
 
@@ -1453,8 +1453,8 @@ async def test_verify_verification_code_with_stored_user_id_async(mock_verificat
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=mock_record["id"],
-        verificationCode="1111",
+        verification_id=mock_record["id"],
+        verification_code="1111",
         email="test@example.com"
     )
 
@@ -1485,8 +1485,8 @@ async def test_verify_verification_code_email_update_success_async(mock_verifica
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=mock_record["id"],
-        verificationCode="1111",
+        verification_id=mock_record["id"],
+        verification_code="1111",
         email="new@example.com"
     )
 
@@ -1518,8 +1518,8 @@ async def test_verify_verification_code_phone_update_success_async(mock_verifica
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.PHONE_NUMBER,
-        verificationId=mock_record["id"],
-        verificationCode="1111",
+        verification_id=mock_record["id"],
+        verification_code="1111",
         phoneNumber="+1234567890"
     )
 
@@ -1550,8 +1550,8 @@ async def test_verify_verification_code_access_token_missing_async(mock_verifica
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=mock_record["id"],
-        verificationCode="1111",
+        verification_id=mock_record["id"],
+        verification_code="1111",
         email="new@example.com"
     )
 
@@ -1580,8 +1580,8 @@ async def test_verify_verification_code_skip_update_no_trigger_async(mock_verifi
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=mock_record["id"],
-        verificationCode="1111",
+        verification_id=mock_record["id"],
+        verification_code="1111",
         email="test@example.com"
     )
 
@@ -1612,8 +1612,8 @@ async def test_verify_verification_code_no_user_id_async(mock_verification_recor
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=mock_record["id"],
-        verificationCode="1111",
+        verification_id=mock_record["id"],
+        verification_code="1111",
         email="test@example.com"
     )
 
@@ -1639,8 +1639,8 @@ async def test_verify_verification_code_generic_exception_async(mock_verificatio
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=mock_verification_record["id"],
-        verificationCode="1111",
+        verification_id=mock_verification_record["id"],
+        verification_code="1111",
         email="test@example.com"
     )
 
@@ -2323,8 +2323,8 @@ def test_validate_verification_record_not_found():
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=str(uuid.uuid4()),
-        verificationCode="1111",
+        verification_id=str(uuid.uuid4()),
+        verification_code="1111",
         email="test@example.com"
     )
 
@@ -2339,8 +2339,8 @@ def test_validate_verification_record_already_verified():
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=str(uuid.uuid4()),
-        verificationCode="1111",
+        verification_id=str(uuid.uuid4()),
+        verification_code="1111",
         email="test@example.com"
     )
 
@@ -2362,8 +2362,8 @@ def test_validate_verification_record_expired():
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=str(uuid.uuid4()),
-        verificationCode="1111",
+        verification_id=str(uuid.uuid4()),
+        verification_code="1111",
         email="test@example.com"
     )
 
@@ -2383,8 +2383,8 @@ def test_validate_verification_record_input_mismatch():
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.EMAIL,
-        verificationId=str(uuid.uuid4()),
-        verificationCode="1111",
+        verification_id=str(uuid.uuid4()),
+        verification_code="1111",
         email="different@example.com"
     )
 
@@ -2404,8 +2404,8 @@ def test_validate_verification_record_phone_number():
 
     data = VerifyVerificationCodeRequest(
         type=VerificationType.PHONE_NUMBER,
-        verificationId=str(uuid.uuid4()),
-        verificationCode="1111",
+        verification_id=str(uuid.uuid4()),
+        verification_code="1111",
         phoneNumber="+1234567890"
     )
 
@@ -2471,3 +2471,303 @@ async def test_verify_code_and_update_record_existing_attempts():
                AsyncMock()):
         await _verify_code_and_update_record(record, "1234", "verification-id")
 
+
+# ============================================================================
+# Additional coverage tests for uncovered lines
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_send_verification_code_with_verification_method_provided():
+    """Test send verification code when verification_method is provided in request."""
+    from apps.user_service.app.api.verification_codes import send_verification_code
+    from fastapi import Request
+    from unittest.mock import MagicMock
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.headers = {}
+    mock_request.client = MagicMock()
+    mock_request.client.host = "127.0.0.1"
+    mock_request.state = MagicMock()
+    mock_request.state.access_token = None
+
+    data = SendVerificationCodeRequest(
+        type=VerificationType.EMAIL,
+        email="new@example.com",
+        verification_method="CUSTOM_TRIGGER"
+    )
+
+    mock_record = {
+        "id": str(uuid.uuid4()),
+        "expiry_at": int((datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp() * 1000),
+        "verification_code": "1111"
+    }
+
+    with patch('apps.user_service.app.api.verification_codes.get_optional_user',
+               return_value=None), \
+         patch('apps.user_service.app.api.verification_codes.get_auth_user_by_email',
+               AsyncMock(return_value=None)), \
+         patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+               AsyncMock(return_value=[])), \
+         patch('apps.user_service.app.api.verification_codes.create_verification_code',
+               AsyncMock(return_value=mock_record)), \
+         patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
+               return_value=True):
+        result = await send_verification_code(mock_request, data, None)
+        assert result.verification_id == mock_record["id"]
+
+
+@pytest.mark.asyncio
+async def test_send_verification_code_with_verification_method_authenticated():
+    """Test send verification code with verification_method when authenticated."""
+    from apps.user_service.app.api.verification_codes import send_verification_code
+    from fastapi import Request
+    from unittest.mock import MagicMock
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.headers = {}
+    mock_request.client = MagicMock()
+    mock_request.client.host = "127.0.0.1"
+    mock_request.state = MagicMock()
+    mock_request.state.access_token = None
+
+    current_user = {"sub": "user-123", "email": "current@example.com"}
+    data = SendVerificationCodeRequest(
+        type=VerificationType.EMAIL,
+        email="new@example.com",
+        verification_method="CUSTOM_TRIGGER"
+    )
+
+    mock_user_data = MagicMock()
+    mock_user_data.user = MagicMock()
+    mock_user_data.user.email = "current@example.com"
+
+    mock_record = {
+        "id": str(uuid.uuid4()),
+        "expiry_at": int((datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp() * 1000),
+        "verification_code": "1111"
+    }
+
+    with patch('apps.user_service.app.api.verification_codes.get_optional_user',
+               return_value=current_user), \
+         patch('apps.user_service.app.api.verification_codes.get_user_by_id',
+               AsyncMock(return_value=mock_user_data)), \
+         patch('apps.user_service.app.api.verification_codes._validate_email_for_update',
+               AsyncMock()), \
+         patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+               AsyncMock(return_value=[])), \
+         patch('apps.user_service.app.api.verification_codes.create_verification_code',
+               AsyncMock(return_value=mock_record)), \
+         patch('apps.user_service.app.api.verification_codes.send_verification_code_email',
+               return_value=True):
+        result = await send_verification_code(mock_request, data, current_user)
+        assert result.verification_id == mock_record["id"]
+
+
+def test_check_verification_code_ownership_no_sub_in_user():
+    """Test ownership check when user has no 'sub' key."""
+    from apps.user_service.app.api.verification_codes import _check_verification_code_ownership
+
+    verification_record = {"user_id": "user-123"}
+    current_user = {"email": "test@example.com"}  # No 'sub' key
+
+    # Should not raise, just log warning
+    with patch('apps.user_service.app.api.verification_codes.logger') as mock_logger:
+        _check_verification_code_ownership(verification_record, current_user, "verification-id")
+        # Should log warning about missing sub
+        assert mock_logger.warning.called
+
+
+def test_check_verification_code_ownership_no_current_user_id():
+    """Test ownership check when current_user_id is None."""
+    from apps.user_service.app.api.verification_codes import _check_verification_code_ownership
+
+    verification_record = {"user_id": "user-123"}
+    current_user = {"sub": None}  # sub is None
+
+    # Should not raise
+    _check_verification_code_ownership(verification_record, current_user, "verification-id")
+
+
+@pytest.mark.asyncio
+async def test_check_auth_user_exists_by_phone_with_plus_normalized():
+    """Test phone existence check with + prefix normalization."""
+    from apps.user_service.app.api.verification_codes import _check_auth_user_exists_by_phone
+
+    mock_user = MagicMock()
+    mock_user.phone = "+1234567890"
+
+    mock_supabase = MagicMock()
+    mock_supabase.auth.admin.list_users = AsyncMock(return_value=[mock_user])
+
+    with patch('apps.user_service.app.api.verification_codes.get_supabase_admin_client',
+               AsyncMock(return_value=mock_supabase)):
+        result = await _check_auth_user_exists_by_phone("1234567890")  # Without +
+        assert result is True  # Should match after normalization
+
+
+@pytest.mark.asyncio
+async def test_check_auth_user_exists_by_phone_list_users_exception():
+    """Test phone existence check when list_users raises exception."""
+    from apps.user_service.app.api.verification_codes import _check_auth_user_exists_by_phone
+
+    mock_supabase = MagicMock()
+    mock_supabase.auth.admin.list_users = AsyncMock(side_effect=Exception("DB error"))
+
+    with patch('apps.user_service.app.api.verification_codes.get_supabase_admin_client',
+               AsyncMock(return_value=mock_supabase)), \
+         patch('apps.user_service.app.api.verification_codes.logger') as mock_logger:
+        result = await _check_auth_user_exists_by_phone("+1234567890")
+        assert result is False  # Should return False on error
+        mock_logger.warning.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_validate_phone_for_update_no_user_data():
+    """Test phone validation when get_user_by_id returns None."""
+    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
+
+    # When user_data is None, the if condition fails and no exception is raised
+    # So no warning is logged - the function just continues
+    with patch('apps.user_service.app.api.verification_codes.get_user_by_id',
+               AsyncMock(return_value=None)):
+        # Should not raise, just silently continue
+        await _validate_phone_for_update("+1234567890", "user-123")
+        # No warning is logged when user_data is None - it's a valid path
+
+
+@pytest.mark.asyncio
+async def test_validate_phone_for_update_no_user_attr():
+    """Test phone validation when user_data has no 'user' attribute."""
+    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
+
+    mock_user_data = MagicMock()
+    # hasattr will return False, so the if condition fails and no exception is raised
+    # No warning is logged in this case - it's a valid path
+
+    with patch('apps.user_service.app.api.verification_codes.get_user_by_id',
+               AsyncMock(return_value=mock_user_data)):
+        # Should not raise, just silently continue
+        await _validate_phone_for_update("+1234567890", "user-123")
+        # No warning is logged when user_data has no user attribute - it's a valid path
+
+
+@pytest.mark.asyncio
+async def test_validate_authenticated_user_input_exception_in_get_user():
+    """Test authenticated user input when get_user_by_id raises exception."""
+    from apps.user_service.app.api.verification_codes import _validate_authenticated_user_input
+
+    current_user = {"sub": "user-123", "email": "jwt@example.com"}
+    data = SendVerificationCodeRequest(type=VerificationType.EMAIL, email="new@example.com")
+
+    # Make get_user_by_id raise an exception to trigger the warning
+    with patch('apps.user_service.app.api.verification_codes.get_user_by_id',
+               AsyncMock(side_effect=Exception("DB error"))), \
+         patch('apps.user_service.app.api.verification_codes._validate_email_for_update',
+               AsyncMock()), \
+         patch('apps.user_service.app.api.verification_codes.logger') as mock_logger:
+        user_id, trigger = await _validate_authenticated_user_input(data, current_user)
+        assert user_id == "user-123"
+        # Should log warning when exception occurs and fall back to JWT email
+        mock_logger.warning.assert_called_once()
+        assert "Could not get current email from auth" in mock_logger.warning.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_get_optional_user_exception_in_get_user_from_auth():
+    """Test get_optional_user when get_user_from_auth raises exception."""
+    from apps.user_service.app.api.verification_codes import get_optional_user
+    from fastapi import Request
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.state = MagicMock()
+    mock_request.state.user = {"sub": "user-123"}
+
+    with patch('apps.user_service.app.api.verification_codes.get_user_from_auth',
+               side_effect=Exception("Auth error")):
+        result = get_optional_user(mock_request)
+        # Should return None on exception
+        assert result is None
+
+
+@pytest.mark.asyncio
+async def test_send_verification_code_verification_method_phone_unauthenticated():
+    """Test send verification code with verification_method for phone when unauthenticated."""
+    from apps.user_service.app.api.verification_codes import send_verification_code
+    from fastapi import Request
+    from unittest.mock import MagicMock
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.headers = {}
+    mock_request.client = MagicMock()
+    mock_request.client.host = "127.0.0.1"
+    mock_request.state = MagicMock()
+    mock_request.state.access_token = None
+
+    data = SendVerificationCodeRequest(
+        type=VerificationType.PHONE_NUMBER,
+        phoneNumber="+1234567890",
+        verification_method="CUSTOM_TRIGGER"
+    )
+
+    mock_record = {
+        "id": str(uuid.uuid4()),
+        "expiry_at": int((datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp() * 1000),
+        "verification_code": "1111"
+    }
+
+    with patch('apps.user_service.app.api.verification_codes.get_optional_user',
+               return_value=None), \
+         patch('apps.user_service.app.api.verification_codes._check_auth_user_exists_by_phone',
+               AsyncMock(return_value=False)), \
+         patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+               AsyncMock(return_value=[])), \
+         patch('apps.user_service.app.api.verification_codes.create_verification_code',
+               AsyncMock(return_value=mock_record)):
+        result = await send_verification_code(mock_request, data, None)
+        assert result.verification_id == mock_record["id"]
+
+
+@pytest.mark.asyncio
+async def test_send_verification_code_verification_method_phone_authenticated():
+    """Test send verification code with verification_method for phone when authenticated."""
+    from apps.user_service.app.api.verification_codes import send_verification_code
+    from fastapi import Request
+    from unittest.mock import MagicMock
+
+    mock_request = MagicMock(spec=Request)
+    mock_request.headers = {}
+    mock_request.client = MagicMock()
+    mock_request.client.host = "127.0.0.1"
+    mock_request.state = MagicMock()
+    mock_request.state.access_token = None
+
+    current_user = {"sub": "user-123"}
+    data = SendVerificationCodeRequest(
+        type=VerificationType.PHONE_NUMBER,
+        phoneNumber="+1234567890",
+        verification_method="CUSTOM_TRIGGER"
+    )
+
+    mock_user_data = MagicMock()
+    mock_user_data.user = MagicMock()
+    mock_user_data.user.phone = "+1111111111"
+
+    mock_record = {
+        "id": str(uuid.uuid4()),
+        "expiry_at": int((datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp() * 1000),
+        "verification_code": "1111"
+    }
+
+    with patch('apps.user_service.app.api.verification_codes.get_optional_user',
+               return_value=current_user), \
+         patch('apps.user_service.app.api.verification_codes.get_user_by_id',
+               AsyncMock(return_value=mock_user_data)), \
+         patch('apps.user_service.app.api.verification_codes._validate_phone_for_update',
+               AsyncMock()), \
+         patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
+               AsyncMock(return_value=[])), \
+         patch('apps.user_service.app.api.verification_codes.create_verification_code',
+               AsyncMock(return_value=mock_record)):
+        result = await send_verification_code(mock_request, data, current_user)
+        assert result.verification_id == mock_record["id"]

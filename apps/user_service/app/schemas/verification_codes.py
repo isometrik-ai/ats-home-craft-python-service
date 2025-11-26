@@ -50,6 +50,7 @@ class SendVerificationCodeRequest(BaseModel):
     type: VerificationType = Field(..., description="Type of verification: EMAIL or PHONE_NUMBER")
     email: Optional[EmailStr] = Field(None, description="Email address for verification")
     phoneNumber: Optional[str] = Field(None, description="Phone number for verification")
+    verification_method: Optional[str] = Field(None, description="Optional verification method field (e.g., 'signup_verification')")
 
     @model_validator(mode='after')
     def validate_email_or_phone(self):
@@ -71,8 +72,8 @@ class VerifyVerificationCodeRequest(BaseModel):
     """Request model for verifying verification code"""
 
     type: VerificationType = Field(..., description="Type of verification: EMAIL or PHONE_NUMBER")
-    verificationId: str = Field(..., description="ID of the verification code record")
-    verificationCode: str = Field(..., description="The verification code to verify")
+    verification_id: str = Field(..., description="ID of the verification code record")
+    verification_code: str = Field(..., description="The verification code to verify")
     email: Optional[EmailStr] = Field(None, description="Email address for verification")
     phoneNumber: Optional[str] = Field(None, description="Phone number for verification")
 
@@ -99,7 +100,7 @@ class VerifyVerificationCodeRequest(BaseModel):
 class SendVerificationCodeResponse(ResponseModel):
     """Response model for sending verification code"""
 
-    verificationId: str = Field(..., description="ID of the created verification code")
+    verification_id: str = Field(..., description="ID of the created verification code")
     expiryAt: int = Field(..., description="Expiry timestamp (Unix timestamp in milliseconds)")
     message: str = Field(default="Verification code sent successfully", description="Response message")
     attemptsLeft: int = Field(..., description="Number of send OTP attempts remaining for today")
