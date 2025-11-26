@@ -518,7 +518,6 @@ async def create_organisation(
             "company_size": body.company_data.company_size,
             "description": body.company_data.description,
             "referral_source": body.company_data.referral_source,
-            "max_users": body.company_data.max_users,
             "logo_url": body.company_data.logo_url,
             "status": "active",
             "user_id": user_context.user_id,
@@ -565,9 +564,7 @@ async def create_organisation(
             "organization_name": organization_name,
             "user_email": user_context.email,
             "role_name": "admin",
-            "slug": slug,
-            "plan_type": body.plan_type.value,
-            "max_users": body.company_data.max_users,
+            "slug": slug
         },
     )
 
