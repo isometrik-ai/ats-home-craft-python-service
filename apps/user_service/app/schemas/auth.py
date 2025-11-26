@@ -99,6 +99,7 @@ class SignupRequest(BaseModel):
 
     email: EmailStr
     password: str = Field(..., min_length=6)
+    salutation: Optional[Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.","Adv."]] = Field(None, description="Salutation for the user")
     first_name: str = Field(..., min_length=2)
     last_name: Optional[str] = Field(None, min_length=2)
     # job_title: Optional[str] = None

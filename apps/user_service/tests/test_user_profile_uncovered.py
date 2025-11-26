@@ -107,6 +107,7 @@ def test_get_user_profile_phone_in_phone_field(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(return_value=mock_user_data)), \

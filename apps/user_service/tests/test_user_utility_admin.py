@@ -25,7 +25,8 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     login_user,
     invite_user_with_email,
     reset_the_password_email,
-    update_password_with_token
+    update_password_with_token,
+    refresh_session
 )
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 
@@ -138,6 +139,36 @@ class TestUpdateSupabaseUserEmail:
 
             assert exc_info.value.status_code == 500
             assert "Internal server error" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_update_supabase_user_email_email_send_fails(self):
+        """Test email update when email sending fails - covers line 67."""
+        user_id = str(uuid.uuid4())
+        org_id = str(uuid.uuid4())
+        new_email = "new@example.com"
+
+        mock_user_info = {
+            "user_id": user_id,
+            "full_name": "Test User",
+            "email": "old@example.com"
+        }
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_user_profile_by_id",
+                   AsyncMock(return_value=mock_user_info)), \
+             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.update_email_of_user",
+                   AsyncMock(return_value={"success": True})), \
+             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.update_user_email",
+                   AsyncMock(return_value=True)), \
+             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.send_admin_update_email",
+                   AsyncMock(return_value=False)), \
+             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.logger") as mock_logger:
+
+            # Should not raise exception, but should log warning
+            await update_supabase_user_email(user_id, org_id, new_email)
+            
+            # Verify warning was logged
+            mock_logger.warning.assert_called_once()
+            assert new_email in str(mock_logger.warning.call_args)
 
 
 class TestGenerateMagicLink:
@@ -450,6 +481,79 @@ class TestSignUpSupabaseUser:
             assert exc_info.value.status_code == 503
             assert "Service temporarily unavailable" in exc_info.value.detail
 
+    @pytest.mark.asyncio
+    async def test_sign_up_supabase_user_unexpected_error(self):
+        """Test user signup with unexpected error - covers line 293."""
+        body = MagicMock()
+        body.email = "test@example.com"
+        body.password = "password123"
+        body.first_name = "Test"
+        body.last_name = None
+        body.phone = None
+        body.timezone = "UTC"
+
+        # Mock an error that doesn't match any patterns
+        mock_supabase = MagicMock()
+        mock_supabase.auth.sign_up = AsyncMock(side_effect=Exception("Unexpected database error"))
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+
+            with pytest.raises(HTTPException) as exc_info:
+                await sign_up_supabase_user(body)
+
+            # Should return 500 for unexpected errors
+            assert exc_info.value.status_code == 500
+            assert "Failed to create user account" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_sign_up_supabase_user_value_error(self):
+        """Test user signup with ValueError - covers lines 308-309."""
+        body = MagicMock()
+        body.email = "test@example.com"
+        body.password = "password123"
+        body.first_name = "Test"
+        body.last_name = None
+        body.phone = None
+        body.timezone = "UTC"
+
+        mock_supabase = MagicMock()
+        mock_supabase.auth.sign_up = AsyncMock(side_effect=ValueError("Invalid input data"))
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+
+            with pytest.raises(HTTPException) as exc_info:
+                await sign_up_supabase_user(body)
+
+            # ValueError should return 400 Bad Request
+            assert exc_info.value.status_code == 400
+            assert "Invalid request" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_sign_up_supabase_user_auth_api_error(self):
+        """Test user signup with AuthApiError - covers lines 308-309."""
+        body = MagicMock()
+        body.email = "test@example.com"
+        body.password = "password123"
+        body.first_name = "Test"
+        body.last_name = None
+        body.phone = None
+        body.timezone = "UTC"
+
+        mock_supabase = MagicMock()
+        mock_supabase.auth.sign_up = AsyncMock(side_effect=AuthApiError("Invalid request", 400, "INVALID_REQUEST"))
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+
+            with pytest.raises(HTTPException) as exc_info:
+                await sign_up_supabase_user(body)
+
+            # AuthApiError should return 400 Bad Request
+            assert exc_info.value.status_code == 400
+            assert "Invalid request" in exc_info.value.detail
+
 
 class TestLoginUser:
     """Test cases for login_user function."""
@@ -483,6 +587,63 @@ class TestLoginUser:
                 await login_user(email, password)
 
             assert "Invalid credentials" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_login_user_email_not_confirmed(self):
+        """Test login when email is not confirmed - covers lines 341-342."""
+        email = "test@example.com"
+        password = "password123"
+
+        auth_error = AuthApiError("Email not confirmed", 400, "EMAIL_NOT_CONFIRMED")
+        auth_error.status = 400
+        auth_error.message = "Email not confirmed"
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=auth_error))))):
+
+            with pytest.raises(HTTPException) as exc_info:
+                await login_user(email, password)
+
+            assert exc_info.value.status_code == 403
+            assert "Email not confirmed" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_login_user_invalid_credentials(self):
+        """Test login with invalid credentials - covers lines 343-344."""
+        email = "test@example.com"
+        password = "wrongpassword"
+
+        auth_error = AuthApiError("Invalid login credentials", 400, "INVALID_CREDENTIALS")
+        auth_error.status = 400
+        auth_error.message = "Invalid login credentials"
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=auth_error))))):
+
+            with pytest.raises(HTTPException) as exc_info:
+                await login_user(email, password)
+
+            assert exc_info.value.status_code == 400
+            assert "Invalid Password" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_login_user_auth_api_error_other(self):
+        """Test login with other AuthApiError - covers lines 345-346."""
+        email = "test@example.com"
+        password = "password123"
+
+        auth_error = AuthApiError("Account suspended", 403, "ACCOUNT_SUSPENDED")
+        auth_error.status = 403
+        auth_error.message = "Account suspended"
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=auth_error))))):
+
+            with pytest.raises(HTTPException) as exc_info:
+                await login_user(email, password)
+
+            assert exc_info.value.status_code == 403
+            assert "Account suspended" in exc_info.value.detail
 
 class TestInviteUserWithEmail:
     """Test cases for invite_user_with_email function."""
@@ -667,6 +828,66 @@ class TestUpdatePasswordWithToken:
 
             assert exc_info.value.status_code == 500
             assert "Unexpected error occurred while updating password with token" in exc_info.value.detail
+
+
+class TestRefreshSession:
+    """Test cases for refresh_session function."""
+
+    @pytest.mark.asyncio
+    async def test_refresh_session_success(self):
+        """Test successful session refresh - covers refresh_session function."""
+        refresh_token = "refresh_token_123"
+        mock_response = {
+            "session": {
+                "access_token": "new_access_token",
+                "refresh_token": "new_refresh_token"
+            },
+            "user": {"id": "user123"}
+        }
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+                   AsyncMock(return_value=MagicMock(auth=MagicMock(refresh_session=AsyncMock(return_value=mock_response))))):
+
+            result = await refresh_session(refresh_token)
+            assert result == mock_response
+
+    @pytest.mark.asyncio
+    async def test_refresh_session_auth_api_error(self):
+        """Test refresh session with AuthApiError - covers lines 454-458."""
+        refresh_token = "invalid_refresh_token"
+
+        auth_error = AuthApiError("Invalid refresh token", 400, "INVALID_REFRESH_TOKEN")
+        auth_error.status = 400
+        auth_error.message = "Invalid refresh token"
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+                   AsyncMock(return_value=MagicMock(auth=MagicMock(refresh_session=AsyncMock(side_effect=auth_error))))):
+
+            with pytest.raises(HTTPException) as exc_info:
+                await refresh_session(refresh_token)
+
+            assert exc_info.value.status_code == 400
+            assert "Invalid request" in exc_info.value.detail
+            assert "Invalid refresh token" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_refresh_session_general_exception(self):
+        """Test refresh session with general exception - covers lines 459-464."""
+        refresh_token = "refresh_token_123"
+
+        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
+                   AsyncMock(return_value=MagicMock(auth=MagicMock(refresh_session=AsyncMock(side_effect=Exception("Database connection error")))))), \
+             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.logger") as mock_logger:
+
+            with pytest.raises(HTTPException) as exc_info:
+                await refresh_session(refresh_token)
+
+            assert exc_info.value.status_code == 500
+            assert "Unexpected error occurred while refreshing session" in exc_info.value.detail
+            # Verify error was logged
+            mock_logger.error.assert_called_once()
+            assert "refreshing session" in str(mock_logger.error.call_args).lower()
+
 
 class TestLogException:
     """Test cases for log_exception function."""

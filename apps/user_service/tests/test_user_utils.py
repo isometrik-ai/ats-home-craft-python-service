@@ -37,7 +37,8 @@ class TestCreateUserProfileData:
             "joined_at": datetime.now(timezone.utc),
             "last_active_at": datetime.now(timezone.utc),
             "organization_id": str(uuid.uuid4()),
-            "identities": []
+            "identities": [],
+            "salutation": None
         }
 
         result = create_user_profile_data(user_profile)
@@ -65,6 +66,7 @@ class TestCreateUserProfileData:
             "last_active_at": None,
             "organization_id": str(uuid.uuid4()),
             "identities": [],
+            "salutation": None,
             "verification_preference": {
                 "enabled": True,
                 "type": "email"
@@ -94,6 +96,7 @@ class TestCreateUserProfileData:
             "last_active_at": None,
             "organization_id": str(uuid.uuid4()),
             "identities": [],
+            "salutation": None,
             "verification_preference": {
                 "enabled": "invalid",  # Invalid type to trigger exception
                 "type": None
@@ -123,6 +126,7 @@ class TestCreateUserProfileData:
             "last_active_at": None,
             "organization_id": str(uuid.uuid4()),
             "identities": [],
+            "salutation": None,
             "verification_preference": "not a dict"
         }
 
@@ -147,6 +151,7 @@ class TestCreateUserProfileData:
             "last_active_at": None,
             "organization_id": str(uuid.uuid4()),
             "identities": [],
+            "salutation": None,
             "verification_preference": None
         }
 
@@ -169,7 +174,8 @@ class TestCreateUserProfileData:
             "joined_at": "2024-01-01T00:00:00Z",  # String, not datetime
             "last_active_at": None,
             "organization_id": str(uuid.uuid4()),
-            "identities": []
+            "identities": [],
+            "salutation": None
         }
 
         result = create_user_profile_data(user_profile)
@@ -193,7 +199,8 @@ class TestCreateUserProfileData:
             "joined_at": None,
             "last_active_at": None,
             "organization_id": str(uuid.uuid4()),
-            "identities": []
+            "identities": [],
+            "salutation": None
         }
 
         result = create_user_profile_data(user_profile)
@@ -216,7 +223,8 @@ class TestCreateUserProfileData:
             "joined_at": datetime.now(timezone.utc),
             "last_active_at": "2024-01-01T00:00:00Z",  # String, not datetime
             "organization_id": str(uuid.uuid4()),
-            "identities": []
+            "identities": [],
+            "salutation": None
         }
 
         result = create_user_profile_data(user_profile)
@@ -252,7 +260,8 @@ class TestCreateUserProfileData:
             "joined_at": datetime.now(timezone.utc),
             "last_active_at": datetime.now(timezone.utc),
             "organization_id": str(uuid.uuid4()),
-            "identities": []
+            "identities": [],
+            "salutation": None
         }
 
         result = create_user_profile_data(
@@ -280,7 +289,8 @@ class TestCreateUserProfileData:
             "joined_at": datetime.now(timezone.utc),
             "last_active_at": None,
             "organization_id": str(uuid.uuid4()),
-            "identities": []
+            "identities": [],
+            "salutation": None
         }
 
         result = create_user_profile_data(user_profile)
@@ -302,7 +312,8 @@ class TestCreateUserProfileData:
             "joined_at": datetime.now(timezone.utc),
             "last_active_at": None,
             "organization_id": str(uuid.uuid4()),
-            "identities": []
+            "identities": [],
+            "salutation": None
         }
 
         result = create_user_profile_data(user_profile, user_type="super_admin")

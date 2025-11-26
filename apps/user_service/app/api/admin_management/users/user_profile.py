@@ -158,7 +158,7 @@ async def get_user_profile(
             # Use current_phone from Supabase auth if available, otherwise fall back to metadata
             phone = current_phone or user_metadata.get("phone")
             tzone = user_metadata.get("timezone", "UTC")
-
+            salutation = user_metadata.get("salutation", None)
             # Create a basic profile for users without organization membership
             user_profile = {
                 "user_id": user_context.user_id,
@@ -169,6 +169,7 @@ async def get_user_profile(
                 "avatar_url": avatar_url,
                 "phone": phone,  # Use current phone from Supabase auth
                 "timezone": tzone,
+                "salutation": salutation,
                 "role_id": None,
                 "status": "active",
                 "created_at": None,
