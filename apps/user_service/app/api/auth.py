@@ -523,7 +523,7 @@ async def login(request: Request, data: AuthLogin):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=EMAIL_NOT_FOUND_MESSAGE
             )
-        
+
         # Check if user has 2FA enabled and verify if needed
         user_metadata = all_user.user_metadata or {}
         user_phone = getattr(all_user, 'phone', None)  # Get phone from auth.users
@@ -534,8 +534,17 @@ async def login(request: Request, data: AuthLogin):
             email=data.email,
             user_phone=user_phone
         )
-        
-        result = await login_user(data.email, data.password)
+
+        # Extract headers
+        user_agent = request.headers.get("User-Agent")
+        device_signature = request.headers.get("X-Device-Signature")
+
+        result = await login_user(
+            email=data.email, 
+            password=data.password, 
+            user_agent=user_agent,
+            device_signature=device_signature,
+        )
         return AuthResponse(
             access_token=result.session.access_token,
             refresh_token=result.session.refresh_token,
@@ -995,8 +1004,8 @@ async def verify_email(
                 can_login=True
             )
 
-        # 4) User exists in auth.users but is not organization_member or has no user type
-        # Still return email_found=True since email exists
+    # 4) User exists in auth.users but is not organization_member or has no user type
+    # Still return email_found=True since email exists
     except HTTPException as error:
         raise error
     except Exception as error:
