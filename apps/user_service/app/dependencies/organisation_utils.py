@@ -41,12 +41,7 @@ from libs.shared_db.postgres_db.user_service_operations.exception_handling impor
     SupabaseAPIError,
 )
 from libs.shared_utils.isometrik_service import (
-    create_isometrik_application,
-    update_isometrik_application,
-    create_isometrik_chat_user
-)
-from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
-    update_organisation_settings,
+    create_isometrik_application
 )
 
 FAIL_CREATE_ACCOUNT = "Failed to create account. Please try again."
@@ -194,110 +189,87 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         })
 
         # Step 6: Create Isometrik application (non-blocking - log errors but don't fail org creation)
-        try:
-            isometrik_response = await create_isometrik_application(
-                organization_name=org_data["name"],
-                organization_id=org_data["organization_id"],
-                product_types=["chat", "video"],
-                plan="basic"
-            )
-            
-            # Store Isometrik response data in organization settings
-            if isometrik_response and isometrik_response.get("data"):
-                isometrik_data = isometrik_response["data"]
-                # Get current settings and update with Isometrik data
-                current_org = await get_organisation_details_by_id(org_data["organization_id"])
-                if current_org and current_org.get("settings"):
-                    current_settings = current_org["settings"]
-                else:
-                    current_settings = {}
-                
-                # Store Isometrik data in settings
-                current_settings["isometrik"] = {
-                    "projectId": isometrik_data.get("projectId"),
-                    "keysetId": isometrik_data.get("keysetId"),
-                    "keysetName": isometrik_data.get("keysetName"),
-                    "appSecret": isometrik_data.get("appSecret"),
-                    "userSecret": isometrik_data.get("userSecret"),
-                    "licenseKey": isometrik_data.get("licenseKey"),
-                    "publishKey": isometrik_data.get("publishKey"),
-                    "subscribeKey": isometrik_data.get("subscribeKey"),
-                    "accountId": isometrik_data.get("accountId", org_data["organization_id"]),
-                }
-                
-                # Update organization settings with Isometrik data
-                await update_organisation_settings(org_data["organization_id"], current_settings)
-                logger.info(
-                    "Successfully created and stored Isometrik application for organization: %s (projectId: %s)",
-                    org_data["organization_id"],
-                    isometrik_data.get("projectId")
+        # Only proceed if Isometrik is enabled
+        from libs.shared_utils.isometrik_service import is_isometrik_enabled
+        if is_isometrik_enabled():
+            try:
+                isometrik_response = await create_isometrik_application(
+                    organization_name=org_data["name"],
+                    product_types=["chat", "video"],
+                    plan="basic"
                 )
                 
-                # Step 7: Create Isometrik chat user (non-blocking - log errors but don't fail org creation)
-                try:
-                    chat_user_response = await create_isometrik_chat_user(
-                        organization_id=org_data["organization_id"],
-                        first_name=org_data.get("first_name"),
-                        last_name=org_data.get("last_name"),
-                        email=org_data["email"],
-                        isometrik_credentials={
-                            "userSecret": isometrik_data.get("userSecret"),
-                            "licenseKey": isometrik_data.get("licenseKey"),
-                            "appSecret": isometrik_data.get("appSecret")
-                        }
-                    )
-                    
-                    # Store chat user data in settings
-                    if chat_user_response and chat_user_response.get("data"):
-                        chat_user_data = chat_user_response["data"]
-                        # Get updated settings
-                        updated_org = await get_organisation_details_by_id(org_data["organization_id"])
-                        if updated_org and updated_org.get("settings"):
-                            updated_settings = updated_org["settings"]
-                        else:
-                            updated_settings = current_settings
-                        
-                        # Add chat user data to Isometrik settings
-                        if "isometrik" not in updated_settings:
-                            updated_settings["isometrik"] = {}
-                        
-                        updated_settings["isometrik"]["isometrikUserId"] = chat_user_data.get("userId")
-                        updated_settings["isometrik"]["isometrikRes"] = chat_user_data
-                        updated_settings["isometrik"]["isometrikToken"] = chat_user_data.get("userToken")
-                        
-                        # Update organization settings with chat user data
-                        await update_organisation_settings(org_data["organization_id"], updated_settings)
-                        logger.info(
-                            "Successfully created and stored Isometrik chat user for organization: %s (userId: %s)",
-                            org_data["organization_id"],
-                            chat_user_data.get("userId")
-                        )
+                # Store Isometrik response data in organization settings
+                if isometrik_response and isometrik_response.get("data"):
+                    isometrik_data = isometrik_response["data"]
+                    # Get current settings and update with Isometrik data
+                    current_org = await get_organisation_details_by_id(org_data["organization_id"])
+                    if current_org and current_org.get("settings"):
+                        current_settings = current_org["settings"]
                     else:
-                        logger.warning(
-                            "Isometrik chat user response missing data for organization: %s",
-                            org_data["organization_id"]
-                        )
-                except Exception as chat_user_error:
-                    # Log error but don't fail organization creation
-                    logger.warning(
-                        "Failed to create Isometrik chat user for organization %s: %s",
+                        current_settings = {}
+                    
+                    # Store only the data portion from Isometrik application creation response
+                    current_settings["isometrik_application_details"] = isometrik_data
+                    
+                    # Update organization settings with Isometrik data
+                    await update_organisation_settings(org_data["organization_id"], current_settings)
+                    logger.info(
+                        "Successfully created and stored Isometrik application for organization: %s (projectId: %s)",
                         org_data["organization_id"],
-                        str(chat_user_error)
+                        isometrik_data.get("projectId")
                     )
-                    # Continue with organization creation even if chat user creation fails
-            else:
+                else:
+                    logger.warning(
+                        "Isometrik response missing data for organization: %s",
+                        org_data["organization_id"]
+                    )
+            except Exception as isometrik_error:
+                # Log error but don't fail organization creation
+                error_message = str(isometrik_error)
                 logger.warning(
-                    "Isometrik response missing data for organization: %s",
-                    org_data["organization_id"]
+                    "Failed to create Isometrik application for organization %s: %s",
+                    org_data["organization_id"],
+                    error_message
                 )
-        except Exception as isometrik_error:
-            # Log error but don't fail organization creation
-            logger.warning(
-                "Failed to create Isometrik application for organization %s: %s",
-                org_data["organization_id"],
-                str(isometrik_error)
-            )
-            # Continue with organization creation even if Isometrik fails
+                
+                # Save error information in settings so we know what happened
+                try:
+                    current_org = await get_organisation_details_by_id(org_data["organization_id"])
+                    if current_org and current_org.get("settings"):
+                        current_settings = current_org["settings"]
+                    else:
+                        current_settings = {}
+                    
+                    # Store error information in settings
+                    current_settings["isometrik"] = {
+                        "status": "error",
+                        "error": error_message,
+                        "organization_id": org_data["organization_id"],
+                        "organization_name": org_data["name"],
+                        "errorType": "creation_failed"
+                    }
+                    
+                    # Check if error is a 409 Conflict (project already exists)
+                    if "409" in error_message or "Conflict" in error_message:
+                        current_settings["isometrik"]["errorType"] = "conflict"
+                        current_settings["isometrik"]["suggestion"] = "Project may already exist with same name. Please check Isometrik dashboard or try with a different organization name."
+                    
+                    # Update organization settings with error information
+                    await update_organisation_settings(org_data["organization_id"], current_settings)
+                    logger.info(
+                        "Saved Isometrik creation error information in settings for organization: %s",
+                        org_data["organization_id"]
+                    )
+                except Exception as settings_error:
+                    # If we can't save error info, log it but don't fail
+                    logger.error(
+                        "Failed to save Isometrik error information in settings for organization %s: %s",
+                        org_data["organization_id"],
+                        str(settings_error)
+                    )
+                
+                # Continue with organization creation even if Isometrik fails
 
     except HTTPException:
         # Re-raise HTTP exceptions as-is (preserves status codes)

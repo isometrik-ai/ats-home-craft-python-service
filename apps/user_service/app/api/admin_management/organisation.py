@@ -644,36 +644,6 @@ async def update_organisation(
     update_data = body.model_dump(exclude_unset=True, exclude_none=True)
     await update_organisation_details(organisation_id, organization_data, update_data)
 
-    # Update Isometrik application if organization name is being updated (non-blocking)
-    if "name" in update_data:
-        try:
-            from libs.shared_utils.isometrik_service import (
-                update_isometrik_application,
-                get_isometrik_data_from_settings
-            )
-            
-            # Get Isometrik application_id from organization settings
-            isometrik_data = get_isometrik_data_from_settings(organization_data.get("settings"))
-            application_id = isometrik_data.get("projectId") if isometrik_data else None  # projectId is the application ID
-            
-            await update_isometrik_application(
-                organization_id=organisation_id,
-                organization_name=update_data["name"],
-                application_id=application_id
-            )
-            logger.info(
-                "Successfully updated Isometrik application name for organization: %s (applicationId: %s)",
-                organisation_id,
-                application_id or organisation_id
-            )
-        except Exception as isometrik_error:
-            # Log error but don't fail organization update
-            logger.warning(
-                "Failed to update Isometrik application for organization %s: %s",
-                organisation_id,
-                str(isometrik_error)
-            )
-            # Continue with organization update even if Isometrik fails
 
     request.state.audit_new_values = update_data
 
