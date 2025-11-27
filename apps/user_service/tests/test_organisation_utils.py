@@ -11,9 +11,7 @@ from apps.user_service.app.dependencies.organisation_utils import (
     validate_organisation_name_filter,
     build_organisation_filter_message,
     create_organisation_with_super_admin,
-    _save_isometrik_application_data,
-    _save_isometrik_error_info,
-    _create_isometrik_application_for_org
+    _save_isometrik_application_data
 )
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     DatabaseOperationError,
@@ -170,8 +168,8 @@ class TestCreateOrganisationWithSuperAdmin:
     """Test cases for create_organisation_with_super_admin function."""
 
     @pytest.mark.asyncio
-    async def test_create_organisation_with_super_admin_success(self):
-        """Test successful organisation creation with super admin."""
+    async def test_create_organisation_with_super_admin_success_isometrik_disabled(self):
+        """Test successful organisation creation with super admin when Isometrik is disabled."""
         org_data = {
             "organization_id": str(uuid.uuid4()),
             "user_id": str(uuid.uuid4()),
@@ -188,12 +186,12 @@ class TestCreateOrganisationWithSuperAdmin:
         mock_permissions = ["perm-1", "perm-2", "perm-3"]
         mock_member_result = {"id": str(uuid.uuid4())}
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)) as mock_create_org, \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)) as mock_create_org, \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value=mock_role_result)) as mock_create_role, \
              patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(return_value=mock_permissions)) as mock_create_perms, \
              patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=True)) as mock_assign_perms, \
-             patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(return_value=mock_member_result)) as mock_add_member, \
-             patch("apps.user_service.app.dependencies.organisation_utils._create_isometrik_application_for_org", AsyncMock()) as mock_isometrik:
+             patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(return_value=mock_member_result)) as mock_add_member:
 
             await create_organisation_with_super_admin(org_data)
 
@@ -214,7 +212,116 @@ class TestCreateOrganisationWithSuperAdmin:
                 "status": "active"
             }
             mock_add_member.assert_called_once_with(org_data["organization_id"], expected_member_data)
-            mock_isometrik.assert_called_once_with(org_data)
+
+    @pytest.mark.asyncio
+    async def test_create_organisation_with_super_admin_success_isometrik_enabled(self):
+        """Test successful organisation creation with super admin when Isometrik is enabled."""
+        org_data = {
+            "organization_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "email": "admin@test.com",
+            "first_name": "Admin",
+            "last_name": "User",
+            "phone": "+1234567890",
+            "timezone": "UTC",
+            "name": "Test Organization"
+        }
+
+        mock_org_result = {"id": org_data["organization_id"], "name": "Test Org"}
+        mock_role_result = {"id": str(uuid.uuid4()), "name": "admin"}
+        mock_permissions = ["perm-1", "perm-2", "perm-3"]
+        mock_member_result = {"id": str(uuid.uuid4())}
+        isometrik_response = {
+            "data": {
+                "projectId": "test-project-id",
+                "keysetId": "test-keyset-id"
+            }
+        }
+
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=True), \
+             patch("libs.shared_utils.isometrik_service.create_isometrik_application", AsyncMock(return_value=isometrik_response)) as mock_isometrik_create, \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)) as mock_create_org, \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value=mock_role_result)) as mock_create_role, \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(return_value=mock_permissions)) as mock_create_perms, \
+             patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=True)) as mock_assign_perms, \
+             patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(return_value=mock_member_result)) as mock_add_member, \
+             patch("apps.user_service.app.dependencies.organisation_utils._save_isometrik_application_data", AsyncMock()) as mock_save_isometrik:
+
+            await create_organisation_with_super_admin(org_data)
+
+            # Verify Isometrik was called first
+            mock_isometrik_create.assert_called_once_with(
+                organization_name="Test Organization",
+                product_types=["chat", "video"],
+                plan="basic"
+            )
+            
+            # Verify all functions were called with correct arguments
+            mock_create_org.assert_called_once_with(org_data)
+            mock_create_role.assert_called_once_with(org_data["organization_id"])
+            mock_create_perms.assert_called_once_with(org_data["organization_id"])
+            mock_assign_perms.assert_called_once_with(mock_role_result["id"], org_data["organization_id"])
+
+            expected_member_data = {
+                "user_id": org_data["user_id"],
+                "email": org_data["email"],
+                "first_name": org_data["first_name"],
+                "last_name": org_data["last_name"],
+                "phone": org_data["phone"],
+                "timezone": org_data["timezone"],
+                "role_id": mock_role_result["id"],
+                "status": "active"
+            }
+            mock_add_member.assert_called_once_with(org_data["organization_id"], expected_member_data)
+            mock_save_isometrik.assert_called_once_with(org_data["organization_id"], isometrik_response["data"])
+
+    @pytest.mark.asyncio
+    async def test_create_organisation_with_super_admin_isometrik_fails(self):
+        """Test organisation creation fails when Isometrik is enabled but creation fails."""
+        org_data = {
+            "organization_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "email": "admin@test.com",
+            "name": "Test Organization"
+        }
+
+        from libs.shared_utils.isometrik_service import IsometrikAPIError
+        isometrik_error = IsometrikAPIError(
+            "Isometrik API error: 409 - Conflict",
+            status_code=409,
+            response_text='{"status":"Conflict"}'
+        )
+
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=True), \
+             patch("libs.shared_utils.isometrik_service.create_isometrik_application", AsyncMock(side_effect=isometrik_error)):
+
+            with pytest.raises(HTTPException) as exc_info:
+                await create_organisation_with_super_admin(org_data)
+
+            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "Failed to create Isometrik application" in exc_info.value.detail
+            assert "Isometrik API error: 409 - Conflict" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_create_organisation_with_super_admin_isometrik_invalid_response(self):
+        """Test organisation creation fails when Isometrik returns invalid response."""
+        org_data = {
+            "organization_id": str(uuid.uuid4()),
+            "user_id": str(uuid.uuid4()),
+            "email": "admin@test.com",
+            "name": "Test Organization"
+        }
+
+        isometrik_response = {"status": "success"}  # Missing "data" key
+
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=True), \
+             patch("libs.shared_utils.isometrik_service.create_isometrik_application", AsyncMock(return_value=isometrik_response)):
+
+            with pytest.raises(HTTPException) as exc_info:
+                await create_organisation_with_super_admin(org_data)
+
+            assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "Invalid response from Isometrik API" in exc_info.value.detail
 
     @pytest.mark.asyncio
     async def test_create_organisation_with_super_admin_missing_fields(self):
@@ -231,7 +338,8 @@ class TestCreateOrganisationWithSuperAdmin:
         mock_permissions = ["perm-1", "perm-2"]
         mock_member_result = {"id": str(uuid.uuid4())}
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value=mock_role_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(return_value=mock_permissions)), \
              patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=True)), \
@@ -267,7 +375,8 @@ class TestCreateOrganisationWithSuperAdmin:
 
         db_error = Exception("Database connection failed")
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(side_effect=db_error)), \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(side_effect=db_error)), \
              patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
@@ -294,7 +403,8 @@ class TestCreateOrganisationWithSuperAdmin:
 
         db_error = Exception("Database connection failed")
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(side_effect=db_error)), \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(side_effect=db_error)), \
              patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
@@ -322,7 +432,8 @@ class TestCreateOrganisationWithSuperAdmin:
         mock_org_result = {"id": org_data["organization_id"], "name": "Test Org"}
         role_error = Exception("Role creation failed")
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(side_effect=role_error)), \
              patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
@@ -352,7 +463,8 @@ class TestCreateOrganisationWithSuperAdmin:
         mock_role_result = {"id": str(uuid.uuid4()), "name": "admin"}
         permissions_error = Exception("Permissions creation failed")
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value=mock_role_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(side_effect=permissions_error)), \
              patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
@@ -384,7 +496,8 @@ class TestCreateOrganisationWithSuperAdmin:
         mock_permissions = ["perm-1", "perm-2"]
         member_error = Exception("Member creation failed")
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=mock_org_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value=mock_role_result)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(return_value=mock_permissions)), \
              patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=True)), \
@@ -415,9 +528,9 @@ class TestCreateOrganisationWithSuperAdmin:
             "code": "23505",
         })
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(side_effect=api_error)), \
-             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception, \
-             patch("apps.user_service.app.dependencies.organisation_utils.logger.warning") as mock_warning:
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(side_effect=api_error)), \
+             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
                 await create_organisation_with_super_admin(org_data)
@@ -425,7 +538,6 @@ class TestCreateOrganisationWithSuperAdmin:
             assert exc_info.value.status_code == status.HTTP_409_CONFLICT
             assert "Organisation slug already exists" in exc_info.value.detail
             mock_log_exception.assert_called_once()
-            mock_warning.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_organisation_with_super_admin_rls_violation(self):
@@ -444,10 +556,10 @@ class TestCreateOrganisationWithSuperAdmin:
         supabase_error = SupabaseAPIError("Supabase API error", operation="create_super_admin_role")
         supabase_error.__cause__ = underlying_api_error
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=None)), \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(side_effect=supabase_error)), \
-             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception, \
-             patch("apps.user_service.app.dependencies.organisation_utils.logger.error") as mock_error:
+             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
                 await create_organisation_with_super_admin(org_data)
@@ -455,7 +567,6 @@ class TestCreateOrganisationWithSuperAdmin:
             assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
             assert "Row-level security policy violation" in exc_info.value.detail
             mock_log_exception.assert_called_once()
-            mock_error.assert_called()
 
     @pytest.mark.asyncio
     async def test_create_organisation_with_super_admin_generic_api_error(self):
@@ -471,10 +582,10 @@ class TestCreateOrganisationWithSuperAdmin:
             "code": "12345",
         })
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=None)), \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(side_effect=api_error)), \
-             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception, \
-             patch("apps.user_service.app.dependencies.organisation_utils.logger.error") as mock_error:
+             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
                 await create_organisation_with_super_admin(org_data)
@@ -482,7 +593,6 @@ class TestCreateOrganisationWithSuperAdmin:
             assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
             assert "Failed to create account" in exc_info.value.detail
             mock_log_exception.assert_called_once()
-            mock_error.assert_called()
 
     @pytest.mark.asyncio
     async def test_create_organisation_with_super_admin_database_operation_error(self):
@@ -495,13 +605,13 @@ class TestCreateOrganisationWithSuperAdmin:
 
         db_operation_error = DatabaseOperationError("Database failure", operation="add_member")
 
-        with patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=None)), \
+        with patch("libs.shared_utils.isometrik_service.is_isometrik_enabled", return_value=False), \
+             patch("apps.user_service.app.dependencies.organisation_utils.create_new_organisation", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value={"id": str(uuid.uuid4())})), \
              patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(side_effect=db_operation_error)), \
-             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception, \
-             patch("apps.user_service.app.dependencies.organisation_utils.logger.error") as mock_error:
+             patch("apps.user_service.app.dependencies.organisation_utils.log_exception") as mock_log_exception:
 
             with pytest.raises(HTTPException) as exc_info:
                 await create_organisation_with_super_admin(org_data)
@@ -509,4 +619,3 @@ class TestCreateOrganisationWithSuperAdmin:
             assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
             assert "Failed to create account" in exc_info.value.detail
             mock_log_exception.assert_called_once()
-            mock_error.assert_called()

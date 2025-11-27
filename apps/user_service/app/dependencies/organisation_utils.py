@@ -24,7 +24,6 @@ from postgrest import APIError
 
 # Local imports
 from apps.user_service.app.dependencies.common_utils import ORG_STATUSES
-from apps.user_service.app.dependencies.logger import get_logger
 
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
@@ -46,8 +45,6 @@ from libs.shared_utils.isometrik_service import (
 
 FAIL_CREATE_ACCOUNT = "Failed to create account. Please try again."
 
-logger = get_logger("organisation_utils")
-
 
 async def _save_isometrik_application_data(
     organization_id: str,
@@ -62,88 +59,8 @@ async def _save_isometrik_application_data(
     
     current_settings["isometrik_application_details"] = isometrik_data
     await update_organisation_settings(organization_id, current_settings)
-    logger.info(
-        "Successfully created and stored Isometrik application for organization: %s (projectId: %s)",
-        organization_id,
-        isometrik_data.get("projectId")
-    )
 
 
-async def _save_isometrik_error_info(
-    organization_id: str,
-    organization_name: str,
-    error_message: str
-) -> None:
-    """Save Isometrik error information to organization settings."""
-    try:
-        current_org = await get_organisation_details_by_id(organization_id)
-        if current_org and current_org.get("settings"):
-            current_settings = current_org["settings"]
-        else:
-            current_settings = {}
-        
-        error_info = {
-            "status": "error",
-            "error": error_message,
-            "organization_id": organization_id,
-            "organization_name": organization_name,
-            "errorType": "creation_failed"
-        }
-        
-        if "409" in error_message or "Conflict" in error_message:
-            error_info["errorType"] = "conflict"
-            error_info["suggestion"] = "Project may already exist with same name. Please check Isometrik dashboard or try with a different organization name."
-        
-        current_settings["isometrik"] = error_info
-        await update_organisation_settings(organization_id, current_settings)
-        logger.info(
-            "Saved Isometrik creation error information in settings for organization: %s",
-            organization_id
-        )
-    except Exception as settings_error:
-        logger.error(
-            "Failed to save Isometrik error information in settings for organization %s: %s",
-            organization_id,
-            str(settings_error)
-        )
-
-
-async def _create_isometrik_application_for_org(org_data: Dict[str, Any]) -> None:
-    """Create Isometrik application for organization (non-blocking)."""
-    from libs.shared_utils.isometrik_service import is_isometrik_enabled, create_isometrik_application
-    
-    if not is_isometrik_enabled():
-        return
-    
-    organization_name = org_data.get("name", "Unknown Organization")
-    
-    try:
-        isometrik_response = await create_isometrik_application(
-            organization_name=organization_name,
-            product_types=["chat", "video"],
-            plan="basic"
-        )
-        
-        if isometrik_response and isometrik_response.get("data"):
-            isometrik_data = isometrik_response["data"]
-            await _save_isometrik_application_data(org_data["organization_id"], isometrik_data)
-        else:
-            logger.warning(
-                "Isometrik response missing data for organization: %s",
-                org_data["organization_id"]
-            )
-    except Exception as isometrik_error:
-        error_message = str(isometrik_error)
-        logger.warning(
-            "Failed to create Isometrik application for organization %s: %s",
-            org_data["organization_id"],
-            error_message
-        )
-        await _save_isometrik_error_info(
-            org_data["organization_id"],
-            organization_name,
-            error_message
-        )
 
 
 def validate_organisation_status(org_status: str) -> None:
@@ -243,11 +160,13 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
     Create a new organisation with super admin role and default permissions.
 
     This function performs a multi-step operation:
-    1. Creates the organization record
-    2. Creates a super admin role for the organization
-    3. Creates default permissions for the organization
-    4. Assigns all permissions to the super admin role
-    5. Adds the user as an organization member with super admin role
+    1. If Isometrik is enabled, create Isometrik application first (must succeed)
+    2. Creates the organization record
+    3. Creates a super admin role for the organization
+    4. Creates default permissions for the organization
+    5. Assigns all permissions to the super admin role
+    6. Adds the user as an organization member with super admin role
+    7. If Isometrik is enabled and application was created, save Isometrik data
 
     Args:
         org_data: Dictionary containing organization and user data
@@ -258,8 +177,40 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         HTTPException:
             - 409: If organization slug already exists (duplicate key violation)
             - 500: For RLS policy violations or other database errors
+            - 500: If Isometrik is enabled and application creation fails
     """
     try:
+        # Step 0: Create Isometrik application first if enabled (must succeed before org creation)
+        from libs.shared_utils.isometrik_service import (
+            is_isometrik_enabled, 
+            create_isometrik_application,
+            IsometrikAPIError,
+            IsometrikConnectionError
+        )
+        
+        isometrik_response = None
+        if is_isometrik_enabled():
+            organization_name = org_data.get("name", "Unknown Organization")
+            try:
+                isometrik_response = await create_isometrik_application(
+                    organization_name=organization_name,
+                    product_types=["chat", "video"],
+                    plan="basic"
+                )
+                
+                # Verify response has data
+                if not isometrik_response or not isometrik_response.get("data"):
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to create Isometrik application: Invalid response from Isometrik API"
+                    )
+            except (IsometrikAPIError, IsometrikConnectionError) as isometrik_error:
+                # Re-raise Isometrik errors directly - organization should not be created if Isometrik fails
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to create Isometrik application: {str(isometrik_error)}"
+                ) from isometrik_error
+
         # Step 1: Create the organization record
         await create_new_organisation(org_data)
 
@@ -285,8 +236,10 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
             "status": "active",
         })
 
-        # Step 6: Create Isometrik application (non-blocking - log errors but don't fail org creation)
-        await _create_isometrik_application_for_org(org_data)
+        # Step 6: Save Isometrik application data if it was created successfully
+        if isometrik_response and isometrik_response.get("data"):
+            isometrik_data = isometrik_response["data"]
+            await _save_isometrik_application_data(org_data["organization_id"], isometrik_data)
 
     except HTTPException:
         # Re-raise HTTP exceptions as-is (preserves status codes)
@@ -341,10 +294,6 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
             all(word in error_message for word in ('slug', 'duplicate')),
             all(word in error_str for word in ('slug', 'duplicate'))
         ]):
-            logger.warning(
-                "Duplicate organization slug detected - Organization ID: %s, Slug: %s",
-                org_data.get("organization_id"), org_data.get("slug")
-            )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Organisation slug already exists. Please choose a different name.",
@@ -358,11 +307,6 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
             'violates row-level security' in error_message,
             'violates row-level security' in error_str
         ]):
-            logger.error(
-                "RLS policy violation during organization creation"
-                "- Organization ID: %s, User ID: %s, Error: %s",
-                org_data.get("organization_id"), org_data.get("user_id"), str(api_error)
-            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database security policy error. Please contact support."
@@ -370,10 +314,6 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
             ) from api_error
 
         # Other API errors - generic database error
-        logger.error(
-            "Database API error during organization creation - Organization ID: %s, Error: %s",
-            org_data.get("organization_id"), str(api_error)
-        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=FAIL_CREATE_ACCOUNT,
@@ -383,11 +323,6 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         # Handle other database operation errors (network, validation, etc.)
         # These are wrapped by the handle_database_errors decorator.
         log_exception()
-        logger.error(
-            "Database operation error during organization creation "
-            "- Organization ID: %s, Error: %s",
-            org_data.get("organization_id"), str(db_error)
-        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=FAIL_CREATE_ACCOUNT,
@@ -397,11 +332,6 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         # Handle any other unexpected errors.
         # This should rarely happen as database operations are wrapped.
         log_exception()
-        logger.error(
-            "Unexpected error during organization creation - Organization ID: %s, Error: %s",
-            org_data.get("organization_id"), str(unexpected_error),
-            exc_info=True
-        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=FAIL_CREATE_ACCOUNT,

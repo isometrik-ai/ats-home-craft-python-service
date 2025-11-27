@@ -15,9 +15,6 @@ Operations Covered:
 import os
 from typing import Dict, Any, Optional
 import httpx
-from apps.user_service.app.dependencies.logger import get_logger
-
-logger = get_logger("isometrik_service")
 
 
 class IsometrikAPIError(Exception):
@@ -38,8 +35,7 @@ class IsometrikConnectionError(Exception):
 
 # Environment variables
 ISOMETRIK_ENABLED = os.getenv("ISOMETRIK_ENABLED", "false").lower() in ("true", "1", "yes")
-ISOMETRIK_API_URL = os.getenv("ISOMETRIK_API_URL", "https://admin-apis.isometrik.io")
-ISOMETRIK_CHAT_API_URL = os.getenv("ISOMETRIK_CHAT_API_URL", "https://apis.isometrik.io")
+ISOMETRIK_ADMIN_API_URL = os.getenv("ISOMETRIK_ADMIN_API_URL", "https://admin-apis.isometrik.io")
 ISOMETRIK_CLIENT_NAME = os.getenv("ISOMETRIK_CLIENT_NAME", "691ad27c348f70f518ee0053")
 ISOMETRIK_REGION_ID = os.getenv("ISOMETRIK_REGION_ID", "507f1f77bcf86cd799439011")
 ISOMETRIK_AUTH_TOKEN = os.getenv("ISOMETRIK_AUTH_TOKEN", "aXNvbWV0cmlrOjFZVXBDYlJEblU4MzBISA==")
@@ -120,47 +116,26 @@ async def create_isometrik_application(
         }
 
         # Make API call
-        url = f"{ISOMETRIK_API_URL}/v1/intr/application"
+        url = f"{ISOMETRIK_ADMIN_API_URL}/v1/intr/application"
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             
             result = response.json()
-            logger.info(
-                "Successfully created Isometrik application for organization: %s",
-                organization_name
-            )
             return result
 
     except httpx.HTTPStatusError as e:
-        logger.error(
-            "Isometrik API error creating application - Organization: %s, Status: %s, Response: %s",
-            organization_name,
-            e.response.status_code,
-            e.response.text
-        )
         raise IsometrikAPIError(
             f"Isometrik API error: {e.response.status_code} - {e.response.text}",
             status_code=e.response.status_code,
             response_text=e.response.text
         ) from e
     except httpx.RequestError as e:
-        logger.error(
-            "Network error calling Isometrik API - Organization: %s, Error: %s",
-            organization_name,
-            str(e)
-        )
         raise IsometrikConnectionError(
             f"Failed to connect to Isometrik API: {str(e)}",
             original_error=e
         ) from e
     except Exception as e:
-        logger.error(
-            "Unexpected error creating Isometrik application - Organization: %s, Error: %s",
-            organization_name,
-            str(e),
-            exc_info=True
-        )
         raise
 
