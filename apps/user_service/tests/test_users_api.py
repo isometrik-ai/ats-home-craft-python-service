@@ -135,7 +135,7 @@ def test_get_user_profile_success(client):
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
-            "joined_at": None, "last_active_at": None
+            "joined_at": None, "last_active_at": None, "salutation": None
         })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_supabase_user)):
         res = client.get("/v1/admin/users/profile")
@@ -166,7 +166,7 @@ def test_get_user_profile_email_mismatch(client):
             "user_id": "u1", "email": "different@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
-            "joined_at": None, "last_active_at": None
+            "joined_at": None, "last_active_at": None, "salutation": None
         })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_user_data)), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])):
@@ -194,7 +194,7 @@ def test_get_user_profile_invalid_user_type(client):
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active", "user_type": "invalid",
             "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Administrator",
             "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
-            "joined_at": None, "last_active_at": None
+            "joined_at": None, "last_active_at": None, "salutation": None
         })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_supabase_user)):
@@ -262,7 +262,7 @@ def test_get_user_profile_no_organization_id(client):
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
             "role_id": None, "organization_id": None, "avatar_url": None, "phone": None, "timezone": "UTC",
-            "joined_at": None, "last_active_at": None
+            "joined_at": None, "last_active_at": None, "salutation": None
         })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_supabase_user)):
         res = client.get("/v1/admin/users/profile")
@@ -289,7 +289,7 @@ def test_get_user_profile_no_role_id(client):
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id", AsyncMock(return_value={
             "user_id": "u1", "email": "test@example.com", "full_name": "Test User", "first_name": "Test", "last_name": "User", "status": "active",
             "role_id": None, "organization_id": str(uuid.uuid4()), "avatar_url": None, "phone": None, "timezone": "UTC",
-            "joined_at": None, "last_active_at": None
+            "joined_at": None, "last_active_at": None, "salutation": None
         })), patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions", AsyncMock(return_value=[])), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.update_user_activity", AsyncMock()), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id", AsyncMock(return_value=mock_supabase_user)):

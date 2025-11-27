@@ -59,6 +59,7 @@ def create_user_profile_data(
         avatar_url=user_profile["avatar_url"],
         phone=user_profile["phone"],
         timezone=user_profile["timezone"] or "UTC",
+        salutation=user_profile.get("salutation", None),
         status=user_profile["status"],
         joined_at=(
             user_profile["joined_at"].isoformat()

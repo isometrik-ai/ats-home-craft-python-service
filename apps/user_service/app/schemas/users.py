@@ -161,6 +161,7 @@ class UserProfileData(BaseModel):
     avatar_url: Optional[str] = Field(None, description="URL to user's profile picture")
     phone: Optional[str] = Field(None, description="User's phone number")
     timezone: str = Field(default="UTC", description="User's timezone setting")
+    salutation: Optional[str] = Field(None, description="User's salutation")
     status: str = Field(..., description="User's membership status in organization")
     joined_at: Optional[str] = Field(
         None, description="ISO timestamp when user joined organization"
@@ -204,6 +205,7 @@ class UserProfileData(BaseModel):
                 "avatar_url": "https://example.com/avatar.jpg",
                 "phone": "+1234567890",
                 "timezone": "UTC",
+                "salutation": "Mr.",
                 "status": "active",
                 "joined_at": "2024-12-19T10:00:00Z",
                 "last_active_at": "2024-12-19T15:30:00Z",
