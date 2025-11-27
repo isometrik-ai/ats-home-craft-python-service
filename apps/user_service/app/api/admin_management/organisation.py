@@ -644,6 +644,7 @@ async def update_organisation(
     update_data = body.model_dump(exclude_unset=True, exclude_none=True)
     await update_organisation_details(organisation_id, organization_data, update_data)
 
+
     request.state.audit_new_values = update_data
 
     return OrganisationResponse(
