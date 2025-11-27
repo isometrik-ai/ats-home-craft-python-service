@@ -136,6 +136,4 @@ async def create_isometrik_application(
             f"Failed to connect to Isometrik API: {str(e)}",
             original_error=e
         ) from e
-    except Exception as e:
-        raise
 
