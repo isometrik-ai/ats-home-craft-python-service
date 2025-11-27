@@ -19,6 +19,23 @@ from apps.user_service.app.dependencies.logger import get_logger
 
 logger = get_logger("isometrik_service")
 
+
+class IsometrikAPIError(Exception):
+    """Exception raised for Isometrik API errors (4xx/5xx status codes)."""
+    
+    def __init__(self, message: str, status_code: int = None, response_text: str = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_text = response_text
+
+
+class IsometrikConnectionError(Exception):
+    """Exception raised for Isometrik API connection/network errors."""
+    
+    def __init__(self, message: str, original_error: Exception = None):
+        super().__init__(message)
+        self.original_error = original_error
+
 # Environment variables
 ISOMETRIK_ENABLED = os.getenv("ISOMETRIK_ENABLED", "false").lower() in ("true", "1", "yes")
 ISOMETRIK_API_URL = os.getenv("ISOMETRIK_API_URL", "https://admin-apis.isometrik.io")
@@ -78,7 +95,9 @@ async def create_isometrik_application(
         Dict[str, Any]: Response from Isometrik API containing application details
 
     Raises:
-        Exception: If API call fails
+        IsometrikAPIError: If API call returns 4xx/5xx status code
+        IsometrikConnectionError: If network/connection error occurs
+        Exception: For unexpected errors
     """
     try:
         # Default product types
@@ -121,14 +140,21 @@ async def create_isometrik_application(
             e.response.status_code,
             e.response.text
         )
-        raise Exception(f"Isometrik API error: {e.response.status_code} - {e.response.text}") from e
+        raise IsometrikAPIError(
+            f"Isometrik API error: {e.response.status_code} - {e.response.text}",
+            status_code=e.response.status_code,
+            response_text=e.response.text
+        ) from e
     except httpx.RequestError as e:
         logger.error(
             "Network error calling Isometrik API - Organization: %s, Error: %s",
             organization_name,
             str(e)
         )
-        raise Exception(f"Failed to connect to Isometrik API: {str(e)}") from e
+        raise IsometrikConnectionError(
+            f"Failed to connect to Isometrik API: {str(e)}",
+            original_error=e
+        ) from e
     except Exception as e:
         logger.error(
             "Unexpected error creating Isometrik application - Organization: %s, Error: %s",

@@ -8,7 +8,9 @@ from typing import Dict, Any, Optional
 from libs.shared_utils.isometrik_service import (
     is_isometrik_enabled,
     get_isometrik_data_from_settings,
-    create_isometrik_application
+    create_isometrik_application,
+    IsometrikAPIError,
+    IsometrikConnectionError
 )
 
 
@@ -225,11 +227,13 @@ class TestCreateIsometrikApplication:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client_class.return_value = mock_client
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(IsometrikAPIError) as exc_info:
             await create_isometrik_application(organization_name="Test Org")
 
         assert "Isometrik API error: 409" in str(exc_info.value)
         assert "Project already exists" in str(exc_info.value)
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.response_text is not None
 
     @pytest.mark.asyncio
     @patch('libs.shared_utils.isometrik_service.httpx.AsyncClient')
@@ -252,10 +256,11 @@ class TestCreateIsometrikApplication:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client_class.return_value = mock_client
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(IsometrikAPIError) as exc_info:
             await create_isometrik_application(organization_name="Test Org")
 
         assert "Isometrik API error: 404" in str(exc_info.value)
+        assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
     @patch('libs.shared_utils.isometrik_service.httpx.AsyncClient')
@@ -278,10 +283,11 @@ class TestCreateIsometrikApplication:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client_class.return_value = mock_client
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(IsometrikAPIError) as exc_info:
             await create_isometrik_application(organization_name="Test Org")
 
         assert "Isometrik API error: 500" in str(exc_info.value)
+        assert exc_info.value.status_code == 500
 
     @pytest.mark.asyncio
     @patch('libs.shared_utils.isometrik_service.httpx.AsyncClient')
@@ -298,11 +304,12 @@ class TestCreateIsometrikApplication:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client_class.return_value = mock_client
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(IsometrikConnectionError) as exc_info:
             await create_isometrik_application(organization_name="Test Org")
 
         assert "Failed to connect to Isometrik API" in str(exc_info.value)
         assert "Connection failed" in str(exc_info.value)
+        assert exc_info.value.original_error == mock_error
 
     @pytest.mark.asyncio
     @patch('libs.shared_utils.isometrik_service.httpx.AsyncClient')
@@ -319,10 +326,11 @@ class TestCreateIsometrikApplication:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client_class.return_value = mock_client
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(IsometrikConnectionError) as exc_info:
             await create_isometrik_application(organization_name="Test Org")
 
         assert "Failed to connect to Isometrik API" in str(exc_info.value)
+        assert exc_info.value.original_error == mock_error
 
     @pytest.mark.asyncio
     @patch('libs.shared_utils.isometrik_service.httpx.AsyncClient')

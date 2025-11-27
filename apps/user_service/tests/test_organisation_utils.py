@@ -10,7 +10,10 @@ from apps.user_service.app.dependencies.organisation_utils import (
     validate_organisation_status,
     validate_organisation_name_filter,
     build_organisation_filter_message,
-    create_organisation_with_super_admin
+    create_organisation_with_super_admin,
+    _save_isometrik_application_data,
+    _save_isometrik_error_info,
+    _create_isometrik_application_for_org
 )
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     DatabaseOperationError,
@@ -176,7 +179,8 @@ class TestCreateOrganisationWithSuperAdmin:
             "first_name": "Admin",
             "last_name": "User",
             "phone": "+1234567890",
-            "timezone": "UTC"
+            "timezone": "UTC",
+            "name": "Test Organization"
         }
 
         mock_org_result = {"id": org_data["organization_id"], "name": "Test Org"}
@@ -188,7 +192,8 @@ class TestCreateOrganisationWithSuperAdmin:
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value=mock_role_result)) as mock_create_role, \
              patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(return_value=mock_permissions)) as mock_create_perms, \
              patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=True)) as mock_assign_perms, \
-             patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(return_value=mock_member_result)) as mock_add_member:
+             patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(return_value=mock_member_result)) as mock_add_member, \
+             patch("apps.user_service.app.dependencies.organisation_utils._create_isometrik_application_for_org", AsyncMock()) as mock_isometrik:
 
             await create_organisation_with_super_admin(org_data)
 
@@ -209,6 +214,7 @@ class TestCreateOrganisationWithSuperAdmin:
                 "status": "active"
             }
             mock_add_member.assert_called_once_with(org_data["organization_id"], expected_member_data)
+            mock_isometrik.assert_called_once_with(org_data)
 
     @pytest.mark.asyncio
     async def test_create_organisation_with_super_admin_missing_fields(self):
