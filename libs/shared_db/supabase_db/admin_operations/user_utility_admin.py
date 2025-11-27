@@ -246,6 +246,7 @@ organization_id: Organization ID to associate with user
                         "last_name": body.last_name,
                         "phone": body.phone,
                         "timezone": body.timezone,
+                        "salutation": body.salutation,
                     }
                 }
             }

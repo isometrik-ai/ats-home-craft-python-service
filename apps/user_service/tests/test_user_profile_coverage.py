@@ -142,6 +142,7 @@ def test_get_user_profile_with_email_change(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(return_value=mock_user_data)), \
@@ -178,6 +179,7 @@ def test_get_user_profile_with_phone_in_metadata(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(return_value=mock_user_data)), \
@@ -214,6 +216,7 @@ def test_get_user_profile_with_phone_change(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(return_value=mock_user_data)), \
@@ -257,6 +260,7 @@ def test_get_user_profile_identities_with_provider_id(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(return_value=mock_user_data)), \
@@ -293,6 +297,7 @@ def test_get_user_profile_identities_fallback_to_jwt(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(side_effect=Exception("API error"))), \
@@ -335,6 +340,7 @@ def test_get_user_profile_with_organization_permissions(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Admin role",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(return_value=mock_user_data)), \
@@ -379,6 +385,7 @@ def test_get_user_profile_with_verification_preference(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Admin role",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(return_value=mock_user_data)), \
@@ -419,6 +426,7 @@ def test_get_user_profile_without_verification_preference(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Admin role",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(return_value=mock_user_data)), \
@@ -462,6 +470,7 @@ def test_get_user_profile_verification_preference_email(client):
                    "role_id": str(uuid.uuid4()), "role_name": "Admin", "role_description": "Admin role",
                    "organization_id": str(uuid.uuid4()), "phone": None, "timezone": "UTC",
                    "avatar_url": None, "joined_at": datetime.now(timezone.utc), "last_active_at": None,
+                   "salutation": None
                })), \
          patch("apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
                AsyncMock(return_value=mock_user_data)), \

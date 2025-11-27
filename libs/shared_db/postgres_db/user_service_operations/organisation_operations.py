@@ -508,6 +508,7 @@ async def add_member_to_organisation(
     member_record["last_name"] = data.user.user_metadata.get("last_name",member_data["last_name"])
     member_record["phone"] = data.user.user_metadata.get("phone",member_data["phone"])
     member_record["timezone"] = data.user.user_metadata.get("timezone",member_data["timezone"])
+    member_record["salutation"] = data.user.user_metadata.get("salutation",None)
 
     table = supabase.table("organization_members")
     query = table.insert(member_record)

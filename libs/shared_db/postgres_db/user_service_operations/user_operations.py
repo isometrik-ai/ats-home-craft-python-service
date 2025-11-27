@@ -46,7 +46,7 @@ async def get_user_profile_by_id(user_id: str, organization_id: str) -> Optional
 
     # Build query based on whether organization_id is provided
     query = supabase.table("organization_members").select(
-        "id, user_id, email, full_name, first_name, last_name,avatar_url, "
+        "id, user_id, email, full_name, first_name, last_name,avatar_url, salutation, "
         "phone, timezone, role_id, status, created_at, updated_at, last_active_at, joined_at, "
         "organization_id, roles(id, name, description)"
     ).eq("user_id", user_id)
