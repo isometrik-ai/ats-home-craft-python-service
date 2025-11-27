@@ -101,7 +101,7 @@ async def get_user_profile(
         current_phone = None  # Will be set from Supabase auth
         user_metadata = {}
         try:
-            user_data = await get_user_by_id(user_context.user_id)
+            user_data = await get_user_by_id(user_context.user_id,request=request)
             if user_data and user_data.user:
                 user_obj = user_data.user
                 # Check if there's a pending email change

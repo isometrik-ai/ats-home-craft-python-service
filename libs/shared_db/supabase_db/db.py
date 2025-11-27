@@ -8,9 +8,10 @@ and creating a Supabase client for database operations.
 
 import os
 from typing import Optional
+from httpx import AsyncClient as HTTPXAsyncClient
 
 # Third-party imports
-from supabase import create_async_client, AsyncClient
+from supabase import create_async_client, AsyncClient, ClientOptions
 
 # Local application imports
 from libs.shared_db.common import setup_import_paths_and_env
@@ -41,7 +42,7 @@ class SupabaseClientCache:
             self._supabase_client = await create_async_client(SUPABASE_URL, SUPABASE_ANON_KEY)
         return self._supabase_client
 
-    async def get_admin_client(self) -> AsyncClient:
+    async def get_admin_client(self, http_client: Optional[HTTPXAsyncClient] = None) -> AsyncClient:
         """Get or create a cached Supabase admin client instance.
 
         Requires SUPABASE_SERVICE_KEY to be set in the environment. If the key is
@@ -55,8 +56,20 @@ class SupabaseClientCache:
                     "SUPABASE_SERVICE_KEY are set before starting the app."
                 )
 
+            if http_client is not None:
+                # When using custom http_client (e.g., with custom User-Agent),
+                # disable session persistence to avoid storage initialization issues
+                options = ClientOptions(
+                    httpx_client=http_client,
+                    persist_session=False
+                )
+            else:
+                options = None
+
+
             self._supabase_admin_client = await create_async_client(
-                SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+                SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+                options=options,
             )
 
             # Warm up the admin client to ensure proper authentication
@@ -97,12 +110,35 @@ async def get_supabase_client():
     return await _cache.get_client()
 
 
-async def get_supabase_admin_client():
+async def get_supabase_admin_client(
+    user_agent: Optional[str] = None,
+    custom_headers: Optional[dict] = None
+):
     """
     Get or create a cached Supabase admin client instance.
     Uses caching to improve performance by reusing the same client.
+    
+    Args:
+        user_agent: Optional User-Agent string
+        custom_headers: Optional dict of additional custom headers (e.g., X-Device-Signature)
+    
+    If a custom user_agent or custom_headers are provided, the cache is reset 
+    to ensure a new client is created with the custom headers.
     """
-    return await _cache.get_admin_client()
+    if user_agent is not None or custom_headers is not None:
+        # Reset cache when custom headers are provided
+        reset_supabase_admin_client()
+        # Build headers dict
+        headers = {}
+        if user_agent:
+            headers["User-Agent"] = user_agent
+        if custom_headers:
+            headers.update(custom_headers)
+        
+        http_client = HTTPXAsyncClient(headers=headers)
+    else:
+        http_client = None
+    return await _cache.get_admin_client(http_client=http_client)
 
 
 def reset_supabase_admin_client():

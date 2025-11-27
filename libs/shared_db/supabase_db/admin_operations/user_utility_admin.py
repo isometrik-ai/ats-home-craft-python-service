@@ -7,6 +7,7 @@ All Supabase Auth admin API operations for user management should be centralized
 from typing import Optional, Tuple
 
 from fastapi import HTTPException, status
+from fastapi import Request
 from supabase_auth.errors import AuthApiError
 
 from apps.user_service.app.dependencies.logger import get_logger
@@ -16,7 +17,7 @@ from apps.user_service.app.dependencies.common_utils import UserContext
 from libs.shared_utils.email_utils import send_email
 from libs.shared_utils.common_query import log_exception
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
-from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client
+from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client, get_supabase_client
 from libs.shared_db.supabase_db.admin_operations.user import update_email_of_user
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_user_profile_by_id,
@@ -315,7 +316,12 @@ def handle_supabase_signup_exceptions(supabase_error):
 # ============================================================================
 
 
-async def login_user(email: str, password: str) -> dict:
+async def login_user(
+    email: str, 
+    password: str, 
+    user_agent: Optional[str] = None,
+    device_signature: Optional[str] = None,
+) -> dict:
     """
     Attempts to log in a user with the provided email and password.
     Returns the result from Supabase or raises an exception on failure.
@@ -323,6 +329,8 @@ async def login_user(email: str, password: str) -> dict:
     Args:
         email (str): User's email address
         password (str): User's password
+        user_agent (Optional[str]): User-Agent header value
+        device_signature (Optional[str]): X-Device-Signature header value
 
     Returns:
         Any: Supabase authentication result
@@ -331,8 +339,17 @@ async def login_user(email: str, password: str) -> dict:
         Exception: If authentication fails
     """
     try:
-        # Get Supabase client from shared db module
-        supabase = await get_supabase_admin_client()
+        # Build custom headers dict
+        custom_headers = {}
+        if device_signature:
+            custom_headers["X-Device-Signature"] = device_signature
+        
+        # Get Supabase client with custom headers
+        supabase = await get_supabase_admin_client(
+            user_agent=user_agent,
+            custom_headers=custom_headers if custom_headers else None
+        )
+
         result = await supabase.auth.sign_in_with_password(
             {"email": email, "password": password}
         )

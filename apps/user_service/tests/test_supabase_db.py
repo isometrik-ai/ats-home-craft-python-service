@@ -189,6 +189,71 @@ class TestGlobalFunctions:
             assert result is mock_admin_client
 
     @pytest.mark.asyncio
+    async def test_get_supabase_admin_client_with_custom_headers(self):
+        """Custom headers should reset cache and pass merged headers to HTTPX client."""
+        SupabaseClientCache._instance = None
+        SupabaseClientCache._supabase_admin_client = None
+
+        mock_cache = MagicMock()
+        mock_admin_client = AsyncMock(spec=AsyncClient)
+
+        async def _mock_get_admin_client(http_client=None):
+            # Ensure the constructed HTTPX client is forwarded
+            assert http_client is mock_http_client
+            return mock_admin_client
+
+        mock_cache.get_admin_client = AsyncMock(side_effect=_mock_get_admin_client)
+
+        with patch('libs.shared_db.supabase_db.db._cache', mock_cache), \
+             patch('libs.shared_db.supabase_db.db.reset_supabase_admin_client') as mock_reset, \
+             patch('libs.shared_db.supabase_db.db.HTTPXAsyncClient') as mock_httpx:
+
+            mock_http_client = MagicMock()
+            mock_httpx.return_value = mock_http_client
+
+            result = await get_supabase_admin_client(
+                user_agent="Custom-UA",
+                custom_headers={"X-Device-Signature": "sig-token"}
+            )
+
+            # Reset should be triggered because custom headers were provided
+            mock_reset.assert_called_once()
+
+            # HTTPX client should be created with merged headers
+            mock_httpx.assert_called_once()
+            headers_arg = mock_httpx.call_args.kwargs["headers"]
+            assert headers_arg == {
+                "User-Agent": "Custom-UA",
+                "X-Device-Signature": "sig-token",
+            }
+
+            # Cache should be asked for an admin client with the new http_client
+            mock_cache.get_admin_client.assert_awaited_once()
+            assert result is mock_admin_client
+
+    @pytest.mark.asyncio
+    async def test_get_supabase_admin_client_without_headers(self):
+        """No custom headers => no reset, HTTPX client not instantiated."""
+        SupabaseClientCache._instance = None
+        SupabaseClientCache._supabase_admin_client = None
+
+        mock_cache = MagicMock()
+        mock_admin_client = AsyncMock(spec=AsyncClient)
+        mock_cache.get_admin_client = AsyncMock(return_value=mock_admin_client)
+
+        with patch('libs.shared_db.supabase_db.db._cache', mock_cache), \
+             patch('libs.shared_db.supabase_db.db.reset_supabase_admin_client') as mock_reset, \
+             patch('libs.shared_db.supabase_db.db.HTTPXAsyncClient') as mock_httpx:
+
+            result = await get_supabase_admin_client()
+
+            # No header => no reset and no HTTPX client construction
+            mock_reset.assert_not_called()
+            mock_httpx.assert_not_called()
+            mock_cache.get_admin_client.assert_awaited_once_with(http_client=None)
+            assert result is mock_admin_client
+
+    @pytest.mark.asyncio
     async def test_global_functions_use_same_cache(self):
         """Test that global functions use the same cache instance."""
         # Reset singleton state
