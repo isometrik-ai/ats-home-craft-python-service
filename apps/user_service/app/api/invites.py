@@ -265,15 +265,6 @@ async def accept_and_set_password_invitation(
     request.state.audit_description = f"Accepted invitation for token: {body.token}"
     request.state.audit_risk_level = "medium"
 
-    # # Extract user context
-    # user_context = await extract_user_context(current_user)
-
-    # request.state.audit_user_context = {
-    #     "user_id": user_context.user_id,
-    #     "user_email": user_context.email,
-    #     "organization_id": user_context.organization_id,
-    # }
-
     if not body.password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -295,12 +286,6 @@ async def accept_and_set_password_invitation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=INVALID_INVITATION_TOKEN_MESSAGE
         )
-
-    # if user_context.email != invitation_data["email"]:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_409_CONFLICT,
-    #         detail="User email does not match invitation email\nPlease Login with the correct email"
-    #     )
 
     # Check if user is already a member
     existing_member = await check_user_membership(
