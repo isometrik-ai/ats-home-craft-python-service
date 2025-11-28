@@ -133,7 +133,9 @@ async def create_new_user(user_data: Dict[str, Any]) -> Dict[str, Any]:
     user_record = {
         "user_id": user_data["user_id"],
         "email": user_data["email"],
-        "full_name": user_data["full_name"],
+        "first_name": user_data.get("first_name", None),
+        "last_name": user_data.get("last_name", None),
+        "salutation": user_data.get("salutation", None),
         "phone": user_data.get("phone"),
         "timezone": user_data.get("timezone", "UTC"),
         "role_id": user_data.get("role_id"),
@@ -245,11 +247,11 @@ async def check_phone_exists_for_other_user(
 async def get_users_details_list(organization_id: str, search: Optional[str] = None,
                         limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
     """Get paginated list of users with optional search."""
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
 
     # Build the query with filters
     query = supabase.table("organization_members").select(
-        "id, user_id, email, full_name, first_name, last_name, phone, timezone, role_id, status, "
+        "id, user_id, email, first_name, last_name, salutation, phone, timezone, role_id, status, "
         "created_at, updated_at, last_active_at"
     ).eq("organization_id", organization_id)
 
@@ -257,7 +259,9 @@ async def get_users_details_list(organization_id: str, search: Optional[str] = N
     if search:
         query = query.or_(
             f"email.ilike.%{search}%,"
-            f"full_name.ilike.%{search}%,"
+            f"first_name.ilike.%{search}%,"
+            f"last_name.ilike.%{search}%,"
+            f"salutation.ilike.%{search}%,"
             f"phone.ilike.%{search}%"
         )
 
@@ -395,7 +399,7 @@ async def update_user_email(user_id: str, organization_id: str, new_email: str) 
 async def get_auth_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     """Get user from auth.users table by email."""
     supabase = await get_fresh_supabase_admin_client()
-    
+
     total_users = 0
     while total_users < 1000:
         result = await supabase.auth.admin.list_users(page=total_users//1000, per_page=1000)
@@ -451,7 +455,7 @@ async def transform_users(users_data, organization_id):
         UserListItem(
             user_id=str(u["user_id"]),
             email=u["email"],
-            full_name=u["full_name"],
+            salutation=u["salutation"],
             first_name=u["first_name"],
             last_name=u["last_name"],
             phone=u["phone"],

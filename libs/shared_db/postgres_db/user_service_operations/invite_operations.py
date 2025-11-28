@@ -16,22 +16,23 @@ Operations Covered:
 - Invitation token management
 """
 
+import os
 import secrets
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.dependencies.invite_utils import hash_token
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     handle_database_errors, create_error_messages
 )
 from libs import NOW_CONSTANT
 from libs.shared_db.postgres_db.user_service_operations.user_operations import create_new_user
-from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
 
 # Initialize logger
 logger = get_logger("invite_operations")
 
+INVITE_EXPIRY_DAYS = int(os.getenv("INVITE_EXPIRY_DAYS", 7))
 
 # ============================================================================
 # INVITATION CRUD OPERATIONS
@@ -49,7 +50,7 @@ async def create_organization_invite(invite_data: Dict[str, Any]) -> Dict[str, A
     token_hash = hash_token(invite_token)
 
     # Calculate expiration date
-    expires_at = datetime.now() + timedelta(days=invite_data.get("expires_in_days", 7))
+    expires_at = datetime.now() + timedelta(days=INVITE_EXPIRY_DAYS)
 
     invite_record = {
         "organization_id": invite_data["organization_id"],
@@ -60,7 +61,13 @@ async def create_organization_invite(invite_data: Dict[str, Any]) -> Dict[str, A
         "status": "pending",
         "expires_at": expires_at.isoformat(),
         "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT
+        "updated_at": NOW_CONSTANT,
+        "metadata": {
+            "first_name": invite_data["first_name"],
+            "last_name": invite_data["last_name"],
+            "phone": invite_data["phone"],
+            "salutation": invite_data["salutation"],
+        }
     }
 
     table = supabase.table("organization_invites")
@@ -82,7 +89,7 @@ async def get_invite_by_token(token: str) -> Optional[Dict[str, Any]]:
     table = supabase.table("organization_invites")
     select_query = table.select(
         "id, organization_id, email, role_id, token_hash, invited_by, "
-        "status, expires_at, created_at, updated_at, "
+        "status, expires_at, created_at, updated_at, metadata, "
         "organizations(name, slug, domain)"
     )
     eq_query = select_query.eq("token_hash", token)
@@ -106,7 +113,7 @@ async def get_invite_by_id(invite_id: str) -> Optional[Dict[str, Any]]:
     select_query = table.select(
         "id, organization_id, email, role_id, invited_by, "
         "token_hash, status, expires_at, created_at, updated_at, "
-        "organizations(name, slug, domain)"
+        "organizations(name, slug, domain), metadata"
     )
     eq_query = select_query.eq("id", invite_id)
     limit_query = eq_query.limit(1)
@@ -127,12 +134,12 @@ async def get_organization_invites(
     offset: int = 0
 ) -> List[Dict[str, Any]]:
     """Get all invitations for an organization with optional filtering."""
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
 
     table = supabase.table("organization_invites")
     select_query = table.select(
         "id, organization_id, email, role_id, invited_by, "
-        "status, expires_at, created_at, updated_at"
+        "status, expires_at, created_at, updated_at, metadata"
     )
     eq_query = select_query.eq("organization_id", organization_id)
 
@@ -169,7 +176,7 @@ async def update_invite_status(
     accepted_by: Optional[str] = None
 ) -> bool:
     """Update invitation status."""
-    supabase = await get_supabase_admin_client()
+    supabase = await get_fresh_supabase_admin_client()
 
     update_data = {
         "status": status,
@@ -178,6 +185,7 @@ async def update_invite_status(
 
     if accepted_by:
         update_data["accepted_by"] = accepted_by
+        update_data["accepted_at"] = NOW_CONSTANT
 
     table = supabase.table("organization_invites")
     update_query = table.update(update_data)
@@ -254,24 +262,23 @@ async def check_user_membership(
     custom_messages=create_error_messages("add_user_to_organization", "adding"))
 async def add_user_to_organization(
     organization_id: str,
-    user_id: str,
+    invite_data: Dict[str, Any],
     email: str,
     role_id: str,
     role_name: str,
     invited_by: str
 ) -> Dict[str, Any]:
     """Add user to organization as a member."""
-    user_data = await get_user_by_id(user_id)
 
     member_record = {
         "organization_id": organization_id,
-        "user_id": user_id,
+        "user_id": invite_data["user_id"],
         "email": email,
-        "full_name": user_data.user.user_metadata.get("full_name", None),
-        "first_name": user_data.user.user_metadata.get("first_name", None),
-        "last_name": user_data.user.user_metadata.get("last_name", None),
-        "phone": user_data.user.user_metadata.get("phone", None),
-        "timezone": user_data.user.user_metadata.get("timezone", "UTC"),
+        "first_name": invite_data.get("first_name", None),
+        "last_name": invite_data.get("last_name", None),
+        "phone": invite_data.get("phone", None),
+        "timezone": invite_data.get("timezone", "UTC"),
+        "salutation": invite_data.get("salutation", None),
         "role_id": role_id,
         "role": role_name,
         "status": "active",
@@ -284,37 +291,3 @@ async def add_user_to_organization(
     result = await create_new_user(member_record)
 
     return result
-
-
-@handle_database_errors(
-    "get_expired_invites",
-    custom_messages=create_error_messages("get_expired_invites", "getting"))
-async def get_expired_invites() -> List[Dict[str, Any]]:
-    """Get all expired invitations."""
-    supabase = await get_supabase_admin_client()
-
-    current_time = datetime.now().isoformat()
-
-    table = supabase.table("organization_invites")
-    select_query = table.select("*")
-    lt_query = select_query.lt("expires_at", current_time)
-    eq_query = lt_query.eq("status", "pending")
-    result = await eq_query.execute()
-
-    return result.data or []
-
-
-@handle_database_errors(
-    "cleanup_expired_invites",
-    custom_messages=create_error_messages("cleanup_expired_invites", "cleaning"))
-async def cleanup_expired_invites() -> int:
-    """Mark expired invitations as expired."""
-    supabase = await get_supabase_admin_client()
-
-    table = supabase.table("organization_invites")
-    update_query = table.update({"status": "expired", "updated_at": NOW_CONSTANT})
-    lt_query = update_query.lt("expires_at", NOW_CONSTANT)
-    eq_query = lt_query.eq("status", "pending")
-    result = await eq_query.execute()
-
-    return len(result.data) if result.data else 0

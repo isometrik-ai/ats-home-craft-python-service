@@ -20,12 +20,14 @@ Endpoints Covered:
 """
 
 import uuid
+import os
 from typing import Optional
 from dataclasses import dataclass
 
 from fastapi import APIRouter, HTTPException, status, Depends, Body, Query, Request
-
+from datetime import datetime, timezone
 # Logger import
+# from apps.user_service.app.api.admin_management.users import update_user
 from apps.user_service.app.dependencies.logger import get_logger
 
 from apps.user_service.app.app_instance import limiter
@@ -41,8 +43,6 @@ from apps.user_service.app.dependencies.common_utils import (
 )
 from apps.user_service.app.dependencies.invite_utils import (
     validate_email_format,
-    validate_expiration_days,
-    can_revoke_invite,
     build_invite_details_response,
     build_invite_list_item,
     handle_invite_validation_error,
@@ -58,16 +58,19 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 )
 
 # Schema imports
+from apps.user_service.app.api.auth import _is_password_strong, PASSWORD_CONDITION_MESSAGE_EXTENDED
+from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.schemas.invites import (
     InviteCreateRequest,
     InviteResponse,
-    InviteAcceptRequest,
+    InviteAcceptBySettingPasswordRequest,
     InviteAcceptResponse,
     InviteListResponse,
 )
 
 # Third-party imports
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
+from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception, sign_up_supabase_user
+from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_user
 
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.invite_operations import (
@@ -80,8 +83,7 @@ from libs.shared_db.postgres_db.user_service_operations.invite_operations import
     delete_invite,
     check_existing_invite,
     check_user_membership,
-    add_user_to_organization,
-    cleanup_expired_invites,
+    add_user_to_organization
 )
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
     get_organisation_details_by_id,
@@ -106,7 +108,7 @@ logger = get_logger("invite-api")
 INVITE_NOT_FOUND_MESSAGE = "Invitation not found"
 
 # Configure this based on your environment
-BASE_URL = "http://localhost:5000"
+BASE_URL = os.getenv("BASE_URL")
 
 # Constants for repeated strings
 ORGANIZATION_MANAGE_PERMISSION = "organization.appscrip.manage"
@@ -170,11 +172,6 @@ def _validate_invite_request(request: InviteCreateRequest) -> None:
         handle_invite_validation_error(
             "role", request.role_id, "Invalid role ID")
 
-    # Validate expiration days
-    if not validate_expiration_days(request.expires_in_days):
-        handle_invite_validation_error(
-            "expires_in_days", request.expires_in_days, "Must be between 1 and 30 days")
-
 
 async def _process_invite_list_request(
     user_context, organization_id: str, query_params: InviteQueryParams
@@ -198,13 +195,6 @@ async def _process_invite_list_request(
     page, page_size, offset = validate_pagination_params(
         query_params.page, query_params.page_size
     )
-
-    # Validate status filter
-    # validated_status = None
-    # if query_params.status:
-    #     if not validate_invite_status(query_params.status):
-    #         handle_invite_validation_error("status", query_params.status, "Invalid status")
-    #     validated_status = query_params.status
 
     # Execute queries and get results
     invitations_data = await get_organization_invites(
@@ -232,11 +222,11 @@ async def _process_invite_list_request(
 # IMPORTANT: Specific routes must come BEFORE parameterized routes to avoid conflicts
 # Routes like /accept, /reject, /cleanup must be defined before /{organization_id}
 
-@handle_api_exceptions("accept invitation")
+@handle_api_exceptions("accept invitation by setting password")
 @router.post(
-    "/accept",
+    "/set-password",
     response_model=InviteAcceptResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -252,10 +242,9 @@ async def _process_invite_list_request(
     category="INVITATION",
 )
 # pylint: disable=unused-argument  # Required by @limiter.limit
-async def accept_invitation(
+async def accept_and_set_password_invitation(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth),
-    body: InviteAcceptRequest = Body(...),
+    body: InviteAcceptBySettingPasswordRequest = Body(...),
 ):
     """
     Accept an organization invitation
@@ -263,7 +252,7 @@ async def accept_invitation(
     Args:
         request (Request): FastAPI request object for rate limiting
         current_user (dict): Decoded JWT token containing user information
-        body (InviteAcceptRequest): Invitation acceptance data
+        body (InviteAcceptBySettingPasswordRequest): Invitation acceptance data
 
     Returns:
         InviteAcceptResponse: Success response with organization details
@@ -276,14 +265,26 @@ async def accept_invitation(
     request.state.audit_description = f"Accepted invitation for token: {body.token}"
     request.state.audit_risk_level = "medium"
 
-    # Extract user context
-    user_context = await extract_user_context(current_user)
+    # # Extract user context
+    # user_context = await extract_user_context(current_user)
 
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
+    # request.state.audit_user_context = {
+    #     "user_id": user_context.user_id,
+    #     "user_email": user_context.email,
+    #     "organization_id": user_context.organization_id,
+    # }
+
+    if not body.password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password is required"
+        )
+
+    if not _is_password_strong(body.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
+        )
 
     # Get invitation details by token
     invitation_data = await get_invite_by_token(body.token)
@@ -295,20 +296,20 @@ async def accept_invitation(
             detail=INVALID_INVITATION_TOKEN_MESSAGE
         )
 
-    if user_context.email != invitation_data["email"]:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User email does not match invitation email\nPlease Login with the correct email"
-        )
+    # if user_context.email != invitation_data["email"]:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_409_CONFLICT,
+    #         detail="User email does not match invitation email\nPlease Login with the correct email"
+    #     )
 
     # Check if user is already a member
     existing_member = await check_user_membership(
         invitation_data["organization_id"],
-        user_context.email
+        invitation_data["email"]
     )
     if existing_member:
         logger.info("User already a member - Request ID: %s, User: %s",
-                  request_id, user_context.email)
+                request_id, invitation_data["email"])
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="User is already a member of this organization"
@@ -317,211 +318,67 @@ async def accept_invitation(
     role_name = await get_role_by_id(invitation_data['role_id'], invitation_data["organization_id"])
 
     try:
+        inv_meta = invitation_data["metadata"]
+
+        signup_result = await sign_up_supabase_user(SignupRequest(
+            email=invitation_data["email"],
+            password=body.password,
+            first_name=inv_meta.get("first_name", None),
+            last_name=inv_meta.get("last_name", None),
+            phone=inv_meta.get("phone", None),
+            timezone="UTC",
+            salutation=inv_meta.get("salutation", None),
+            verification_id="",
+            verification_code="",
+        ))
+
+        if not signup_result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user account"
+            )
+
         # Add user to organization
         await add_user_to_organization(
-            invitation_data["organization_id"],
-            user_context.user_id,
-            invitation_data["email"],
-            invitation_data['role_id'],
-            role_name["name"],
-            invitation_data["invited_by"]
+            organization_id=invitation_data["organization_id"],
+            invite_data={
+                "user_id": signup_result.user.id,
+                "first_name": inv_meta.get("first_name", None),
+                "last_name": inv_meta.get("last_name", None),
+                "phone": inv_meta.get("phone", None),
+                "timezone": "UTC",
+                "salutation": inv_meta.get("salutation", None),
+            },
+            email=invitation_data["email"],
+            role_id=invitation_data['role_id'],
+            role_name=role_name["name"],
+            invited_by=invitation_data["invited_by"]
         )
 
         # Update invitation status
         await update_invite_status(
             invitation_data["id"],
             "accepted",
-            user_context.user_id
+            signup_result.user.id
         )
 
         logger.info("Invitation accepted successfully - Request ID: %s, User: %s",
-                   request_id, user_context.email)
+                   request_id, invitation_data["email"])
 
         return InviteAcceptResponse(
             success=True,
-            organization_id=invitation_data["organization_id"],
             message="Invitation accepted successfully"
         )
 
+    except HTTPException as signup_error:
+        raise signup_error
     except Exception as db_error:
+        log_exception()
         logger.error("Database error accepting invitation - Request ID: %s, Error: %s",
                     request_id, str(db_error))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to accept invitation"
-        ) from db_error
-
-
-@handle_api_exceptions("reject invitation")
-@router.post(
-    "/reject",
-    response_model=InviteResponse,
-    status_code=status.HTTP_200_OK,
-)
-@limiter.limit("100/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="confidential",
-    compliance_tags=[
-        "gdpr",  # Rejecting invitation involves personal information
-        "pii",  # Invitation rejection contains personally identifiable information
-        "soc2_audit",  # Invitation management is critical for SOC2 compliance
-        "audit_required",  # Invitation rejection requires audit trail
-    ],
-    table_name="organization_invites",
-    category="INVITATION",
-)
-# pylint: disable=unused-argument  # Required by @limiter.limit
-async def reject_invitation(
-    request: Request,
-    current_user: dict = Depends(get_user_from_auth),
-    body: InviteAcceptRequest = Body(...),
-):
-    """
-    Reject an organization invitation
-
-    Args:
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-        body (InviteRejectRequest): Invitation rejection data
-
-    Returns:
-        InviteResponse: Success response
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Set audit context for invitation rejection
-    request.state.audit_table = "organization_invites"
-    request.state.audit_description = f"Rejected invitation for token: {body.token}"
-    request.state.audit_risk_level = "low"
-
-    # Extract user context
-    user_context = await extract_user_context(current_user)
-
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-
-    # Get invitation details by token
-    invitation_data = await get_invite_by_token(body.token)
-
-    if not invitation_data:
-        logger.warning(INVALID_INVITATION_REQUEST_MESSAGE, request_id)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=INVALID_INVITATION_TOKEN_MESSAGE
-        )
-
-    # Check if invitation is valid
-    details = build_invite_details_response(invitation_data)
-    if not details["valid"]:
-        logger.warning("Invalid invitation - Request ID: %s, Error: %s",
-                     request_id, details.get("error"))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=details["error"]
-        )
-
-    # Update invitation status
-    try:
-        await update_invite_status(
-            invitation_data["id"],
-            "rejected",
-            user_context.user_id
-        )
-
-        logger.info("Invitation rejected successfully - Request ID: %s, User: %s",
-                   request_id, user_context.email)
-
-        return InviteResponse(
-            success=True,
-            message="Invitation rejected successfully"
-        )
-
-    except Exception as db_error:
-        logger.error("Database error rejecting invitation - Request ID: %s, Error: %s",
-                    request_id, str(db_error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to reject invitation"
-        ) from db_error
-
-
-@handle_api_exceptions("cleanup expired invitations")
-@router.post(
-    "/cleanup",
-    response_model=InviteResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-@limiter.limit("10/minute")
-@audit_api_call(
-    action_type="DELETE",
-    data_classification="confidential",
-    compliance_tags=[
-        "gdpr",  # Cleanup involves personal information
-        "pii",  # Invitation cleanup contains personally identifiable information
-        "soc2_audit",  # Invitation management is critical for SOC2 compliance
-        "audit_required",  # Invitation cleanup requires audit trail
-    ],
-    table_name="organization_invites",
-    category="INVITATION",
-)
-# pylint: disable=unused-argument  # Required by @limiter.limit
-async def cleanup_expired_invitations(
-    request: Request,
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """
-    Cleanup expired invitations (Requires: "settings.system.manage")
-
-    Args:
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-
-    Returns:
-        InviteResponse: Success response with cleanup statistics
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Set audit context for invitation cleanup
-    request.state.audit_table = "organization_invites"
-    request.state.audit_description = "Cleaned up expired invitations"
-    request.state.audit_risk_level = "low"
-
-    # Extract user context
-    user_context = await check_permissions(current_user=current_user,
-        permission_codes=SETTINGS_SYSTEM_MANAGE,
-        action_description="cleanup expired invitations",
-    )
-
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-
-    try:
-        # Cleanup expired invitations
-        cleanup_result = await cleanup_expired_invites()
-
-        logger.info("Expired invitations cleaned up - Request ID: %s, Count: %s",
-                   request_id, cleanup_result or 0)
-
-        return InviteResponse(
-            success=True,
-            message=f"Cleaned up {cleanup_result or 0} expired invitations"
-        )
-
-    except Exception as db_error:
-        logger.error("Database error during cleanup - Request ID: %s, Error: %s",
-                    request_id, str(db_error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to cleanup expired invitations"
         ) from db_error
 
 
@@ -633,7 +490,10 @@ async def create_invitation(
             "email": body.email,
             "role_id": body.role_id,
             "invited_by": user_context.user_id,
-            "expires_in_days": body.expires_in_days
+            "first_name": body.first_name,
+            "last_name": body.last_name,
+            "phone": body.phone,
+            "salutation": body.salutation,
         }
 
         created_invite = await create_organization_invite(invite_data)
@@ -642,12 +502,25 @@ async def create_invitation(
         invite_url = generate_invite_url(BASE_URL, created_invite["token_hash"])
 
         role_name = await get_role_by_id(body.role_id, organization_id)
+        inviter_name = await get_user_by_id(user_context.user_id)
+
+        inviter_full_name, invitee_full_name = "", ""
+
+        for z in [body.salutation, body.first_name, body.last_name]:
+            if z:
+                invitee_full_name += f"{z} "
+
+        user_meta = inviter_name.user.user_metadata
+        for z in [user_meta.get("salutation", None), user_meta.get("first_name", None), user_meta.get("last_name", None)]:
+            if z:
+                inviter_full_name += f"{z} "
 
         # Send invitation email
         email_sent = send_organization_invitation_email(
             email=body.email,
             organization_name=organization_data["name"],
-            inviter_name=user_context.email,  # You might want to get the actual name
+            inviter_name=inviter_full_name.strip(),  # You might want to get the actual name
+            invitee_name=invitee_full_name.strip(),
             invite_url=invite_url,
             role_name=role_name["name"],
             expires_at=created_invite["expires_at"]
@@ -811,13 +684,6 @@ async def resend_invitation(
     if not await validate_organization_access(user_context, invitation_data["organization_id"]):
         handle_invite_permission_error("resend organization invitations")
 
-    # Check if invitation can be resent
-    # if not can_resend_invite(invitation_data):
-    #     raise HTTPException(
-    #         status_code=status.HTTP_400_BAD_REQUEST,
-    #         detail="Invitation cannot be resent. It may be expired or already processed."
-    #     )
-
     # Resend invitation email
     try:
         # Get organization details
@@ -827,6 +693,7 @@ async def resend_invitation(
         invite_url = generate_invite_url(BASE_URL, invitation_data["token_hash"])
 
         role_name = await get_role_by_id(invitation_data["role_id"], organization_data["id"])
+        inviter_name = await get_user_by_id(invitation_data["invited_by"])
 
         if not role_name:
             raise HTTPException(
@@ -834,11 +701,24 @@ async def resend_invitation(
                 detail="Role not found"
             )
 
+        inviter_full_name, invitee_full_name = "", ""
+
+        user_meta = inviter_name.user.user_metadata
+        for z in [user_meta.get("salutation", None), user_meta.get("first_name", None), user_meta.get("last_name", None)]:
+            if z:
+                inviter_full_name += f"{z} "
+
+        inv_meta = invitation_data["metadata"]
+        for z in [inv_meta.get("salutation", None), inv_meta.get("first_name", None), inv_meta.get("last_name", None)]:
+            if z:
+                invitee_full_name += f"{z} "
+
         # Send invitation email
         email_sent = send_organization_invitation_email(
             email=invitation_data["email"],
             organization_name=organization_data["name"],
-            inviter_name=user_context.email,  # You might want to get the actual name
+            inviter_name=inviter_full_name.strip(),  # You might want to get the actual name
+            invitee_name=invitee_full_name.strip(),
             invite_url=invite_url,
             role_name=role_name["name"],
             expires_at=invitation_data["expires_at"]
@@ -853,6 +733,10 @@ async def resend_invitation(
 
         return InviteResponse(
             success=True,
+            invite_id=invite_id,
+            invite_url=invite_url,
+            email=invitation_data["email"],
+            expires_at=invitation_data["expires_at"],
             message="Invitation resent successfully"
         )
 
@@ -864,107 +748,6 @@ async def resend_invitation(
             detail="Failed to resend invitation email"
         ) from email_error
 
-
-@handle_api_exceptions("revoke invitation")
-@router.put(
-    "/revoke/{invite_id}",
-    response_model=InviteResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-@limiter.limit("100/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="confidential",
-    compliance_tags=[
-        "gdpr",  # Revoking invitation involves personal information
-        "pii",  # Invitation revocation contains personally identifiable information
-        "soc2_audit",  # Invitation management is critical for SOC2 compliance
-        "audit_required",  # Invitation revocation requires audit trail
-    ],
-    table_name="organization_invites",
-    category="INVITATION",
-)
-# pylint: disable=unused-argument  # Required by @limiter.limit
-async def revoke_invitation(
-    invite_id: str,
-    request: Request,
-    current_user: dict = Depends(get_user_from_auth)
-):
-    """
-    Revoke an organization invitation (Requires: organization.appscrip.manage)
-
-    Args:
-        invite_id (str): The UUID of the invitation
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-
-    Returns:
-        InviteResponse: Success response
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Set audit context for invitation revocation
-    request.state.audit_table = "organization_invites"
-    request.state.audit_requested_id = invite_id
-    request.state.audit_description = f"Revoked invitation for ID: {invite_id}"
-    request.state.audit_risk_level = "medium"
-
-    # Validate invitation ID format
-    validate_uuid_format(invite_id, INVITATION_ID_LABEL)
-
-    # Extract user context
-    user_context = await check_permissions(
-        current_user=current_user,
-        permission_codes=SETTINGS_SYSTEM_MANAGE,
-        action_description="revoke organization invitations",
-    )
-
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-
-    # Get invitation details
-    invitation_data = await get_invite_by_id(invite_id)
-
-    if not invitation_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=INVITE_NOT_FOUND_MESSAGE,
-        )
-
-    # Validate organization access
-    if not await validate_organization_access(user_context, invitation_data["organization_id"]):
-        handle_invite_permission_error("revoke organization invitations")
-
-    # Check if invitation can be revoked
-    if not can_revoke_invite(invitation_data):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invitation cannot be revoked. It may already be processed or expired."
-        )
-
-    # Update invitation status
-    try:
-        await update_invite_status(invite_id, "revoked")
-
-        logger.info("Invitation revoked successfully - Request ID: %s, Invite ID: %s",
-                   request_id, invite_id)
-
-        return InviteResponse(
-            success=True,
-            message="Invitation revoked successfully"
-        )
-
-    except Exception as db_error:
-        log_exception()
-        logger.error(DATABASE_ERROR_MESSAGE, request_id, str(db_error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to revoke invitation"
-        ) from db_error
 
 
 @handle_api_exceptions("delete invitation")

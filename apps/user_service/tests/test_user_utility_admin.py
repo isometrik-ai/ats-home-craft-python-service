@@ -165,7 +165,7 @@ class TestUpdateSupabaseUserEmail:
 
             # Should not raise exception, but should log warning
             await update_supabase_user_email(user_id, org_id, new_email)
-            
+
             # Verify warning was logged
             mock_logger.warning.assert_called_once()
             assert new_email in str(mock_logger.warning.call_args)
@@ -1502,7 +1502,7 @@ class TestSendOrganizationInvitationEmail:
              patch("libs.shared_utils.email_utils.logger") as mock_logger:
 
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, invite_url, role_name, expires_at
+                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
             )
 
             assert result is True
@@ -1536,7 +1536,7 @@ class TestSendOrganizationInvitationEmail:
              patch("libs.shared_utils.email_utils.logger") as mock_logger:
 
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, invite_url, role_name, expires_at
+                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
             )
 
             assert result is False
@@ -1560,7 +1560,7 @@ class TestSendOrganizationInvitationEmail:
              patch("libs.shared_utils.email_utils.logger") as mock_logger:
 
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, invite_url, role_name, expires_at
+                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
             )
 
             assert result is False
@@ -1583,7 +1583,7 @@ class TestSendOrganizationInvitationEmail:
         with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
 
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, invite_url, role_name, expires_at
+                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
             )
 
             assert result is True
@@ -1631,7 +1631,7 @@ class TestSendOrganizationInvitationEmail:
         with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
 
             send_organization_invitation_email(
-                email, organization_name, inviter_name, invite_url, role_name, expires_at
+                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
             )
 
             call_args = mock_send_email.call_args
@@ -1665,7 +1665,7 @@ class TestSendOrganizationInvitationEmail:
             with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
 
                 result = send_organization_invitation_email(
-                    email, organization_name, inviter_name, invite_url, role_name, expires_at
+                    email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
                 )
 
                 assert result is True

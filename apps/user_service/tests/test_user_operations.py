@@ -424,6 +424,9 @@ class TestUserOperations:
                 "timezone": "UTC",
                 "role_id": str(uuid.uuid4()),
                 "status": "active",
+                "salutation": "Mr.",
+                "first_name": "User",
+                "last_name": "1",
                 "created_at": "2024-01-01T00:00:00Z",
                 "updated_at": "2024-01-01T00:00:00Z",
                 "last_active_at": "2024-01-01T00:00:00Z"
@@ -437,13 +440,16 @@ class TestUserOperations:
                 "timezone": "EST",
                 "role_id": str(uuid.uuid4()),
                 "status": "active",
+                "salutation": "Ms.",
+                "first_name": "User",
+                "last_name": "2",
                 "created_at": "2024-01-02T00:00:00Z",
                 "updated_at": "2024-01-02T00:00:00Z",
                 "last_active_at": "2024-01-02T00:00:00Z"
             }
         ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = mock_users
@@ -471,13 +477,16 @@ class TestUserOperations:
                 "timezone": "UTC",
                 "role_id": str(uuid.uuid4()),
                 "status": "active",
+                "salutation": "Mr.",
+                "first_name": "Test",
+                "last_name": "User",
                 "created_at": "2024-01-01T00:00:00Z",
                 "updated_at": "2024-01-01T00:00:00Z",
                 "last_active_at": "2024-01-01T00:00:00Z"
             }
         ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = mock_users
@@ -494,7 +503,7 @@ class TestUserOperations:
         """Test users list retrieval when no users found."""
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.user_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
@@ -759,6 +768,7 @@ class TestUserOperations:
                 "role_name": "Admin",
                 "role_id": str(uuid.uuid4()),
                 "status": "active",
+                "salutation": "Mr.",
                 "joined_at": datetime.now().isoformat(),
                 "last_active_at": datetime.now().isoformat()
             }
@@ -776,7 +786,8 @@ class TestUserOperations:
             assert len(result) == 1
             assert result[0].user_id == users_data[0]["user_id"]
             assert result[0].email == users_data[0]["email"]
-            assert result[0].full_name == users_data[0]["full_name"]
+            assert result[0].first_name == users_data[0]["first_name"]
+            assert result[0].last_name == users_data[0]["last_name"]
             assert result[0].permissions_count == 5
 
     @pytest.mark.asyncio
@@ -805,6 +816,7 @@ class TestUserOperations:
                 "role_name": "Admin",
                 "role_id": str(uuid.uuid4()),
                 "status": "active",
+                "salutation": "Mr.",
                 "joined_at": datetime.now().isoformat(),
                 "last_active_at": datetime.now().isoformat()
             }
@@ -838,6 +850,7 @@ class TestUserOperations:
                 "role_name": "Admin",
                 "role_id": str(uuid.uuid4()),
                 "status": "active",
+                "salutation": "Mr.",
                 "joined_at": None,
                 "last_active_at": datetime.now().isoformat()
             }

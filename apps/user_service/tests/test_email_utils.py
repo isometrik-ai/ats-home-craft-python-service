@@ -176,6 +176,7 @@ class TestEmailFunctions:
             email="test@example.com",
             organization_name="Test Org",
             inviter_name="John Doe",
+            invitee_name="Jane Doe",
             invite_url="https://example.com/invite",
             role_name="admin",
             expires_at="2024-12-31"

@@ -75,19 +75,6 @@ def validate_invite_status(status: str) -> bool:
     return status.lower() in valid_statuses
 
 
-def validate_expiration_days(days: int) -> bool:
-    """
-    Validate expiration days for invitation.
-
-    Args:
-        days (int): Number of days until expiration
-
-    Returns:
-        bool: True if days is valid
-    """
-    return 1 <= days <= 30
-
-
 # ============================================================================
 # INVITATION PROCESSING UTILITIES
 # ============================================================================
@@ -131,20 +118,6 @@ def can_resend_invite(invite_data: Dict[str, Any]) -> bool:
         return not is_invite_expired(expires_at)
 
     return False
-
-
-def can_revoke_invite(invite_data: Dict[str, Any]) -> bool:
-    """
-    Check if invitation can be revoked.
-
-    Args:
-        invite_data (dict): Invitation data
-
-    Returns:
-        bool: True if invitation can be revoked
-    """
-    status = invite_data.get("status", "").lower()
-    return status in ["pending", "accepted"]
 
 
 # ============================================================================
@@ -224,7 +197,11 @@ def build_invite_list_item(invite_data: Dict[str, Any]) -> Dict[str, Any]:
         "invited_by": invite_data.get("invited_by"),
         "expires_at": invite_data.get("expires_at"),
         "created_at": invite_data.get("created_at"),
-        "updated_at": invite_data.get("updated_at")
+        "updated_at": invite_data.get("updated_at"),
+        "salutation": invite_data.get("metadata", {}).get("salutation", None),
+        "first_name": invite_data.get("metadata", {}).get("first_name", None),
+        "last_name": invite_data.get("metadata", {}).get("last_name", None),
+        "phone": invite_data.get("metadata", {}).get("phone", None),
     }
 
 
@@ -301,7 +278,7 @@ def generate_invite_url(base_url: str, token: str) -> str:
     Returns:
         str: Complete invitation URL
     """
-    return f"{base_url.rstrip('/')}/invite/accept/{token}"
+    return f"{base_url.rstrip('/')}/invite/accept/?token={token}&page=invite-user"
 
 
 def extract_token_from_url(url: str) -> Optional[str]:

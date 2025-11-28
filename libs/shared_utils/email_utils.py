@@ -214,6 +214,7 @@ def send_organization_invitation_email(
     email: str,
     organization_name: str,
     inviter_name: str,
+    invitee_name: str,
     invite_url: str,
     role_name: str,
     expires_at: str
@@ -320,7 +321,7 @@ The {organization_name} Team"""
         <div class="header">You're invited to join {organization_name}!</div>
 
         <div class="content">
-            <p>Hello,</p>
+            <p>Hello {invitee_name},</p>
 
             <p><strong>{inviter_name}</strong> has invited you to join <strong>{organization_name}</strong> as a <strong>{role_name}</strong>.</p>
 
