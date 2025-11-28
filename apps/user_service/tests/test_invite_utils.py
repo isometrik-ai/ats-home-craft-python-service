@@ -14,10 +14,8 @@ from apps.user_service.app.dependencies.invite_utils import (
     validate_email_format,
     validate_role,
     validate_invite_status,
-    validate_expiration_days,
     is_invite_expired,
     can_resend_invite,
-    can_revoke_invite,
     build_invite_details_response,
     build_invite_list_item,
     handle_invite_validation_error,
@@ -121,24 +119,6 @@ class TestValidateInviteStatus:
             assert validate_invite_status(status_val) is False
 
 
-class TestValidateExpirationDays:
-    """Test cases for validate_expiration_days function."""
-
-    def test_validate_expiration_days_valid_days(self):
-        """Test validation with valid expiration days."""
-        valid_days = list(range(1, 31))  # 1 to 30 days
-
-        for days in valid_days:
-            assert validate_expiration_days(days) is True
-
-    def test_validate_expiration_days_invalid_days(self):
-        """Test validation with invalid expiration days."""
-        invalid_days = [0, -1, 31, 50, 100]
-
-        for days in invalid_days:
-            assert validate_expiration_days(days) is False
-
-
 class TestIsInviteExpired:
     """Test cases for is_invite_expired function."""
 
@@ -212,35 +192,6 @@ class TestCanResendInvite:
             "expires_at": (datetime.now() + timedelta(days=1)).isoformat()
         }
         assert can_resend_invite(invite_data) is False
-
-
-class TestCanRevokeInvite:
-    """Test cases for can_revoke_invite function."""
-
-    def test_can_revoke_invite_pending(self):
-        """Test revoke capability for pending invite."""
-        invite_data = {"status": "pending"}
-        assert can_revoke_invite(invite_data) is True
-
-    def test_can_revoke_invite_accepted(self):
-        """Test revoke capability for accepted invite."""
-        invite_data = {"status": "accepted"}
-        assert can_revoke_invite(invite_data) is True
-
-    def test_can_revoke_invite_rejected(self):
-        """Test revoke capability for rejected invite."""
-        invite_data = {"status": "rejected"}
-        assert can_revoke_invite(invite_data) is False
-
-    def test_can_revoke_invite_expired(self):
-        """Test revoke capability for expired invite."""
-        invite_data = {"status": "expired"}
-        assert can_revoke_invite(invite_data) is False
-
-    def test_can_revoke_invite_revoked(self):
-        """Test revoke capability for already revoked invite."""
-        invite_data = {"status": "revoked"}
-        assert can_revoke_invite(invite_data) is False
 
 
 class TestBuildInviteDetailsResponse:
@@ -412,14 +363,14 @@ class TestGenerateInviteUrl:
         base_url = "https://example.com"
         token = "abc123xyz"
         result = generate_invite_url(base_url, token)
-        assert result == f"{base_url}/invite/accept/{token}"
+        assert result == f"{base_url}/invite/accept/?token={token}&page=invite-user"
 
     def test_generate_invite_url_with_trailing_slash(self):
         """Test URL generation with trailing slash in base URL."""
         base_url = "https://example.com/"
         token = "abc123xyz"
         result = generate_invite_url(base_url, token)
-        assert result == f"https://example.com/invite/accept/{token}"
+        assert result == f"https://example.com/invite/accept/?token={token}&page=invite-user"
 
 
 class TestExtractTokenFromUrl:

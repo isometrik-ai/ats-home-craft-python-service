@@ -237,3 +237,16 @@ async def get_user_by_id(user_id: str) -> dict:
         except (KeyError, TypeError, ValueError) as e:
             logger.error("Data validation error getting user by id: %s", e, exc_info=True)
             raise
+
+async def update_user(user_id: str, update_data: dict) -> bool:
+    """Update user in auth.users table."""
+    supabase = await get_supabase_admin_client()
+    try:
+        result = await supabase.auth.admin.update_user_by_id(user_id, update_data)
+        return result.user is not None
+    except APIError as e:
+        logger.error("Supabase API error updating user: %s", e, exc_info=True)
+        raise
+    except (HTTPError, RequestError, TimeoutException) as e:
+        logger.error("Network error updating user: %s", e, exc_info=True)
+        raise

@@ -432,10 +432,10 @@ class UserListItem(BaseModel):
 
     user_id: str = Field(..., description="Unique identifier for the user")
     email: str = Field(..., description="email address of the user")
-    full_name: Optional[str] = Field(None, description="User's full name")
-    phone: Optional[str] = Field(None, description="Updated phone number")
     first_name: Optional[str] = Field(None, description="Updated first name")
     last_name: Optional[str] = Field(None, description="Updated last name")
+    salutation: Optional[str] = Field(None, description="Updated salutation")
+    phone: Optional[str] = Field(None, description="Updated phone number")
     # role_name: str = Field(..., description="Name of user's assigned role")
     status: str = Field(..., description="User's membership status")
     joined_at: str = Field(..., description="ISO timestamp when user joined")

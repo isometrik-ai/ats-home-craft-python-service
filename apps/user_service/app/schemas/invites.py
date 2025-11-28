@@ -7,7 +7,7 @@ These schemas are used for request/response validation and API documentation.
 """
 
 import uuid
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from apps.user_service.app.schemas.common import PaginationBase
 from apps.user_service.app.schemas import ResponseModel
@@ -56,9 +56,12 @@ class InviteCreateRequest(BaseModel):
     """
     Request model for invitation creation operations
     """
+    salutation: Optional[Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.","Adv."]] = Field(None, description="Salutation for the user")
+    first_name: str = Field(..., min_length=2)
+    last_name: Optional[str] = Field(None, min_length=2)
     email: EmailStr = Field(..., description="Email address to invite")
+    phone: Optional[str] = None
     role_id: uuid.UUID = Field(default="member", description="Role: owner, admin, or member")
-    expires_in_days: int = Field(default=7, ge=1, le=30, description="Days until invite expires")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -71,11 +74,12 @@ class InviteCreateRequest(BaseModel):
     )
 
 
-class InviteAcceptRequest(BaseModel):
+class InviteAcceptBySettingPasswordRequest(BaseModel):
     """
     Request model for invitation acceptance operations
     """
     token: str = Field(..., description="Invite token from the URL")
+    password: str = Field(..., description="Password for the user")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -97,6 +101,10 @@ class InviteListItem(BaseModel):
     expires_at: str = Field(..., description="ISO timestamp when invitation expires")
     created_at: str = Field(..., description="ISO timestamp when invitation was created")
     updated_at: str = Field(..., description="ISO timestamp when invitation was last updated")
+    salutation: Optional[Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.","Adv."]] = Field(None, description="Salutation for the user")
+    first_name: Optional[str] = Field(None, min_length=2)
+    last_name: Optional[str] = Field(None, min_length=2)
+    phone: Optional[str] = None
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -108,7 +116,11 @@ class InviteListItem(BaseModel):
                 "invited_by": "550e8400-e29b-41d4-a716-446655440000",
                 "expires_at": "2024-12-26T10:00:00Z",
                 "created_at": EXAMPLE_TIMESTAMP,
-                "updated_at": EXAMPLE_TIMESTAMP
+                "updated_at": EXAMPLE_TIMESTAMP,
+                "salutation": "Mr.",
+                "first_name": "John",
+                "last_name": "Doe",
+                "phone": "+1234567890"
             }
         }
     )

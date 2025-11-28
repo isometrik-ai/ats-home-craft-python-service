@@ -19,9 +19,7 @@ from libs.shared_db.postgres_db.user_service_operations.invite_operations import
     delete_invite,
     check_existing_invite,
     check_user_membership,
-    add_user_to_organization,
-    get_expired_invites,
-    cleanup_expired_invites,
+    add_user_to_organization
 )
 
 
@@ -36,7 +34,10 @@ class TestCreateOrganizationInvite:
             "email": "test@example.com",
             "role_id": str(uuid.uuid4()),
             "invited_by": str(uuid.uuid4()),
-            "expires_in_days": 7
+            "first_name": "Test",
+            "last_name": "User",
+            "phone": None,
+            "salutation": None
         }
 
         mock_result = MagicMock()
@@ -76,7 +77,10 @@ class TestCreateOrganizationInvite:
             "email": "test@example.com",
             "role_id": str(uuid.uuid4()),
             "invited_by": str(uuid.uuid4()),
-            "expires_in_days": 7
+            "first_name": "Test",
+            "last_name": "User",
+            "phone": None,
+            "salutation": None
         }
 
         mock_result = MagicMock()
@@ -102,8 +106,11 @@ class TestCreateOrganizationInvite:
             "organization_id": str(uuid.uuid4()),
             "email": "test@example.com",
             "role_id": str(uuid.uuid4()),
-            "invited_by": str(uuid.uuid4())
-            # No expires_in_days provided
+            "invited_by": str(uuid.uuid4()),
+            "first_name": "Test",
+            "last_name": "User",
+            "phone": None,
+            "salutation": None
         }
 
         mock_result = MagicMock()
@@ -309,7 +316,7 @@ class TestGetOrganizationInvites:
         mock_result = MagicMock()
         mock_result.data = mock_invites
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -340,7 +347,7 @@ class TestGetOrganizationInvites:
         mock_result = MagicMock()
         mock_result.data = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -425,7 +432,7 @@ class TestUpdateInviteStatus:
         mock_result = MagicMock()
         mock_result.data = [{"id": invite_id, "status": status}]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_update = MagicMock()
@@ -449,7 +456,7 @@ class TestUpdateInviteStatus:
         mock_result = MagicMock()
         mock_result.data = [{"id": invite_id, "status": status}]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_update = MagicMock()
@@ -473,7 +480,7 @@ class TestUpdateInviteStatus:
         mock_result = MagicMock()
         mock_result.data = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_update = MagicMock()
@@ -497,7 +504,7 @@ class TestUpdateInviteStatus:
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_update = MagicMock()
@@ -718,6 +725,15 @@ class TestAddUserToOrganization:
         role_name = "member"
         invited_by = str(uuid.uuid4())
 
+        invite_data = {
+            "user_id": user_id,
+            "first_name": "Test",
+            "last_name": "User",
+            "phone": None,
+            "timezone": "UTC",
+            "salutation": None
+        }
+
         mock_member_data = {
             "id": str(uuid.uuid4()),
             "organization_id": organization_id,
@@ -732,7 +748,6 @@ class TestAddUserToOrganization:
         mock_result.data = [mock_member_data]
 
         with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client, \
-             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={"full_name": "Test User", "first_name": "Test", "last_name": "User", "phone": None, "timezone": "UTC"})))) as mock_get_user, \
              patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value=mock_member_data)) as mock_create_user:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
@@ -743,7 +758,7 @@ class TestAddUserToOrganization:
             mock_get_client.return_value = mock_supabase
 
             result = await add_user_to_organization(
-                organization_id, user_id, email, role_id, role_name, invited_by
+                organization_id, invite_data, email, role_id, role_name, invited_by
             )
 
             assert result["id"] is not None
@@ -761,11 +776,19 @@ class TestAddUserToOrganization:
         role_name = "member"
         invited_by = str(uuid.uuid4())
 
+        invite_data = {
+            "user_id": user_id,
+            "first_name": "Test",
+            "last_name": "User",
+            "phone": None,
+            "timezone": "UTC",
+            "salutation": None
+        }
+
         mock_result = MagicMock()
         mock_result.data = []
 
         with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client, \
-             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={"full_name": "Test User", "first_name": "Test", "last_name": "User", "phone": None, "timezone": "UTC"})))) as mock_get_user, \
              patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value={})) as mock_create_user:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
@@ -776,130 +799,7 @@ class TestAddUserToOrganization:
             mock_get_client.return_value = mock_supabase
 
             result = await add_user_to_organization(
-                organization_id, user_id, email, role_id, role_name, invited_by
+                organization_id, invite_data, email, role_id, role_name, invited_by
             )
 
             assert result == {}
-
-
-class TestGetExpiredInvites:
-    """Test cases for get_expired_invites function."""
-
-    @pytest.mark.asyncio
-    async def test_get_expired_invites_success(self):
-        """Test successful retrieval of expired invites."""
-        mock_expired_invites = [
-            {
-                "id": str(uuid.uuid4()),
-                "email": "expired1@example.com",
-                "status": "pending",
-                "expires_at": (datetime.now() - timedelta(days=1)).isoformat()
-            },
-            {
-                "id": str(uuid.uuid4()),
-                "email": "expired2@example.com",
-                "status": "pending",
-                "expires_at": (datetime.now() - timedelta(days=2)).isoformat()
-            }
-        ]
-
-        mock_result = MagicMock()
-        mock_result.data = mock_expired_invites
-
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
-            mock_supabase = MagicMock()
-            mock_table = MagicMock()
-            mock_select = MagicMock()
-            mock_lt = MagicMock()
-            mock_eq = MagicMock()
-            mock_eq.execute = AsyncMock(return_value=mock_result)
-            mock_lt.eq.return_value = mock_eq
-            mock_select.lt.return_value = mock_lt
-            mock_table.select.return_value = mock_select
-            mock_supabase.table.return_value = mock_table
-            mock_get_client.return_value = mock_supabase
-
-            result = await get_expired_invites()
-
-            assert len(result) == 2
-            assert result[0]["email"] == "expired1@example.com"
-            assert result[1]["email"] == "expired2@example.com"
-
-    @pytest.mark.asyncio
-    async def test_get_expired_invites_none_data(self):
-        """Test expired invites retrieval when data is None."""
-        mock_result = MagicMock()
-        mock_result.data = None
-
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
-            mock_supabase = MagicMock()
-            mock_table = MagicMock()
-            mock_select = MagicMock()
-            mock_lt = MagicMock()
-            mock_eq = MagicMock()
-            mock_eq.execute = AsyncMock(return_value=mock_result)
-            mock_lt.eq.return_value = mock_eq
-            mock_select.lt.return_value = mock_lt
-            mock_table.select.return_value = mock_select
-            mock_supabase.table.return_value = mock_table
-            mock_get_client.return_value = mock_supabase
-
-            result = await get_expired_invites()
-
-            assert result == []
-
-
-class TestCleanupExpiredInvites:
-    """Test cases for cleanup_expired_invites function."""
-
-    @pytest.mark.asyncio
-    async def test_cleanup_expired_invites_success(self):
-        """Test successful cleanup of expired invites."""
-        mock_cleaned_invites = [
-            {"id": str(uuid.uuid4()), "status": "expired"},
-            {"id": str(uuid.uuid4()), "status": "expired"},
-            {"id": str(uuid.uuid4()), "status": "expired"}
-        ]
-
-        mock_result = MagicMock()
-        mock_result.data = mock_cleaned_invites
-
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
-            mock_supabase = MagicMock()
-            mock_table = MagicMock()
-            mock_update = MagicMock()
-            mock_lt = MagicMock()
-            mock_eq = MagicMock()
-            mock_eq.execute = AsyncMock(return_value=mock_result)
-            mock_lt.eq.return_value = mock_eq
-            mock_update.lt.return_value = mock_lt
-            mock_table.update.return_value = mock_update
-            mock_supabase.table.return_value = mock_table
-            mock_get_client.return_value = mock_supabase
-
-            result = await cleanup_expired_invites()
-
-            assert result == 3
-
-    @pytest.mark.asyncio
-    async def test_cleanup_expired_invites_none_data(self):
-        """Test cleanup when no data is returned."""
-        mock_result = MagicMock()
-        mock_result.data = None
-
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
-            mock_supabase = MagicMock()
-            mock_table = MagicMock()
-            mock_update = MagicMock()
-            mock_lt = MagicMock()
-            mock_eq = MagicMock()
-            mock_eq.execute = AsyncMock(return_value=mock_result)
-            mock_lt.eq.return_value = mock_eq
-            mock_update.lt.return_value = mock_lt
-            mock_table.update.return_value = mock_update
-            mock_supabase.table.return_value = mock_table
-            mock_get_client.return_value = mock_supabase
-
-            result = await cleanup_expired_invites()
-
-            assert result == 0

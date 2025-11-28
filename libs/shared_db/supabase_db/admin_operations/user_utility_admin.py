@@ -7,11 +7,11 @@ All Supabase Auth admin API operations for user management should be centralized
 from typing import Optional, Tuple
 
 from fastapi import HTTPException, status
-from fastapi import Request
 from supabase_auth.errors import AuthApiError
 
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.users import CreateUserRequest
+from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.dependencies.common_utils import UserContext
 
 from libs.shared_utils.email_utils import send_email
@@ -220,7 +220,7 @@ async def send_admin_update_email(user: dict) -> bool:
             detail="Failed to send admin update email"
         ) from error
 
-async def sign_up_supabase_user(body):
+async def sign_up_supabase_user(body: SignupRequest):
     """
     Create user in Supabase Auth using auth.signUp for user-initiated registration.
     This is for user signup (like in signup API) and requires email confirmation.
@@ -317,8 +317,8 @@ def handle_supabase_signup_exceptions(supabase_error):
 
 
 async def login_user(
-    email: str, 
-    password: str, 
+    email: str,
+    password: str,
     user_agent: Optional[str] = None,
     device_signature: Optional[str] = None,
 ) -> dict:
@@ -343,7 +343,7 @@ async def login_user(
         custom_headers = {}
         if device_signature:
             custom_headers["X-Device-Signature"] = device_signature
-        
+
         # Get Supabase client with custom headers
         supabase = await get_supabase_admin_client(
             user_agent=user_agent,

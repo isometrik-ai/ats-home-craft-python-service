@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
+COMMON_COMPANY_NAME = "House of App AI"
+COMMON_SUPPORT_EMAIL = "support@houseofapp.ai"
+COMMON_COMPANY_ADDRESS = "123 Main Street, City, State 12345"
+COMMON_PRIVACY_POLICY_URL = "https://houseofapp.ai/privacy"
+COMMON_TERMS_URL = "https://houseofapp.ai/terms"
+ROSS_AI_FROM_NAME = "Ross.Ai"
+
 
 def send_email(
     email: str,
@@ -214,6 +221,7 @@ def send_organization_invitation_email(
     email: str,
     organization_name: str,
     inviter_name: str,
+    invitee_name: str,
     invite_url: str,
     role_name: str,
     expires_at: str
@@ -320,7 +328,7 @@ The {organization_name} Team"""
         <div class="header">You're invited to join {organization_name}!</div>
 
         <div class="content">
-            <p>Hello,</p>
+            <p>Hello {invitee_name},</p>
 
             <p><strong>{inviter_name}</strong> has invited you to join <strong>{organization_name}</strong> as a <strong>{role_name}</strong>.</p>
 
@@ -359,12 +367,12 @@ The {organization_name} Team"""
 def send_welcome_email(
     email: str,
     first_name: str,
-    company_name: str = "House of App AI",
+    company_name: str = COMMON_COMPANY_NAME,
     dashboard_url: str = "https://house-of-apps-legal-ai-front-end.vercel.app/",
-    support_email: str = "support@houseofapp.ai",
-    company_address: str = "123 Main Street, City, State 12345",
-    privacy_policy_url: str = "https://houseofapp.ai/privacy",
-    terms_url: str = "https://houseofapp.ai/terms"
+    support_email: str = COMMON_SUPPORT_EMAIL,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL
 ) -> bool:
     """
     Send a welcome email to newly signed up users.
@@ -520,7 +528,7 @@ The {company_name} Team"""
 </html>"""
 
         # Send the email with HTML content and sender name "Ross.Ai"
-        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
 
         if email_sent:
             logger.info("Welcome email sent successfully to %s", email)
@@ -536,12 +544,11 @@ The {company_name} Team"""
 def send_password_change_success_email(
     email: str,
     user_name: str = None,
-    company_name: str = "House of App AI",
-    support_email: str = "support@houseofapp.ai",
-    company_address: str = "123 Main Street, City, State 12345",
-    site_url: str = "https://houseofapp.ai",
-    privacy_policy_url: str = "https://houseofapp.ai/privacy-policy",
-    terms_url: str = "https://houseofapp.ai/terms"
+    company_name: str = COMMON_COMPANY_NAME,
+    support_email: str = COMMON_SUPPORT_EMAIL,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL
 ) -> bool:
     """
     Send a password change success email to the user.
@@ -552,7 +559,6 @@ def send_password_change_success_email(
         company_name (str): Company name (default: "House of App AI")
         support_email (str): Support email address
         company_address (str): Company address for footer
-        site_url (str): Site URL for links
         privacy_policy_url (str): Privacy policy URL
         terms_url (str): Terms of service URL
 
@@ -618,7 +624,7 @@ Contact Support: {support_email}
 </html>"""
 
         # Send the email with HTML content and sender name "Ross.Ai"
-        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
 
         if email_sent:
             logger.info("Password change success email sent successfully to %s", email)
@@ -634,12 +640,11 @@ Contact Support: {support_email}
 def send_password_reset_success_email(
     email: str,
     user_name: str = None,
-    company_name: str = "House of App AI",
-    support_email: str = "support@houseofapp.ai",
-    company_address: str = "123 Main Street, City, State 12345",
-    site_url: str = "https://houseofapp.ai",
-    privacy_policy_url: str = "https://houseofapp.ai/privacy-policy",
-    terms_url: str = "https://houseofapp.ai/terms"
+    company_name: str = COMMON_COMPANY_NAME,
+    support_email: str = COMMON_SUPPORT_EMAIL,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL
 ) -> bool:
     """
     Send a password reset success email to the user.
@@ -650,7 +655,6 @@ def send_password_reset_success_email(
         company_name (str): Company name (default: "House of App AI")
         support_email (str): Support email address
         company_address (str): Company address for footer
-        site_url (str): Site URL for links
         privacy_policy_url (str): Privacy policy URL
         terms_url (str): Terms of service URL
 
@@ -725,7 +729,7 @@ Contact Support: {support_email}
 </html>"""
 
         # Send the email with HTML content and sender name "Ross.Ai"
-        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
 
         if email_sent:
             logger.info("Password reset success email sent successfully to %s", email)
@@ -742,10 +746,10 @@ def send_verification_code_email(
     email: str,
     otp_code: str,
     expiry_minutes: int = 10,
-    company_name: str = "House of App AI",
-    company_address: str = "123 Main Street, City, State 12345",
-    privacy_policy_url: str = "https://houseofapp.ai/privacy",
-    terms_url: str = "https://houseofapp.ai/terms"
+    company_name: str = COMMON_COMPANY_NAME,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL
 ) -> bool:
     """
     Send a verification code (OTP) email to the user.
@@ -839,7 +843,7 @@ If you didn't request this, please ignore this email.
 </html>"""
 
         # Send the email with HTML content
-        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
 
         if email_sent:
             logger.info("Verification code email sent successfully to %s", email)
