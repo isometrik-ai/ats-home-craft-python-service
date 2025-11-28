@@ -23,7 +23,8 @@ def mock_permission_system():
          patch("apps.user_service.app.dependencies.invite_utils.validate_organization_access", return_value=True) as mock_validate_org_access, \
          patch("apps.user_service.app.api.invites.validate_organization_access", return_value=True) as mock_invites_validate_org_access, \
          patch("apps.user_service.app.dependencies.invite_utils.build_invite_list_item") as mock_build_invite_list_item, \
-         patch("apps.user_service.app.api.invites.build_invite_list_item") as mock_invites_build_invite_list_item:
+         patch("apps.user_service.app.api.invites.build_invite_list_item") as mock_invites_build_invite_list_item, \
+         patch("apps.user_service.app.api.invites.BASE_URL", "https://example.com"):
 
         # Configure the mocks
         from apps.user_service.app.dependencies.common_utils import UserContext
@@ -253,7 +254,7 @@ class TestCreateInvitation:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value=mock_created_invite)), \
@@ -328,7 +329,7 @@ class TestCreateInvitation:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=True)):
 
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
@@ -347,7 +348,7 @@ class TestCreateInvitation:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=True)):
 
@@ -396,7 +397,7 @@ class TestCreateInvitation:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value={"id": str(uuid.uuid4()), "token_hash": "abc", "expires_at": "2024-12-31"})), \
@@ -418,7 +419,7 @@ class TestCreateInvitation:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(side_effect=DatabaseOperationError("Database error"))):
@@ -695,7 +696,7 @@ class TestInviteValidation:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value={"id": str(uuid.uuid4()), "token_hash": "abc", "expires_at": "2024-12-31"})), \
@@ -732,7 +733,7 @@ class TestInviteValidation:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value={"id": str(uuid.uuid4()), "token_hash": "abc", "expires_at": "2024-12-31"})), \
@@ -829,7 +830,7 @@ class TestInviteEdgeCases:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value=mock_created_invite)), \
@@ -858,7 +859,7 @@ class TestInviteEdgeCases:
         }
 
         with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
              patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value=mock_created_invite)), \
@@ -909,13 +910,13 @@ class TestInviteEdgeCases:
             }
 
             with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-                 patch("apps.user_service.app.api.invites.check_organization_capacity", return_value=True), \
+                 patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
                  patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
                  patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
                  patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value=mock_created_invite)), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": role})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
+                 patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": role})), \
+                 patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
+                 patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
 
                 response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
