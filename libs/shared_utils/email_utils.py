@@ -21,6 +21,7 @@ COMMON_SUPPORT_EMAIL = "support@houseofapp.ai"
 COMMON_COMPANY_ADDRESS = "123 Main Street, City, State 12345"
 COMMON_PRIVACY_POLICY_URL = "https://houseofapp.ai/privacy"
 COMMON_TERMS_URL = "https://houseofapp.ai/terms"
+ROSS_AI_FROM_NAME = "Ross.Ai"
 
 
 def send_email(
@@ -527,7 +528,7 @@ The {company_name} Team"""
 </html>"""
 
         # Send the email with HTML content and sender name "Ross.Ai"
-        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
 
         if email_sent:
             logger.info("Welcome email sent successfully to %s", email)
@@ -623,7 +624,7 @@ Contact Support: {support_email}
 </html>"""
 
         # Send the email with HTML content and sender name "Ross.Ai"
-        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
 
         if email_sent:
             logger.info("Password change success email sent successfully to %s", email)
@@ -728,7 +729,7 @@ Contact Support: {support_email}
 </html>"""
 
         # Send the email with HTML content and sender name "Ross.Ai"
-        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
 
         if email_sent:
             logger.info("Password reset success email sent successfully to %s", email)
@@ -842,7 +843,7 @@ If you didn't request this, please ignore this email.
 </html>"""
 
         # Send the email with HTML content
-        email_sent = send_email(email, subject, message, html_message, from_name="Ross.Ai")
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
 
         if email_sent:
             logger.info("Verification code email sent successfully to %s", email)
