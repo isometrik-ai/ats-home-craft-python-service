@@ -5,7 +5,7 @@ This module provides user update operations including email updates, ban, and un
 All endpoints include proper authentication, validation, and database operations.
 """
 
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 import uuid
 
@@ -82,6 +82,7 @@ class UpdateUserProfileRequest(BaseModel):
     Only these fields can be updated:
     - first_name: Updated first name
     - last_name: Updated last name
+    - salutation: Updated salutation (Mr., Mrs., Ms., Dr., Prof., Adv.)
     - timezone: Updated timezone preference
     - avatar_url: Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')
     - two_fa_enabled: Enable or disable verification preference
@@ -91,6 +92,7 @@ class UpdateUserProfileRequest(BaseModel):
     """
     first_name: Optional[str] = Field(None, description="Updated first name")
     last_name: Optional[str] = Field(None, description="Updated last name")
+    salutation: Optional[Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Adv."]] = Field(None, description="Salutation for the user")
     timezone: Optional[str] = Field(None, description="Updated timezone preference")
     avatar_url: Optional[str] = Field(None, description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')")
     two_fa_enabled: Optional[bool] = Field(None, description="Enable or disable verification preference")
@@ -107,6 +109,7 @@ class UpdateUserProfileRequest(BaseModel):
             "example": {
                 "first_name": "John",
                 "last_name": "Doe",
+                "salutation": "Mr.",
                 "timezone": "America/New_York",
                 "avatar_url": "house-of-apps-legal-ai/user-id/avatar.jpg",
                 "two_fa_enabled": True,
@@ -413,6 +416,7 @@ async def update_user_profile(
     **Updatable Fields:**
     - `first_name`: Updated first name
     - `last_name`: Updated last name
+    - `salutation`: Updated salutation (Mr., Mrs., Ms., Dr., Prof., Adv.)
     - `timezone`: Updated timezone preference (e.g., "America/New_York", "UTC")
     - `avatar_url`: Updated avatar/profile picture URL
 
@@ -517,6 +521,11 @@ async def update_user_profile(
     if body.avatar_url is not None:
         update_data["avatar_url"] = body.avatar_url
         metadata_update["avatar_url"] = body.avatar_url
+
+    # Update salutation if provided
+    if body.salutation is not None:
+        update_data["salutation"] = body.salutation
+        metadata_update["salutation"] = body.salutation
 
     # Update verification preference if provided
     # verification_method defaults to "EMAIL" if not provided
@@ -639,6 +648,7 @@ async def update_user_profile(
         "user_id": str(user_id),
         "first_name": updated_profile.get("first_name") if updated_profile else current_user_data.get("first_name"),
         "last_name": updated_profile.get("last_name") if updated_profile else current_user_data.get("last_name"),
+        "salutation": updated_profile.get("salutation") if updated_profile else current_user_data.get("salutation"),
         "full_name": updated_profile.get("full_name") if updated_profile else current_user_data.get("full_name"),
         "timezone": updated_profile.get("timezone") if updated_profile else current_user_data.get("timezone"),
         "avatar_url": updated_profile.get("avatar_url") if updated_profile else current_user_data.get("avatar_url"),
