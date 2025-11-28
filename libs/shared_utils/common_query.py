@@ -24,6 +24,10 @@ def log_exception():
 # Returns:
 #     List[tuple]: List of permission tuples (code, name, description, category)
 # """
+
+# Permission code constants (to avoid duplication)
+ROLES_MANAGEMENT_EDIT = "roles_management.edit"
+
 DEFAULT_PERMISSIONS = [
     # User Management
     (
@@ -64,7 +68,7 @@ DEFAULT_PERMISSIONS = [
         "roles",
     ),
     (
-        "roles_management.edit",
+        ROLES_MANAGEMENT_EDIT,
         "Edit Roles",
         "Modify role information and permissions",
         "roles",
@@ -220,9 +224,9 @@ PERMISSION_SELECT_FIELDS = """
 
 # Permission constants (new permission codes with _management suffix)
 SETTINGS_SYSTEM_MANAGE = "settings_management.edit"
-SETTINGS_ROLES_MANAGE = "roles_management.edit"
+SETTINGS_ROLES_MANAGE = ROLES_MANAGEMENT_EDIT
 SETTINGS_USERS_MANAGE = "users_management.edit"
 SETTINGS_USERS_VIEW = "users_management.view"
-SETTINGS_PERMISSIONS_MANAGE = "roles_management.edit"
+SETTINGS_PERMISSIONS_MANAGE = ROLES_MANAGEMENT_EDIT
 
 USER_NOT_FOUND_MESSAGE = "User not found in organization"
