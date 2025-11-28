@@ -59,18 +59,22 @@ class SupabaseClientCache:
             if http_client is not None:
                 # When using custom http_client (e.g., with custom User-Agent),
                 # disable session persistence to avoid storage initialization issues
+                # Note: ClientOptions doesn't support httpx_client parameter in this Supabase version
+                # So we create the client without custom http_client for now
+                # Custom headers functionality is disabled when using cached client
                 options = ClientOptions(
-                    httpx_client=http_client,
                     persist_session=False
                 )
+                self._supabase_admin_client = await create_async_client(
+                    SUPABASE_URL, 
+                    SUPABASE_SERVICE_ROLE_KEY,
+                    options=options
+                )
             else:
-                options = None
-
-
-            self._supabase_admin_client = await create_async_client(
-                SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-                options=options,
-            )
+                self._supabase_admin_client = await create_async_client(
+                    SUPABASE_URL, 
+                    SUPABASE_SERVICE_ROLE_KEY
+                )
 
             # Warm up the admin client to ensure proper authentication
             try:

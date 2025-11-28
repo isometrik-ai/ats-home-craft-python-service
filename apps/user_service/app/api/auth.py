@@ -545,20 +545,56 @@ async def login(request: Request, data: AuthLogin):
             user_agent=user_agent,
             device_signature=device_signature,
         )
+        
+        # Validate result structure
+        if not result:
+            logger.error("login_user returned None or empty result for email: %s", data.email)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication failed: Invalid response from authentication service"
+            )
+        
+        if not hasattr(result, 'session') or result.session is None:
+            logger.error("login_user result missing session for email: %s", data.email)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication failed: Session data is missing"
+            )
+        
+        if not hasattr(result, 'user') or result.user is None:
+            logger.error("login_user result missing user for email: %s", data.email)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication failed: User data is missing"
+            )
+        
+        # Safely access session attributes
+        session = result.session
+        user = result.user
+        user_metadata = getattr(user, 'user_metadata', {}) or {}
+        
+        # Validate required session attributes
+        if not hasattr(session, 'access_token') or not session.access_token:
+            logger.error("login_user session missing access_token for email: %s", data.email)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication failed: Access token is missing"
+            )
+        
         return AuthResponse(
-            access_token=result.session.access_token,
-            refresh_token=result.session.refresh_token,
-            expires_in=result.session.expires_in,
-            expires_at=result.session.expires_at,
+            access_token=session.access_token,
+            refresh_token=getattr(session, 'refresh_token', None),
+            expires_in=getattr(session, 'expires_in', None),
+            expires_at=getattr(session, 'expires_at', None),
             user=UserInfo(
-                id=result.user.id,
-                email=result.user.email,
-                first_name=result.user.user_metadata.get("first_name", None),
-                last_name=result.user.user_metadata.get("last_name", None),
-                phone=result.user.user_metadata.get("phone", None),
-                timezone=result.user.user_metadata.get("timezone", None),
-                org_setup_status_completed=bool(result.user.user_metadata.get("organization_id", False)),
-                organization_id=result.user.user_metadata.get("organization_id", None),
+                id=getattr(user, 'id', None),
+                email=getattr(user, 'email', None),
+                first_name=user_metadata.get("first_name", None),
+                last_name=user_metadata.get("last_name", None),
+                phone=user_metadata.get("phone", None),
+                timezone=user_metadata.get("timezone", None),
+                org_setup_status_completed=bool(user_metadata.get("organization_id", False)),
+                organization_id=user_metadata.get("organization_id", None),
             ),
         )
     except HTTPException:
@@ -586,6 +622,14 @@ async def login(request: Request, data: AuthLogin):
     except Exception as error:
         log_exception()
         error_str = str(error).lower()
+        error_type = type(error).__name__
+        
+        # Log detailed error information for debugging
+        logger.error(
+            "Unexpected error during login - Type: %s, Error: %s, Email: %s",
+            error_type, str(error), data.email
+        )
+        
         # Check for invalid credentials in error message
         if INVALID_LOGIN_CREDS in error_str or \
            ("invalid" in error_str and "credential" in error_str):
@@ -593,9 +637,17 @@ async def login(request: Request, data: AuthLogin):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=INVALID_LOGIN_CREDS
             ) from error
+        
+        # Provide more detailed error message
+        error_detail = f"Authentication failed: {error_type}"
+        if hasattr(error, '__cause__') and error.__cause__:
+            error_detail += f" - {str(error.__cause__)}"
+        else:
+            error_detail += f" - {str(error)}"
+            
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication failed"
+            detail=error_detail
         ) from error
 
 
