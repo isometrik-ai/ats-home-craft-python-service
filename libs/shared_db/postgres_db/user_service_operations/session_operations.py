@@ -195,6 +195,80 @@ SESSION_FIELDS = (
 )
 
 
+def _check_member_matches(member_info: Optional[Dict[str, Any]], search_term: str) -> bool:
+    """
+    Check if search term matches any member fields (email, first_name, last_name).
+    
+    Args:
+        member_info: Member dictionary with email, first_name, last_name (can be None)
+        search_term: Lowercase search term
+    
+    Returns:
+        True if search matches any member field, False otherwise
+    """
+    if not member_info:
+        return False
+    
+    email = (member_info.get("email") or "").lower()
+    first_name = (member_info.get("first_name") or "").lower()
+    last_name = (member_info.get("last_name") or "").lower()
+    
+    # Python's 'in' operator handles all characters including +, @, etc.
+    return (
+        search_term in email or
+        search_term in first_name or
+        search_term in last_name
+    )
+
+
+def _check_session_matches(session: Dict[str, Any], search_term: str) -> bool:
+    """
+    Check if search term matches any session fields (user_agent, ip_address).
+    
+    Args:
+        session: Session dictionary
+        search_term: Lowercase search term
+    
+    Returns:
+        True if search matches any session field, False otherwise
+    """
+    user_agent = (session.get("user_agent") or "").lower()
+    ip_address = (session.get("ip_address") or "").lower()
+    
+    # Python's 'in' operator handles all characters including +, @, etc.
+    return (
+        search_term in user_agent or
+        search_term in ip_address
+    )
+
+
+def _attach_member_info_to_session(
+    session: Dict[str, Any],
+    member_info: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Attach organization member info to a session dictionary.
+    
+    Args:
+        session: Session dictionary
+        member_info: Member dictionary with email, first_name, last_name (can be None)
+    
+    Returns:
+        Session dictionary with organization_members field added
+    """
+    session_with_member = {**session}
+    if member_info:
+        session_with_member["organization_members"] = {
+            "email": member_info.get("email"),
+            "first_name": member_info.get("first_name"),
+            "last_name": member_info.get("last_name")
+        }
+    else:
+        session_with_member["organization_members"] = None
+    
+    return session_with_member
+
+
 def _match_sessions_with_members_and_filter(
     all_sessions: List[Dict[str, Any]],
     members_dict: Dict[str, Dict[str, Any]],
@@ -217,42 +291,13 @@ def _match_sessions_with_members_and_filter(
         user_id = session.get("user_id")
         member_info = members_dict.get(user_id) if user_id else None
         
-        # Add member info to session
-        session_with_member = {**session}
-        if member_info:
-            session_with_member["organization_members"] = {
-                "email": member_info.get("email"),
-                "first_name": member_info.get("first_name"),
-                "last_name": member_info.get("last_name")
-            }
-        else:
-            session_with_member["organization_members"] = None
+        # Attach member info to session
+        session_with_member = _attach_member_info_to_session(session, member_info)
         
         # Apply search filter if provided
         if search_term:
-            # Check if search matches member fields (case-insensitive, preserves special chars)
-            member_matches = False
-            if member_info:
-                email = (member_info.get("email") or "").lower()
-                first_name = (member_info.get("first_name") or "").lower()
-                last_name = (member_info.get("last_name") or "").lower()
-                
-                # Python's 'in' operator handles all characters including +, @, etc.
-                member_matches = (
-                    search_term in email or
-                    search_term in first_name or
-                    search_term in last_name
-                )
-            
-            # Check if search matches session fields (case-insensitive, preserves special chars)
-            user_agent = (session.get("user_agent") or "").lower()
-            ip_address = (session.get("ip_address") or "").lower()
-            
-            # Python's 'in' operator handles all characters including +, @, etc.
-            session_matches = (
-                search_term in user_agent or
-                search_term in ip_address
-            )
+            member_matches = _check_member_matches(member_info, search_term)
+            session_matches = _check_session_matches(session, search_term)
             
             # Include session if either member or session fields match
             if member_matches or session_matches:
