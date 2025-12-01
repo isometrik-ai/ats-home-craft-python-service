@@ -194,6 +194,75 @@ SESSION_FIELDS = (
     "accessed_phi, phi_access_purpose"
 )
 
+
+def _match_sessions_with_members_and_filter(
+    all_sessions: List[Dict[str, Any]],
+    members_dict: Dict[str, Dict[str, Any]],
+    search_term: str
+) -> List[Dict[str, Any]]:
+    """
+    Match sessions with organization members and apply search filtering.
+    
+    Args:
+        all_sessions: List of session dictionaries from database
+        members_dict: Dictionary mapping user_id to member info (email, first_name, last_name)
+        search_term: Lowercase search term (empty string if no search)
+    
+    Returns:
+        List of sessions with member info attached, filtered by search if applicable
+    """
+    matched_sessions = []
+    
+    for session in all_sessions:
+        user_id = session.get("user_id")
+        member_info = members_dict.get(user_id) if user_id else None
+        
+        # Add member info to session
+        session_with_member = {**session}
+        if member_info:
+            session_with_member["organization_members"] = {
+                "email": member_info.get("email"),
+                "first_name": member_info.get("first_name"),
+                "last_name": member_info.get("last_name")
+            }
+        else:
+            session_with_member["organization_members"] = None
+        
+        # Apply search filter if provided
+        if search_term:
+            # Check if search matches member fields (case-insensitive, preserves special chars)
+            member_matches = False
+            if member_info:
+                email = (member_info.get("email") or "").lower()
+                first_name = (member_info.get("first_name") or "").lower()
+                last_name = (member_info.get("last_name") or "").lower()
+                
+                # Python's 'in' operator handles all characters including +, @, etc.
+                member_matches = (
+                    search_term in email or
+                    search_term in first_name or
+                    search_term in last_name
+                )
+            
+            # Check if search matches session fields (case-insensitive, preserves special chars)
+            user_agent = (session.get("user_agent") or "").lower()
+            ip_address = (session.get("ip_address") or "").lower()
+            
+            # Python's 'in' operator handles all characters including +, @, etc.
+            session_matches = (
+                search_term in user_agent or
+                search_term in ip_address
+            )
+            
+            # Include session if either member or session fields match
+            if member_matches or session_matches:
+                matched_sessions.append(session_with_member)
+        else:
+            # No search filter, include all sessions
+            matched_sessions.append(session_with_member)
+    
+    return matched_sessions
+
 @handle_database_errors(
     "get_sessions_list",
     custom_messages=create_error_messages("get_sessions_list", "getting"))
@@ -377,55 +446,11 @@ async def get_org_sessions_with_count(
     # Convert search term to lowercase for case-insensitive matching
     # Note: Special characters like +, @, etc. are preserved and matched as-is
     search_term = (filters.search or "").lower() if filters.search else ""
-    matched_sessions = []
-
-    for session in all_sessions:
-        user_id = session.get("user_id")
-        member_info = members_dict.get(user_id) if user_id else None
-
-        # Add member info to session
-        session_with_member = {**session}
-        if member_info:
-            session_with_member["organization_members"] = {
-                "email": member_info.get("email"),
-                "first_name": member_info.get("first_name"),
-                "last_name": member_info.get("last_name")
-            }
-        else:
-            session_with_member["organization_members"] = None
-
-        # Apply search filter if provided
-        if filters.search and search_term:
-            # Check if search matches member fields (case-insensitive, preserves special chars)
-            member_matches = False
-            if member_info:
-                email = (member_info.get("email") or "").lower()
-                first_name = (member_info.get("first_name") or "").lower()
-                last_name = (member_info.get("last_name") or "").lower()
-
-                # Python's 'in' operator handles all characters including +, @, etc.
-                member_matches = (
-                    search_term in email or
-                    search_term in first_name or
-                    search_term in last_name
-                )
-
-            # Check if search matches session fields (case-insensitive, preserves special chars)
-            user_agent = (session.get("user_agent") or "").lower()
-            ip_address = (session.get("ip_address") or "").lower()
-
-            # Python's 'in' operator handles all characters including +, @, etc.
-            session_matches = (
-                search_term in user_agent or
-                search_term in ip_address
-            )
-
-            # Include session if either member or session fields match
-            if member_matches or session_matches:
-                matched_sessions.append(session_with_member)
-        else:
-            # No search filter, include all sessions
-            matched_sessions.append(session_with_member)
+    
+    # Use helper function to reduce cognitive complexity
+    matched_sessions = _match_sessions_with_members_and_filter(
+        all_sessions, members_dict, search_term
+    )
 
     # Step 5: Apply pagination
     total_count = len(matched_sessions)
