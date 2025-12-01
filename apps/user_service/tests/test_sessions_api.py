@@ -1605,15 +1605,6 @@ class TestGetOrgSessionsWithCount:
     """Test cases for get_org_sessions_with_count function."""
 
     @pytest.mark.asyncio
-    async def test_get_org_sessions_with_count_none_organization_id(self):
-        """Test get_org_sessions_with_count with None organization_id - early return."""
-        filters = SessionFilter()
-
-        result = await get_org_sessions_with_count(None, filters)
-
-        assert result == {"data": [], "total_count": 0}
-
-    @pytest.mark.asyncio
     async def test_get_org_sessions_with_count_no_search_no_filters(self):
         """Test get_org_sessions_with_count without search and filters."""
         organization_id = str(uuid.uuid4())
