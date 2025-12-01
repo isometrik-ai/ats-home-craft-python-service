@@ -12,7 +12,8 @@ from libs.shared_db.postgres_db.user_service_operations.session_operations impor
     check_session_exists,
     get_sessions_list,
     get_sessions_count,
-    get_sessions_with_count
+    get_sessions_with_count,
+    get_org_sessions_with_count
 )
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     DatabaseOperationError
@@ -57,24 +58,24 @@ def client(app):
 def test_sessions_list_success(client):
     """Test successful sessions list API endpoint."""
     from apps.user_service.app.dependencies.common_utils import UserContext
-    
+
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     later = datetime(2025, 1, 2, tzinfo=timezone.utc)
     test_user_id = str(uuid.uuid4())
     test_org_id = str(uuid.uuid4())
-    
+
     mock_user_context = UserContext(
         organization_id=test_org_id,
         user_id=test_user_id,
         email="e@e.com",
         user_type="organization_member"
     )
-    
+
     with patch("apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
                AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
                AsyncMock(return_value=mock_user_context)), \
-         patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count", 
+         patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count",
                AsyncMock(return_value={
                    "data": [{
                        "id": str(uuid.uuid4()),
@@ -101,22 +102,22 @@ def test_sessions_list_success(client):
 def test_sessions_list_with_filters(client):
     """Test sessions list API with query parameters."""
     from apps.user_service.app.dependencies.common_utils import UserContext
-    
+
     test_user_id = str(uuid.uuid4())
     test_org_id = str(uuid.uuid4())
-    
+
     mock_user_context = UserContext(
         organization_id=test_org_id,
         user_id=test_user_id,
         email="e@e.com",
         user_type="organization_member"
     )
-    
+
     with patch("apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
                AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
                AsyncMock(return_value=mock_user_context)), \
-         patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count", 
+         patch("apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count",
                AsyncMock(return_value={
                    "data": [],
                    "total_count": 0
@@ -129,17 +130,17 @@ def test_sessions_list_with_filters(client):
 def test_sessions_list_database_error(client):
     """Test sessions list API with database error."""
     from apps.user_service.app.dependencies.common_utils import UserContext
-    
+
     test_user_id = str(uuid.uuid4())
     test_org_id = str(uuid.uuid4())
-    
+
     mock_user_context = UserContext(
         organization_id=test_org_id,
         user_id=test_user_id,
         email="e@e.com",
         user_type="organization_member"
     )
-    
+
     with patch("apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
                AsyncMock(return_value=mock_user_context)), \
          patch("apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
@@ -171,6 +172,77 @@ def test_sessions_list_no_organization_id(client):
         res = client.get("/v1/admin/sessions")
         assert res.status_code == 200  # Now allows users without organization_id
         assert res.json()["total_count"] == 0
+
+
+def test_org_sessions_list_success(client):
+    """Test successful organization-wide sessions list API endpoint."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+
+    test_org_id = str(uuid.uuid4())
+
+    mock_user_context = UserContext(
+        organization_id=test_org_id,
+        user_id=str(uuid.uuid4()),
+        email="e@e.com",
+        user_type="organization_member",
+    )
+
+    with patch(
+        "apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+        AsyncMock(return_value=mock_user_context),
+    ), patch(
+        "apps.user_service.app.api.admin_management.sessions.sessions.get_org_sessions_with_count",
+        AsyncMock(
+            return_value={
+                "data": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "user_id": str(uuid.uuid4()),
+                        "organization_id": test_org_id,
+                        "ip_address": "127.0.0.1",
+                        "user_agent": "agent",
+                        "device_fingerprint": None,
+                        "risk_score": 0,
+                        "login_timestamp": datetime.now(timezone.utc).isoformat(),
+                        "logout_timestamp": None,
+                        "session_status": "active",
+                        "login_method": "password",
+                        "accessed_phi": False,
+                        "phi_access_purpose": None,
+                    }
+                ],
+                "total_count": 1,
+            }
+        ),
+    ):
+        res = client.get("/v1/admin/sessions/all")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["total_count"] == 1
+        assert len(body["sessions"]) == 1
+
+
+def test_org_sessions_list_missing_organization_id(client):
+    """Test organization-wide sessions list when user has no organization_id."""
+    from apps.user_service.app.dependencies.common_utils import UserContext
+
+    mock_user_context = UserContext(
+        organization_id=None,
+        user_id=str(uuid.uuid4()),
+        email="test@example.com",
+        user_type="organization_member",
+    )
+
+    with patch(
+        "apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+        AsyncMock(return_value=mock_user_context),
+    ):
+        res = client.get("/v1/admin/sessions/all")
+        assert res.status_code == 400
+        assert (
+            "Organization ID is required"
+            in res.json().get("detail", "")
+        )
 
 
 def test_session_response_to_dict():
@@ -1417,7 +1489,7 @@ class TestSessionOperationsCoverage:
         mock_eq_query.is_ = MagicMock(return_value=mock_is_query)
         mock_eq_query.eq = MagicMock(return_value=mock_eq_query)
         mock_select_query.eq.return_value = mock_eq_query
-        
+
         mock_supabase.table.return_value = mock_table
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
@@ -1439,7 +1511,7 @@ class TestSessionOperationsCoverage:
         mock_eq_query2.execute = AsyncMock(return_value=mock_select_result_empty)
         mock_eq_query2.eq = MagicMock(return_value=mock_eq_query2)
         mock_select_query2.eq.return_value = mock_eq_query2
-        
+
         mock_supabase2.table.return_value = mock_table2
 
         with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_supabase_admin_client",
@@ -1523,3 +1595,967 @@ class TestSessionOperationsCoverage:
             assert count == 2
             # Verify or_ was called for search
             mock_search_query.or_.assert_called_once()
+
+
+# ============================================================================
+# GET ORG SESSIONS WITH COUNT TESTS
+# ============================================================================
+
+class TestGetOrgSessionsWithCount:
+    """Test cases for get_org_sessions_with_count function."""
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_none_organization_id(self):
+        """Test get_org_sessions_with_count with None organization_id - early return."""
+        filters = SessionFilter()
+
+        result = await get_org_sessions_with_count(None, filters)
+
+        assert result == {"data": [], "total_count": 0}
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_no_search_no_filters(self):
+        """Test get_org_sessions_with_count without search and filters."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(limit=10, offset=0)
+
+        # Mock members data
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            },
+            {
+                "user_id": "user2",
+                "email": "user2@example.com",
+                "first_name": "Jane",
+                "last_name": "Smith"
+            }
+        ]
+
+        # Mock sessions data
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            },
+            {
+                "id": "session2",
+                "user_id": "user2",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.2",
+                "user_agent": "Chrome/1.0",
+                "login_timestamp": "2024-01-02T00:00:00Z",
+                "session_status": "active",
+                "login_method": "sso"
+            }
+        ]
+
+        # Mock Supabase client
+        mock_supabase = MagicMock()
+
+        # Mock members query
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        # Mock sessions query
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        # Setup table returns
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 2
+            assert result["total_count"] == 2
+            assert result["data"][0]["id"] == "session1"
+            assert result["data"][0]["organization_members"]["email"] == "user1@example.com"
+            assert result["data"][1]["organization_members"]["email"] == "user2@example.com"
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_search_matches_email(self):
+        """Test get_org_sessions_with_count with search matching email."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(search="user1@example.com", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+            assert result["data"][0]["id"] == "session1"
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_search_matches_first_name(self):
+        """Test get_org_sessions_with_count with search matching first_name."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(search="John", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_search_matches_last_name(self):
+        """Test get_org_sessions_with_count with search matching last_name."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(search="Doe", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_search_matches_user_agent(self):
+        """Test get_org_sessions_with_count with search matching user_agent."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(search="Mozilla", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_search_matches_ip_address(self):
+        """Test get_org_sessions_with_count with search matching ip_address."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(search="192.168.1.1", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_search_no_matches(self):
+        """Test get_org_sessions_with_count with search that matches nothing."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(search="nonexistent", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 0
+            assert result["total_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_with_session_status_filter(self):
+        """Test get_org_sessions_with_count with session_status filter."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(session_status="active", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query  # For session_status filter
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+            # Verify session_status filter was applied
+            mock_session_query.eq.assert_called_with("session_status", "active")
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_with_login_method_filter(self):
+        """Test get_org_sessions_with_count with login_method filter."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(login_method="password", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query  # For login_method filter
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+            # Verify login_method filter was applied
+            mock_session_query.eq.assert_any_call("login_method", "password")
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_pagination(self):
+        """Test get_org_sessions_with_count with pagination."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(limit=2, offset=1)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            },
+            {
+                "user_id": "user2",
+                "email": "user2@example.com",
+                "first_name": "Jane",
+                "last_name": "Smith"
+            },
+            {
+                "user_id": "user3",
+                "email": "user3@example.com",
+                "first_name": "Bob",
+                "last_name": "Jones"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            },
+            {
+                "id": "session2",
+                "user_id": "user2",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.2",
+                "user_agent": "Chrome/1.0",
+                "login_timestamp": "2024-01-02T00:00:00Z",
+                "session_status": "active",
+                "login_method": "sso"
+            },
+            {
+                "id": "session3",
+                "user_id": "user3",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.3",
+                "user_agent": "Safari/1.0",
+                "login_timestamp": "2024-01-03T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            # Should return 2 items (offset=1, limit=2) but total_count should be 3
+            assert len(result["data"]) == 2
+            assert result["total_count"] == 3
+            assert result["data"][0]["id"] == "session2"
+            assert result["data"][1]["id"] == "session3"
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_session_without_member(self):
+        """Test get_org_sessions_with_count when session has no matching member."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(limit=10, offset=0)
+
+        # No members
+        mock_members = []
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+            assert result["data"][0]["organization_members"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_special_characters_in_search(self):
+        """Test get_org_sessions_with_count with special characters in search (+, @, etc.)."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(search="user+tag@example.com", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user+tag@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+            assert result["data"][0]["organization_members"]["email"] == "user+tag@example.com"
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_empty_search_string(self):
+        """Test get_org_sessions_with_count with empty search string."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(search="", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "user1@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            # Empty search should return all sessions (no filtering)
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_empty_members_and_sessions(self):
+        """Test get_org_sessions_with_count with empty members and sessions."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(limit=10, offset=0)
+
+        mock_members = []
+        mock_sessions = []
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            assert len(result["data"]) == 0
+            assert result["total_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_org_sessions_with_count_search_matches_both_member_and_session(self):
+        """Test get_org_sessions_with_count when search matches both member and session fields."""
+        organization_id = str(uuid.uuid4())
+        filters = SessionFilter(search="test", limit=10, offset=0)
+
+        mock_members = [
+            {
+                "user_id": "user1",
+                "email": "test@example.com",
+                "first_name": "John",
+                "last_name": "Doe"
+            }
+        ]
+
+        mock_sessions = [
+            {
+                "id": "session1",
+                "user_id": "user1",
+                "organization_id": organization_id,
+                "ip_address": "192.168.1.1",
+                "user_agent": "test-agent",
+                "login_timestamp": "2024-01-01T00:00:00Z",
+                "session_status": "active",
+                "login_method": "password"
+            }
+        ]
+
+        mock_supabase = MagicMock()
+        mock_member_table = MagicMock()
+        mock_member_query = MagicMock()
+        mock_member_result = MagicMock()
+        mock_member_result.data = mock_members
+        mock_member_table.select.return_value = mock_member_query
+        mock_member_query.eq.return_value = mock_member_query
+        mock_member_query.execute = AsyncMock(return_value=mock_member_result)
+
+        mock_session_table = MagicMock()
+        mock_session_query = MagicMock()
+        mock_session_result = MagicMock()
+        mock_session_result.data = mock_sessions
+        mock_session_table.select.return_value = mock_session_query
+        mock_session_query.eq.return_value = mock_session_query
+        mock_session_query.order.return_value = mock_session_query
+        mock_session_query.execute = AsyncMock(return_value=mock_session_result)
+
+        def table_side_effect(table_name):
+            if table_name == "organization_members":
+                return mock_member_table
+            return mock_session_table
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.session_operations.get_fresh_supabase_admin_client",
+                   AsyncMock(return_value=mock_supabase)):
+            result = await get_org_sessions_with_count(organization_id, filters)
+
+            # Should match because both email and user_agent contain "test"
+            assert len(result["data"]) == 1
+            assert result["total_count"] == 1
