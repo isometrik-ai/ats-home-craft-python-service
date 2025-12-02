@@ -35,10 +35,11 @@ from apps.user_service.app.app_instance import limiter
 
 
 # Local imports
-from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
+from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USERS_VIEW
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_db.postgres_db.user_service_operations.session_operations import (
-    get_sessions_with_count
+    get_sessions_with_count,
+    get_org_sessions_with_count,
 )
 
 
@@ -244,6 +245,26 @@ async def _fetch_sessions_data(
     return result["data"], result["total_count"]
 
 
+async def _fetch_org_sessions_data(
+    organization_id, query_params, page_size: int, offset: int
+):
+    """Fetch organization-wide sessions data and count (all users in org)."""
+    filters = SessionFilter(
+        search=query_params.search,
+        session_status=query_params.session_status,
+        login_method=query_params.login_method,
+        limit=page_size,
+        offset=offset,
+    )
+
+    result = await get_org_sessions_with_count(
+        organization_id=organization_id,
+        filters=filters,
+    )
+
+    return result["data"], result["total_count"]
+
+
 @router.get("", response_model=SessionsResponse, status_code=status.HTTP_200_OK)
 @limiter.limit("100/minute")
 # @audit_api_call(
@@ -281,7 +302,7 @@ async def get_sessions_details(
 
     # Extract user context from JWT token
     user_context = await extract_user_context(current_user)
-    
+
     # Check permissions only if user has an organization_id
     # Allow users without organization_id to view their sessions (organization_id can be None)
     # This supports personal accounts that don't belong to an organization
@@ -331,6 +352,92 @@ async def get_sessions_details(
             "session_status": query_params.session_status,
             "login_method": query_params.login_method,
         },
+    }
+
+    return SessionsResponse(
+        message=message,
+        sessions=sessions,
+        total_count=total_count,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/all",
+    response_model=SessionsResponse,
+    status_code=status.HTTP_200_OK,
+)
+@limiter.limit("100/minute")
+async def get_organization_sessions(
+    request: Request,
+    current_user: dict = Depends(get_user_from_auth),
+    query_params: SessionQueryParams = Depends(),
+):
+    """
+    Get all sessions for all users in the current organization.
+
+    Intended for org-level admins with settings management permission.
+    """
+    # Extract context and enforce permissions in a single helper call
+    user_context = await check_permissions(
+        current_user=current_user,
+        permission_codes=SETTINGS_USERS_VIEW,
+        action_description="view organization-wide sessions list",
+    )
+
+    # Require organization_id – org-wide listing doesn't apply to personal accounts
+    if not user_context.organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Organization ID is required to list organization-wide sessions",
+        )
+
+    # Set audit context
+    request.state.audit_table = "user_sessions"
+    request.state.audit_description = (
+        f"Admin accessed organization-wide session list with search: "
+        f"'{query_params.search or 'none'}'"
+    )
+    request.state.audit_risk_level = "high"
+
+    # Validate pagination parameters and calculate offset
+    page, page_size, offset = validate_pagination_params(
+        query_params.page,
+        query_params.page_size,
+    )
+
+    # Fetch sessions data and count
+    sessions_data, total_count = await _fetch_org_sessions_data(
+        organization_id=user_context.organization_id,
+        query_params=query_params,
+        page_size=page_size,
+        offset=offset,
+    )
+
+    # Format sessions data
+    sessions = [_format_session_item(session) for session in sessions_data]
+
+    # Build response message
+    message = build_session_filter_message(
+        search=query_params.search,
+        session_status=query_params.session_status,
+        login_method=query_params.login_method,
+        page=page,
+        page_size=page_size,
+    )
+
+    # Audit payload
+    request.state.raw_audit_new_data = {
+        "total_sessions": total_count,
+        "page": page,
+        "page_size": page_size,
+        "filters_applied": {
+            "search": query_params.search,
+            "session_status": query_params.session_status,
+            "login_method": query_params.login_method,
+        },
+        "scope": "organization",
     }
 
     return SessionsResponse(
