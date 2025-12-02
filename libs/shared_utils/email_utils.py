@@ -250,14 +250,10 @@ def send_organization_invitation_email(
             expires_datetime = datetime.fromisoformat(expires_at_clean)
 
             # Format as human-readable: "December 9, 2025 at 11:41 AM UTC"
-            # Check if it's UTC timezone
+            # If datetime has timezone info, format with UTC label
+            # Otherwise, format without timezone label
             if expires_datetime.tzinfo:
-                utc_offset = expires_datetime.tzinfo.utcoffset(expires_datetime)
-                if utc_offset and utc_offset.total_seconds() == 0:
-                    formatted_expires_at = expires_datetime.strftime("%B %d, %Y at %I:%M %p UTC")
-                else:
-                    # For other timezones, show UTC offset or timezone name
-                    formatted_expires_at = expires_datetime.strftime("%B %d, %Y at %I:%M %p UTC")
+                formatted_expires_at = expires_datetime.strftime("%B %d, %Y at %I:%M %p UTC")
             else:
                 # No timezone info, format without timezone
                 formatted_expires_at = expires_datetime.strftime("%B %d, %Y at %I:%M %p")
