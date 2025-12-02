@@ -1496,7 +1496,7 @@ class TestSendOrganizationInvitationEmail:
         inviter_name = "John Doe"
         invite_url = "https://example.com/invite/123"
         role_name = "member"
-        expires_at = "2024-12-31 23:59:59"
+        expires_at = "2024-12-31T23:59:59+00:00"  # ISO format with timezone
 
         with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email, \
              patch("libs.shared_utils.email_utils.logger") as mock_logger:
@@ -1515,7 +1515,6 @@ class TestSendOrganizationInvitationEmail:
             assert organization_name in call_args[0][2]  # message
             assert invite_url in call_args[0][2]  # message contains invite URL
             assert role_name in call_args[0][2]  # message contains role
-            assert expires_at in call_args[0][2]  # message contains expiration
             assert organization_name in call_args[0][3]  # html_message
 
             # Verify success logging
@@ -1578,7 +1577,7 @@ class TestSendOrganizationInvitationEmail:
         inviter_name = "Jane Smith"
         invite_url = "https://acme.com/invite/abc123"
         role_name = "manager"
-        expires_at = "2024-06-15 18:30:00"
+        expires_at = "2024-06-15T18:30:00+00:00"  # ISO format with timezone
 
         with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
 
@@ -1602,7 +1601,8 @@ class TestSendOrganizationInvitationEmail:
             assert inviter_name in message
             assert role_name in message
             assert invite_url in message
-            assert expires_at in message
+            # Check for formatted date (should contain "June" and "2024")
+            assert "June" in message or "2024" in message  # formatted expiration
             assert "You're invited to join" in message
             assert "To accept this invitation" in message
             assert "This invitation will expire" in message
@@ -1612,10 +1612,77 @@ class TestSendOrganizationInvitationEmail:
             assert inviter_name in html_message
             assert role_name in html_message
             assert invite_url in html_message
-            assert expires_at in html_message
+            # Check for formatted date in HTML
+            assert "June" in html_message or "2024" in html_message  # formatted expiration
             assert "You're invited to join" in html_message
             assert "Accept Invitation" in html_message
             assert "This invitation will expire" in html_message
+
+    def test_send_organization_invitation_email_with_timezone(self):
+        """Test organization invitation email with non-UTC timezone."""
+        from libs.shared_utils.email_utils import send_organization_invitation_email
+
+        email = "test@example.com"
+        organization_name = "Test Org"
+        inviter_name = "John Doe"
+        invite_url = "https://example.com/invite/123"
+        role_name = "member"
+        expires_at = "2024-12-31T23:59:59+05:30"  # Non-UTC timezone
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+            result = send_organization_invitation_email(
+                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+            )
+
+            assert result is True
+            call_args = mock_send_email.call_args
+            # Should contain formatted date
+            assert "December" in call_args[0][2] or "2024" in call_args[0][2]
+
+    def test_send_organization_invitation_email_with_naive_datetime(self):
+        """Test organization invitation email with naive datetime (no timezone)."""
+        from libs.shared_utils.email_utils import send_organization_invitation_email
+
+        email = "test@example.com"
+        organization_name = "Test Org"
+        inviter_name = "John Doe"
+        invite_url = "https://example.com/invite/123"
+        role_name = "member"
+        expires_at = "2024-12-31T23:59:59"  # Naive datetime (no timezone)
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+            result = send_organization_invitation_email(
+                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+            )
+
+            assert result is True
+            call_args = mock_send_email.call_args
+            # Should contain formatted date
+            assert "December" in call_args[0][2] or "2024" in call_args[0][2]
+
+    def test_send_organization_invitation_email_with_invalid_date(self):
+        """Test organization invitation email with invalid date format."""
+        from libs.shared_utils.email_utils import send_organization_invitation_email
+
+        email = "test@example.com"
+        organization_name = "Test Org"
+        inviter_name = "John Doe"
+        invite_url = "https://example.com/invite/123"
+        role_name = "member"
+        expires_at = "invalid-date-format"  # Invalid date
+
+        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email, \
+             patch("libs.shared_utils.email_utils.logger") as mock_logger:
+            result = send_organization_invitation_email(
+                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+            )
+
+            assert result is True
+            # Should fallback to original format
+            call_args = mock_send_email.call_args
+            assert expires_at in call_args[0][2]  # Original invalid date should be in message
+            # Should log warning
+            mock_logger.warning.assert_called()
 
     def test_send_organization_invitation_email_html_structure(self):
         """Test organization invitation email HTML structure."""

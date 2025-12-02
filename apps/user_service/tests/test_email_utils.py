@@ -14,7 +14,9 @@ from libs.shared_utils.email_utils import (
     send_password_reset_confirmation_email,
     send_organization_invitation_email,
     send_welcome_email,
-    send_verification_code_email
+    send_verification_code_email,
+    send_password_change_success_email,
+    send_password_reset_success_email
 )
 
 
@@ -219,4 +221,76 @@ class TestEmailFunctions:
         # Check keyword arguments (from_name)
         call_kwargs = mock_send_email.call_args[1]
         assert call_kwargs["from_name"] == "Ross.Ai"
+
+    @patch('libs.shared_utils.email_utils.send_email')
+    @patch('libs.shared_utils.email_utils.logger')
+    def test_send_password_change_success_email_failure(self, mock_logger, mock_send_email):
+        """Test send_password_change_success_email when email sending fails (covers lines 663-668)."""
+        mock_send_email.return_value = False
+
+        result = send_password_change_success_email(
+            email="test@example.com",
+            user_name="Test User"
+        )
+
+        assert result is False
+        mock_send_email.assert_called_once()
+        mock_logger.error.assert_called_with("Failed to send password change success email to %s", "test@example.com")
+
+    @patch('libs.shared_utils.email_utils.send_email')
+    @patch('libs.shared_utils.email_utils.logger')
+    def test_send_password_change_success_email_exception(self, mock_logger, mock_send_email):
+        """Test send_password_change_success_email when exception occurs."""
+        mock_send_email.side_effect = Exception("SMTP Error")
+
+        result = send_password_change_success_email(
+            email="test@example.com",
+            user_name="Test User"
+        )
+
+        assert result is False
+        mock_logger.error.assert_called_with("Error sending password change success email: %s", "SMTP Error")
+
+    @patch('libs.shared_utils.email_utils.send_email')
+    @patch('libs.shared_utils.email_utils.logger')
+    def test_send_password_reset_success_email_exception(self, mock_logger, mock_send_email):
+        """Test send_password_reset_success_email when exception occurs (covers lines 771-773)."""
+        mock_send_email.side_effect = Exception("SMTP Error")
+
+        result = send_password_reset_success_email(
+            email="test@example.com",
+            user_name="Test User"
+        )
+
+        assert result is False
+        mock_logger.error.assert_called_with("Error sending password reset success email: %s", "SMTP Error")
+
+    @patch('libs.shared_utils.email_utils.send_email')
+    @patch('libs.shared_utils.email_utils.logger')
+    def test_send_verification_code_email_failure(self, mock_logger, mock_send_email):
+        """Test send_verification_code_email when email sending fails (covers lines 882-883)."""
+        mock_send_email.return_value = False
+
+        result = send_verification_code_email(
+            email="test@example.com",
+            otp_code="1234"
+        )
+
+        assert result is False
+        mock_send_email.assert_called_once()
+        mock_logger.error.assert_called_with("Failed to send verification code email to %s", "test@example.com")
+
+    @patch('libs.shared_utils.email_utils.send_email')
+    @patch('libs.shared_utils.email_utils.logger')
+    def test_send_verification_code_email_exception(self, mock_logger, mock_send_email):
+        """Test send_verification_code_email when exception occurs (covers lines 885-887)."""
+        mock_send_email.side_effect = Exception("SMTP Error")
+
+        result = send_verification_code_email(
+            email="test@example.com",
+            otp_code="1234"
+        )
+
+        assert result is False
+        mock_logger.error.assert_called_with("Error sending verification code email: %s", "SMTP Error")
 

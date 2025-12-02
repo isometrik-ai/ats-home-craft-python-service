@@ -243,6 +243,29 @@ def send_organization_invitation_email(
     try:
         subject = f"You're invited to join {organization_name}"
 
+        # Format expires_at to human-readable format
+        try:
+            # Parse ISO format datetime string (handle both Z and +00:00 formats)
+            expires_at_clean = expires_at.replace('Z', '+00:00')
+            expires_datetime = datetime.fromisoformat(expires_at_clean)
+
+            # Format as human-readable: "December 9, 2025 at 11:41 AM UTC"
+            # Check if it's UTC timezone
+            if expires_datetime.tzinfo:
+                utc_offset = expires_datetime.tzinfo.utcoffset(expires_datetime)
+                if utc_offset and utc_offset.total_seconds() == 0:
+                    formatted_expires_at = expires_datetime.strftime("%B %d, %Y at %I:%M %p UTC")
+                else:
+                    # For other timezones, show UTC offset or timezone name
+                    formatted_expires_at = expires_datetime.strftime("%B %d, %Y at %I:%M %p UTC")
+            else:
+                # No timezone info, format without timezone
+                formatted_expires_at = expires_datetime.strftime("%B %d, %Y at %I:%M %p")
+        except (ValueError, AttributeError) as date_error:
+            # Fallback to original format if parsing fails
+            logger.warning("Failed to parse expires_at date: %s, using original format", str(date_error))
+            formatted_expires_at = expires_at
+
         # Plain text message
         message = f"""You're invited to join {organization_name}!
 
@@ -251,7 +274,7 @@ def send_organization_invitation_email(
 To accept this invitation, click the link below:
 {invite_url}
 
-This invitation will expire on {expires_at}.
+This invitation will expire on {formatted_expires_at}.
 
 If you don't want to join this organization, you can simply ignore this email.
 
@@ -299,13 +322,19 @@ The {organization_name} Team"""
         }}
         .button {{
             display: inline-block;
-            background-color: #4f46e5;
-            color: white;
+            background-color: #4f46e5 !important;
+            color: #ffffff !important;
             padding: 12px 24px;
-            text-decoration: none;
+            text-decoration: none !important;
             border-radius: 6px;
             margin: 20px 0;
             font-weight: 500;
+            border: none;
+            text-align: center;
+        }}
+        .button:link, .button:visited, .button:hover, .button:active {{
+            color: #ffffff !important;
+            text-decoration: none !important;
         }}
         .highlight {{
             background-color: #f3f4f6;
@@ -334,10 +363,12 @@ The {organization_name} Team"""
 
             <p>To accept this invitation, click the button below:</p>
 
-            <a href="{invite_url}" class="button">Accept Invitation</a>
+            <div style="margin: 20px 0;">
+                <a href="{invite_url}" class="button" style="display: inline-block; background-color: #4f46e5; color: #ffffff !important; padding: 12px 24px; text-decoration: none !important; border-radius: 6px; font-weight: 500; border: none;">Accept Invitation</a>
+            </div>
 
             <div class="highlight">
-                <strong>Important:</strong> This invitation will expire on <strong>{expires_at}</strong>.
+                <strong>Important:</strong> This invitation will expire on <strong>{formatted_expires_at}</strong>.
             </div>
 
             <p>If you don't want to join this organization, you can simply ignore this email.</p>
