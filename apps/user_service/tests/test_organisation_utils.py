@@ -11,7 +11,6 @@ from apps.user_service.app.dependencies.organisation_utils import (
     validate_organisation_name_filter,
     build_organisation_filter_message,
     create_organisation_with_super_admin,
-    _save_isometrik_application_data
 )
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     DatabaseOperationError,
@@ -196,7 +195,9 @@ class TestCreateOrganisationWithSuperAdmin:
             await create_organisation_with_super_admin(org_data)
 
             # Verify all functions were called with correct arguments
-            mock_create_org.assert_called_once_with(org_data)
+            assert mock_create_org.called
+            call_args = mock_create_org.call_args[0][0]
+            assert call_args.get("isometrik_application_details") == {}
             mock_create_role.assert_called_once_with(org_data["organization_id"])
             mock_create_perms.assert_called_once_with(org_data["organization_id"])
             mock_assign_perms.assert_called_once_with(mock_role_result["id"], org_data["organization_id"])
@@ -209,9 +210,15 @@ class TestCreateOrganisationWithSuperAdmin:
                 "phone": org_data["phone"],
                 "timezone": org_data["timezone"],
                 "role_id": mock_role_result["id"],
-                "status": "active"
+                "status": "active",
+                "role": "owner",
+                "logo_url": org_data.get("logo_url", None),
             }
-            mock_add_member.assert_called_once_with(org_data["organization_id"], expected_member_data)
+            mock_add_member.assert_called_once_with(
+                organization_id=org_data["organization_id"],
+                member_data=expected_member_data,
+                isometrik_credentials={}
+            )
 
     @pytest.mark.asyncio
     async def test_create_organisation_with_super_admin_success_isometrik_enabled(self):
@@ -244,8 +251,7 @@ class TestCreateOrganisationWithSuperAdmin:
              patch("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role", AsyncMock(return_value=mock_role_result)) as mock_create_role, \
              patch("apps.user_service.app.dependencies.organisation_utils.create_default_permissions_for_organisation", AsyncMock(return_value=mock_permissions)) as mock_create_perms, \
              patch("apps.user_service.app.dependencies.organisation_utils.assign_all_permissions_to_role", AsyncMock(return_value=True)) as mock_assign_perms, \
-             patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(return_value=mock_member_result)) as mock_add_member, \
-             patch("apps.user_service.app.dependencies.organisation_utils._save_isometrik_application_data", AsyncMock()) as mock_save_isometrik:
+             patch("apps.user_service.app.dependencies.organisation_utils.add_member_to_organisation", AsyncMock(return_value=mock_member_result)) as mock_add_member:
 
             await create_organisation_with_super_admin(org_data)
 
@@ -256,8 +262,12 @@ class TestCreateOrganisationWithSuperAdmin:
                 plan="basic"
             )
             
+            # Verify create_new_organisation was called and check isometrik_application_details
+            assert mock_create_org.called
+            call_args = mock_create_org.call_args[0][0]
+            assert call_args.get("isometrik_application_details") == isometrik_response["data"]
+            
             # Verify all functions were called with correct arguments
-            mock_create_org.assert_called_once_with(org_data)
             mock_create_role.assert_called_once_with(org_data["organization_id"])
             mock_create_perms.assert_called_once_with(org_data["organization_id"])
             mock_assign_perms.assert_called_once_with(mock_role_result["id"], org_data["organization_id"])
@@ -270,10 +280,16 @@ class TestCreateOrganisationWithSuperAdmin:
                 "phone": org_data["phone"],
                 "timezone": org_data["timezone"],
                 "role_id": mock_role_result["id"],
-                "status": "active"
+                "status": "active",
+                "role": "owner",
+                "logo_url": org_data.get("logo_url", None),
             }
-            mock_add_member.assert_called_once_with(org_data["organization_id"], expected_member_data)
-            mock_save_isometrik.assert_called_once_with(org_data["organization_id"], isometrik_response["data"])
+            # Verify add_member_to_organisation was called with isometrik_credentials
+            mock_add_member.assert_called_once_with(
+                organization_id=org_data["organization_id"],
+                member_data=expected_member_data,
+                isometrik_credentials=isometrik_response["data"]
+            )
 
     @pytest.mark.asyncio
     async def test_create_organisation_with_super_admin_isometrik_fails(self):
@@ -356,9 +372,15 @@ class TestCreateOrganisationWithSuperAdmin:
                 "phone": None,
                 "timezone": "UTC",  # Default timezone
                 "role_id": mock_role_result["id"],
-                "status": "active"
+                "status": "active",
+                "role": "owner",
+                "logo_url": org_data.get("logo_url", None),
             }
-            mock_add_member.assert_called_once_with(org_data["organization_id"], expected_member_data)
+            mock_add_member.assert_called_once_with(
+                organization_id=org_data["organization_id"],
+                member_data=expected_member_data,
+                isometrik_credentials={}
+            )
 
     @pytest.mark.asyncio
     async def test_create_organisation_with_super_admin_database_error(self):

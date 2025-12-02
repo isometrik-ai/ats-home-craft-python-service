@@ -39,32 +39,22 @@ from libs.shared_db.postgres_db.user_service_operations.exception_handling impor
     DatabaseOperationError,
     SupabaseAPIError,
 )
-from libs.shared_utils.isometrik_service import (
-    create_isometrik_application
-)
+from apps.user_service.app.dependencies.logger import get_logger
+
+logger = get_logger("organisation_utils")
 
 FAIL_CREATE_ACCOUNT = "Failed to create account. Please try again."
-
-
-async def _save_isometrik_application_data(
-    organization_id: str,
-    isometrik_data: Dict[str, Any]
-) -> None:
-    """Save Isometrik application data to organization settings."""
-    current_org = await get_organisation_details_by_id(organization_id)
-    if current_org and current_org.get("settings"):
-        current_settings = current_org["settings"]
-    else:
-        current_settings = {}
-    
-    current_settings["isometrik_application_details"] = isometrik_data
-    await update_organisation_settings(organization_id, current_settings)
 
 
 async def _create_isometrik_application_if_enabled(
     organization_name: str
 ) -> Optional[Dict[str, Any]]:
-    """Create Isometrik application if enabled, otherwise return None."""
+    """
+    Create Isometrik application if enabled, otherwise return None.
+    
+    Connection errors are logged as warnings but do not block organization creation.
+    Only API errors (4xx/5xx) will raise exceptions to prevent organization creation.
+    """
     from libs.shared_utils.isometrik_service import (
         is_isometrik_enabled,
         create_isometrik_application,
@@ -285,7 +275,7 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
     Create a new organisation with super admin role and default permissions.
 
     This function performs a multi-step operation:
-    1. If Isometrik is enabled, create Isometrik application first (must succeed)
+    1. If Isometrik is enabled, attempt to create Isometrik application (non-blocking for connection errors)
     2. Creates the organization record
     3. Creates a super admin role for the organization
     4. Creates default permissions for the organization
@@ -302,13 +292,16 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         HTTPException:
             - 409: If organization slug already exists (duplicate key violation)
             - 500: For RLS policy violations or other database errors
-            - 500: If Isometrik is enabled and application creation fails
+            - 500: If Isometrik API returns 4xx/5xx errors (configuration issues)
     """
     try:
-        # Step 0: Create Isometrik application first if enabled (must succeed before org creation)
+        # Step 0: Create Isometrik application first if enabled (non-blocking for connection errors)
         organization_name = org_data.get("name", "Unknown Organization")
         isometrik_response = await _create_isometrik_application_if_enabled(organization_name)
 
+        isometrik_credentials = isometrik_response.get("data", {}) if isometrik_response else {}
+
+        org_data['isometrik_application_details'] = isometrik_credentials
         # Step 1: Create the organization record
         await create_new_organisation(org_data)
 
@@ -323,21 +316,22 @@ async def create_organisation_with_super_admin(org_data: Dict[str, Any]) -> None
         await assign_all_permissions_to_role(super_admin_role_id, org_data["organization_id"])
 
         # Step 5: Add user as organization member
-        await add_member_to_organisation(org_data["organization_id"], {
-            "user_id": org_data["user_id"],
-            "email": org_data["email"],
-            "first_name": org_data.get("first_name", None),
-            "last_name": org_data.get("last_name", None),
-            "phone": org_data.get("phone", None),
-            "timezone": org_data.get("timezone", "UTC"),
-            "role_id": super_admin_role_id,
-            "status": "active",
-        })
-
-        # Step 6: Save Isometrik application data if it was created successfully
-        if isometrik_response and isometrik_response.get("data"):
-            isometrik_data = isometrik_response["data"]
-            await _save_isometrik_application_data(org_data["organization_id"], isometrik_data)
+        await add_member_to_organisation(
+            organization_id=org_data["organization_id"],
+            member_data={
+                "user_id": org_data["user_id"],
+                "email": org_data["email"],
+                "first_name": org_data.get("first_name", None),
+                "last_name": org_data.get("last_name", None),
+                "phone": org_data.get("phone", None),
+                "timezone": org_data.get("timezone", "UTC"),
+                "role_id": super_admin_role_id,
+                "status": "active",
+                "role": "owner",
+                "logo_url": org_data.get("logo_url", None),
+            },
+            isometrik_credentials=isometrik_credentials,
+        )
 
     except HTTPException:
         # Re-raise HTTP exceptions as-is (preserves status codes)

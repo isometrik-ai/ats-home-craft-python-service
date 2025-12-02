@@ -141,6 +141,7 @@ async def create_new_user(user_data: Dict[str, Any]) -> Dict[str, Any]:
         "role_id": user_data.get("role_id"),
         "status": user_data.get("status", "active"),
         "organization_id": user_data.get("organization_id"),
+        "isometrik_user_id": user_data.get("isometrik_user_id", None),
         "created_at": NOW_CONSTANT,
         "joined_at": NOW_CONSTANT,
         "updated_at": NOW_CONSTANT

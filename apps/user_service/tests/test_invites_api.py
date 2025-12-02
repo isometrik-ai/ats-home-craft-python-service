@@ -159,6 +159,7 @@ class TestAcceptInvitation:
         with patch("libs.shared_db.supabase_db.db.get_supabase_admin_client") as mock_get_client, \
              patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
+             patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value={"settings": {"isometrik_application_details": {"projectId": "test", "keysetId": "test"}}})), \
              patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
              patch("apps.user_service.app.api.invites.sign_up_supabase_user", AsyncMock(return_value=MagicMock(user=MagicMock(id=str(uuid.uuid4()))))), \
              patch("apps.user_service.app.api.invites.add_user_to_organization", AsyncMock(return_value=True)), \
@@ -204,7 +205,8 @@ class TestAcceptInvitation:
         mock_invite_data["email"] = "different@example.com"
 
         with patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)):
+             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
+             patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value={"settings": {"isometrik_application_details": {"projectId": "test", "keysetId": "test"}}})):
             response = client.post("/v1/invite/set-password", json=request_data)
 
             # Note: The endpoint no longer checks email mismatch, so this test may need adjustment
@@ -221,6 +223,7 @@ class TestAcceptInvitation:
 
         with patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)), \
              patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
+             patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value={"settings": {"isometrik_application_details": {"projectId": "test", "keysetId": "test"}}})), \
              patch("apps.user_service.app.api.invites.sign_up_supabase_user", AsyncMock(side_effect=Exception("Database error"))):
 
             response = client.post("/v1/invite/set-password", json=request_data)

@@ -332,13 +332,18 @@ class TestSendVerificationCode:
 
     def test_send_verification_code_rate_limit_exceeded(self, client):
         """Should return 429 if too many attempts exist."""
+        from libs.shared_db.postgres_db.user_service_operations.verification_operations import MAX_ATTEMPT_VERIFICATION
+        
         request_data = {"type": "EMAIL", "email": "test@example.com"}
-        recent_codes = [{"verified": False}] * 5
+        # Create enough unverified codes to exceed the limit
+        recent_codes = [{"verified": False}] * MAX_ATTEMPT_VERIFICATION
 
         with patch('apps.user_service.app.api.verification_codes.get_auth_user_by_email',
                    AsyncMock(return_value=None)), \
              patch('apps.user_service.app.api.verification_codes.get_recent_verification_codes',
-                   AsyncMock(return_value=recent_codes)):
+                   AsyncMock(return_value=recent_codes)), \
+             patch('apps.user_service.app.api.verification_codes.get_client_ip',
+                   return_value="127.0.0.1"):
             response = client.post("/v1/verification-code/send", json=request_data)
         assert response.status_code == 429
         assert "Maximum send OTP attempts" in response.json()["detail"]

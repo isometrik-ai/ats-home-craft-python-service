@@ -7,6 +7,7 @@ All SQL queries for organisation management should be centralized here.
 from datetime import datetime, timedelta, timezone
 import uuid
 from typing import List, Dict, Any, Optional
+from enum import Enum
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.auth import PlanType
 from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_metadata_of_user
@@ -15,7 +16,12 @@ from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
     handle_database_errors, create_error_messages
 )
+from libs.shared_utils.isometrik_service import (
+    is_isometrik_enabled,
+    create_isometrik_user,
+)
 from libs import NOW_CONSTANT
+from fastapi import HTTPException
 
 # Initialize logger
 logger = get_logger("organisation_operations")
@@ -36,6 +42,21 @@ def _has_result_data(result) -> bool:
 def _get_result_data(result, default=None):
     """Get result data with default fallback."""
     return result.data if result.data else (default or [])
+
+
+def _serialize_value(value):
+    """Convert enums and pydantic models into JSON-serializable primitives."""
+    if value is None:
+        return None
+    if isinstance(value, Enum):
+        return value.value
+    if hasattr(value, "model_dump"):
+        return value.model_dump(exclude_unset=True, exclude_none=True)
+    if isinstance(value, list):
+        return [_serialize_value(item) for item in value]
+    if isinstance(value, dict):
+        return {k: _serialize_value(v) for k, v in value.items()}
+    return value
 
 def _apply_search_filter(query, search: str, fields: List[str]):
     """Apply search filter to query."""
@@ -76,25 +97,35 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "created_by_id":organisation_data.get("user_id")
     }
 
-    org_record["settings"] = {}
+    settings = {}
 
-    if organisation_data.get("address") is not None:
-        org_record["settings"].update({"address": organisation_data.get("address").model_dump(exclude_unset=True, exclude_none=True)})
+    address = organisation_data.get("address")
+    if address is not None:
+        settings["address"] = _serialize_value(address)
 
-    org_record["settings"].update({"practice_areas":{"primary":None,"secondary":None,"specializations":None}})
-    org_record["settings"]["practice_areas"]["primary"] = organisation_data.get("primary_practice_areas",None)
-    org_record["settings"]["practice_areas"]["secondary"] = organisation_data.get("secondary_practice_areas",None)
-    org_record["settings"]["practice_areas"]["specializations"] = organisation_data.get("specializations",None)
+    settings["practice_areas"] = {
+        "primary": _serialize_value(organisation_data.get("primary_practice_areas")),
+        "secondary": _serialize_value(organisation_data.get("secondary_practice_areas")),
+        "specializations": _serialize_value(organisation_data.get("specializations")),
+    }
 
-    org_record["settings"].update({"preferred_integration":organisation_data.get("preferred_integration",None)})
+    settings["preferred_integration"] = _serialize_value(
+        organisation_data.get("preferred_integration")
+    )
+    settings["need_help_importing_data"] = organisation_data.get("need_help_importing_data", None)
+    settings["need_migration_assistance"] = organisation_data.get("need_migration_assistance", None)
+    settings["compliance_security"] = _serialize_value(
+        organisation_data.get("compliance_security")
+    )
+    settings["enterprise_features"] = _serialize_value(
+        organisation_data.get("enterprise_features")
+    )
 
-    org_record["settings"].update({"need_help_importing_data":organisation_data.get("need_help_importing_data",None)})
+    settings["isometrik_application_details"] = _serialize_value(
+        organisation_data.get("isometrik_application_details")
+    )
 
-    org_record["settings"].update({"need_migration_assistance":organisation_data.get("need_migration_assistance",None)})
-
-    org_record["settings"].update({"compliance_security":organisation_data.get("compliance_security",None)})
-
-    org_record["settings"].update({"enterprise_features":organisation_data.get("enterprise_features",None)})
+    org_record["settings"] = settings
 
     subscription_dict = {
         'start_date' : datetime.now(timezone.utc).isoformat(),
@@ -133,7 +164,7 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
 @handle_database_errors(
     "get_organisation_details_by_id",
     custom_messages=create_error_messages("get_organisation_details_by_id", "getting"))
-async def get_organisation_details_by_id(organisation_id: str) -> Optional[Dict[str, Any]]:
+async def get_organisation_details_by_id(organization_id: str) -> Optional[Dict[str, Any]]:
     """Get organisation details by ID with member_count, mimicking SQL query builder.
 
     Mirrors build_organisation_detail_query() from organisation_utils.py:
@@ -149,7 +180,8 @@ async def get_organisation_details_by_id(organisation_id: str) -> Optional[Dict[
         "id, name, slug, domain, logo_url, status, timezone, settings, subscription,"
         "description, company_size, created_at, updated_at, organization_members(status)"
     )
-    eq_query = select_query.eq("id", organisation_id)
+    eq_query = select_query.eq("id", organization_id)
+    eq_query = eq_query.eq("status", "active")
     limit_query = eq_query.limit(1)
     result = await limit_query.execute()
 
@@ -486,18 +518,40 @@ async def get_organisation_members_count(organisation_id: str, search: Optional[
     "add_member_to_organisation",
     custom_messages=create_error_messages("add_member_to_organisation", "adding"))
 async def add_member_to_organisation(
-    organisation_id: str,
-    member_data: Dict[str, Any]
+    organization_id: str,
+    member_data: Dict[str, Any],
+    isometrik_credentials: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Add a member to organisation."""
     supabase = await get_supabase_admin_client()
 
+    isometrik_user_id = None
+    if is_isometrik_enabled():
+        isometrik_response = await create_isometrik_user(
+            user_id=member_data["user_id"],
+            first_name=member_data.get("first_name", None),
+            last_name=member_data.get("last_name", None),
+            email=member_data["email"],
+            isometrik_credentials=isometrik_credentials,
+            organization_id=organization_id,
+            role=member_data.get("role", "owner"),
+            avatar_url=member_data.get("logo_url", None)
+        )
+        if isometrik_response:
+            isometrik_user_id = isometrik_response.get("userId", None)
+            if not isometrik_user_id:
+                raise HTTPException(status_code=400, detail="Failed to create Isometrik user")
+    
+    if isometrik_user_id:
+        member_data["isometrik_user_id"] = isometrik_user_id       
+
     member_record = {
         "user_id": member_data["user_id"],
+        "isometrik_user_id": member_data.get("isometrik_user_id", None),
         "email": member_data["email"],
         "role_id": member_data.get("role_id"),
         "status": member_data.get("status", "active"),
-        "organization_id": organisation_id,
+        "organization_id": organization_id,
         "created_at": NOW_CONSTANT,
         "updated_at": NOW_CONSTANT,
         "joined_at": NOW_CONSTANT
@@ -515,7 +569,7 @@ async def add_member_to_organisation(
     result = await query.execute()
 
     await update_metadata_of_user(member_data["user_id"],{
-        "organization_id": organisation_id
+        "organization_id": organization_id
     })
 
     return _has_result_data(result)

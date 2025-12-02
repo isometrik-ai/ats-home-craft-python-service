@@ -300,6 +300,13 @@ async def accept_and_set_password_invitation(
             detail="User is already a member of this organization"
         )
 
+    organization_data = await get_organisation_details_by_id(invitation_data["organization_id"])
+    if not organization_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found"
+        )
+
     role_name = await get_role_by_id(invitation_data['role_id'], invitation_data["organization_id"])
 
     try:
@@ -323,6 +330,14 @@ async def accept_and_set_password_invitation(
                 detail="Failed to create user account"
             )
 
+        isometrik_credentials = organization_data.get("settings", {}).get("isometrik_application_details", {})
+
+        if not isometrik_credentials:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Isometrik application not found"
+            )
+
         # Add user to organization
         await add_user_to_organization(
             organization_id=invitation_data["organization_id"],
@@ -337,7 +352,8 @@ async def accept_and_set_password_invitation(
             email=invitation_data["email"],
             role_id=invitation_data['role_id'],
             role_name=role_name["name"],
-            invited_by=invitation_data["invited_by"]
+            invited_by=invitation_data["invited_by"],
+            isometrik_credentials=isometrik_credentials
         )
 
         # Update invitation status
@@ -346,9 +362,6 @@ async def accept_and_set_password_invitation(
             "accepted",
             signup_result.user.id
         )
-
-        logger.info("Invitation accepted successfully - Request ID: %s, User: %s",
-                   request_id, invitation_data["email"])
 
         return InviteAcceptResponse(
             success=True,

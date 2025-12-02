@@ -92,8 +92,8 @@ def _build_subscription(plan_type="starter", max_users=10):
 class TestOrganisationCRUD:
     """Test cases for organisation CRUD operations."""
 
-    class FakeAddress:
-        """Helper to mimic Pydantic model for address."""
+    class FakeModel:
+        """Helper to mimic Pydantic BaseModel instances."""
         def __init__(self, **data):
             self._data = data
 
@@ -169,7 +169,7 @@ class TestOrganisationCRUD:
             "status": "active",
             "user_id": str(uuid.uuid4()),
             "subscription": _build_subscription(plan_type="starter", max_users=15),
-            "address": self.FakeAddress(city="LA", country="USA"),
+            "address": self.FakeModel(city="LA", country="USA"),
             "primary_practice_areas": ["Corporate"],
             "secondary_practice_areas": ["Tax"],
             "specializations": ["FinTech"],
@@ -197,6 +197,52 @@ class TestOrganisationCRUD:
             assert settings["practice_areas"]["specializations"] == ["FinTech"]
             assert settings["preferred_integration"] == ["Clio"]
             assert settings["need_help_importing_data"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_new_organisation_serializes_enterprise_features(self):
+        """Enterprise and compliance models should be converted into JSON-safe dicts."""
+        enterprise_features = self.FakeModel(
+            expected_number_of_users=200,
+            preferred_go_live_date="12/12/2025",
+            support_service_options=["24x7-support"],
+            sla_requirements=["99.9 uptime"],
+            customization_options=["custom-branding"],
+            custom_integration=["salesforce"],
+            custom_reporting=["Matter KPIs"],
+            primary_contact_information={
+                "contact_name": "Jane Doe",
+                "contact_email": "jane@example.com",
+                "contact_phone": "+1-555-1234",
+            },
+        )
+        compliance = self.FakeModel(required_compliance_standards=["SOC2", "GDPR"])
+
+        organisation_data = {
+            "organization_id": str(uuid.uuid4()),
+            "name": "Enterprise Org",
+            "slug": "enterprise-org",
+            "status": "active",
+            "user_id": str(uuid.uuid4()),
+            "subscription": _build_subscription(plan_type="enterprise", max_users=100),
+            "enterprise_features": enterprise_features,
+            "compliance_security": compliance,
+        }
+
+        with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client:
+            mock_supabase = MagicMock()
+            mock_table = MagicMock()
+            insert_query = MagicMock()
+            insert_query.execute = AsyncMock(return_value=MagicMock())
+            mock_table.insert.return_value = insert_query
+            mock_supabase.table.return_value = mock_table
+            mock_get_client.return_value = mock_supabase
+
+            await create_new_organisation(organisation_data)
+
+            inserted_record = mock_table.insert.call_args[0][0]
+            settings = inserted_record["settings"]
+            assert settings["enterprise_features"] == enterprise_features.model_dump(exclude_unset=True, exclude_none=True)
+            assert settings["compliance_security"] == compliance.model_dump(exclude_unset=True, exclude_none=True)
 
     @pytest.mark.asyncio
     async def test_create_new_organisation_no_data_returned(self):
@@ -256,7 +302,20 @@ class TestOrganisationCRUD:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_org_data]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.limit.return_value.execute = AsyncMock(return_value=mock_result)
+            
+            # Create a mock chain that supports .eq().eq().limit().execute()
+            mock_table = MagicMock()
+            mock_select = MagicMock()
+            mock_eq1 = MagicMock()
+            mock_eq2 = MagicMock()
+            mock_limit = MagicMock()
+            
+            mock_table.select.return_value = mock_select
+            mock_select.eq.return_value = mock_eq1
+            mock_eq1.eq.return_value = mock_eq2
+            mock_eq2.limit.return_value = mock_limit
+            mock_limit.execute = AsyncMock(return_value=mock_result)
+            mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
             result = await get_organisation_details_by_id(organisation_id)
@@ -274,7 +333,20 @@ class TestOrganisationCRUD:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.limit.return_value.execute = AsyncMock(return_value=mock_result)
+            
+            # Create a mock chain that supports .eq().eq().limit().execute()
+            mock_table = MagicMock()
+            mock_select = MagicMock()
+            mock_eq1 = MagicMock()
+            mock_eq2 = MagicMock()
+            mock_limit = MagicMock()
+            
+            mock_table.select.return_value = mock_select
+            mock_select.eq.return_value = mock_eq1
+            mock_eq1.eq.return_value = mock_eq2
+            mock_eq2.limit.return_value = mock_limit
+            mock_limit.execute = AsyncMock(return_value=mock_result)
+            mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
             result = await get_organisation_details_by_id(organisation_id)
@@ -1045,7 +1117,8 @@ class TestOrganisationMembers:
 
         with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client, \
              patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_user_by_id", return_value=mock_user_data), \
-             patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.update_metadata_of_user", return_value=True):
+             patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.update_metadata_of_user", return_value=True), \
+             patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.is_isometrik_enabled", return_value=False):
 
             mock_supabase = MagicMock()
             mock_result = MagicMock()
@@ -1053,7 +1126,7 @@ class TestOrganisationMembers:
             mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
-            result = await add_member_to_organisation(organisation_id, member_data)
+            result = await add_member_to_organisation(organisation_id, member_data, isometrik_credentials={})
 
             assert result is True
 
@@ -1082,7 +1155,8 @@ class TestOrganisationMembers:
 
         with patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_supabase_admin_client") as mock_get_client, \
              patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.get_user_by_id", return_value=mock_user_data), \
-             patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.update_metadata_of_user", return_value=True):
+             patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.update_metadata_of_user", return_value=True), \
+             patch("libs.shared_db.postgres_db.user_service_operations.organisation_operations.is_isometrik_enabled", return_value=False):
 
             mock_supabase = MagicMock()
             mock_result = MagicMock()
@@ -1090,7 +1164,7 @@ class TestOrganisationMembers:
             mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
-            result = await add_member_to_organisation(organisation_id, member_data)
+            result = await add_member_to_organisation(organisation_id, member_data, isometrik_credentials={})
 
             assert result is False
 

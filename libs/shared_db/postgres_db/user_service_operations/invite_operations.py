@@ -15,11 +15,12 @@ Operations Covered:
 - Invitation search and filtering
 - Invitation token management
 """
-
+from libs.shared_utils.isometrik_service import is_isometrik_enabled, create_isometrik_user
 import os
 import secrets
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+from fastapi import HTTPException
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.dependencies.invite_utils import hash_token
 from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client
@@ -266,9 +267,30 @@ async def add_user_to_organization(
     email: str,
     role_id: str,
     role_name: str,
-    invited_by: str
+    invited_by: str,
+    isometrik_credentials: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Add user to organization as a member."""
+
+    isometrik_user_id = None
+    if is_isometrik_enabled():
+        isometrik_response = await create_isometrik_user(
+            user_id=invite_data["user_id"],
+            first_name=invite_data.get("first_name", None),
+            last_name=invite_data.get("last_name", None),
+            email=email,
+            isometrik_credentials=isometrik_credentials,
+            organization_id=organization_id,
+            role='member',
+        )
+        if isometrik_response:
+            isometrik_user_id = isometrik_response.get("userId", None)
+            
+            if not isometrik_user_id:
+                raise HTTPException(status_code=400, detail="Failed to create Isometrik user")
+
+    if isometrik_user_id:
+        invite_data["isometrik_user_id"] = isometrik_user_id
 
     member_record = {
         "organization_id": organization_id,
@@ -283,6 +305,7 @@ async def add_user_to_organization(
         "role": role_name,
         "status": "active",
         "invited_by": invited_by,
+        "isometrik_user_id": invite_data.get("isometrik_user_id", None),
         "joined_at": NOW_CONSTANT,
         "created_at": NOW_CONSTANT,
         "updated_at": NOW_CONSTANT

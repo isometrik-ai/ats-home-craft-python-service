@@ -748,7 +748,8 @@ class TestAddUserToOrganization:
         mock_result.data = [mock_member_data]
 
         with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client, \
-             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value=mock_member_data)) as mock_create_user:
+             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value=mock_member_data)) as mock_create_user, \
+             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.is_isometrik_enabled", return_value=False):
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -758,7 +759,7 @@ class TestAddUserToOrganization:
             mock_get_client.return_value = mock_supabase
 
             result = await add_user_to_organization(
-                organization_id, invite_data, email, role_id, role_name, invited_by
+                organization_id, invite_data, email, role_id, role_name, invited_by, isometrik_credentials={}
             )
 
             assert result["id"] is not None
@@ -789,7 +790,8 @@ class TestAddUserToOrganization:
         mock_result.data = []
 
         with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client, \
-             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value={})) as mock_create_user:
+             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value={})) as mock_create_user, \
+             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.is_isometrik_enabled", return_value=False):
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -799,7 +801,7 @@ class TestAddUserToOrganization:
             mock_get_client.return_value = mock_supabase
 
             result = await add_user_to_organization(
-                organization_id, invite_data, email, role_id, role_name, invited_by
+                organization_id, invite_data, email, role_id, role_name, invited_by, isometrik_credentials={}
             )
 
             assert result == {}

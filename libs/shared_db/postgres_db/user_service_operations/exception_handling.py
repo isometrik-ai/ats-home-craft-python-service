@@ -26,6 +26,7 @@ from contextlib import asynccontextmanager
 
 from postgrest import APIError
 from httpx import HTTPError, RequestError, TimeoutException
+from fastapi import HTTPException
 
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from apps.user_service.app.dependencies.logger import get_logger
@@ -180,6 +181,9 @@ def handle_database_errors(
         async def wrapper(*args, **kwargs):
             try:
                 return await func(*args, **kwargs)
+            except HTTPException:
+                # Re-raise HTTP exceptions as-is (preserves status codes and error messages)
+                raise
             except Exception as e:
                 error_type = _get_exception_type(e)
                 return _handle_exception(
