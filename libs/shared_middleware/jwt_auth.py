@@ -13,51 +13,31 @@ The module integrates with Supabase for user authentication and
 permission management, using environment variables for configuration.
 """
 
-
 import os  # Standard library import first
-from typing import List, Tuple, Optional
 
 import jwt
+from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi import Request, HTTPException, status
 
+# Logger import
+from apps.user_service.app.dependencies.logger import get_logger
 from libs.shared_db.supabase_db.db import get_supabase_client
+from libs.shared_utils.http_exceptions import (
+    BadRequestException,
+    InternalServerErrorException,
+    UnauthorizedException,
+)
+from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger(__name__)
 
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
-
-# Centralized error handlers
-def raise_auth_error(request: Request, description: str, detail: str) -> None:
-    """Raise 401 Unauthorized error with audit context."""
-    request.state.audit_description = description
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail=detail,
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-
-def raise_forbidden_error(request: Request, description: str, detail: str) -> None:
-    """Raise 403 Forbidden error with audit context."""
-    request.state.audit_description = description
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=detail,
-    )
-
-
-def raise_internal_error(request: Request, description: str, detail: str) -> None:
-    """Raise 500 Internal Server Error with audit context."""
-    request.state.audit_description = description
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=detail,
-    )
 
 
 # Helper functions for user validation
 def extract_user_data(
-    user: dict
-) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    user: dict,
+) -> tuple[str | None, str | None, str | None, str | None]:
     """Extract user data from JWT token."""
     if not user:
         return None, None, None, None
@@ -90,9 +70,7 @@ def setup_audit_context(
     }
 
 
-async def check_user_access_async(
-    permission_code: List[str], user_id, organisation_id
-):
+async def check_user_access_async(permission_code: list[str], user_id, organisation_id):
     """Check if a user has the specified role permission using Supabase SDK.
 
     This function provides a truly async alternative for permission checking
@@ -117,9 +95,9 @@ async def check_user_access_async(
         supabase = await get_supabase_client()
 
         if not organisation_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User is not a member of any organization",
+            raise BadRequestException(
+                message_key="organisations.errors.user_not_a_member_of_any_organization",
+                custom_code=CustomStatusCode.BAD_REQUEST,
             )
 
         # Use Supabase RPC function for permission checking
@@ -129,7 +107,7 @@ async def check_user_access_async(
                 "user_id": user_id,
                 "organization_id": organisation_id,
                 "permission_code": permission_code,
-            }
+            },
         )
         response = await rpc_result.execute()
 
@@ -138,20 +116,18 @@ async def check_user_access_async(
     except HTTPException as error:
         raise error
     except Exception as error:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to check permission",
+        logger.error("Failed to check permission: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+            params={"error": str(error)},
         ) from error
 
 
+def get_user_from_auth(request: Request) -> dict:
+    """Validate user from JWT, check org membership and role.
 
-
-def get_user_from_auth(
-    request: Request
-) -> dict:
-    """
-    Validates user from JWT, checks org membership and role,
-    and sets audit context in request.state.
+    Sets audit context in request.state.
     Ensures audit context is populated even during authentication/authorization failures.
     """
     user = getattr(request.state, "user", None)
@@ -164,10 +140,11 @@ def get_user_from_auth(
 
     # Validate basic authentication
     if not user:
-        raise_auth_error(
-            request,
-            "User not authenticated (missing token or invalid token)",
-            "Not authenticated",
+        raise UnauthorizedException(
+            message_key="errors.unauthorized",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+            params={"user_id": user_id},
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     # ✅ User is valid, update audit context and success markers
@@ -179,8 +156,7 @@ def get_user_from_auth(
 
 
 def get_user_from_token(token: str) -> dict:
-    """
-    Get user from token
+    """Get user from token.
 
     Args:
         token (str): The JWT token to decode
@@ -196,14 +172,18 @@ def get_user_from_token(token: str) -> dict:
             audience="authenticated",
         )
         return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired"
-        )
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-        )
+    except jwt.ExpiredSignatureError as exc:
+        logger.error("JWT token expired: %s", str(exc))
+        raise UnauthorizedException(
+            message_key="errors.token_expired",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        ) from exc
+    except jwt.InvalidTokenError as exc:
+        logger.error("Invalid JWT token: %s", str(exc))
+        raise UnauthorizedException(
+            message_key="errors.invalid_token",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        ) from exc
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
@@ -230,7 +210,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
 
         Args:
             request (Request): The incoming FastAPI request object
-            call_next: The next middleware or route handler in the chain
+            call_next (Callable): The next middleware or route handler in the chain
 
         Returns:
             Response: Either the next middleware's response or an error response
@@ -259,32 +239,23 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             )
             request.state.user = payload
             request.state.access_token = token
-        except jwt.ExpiredSignatureError:
-            # Setup audit context before raising exception
-            request.state.audit_description = "JWT token expired"
-            request.state.audit_risk_level = "high"
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token expired. Please refresh your authentication token.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+        except jwt.ExpiredSignatureError as e:
+            logger.error("JWT token expired: %s", str(e))
+            raise UnauthorizedException(
+                message_key="errors.token_expired",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            ) from e
         except jwt.InvalidTokenError as e:
-            # Setup audit context before raising exception
-            request.state.audit_description = f"Invalid JWT token: {str(e)}"
-            request.state.audit_risk_level = "high"
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid token. Please provide a valid authentication token. Error: {str(e)}",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            logger.error("Invalid JWT token: %s", str(e))
+            raise UnauthorizedException(
+                message_key="errors.invalid_token",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            ) from e
         except Exception as e:
-            # Setup audit context before raising exception
-            request.state.audit_description = f"JWT validation error: {str(e)}"
-            request.state.audit_risk_level = "high"
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Authentication failed. Error: {str(e)}",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            logger.error("JWT validation error: %s", str(e))
+            raise UnauthorizedException(
+                message_key="errors.authentication_failed",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            ) from e
 
         return await call_next(request)

@@ -1,18 +1,15 @@
-"""
-Email Utilities Module
+"""Email Utilities Module
 This module provides shared email functionality for sending emails via Supabase Edge Functions.
 """
 
-import os
 import logging
+import os
 from datetime import datetime
 
 import httpx
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
-# Environment variables for email functionality
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
@@ -25,14 +22,9 @@ ROSS_AI_FROM_NAME = "Ross.Ai"
 
 
 def send_email(
-    email: str,
-    subject: str,
-    message: str,
-    html: str = None,
-    from_name: str = None
+    email: str, subject: str, message: str, html: str = None, from_name: str = None
 ) -> bool:
-    """
-    Send an email using Supabase Edge Function with Resend.
+    """Send an email using Supabase Edge Function with Resend.
 
     Args:
         email (str): Recipient's email address
@@ -45,11 +37,7 @@ def send_email(
         bool: True if email was sent successfully, False otherwise
     """
     try:
-        payload = {
-            "to": email,
-            "subject": subject,
-            "message": message
-        }
+        payload = {"to": email, "subject": subject, "message": message}
 
         if html:
             payload["html"] = html
@@ -76,8 +64,7 @@ def send_email(
 
 
 def send_password_reset_confirmation_email(email: str, user_name: str = None) -> bool:
-    """
-    Send a password reset confirmation email to the user.
+    """Send a password reset confirmation email to the user.
 
     Args:
         email (str): User's email address
@@ -224,15 +211,15 @@ def send_organization_invitation_email(
     invitee_name: str,
     invite_url: str,
     role_name: str,
-    expires_at: str
+    expires_at: str,
 ) -> bool:
-    """
-    Send an organization invitation email to a user.
+    """Send an organization invitation email to a user.
 
     Args:
         email (str): Recipient's email address
         organization_name (str): Name of the organization
         inviter_name (str): Name of the person who sent the invitation
+        invitee_name (str): Name of the person being invited
         invite_url (str): Invitation acceptance URL
         role_name (str): Role being offered (owner, admin, member)
         expires_at (str): Expiration date/time
@@ -246,7 +233,7 @@ def send_organization_invitation_email(
         # Format expires_at to human-readable format
         try:
             # Parse ISO format datetime string (handle both Z and +00:00 formats)
-            expires_at_clean = expires_at.replace('Z', '+00:00')
+            expires_at_clean = expires_at.replace("Z", "+00:00")
             expires_datetime = datetime.fromisoformat(expires_at_clean)
 
             # Format as human-readable: "December 9, 2025 at 11:41 AM UTC"
@@ -259,7 +246,10 @@ def send_organization_invitation_email(
                 formatted_expires_at = expires_datetime.strftime("%B %d, %Y at %I:%M %p")
         except (ValueError, AttributeError) as date_error:
             # Fallback to original format if parsing fails
-            logger.warning("Failed to parse expires_at date: %s, using original format", str(date_error))
+            logger.warning(
+                "Failed to parse expires_at date: %s, using original format",
+                str(date_error),
+            )
             formatted_expires_at = expires_at
 
         # Plain text message
@@ -355,16 +345,24 @@ The {organization_name} Team"""
         <div class="content">
             <p>Hello {invitee_name},</p>
 
-            <p><strong>{inviter_name}</strong> has invited you to join <strong>{organization_name}</strong> as a <strong>{role_name}</strong>.</p>
+            <p>
+                <strong>{inviter_name}</strong> has invited you to join
+                <strong>{organization_name}</strong> as a <strong>{role_name}</strong>.
+            </p>
 
             <p>To accept this invitation, click the button below:</p>
 
             <div style="margin: 20px 0;">
-                <a href="{invite_url}" class="button" style="display: inline-block; background-color: #4f46e5; color: #ffffff !important; padding: 12px 24px; text-decoration: none !important; border-radius: 6px; font-weight: 500; border: none;">Accept Invitation</a>
+                <a href="{invite_url}" class="button"
+                   style="display: inline-block; background-color: #4f46e5;
+                   color: #ffffff !important; padding: 12px 24px;
+                   text-decoration: none !important; border-radius: 6px;
+                   font-weight: 500; border: none;">Accept Invitation</a>
             </div>
 
             <div class="highlight">
-                <strong>Important:</strong> This invitation will expire on <strong>{formatted_expires_at}</strong>.
+                <strong>Important:</strong> This invitation will expire on
+                <strong>{formatted_expires_at}</strong>.
             </div>
 
             <p>If you don't want to join this organization, you can simply ignore this email.</p>
@@ -399,10 +397,9 @@ def send_welcome_email(
     support_email: str = COMMON_SUPPORT_EMAIL,
     company_address: str = COMMON_COMPANY_ADDRESS,
     privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
-    terms_url: str = COMMON_TERMS_URL
+    terms_url: str = COMMON_TERMS_URL,
 ) -> bool:
-    """
-    Send a welcome email to newly signed up users.
+    """Send a welcome email to newly signed up users.
 
     Args:
         email (str): User's email address
@@ -426,11 +423,14 @@ def send_welcome_email(
         # Plain text message
         message = f"""Hello {first_name},
 
-Thank you for signing up with us on {creation_date}. We are thrilled to have you join our community. Our platform is designed to help you manage your practice efficiently and effectively.
+Thank you for signing up with us on {creation_date}. We are thrilled to have
+you join our community. Our platform is designed to help you manage your
+practice efficiently and effectively.
 
 To get started, visit your dashboard: {dashboard_url}
 
-If you have any questions or need assistance, feel free to reach out to our support team at {support_email}.
+If you have any questions or need assistance, feel free to reach out to our
+support team at {support_email}.
 
 Best regards,
 The {company_name} Team"""
@@ -445,10 +445,13 @@ The {company_name} Team"""
     <title>Welcome to {company_name}</title>
     <style>
         /* Reset styles */
-        body, table, td, a {{ -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }}
+        body, table, td, a {{ -webkit-text-size-adjust: 100%;
+        -ms-text-size-adjust: 100%; }}
         table, td {{ mso-table-lspace: 0pt; mso-table-rspace: 0pt; }}
-        img {{ -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }}
-        body {{ margin: 0; padding: 0; width: 100% !important; height: 100% !important; }}
+        img {{ -ms-interpolation-mode: bicubic; border: 0; height: auto;
+        line-height: 100%; outline: none; text-decoration: none; }}
+        body {{ margin: 0; padding: 0; width: 100% !important;
+        height: 100% !important; }}
 
         /* Mobile Responsive Styles */
         @media only screen and (max-width: 600px) {{
@@ -459,7 +462,8 @@ The {company_name} Team"""
         }}
     </style>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f9fafb; font-family: Arial, Helvetica, sans-serif;">
+<body style="margin: 0; padding: 0; background-color: #f9fafb;
+font-family: Arial, Helvetica, sans-serif;">
 
     <!-- Preview Text (hidden but shows in email preview) -->
     <div style="display: none; max-height: 0px; overflow: hidden;">
@@ -493,15 +497,25 @@ The {company_name} Team"""
                             </p>
 
                             <!-- Main Message -->
-                            <p style="margin: 0 0 20px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">
-                                Thank you for signing up with us on {creation_date}. We are thrilled to have you join our community. Our platform is designed to help you manage your practice efficiently and effectively.
+                            <p style="margin: 0 0 20px 0; color: #4b5563;
+                            font-size: 15px; line-height: 1.6;">
+                                Thank you for signing up with us on {creation_date}.
+                                We are thrilled to have you join our community.
+                                Our platform is designed to help you manage your
+                                practice efficiently and effectively.
                             </p>
 
                             <!-- Call-to-Action Button -->
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 30px 0;">
+                            <table role="presentation" cellspacing="0" cellpadding="0"
+                            border="0" width="100%" style="margin: 30px 0;">
                                 <tr>
                                     <td style="text-align: center;">
-                                        <a href="{dashboard_url}" style="display: inline-block; padding: 14px 40px; background-color: #3b82f6; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: 600; min-width: 200px;">
+                                        <a href="{dashboard_url}"
+                                        style="display: inline-block; padding: 14px 40px;
+                                        background-color: #3b82f6; color: #ffffff;
+                                        text-decoration: none; border-radius: 6px;
+                                        font-size: 16px; font-weight: 600;
+                                        min-width: 200px;">
                                             Go to Dashboard
                                         </a>
                                     </td>
@@ -522,9 +536,12 @@ The {company_name} Team"""
                             <p style="margin: 0 0 10px 0; color: #6b7280; font-size: 14px; line-height: 1.5;">
                                 Questions or need assistance?
                             </p>
-                            <p style="margin: 0; color: #6b7280; font-size: 14px; line-height: 1.5;">
+                            <p style="margin: 0; color: #6b7280; font-size: 14px;
+                            line-height: 1.5;">
                                 Contact our support team at
-                                <a href="mailto:{support_email}" style="color: #3b82f6; text-decoration: none;">{support_email}</a>
+                                <a href="mailto:{support_email}"
+                                style="color: #3b82f6; text-decoration: none;">
+                                {support_email}</a>
                             </p>
                         </td>
                     </tr>
@@ -539,8 +556,12 @@ The {company_name} Team"""
                                 {company_address}
                             </p>
                             <p style="margin: 0; color: #9ca3af; font-size: 12px;">
-                                <a href="{privacy_policy_url}" style="color: #9ca3af; text-decoration: underline;">Privacy Policy</a> |
-                                <a href="{terms_url}" style="color: #9ca3af; text-decoration: underline;">Terms of Service</a>
+                                <a href="{privacy_policy_url}"
+                                style="color: #9ca3af; text-decoration: underline;">
+                                Privacy Policy</a> |
+                                <a href="{terms_url}"
+                                style="color: #9ca3af; text-decoration: underline;">
+                                Terms of Service</a>
                             </p>
                         </td>
                     </tr>
@@ -575,10 +596,9 @@ def send_password_change_success_email(
     support_email: str = COMMON_SUPPORT_EMAIL,
     company_address: str = COMMON_COMPANY_ADDRESS,
     privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
-    terms_url: str = COMMON_TERMS_URL
+    terms_url: str = COMMON_TERMS_URL,
 ) -> bool:
-    """
-    Send a password change success email to the user.
+    """Send a password change success email to the user.
 
     Args:
         email (str): User's email address
@@ -628,7 +648,8 @@ Contact Support: {support_email}
     </div>
     <div style="padding:30px; font-size:15px; color:#444; line-height:1.6;">
       <p>Hello {name},</p>
-      <p>This is a confirmation that your password for <strong>{company_name}</strong> has been successfully updated.</p>
+      <p>This is a confirmation that your password for
+      <strong>{company_name}</strong> has been successfully updated.</p>
       <p>If you made this change, no further action is needed.</p>
       <p>If you did <strong>not</strong> update your password, please contact us immediately for assistance.</p>
       <p style="margin-top:25px;">
@@ -671,10 +692,9 @@ def send_password_reset_success_email(
     support_email: str = COMMON_SUPPORT_EMAIL,
     company_address: str = COMMON_COMPANY_ADDRESS,
     privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
-    terms_url: str = COMMON_TERMS_URL
+    terms_url: str = COMMON_TERMS_URL,
 ) -> bool:
-    """
-    Send a password reset success email to the user.
+    """Send a password reset success email to the user.
 
     Args:
         email (str): User's email address
@@ -776,10 +796,9 @@ def send_verification_code_email(
     company_name: str = COMMON_COMPANY_NAME,
     company_address: str = COMMON_COMPANY_ADDRESS,
     privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
-    terms_url: str = COMMON_TERMS_URL
+    terms_url: str = COMMON_TERMS_URL,
 ) -> bool:
-    """
-    Send a verification code (OTP) email to the user.
+    """Send a verification code (OTP) email to the user.
 
     Args:
         email (str): User's email address
@@ -857,8 +876,10 @@ If you didn't request this, please ignore this email.
                 <p style="margin: 0;">&copy; {current_year} {company_name}. All rights reserved.</p>
                 <p style="margin: 4px 0;">{company_address}</p>
                 <p style="margin: 0;">
-                  <a href="{privacy_policy_url}" style="color: #6b7280; text-decoration: none;">Privacy Policy</a> |
-                  <a href="{terms_url}" style="color: #6b7280; text-decoration: none;">Terms of Service</a>
+                  <a href="{privacy_policy_url}"
+                  style="color: #6b7280; text-decoration: none;">Privacy Policy</a> |
+                  <a href="{terms_url}"
+                  style="color: #6b7280; text-decoration: none;">Terms of Service</a>
                 </p>
               </td>
             </tr>

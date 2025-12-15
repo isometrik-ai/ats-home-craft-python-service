@@ -1,25 +1,22 @@
-# pylint: disable=all
-"""
-Test cases for invite_operations.py module
+"""Test cases for invite_operations.py module"""
 
-This module tests all database operations for organization invitations.
-"""
-
-import pytest
 import uuid
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from libs.shared_db.postgres_db.user_service_operations.invite_operations import (
+    add_user_to_organization,
+    check_existing_invite,
+    check_user_membership,
     create_organization_invite,
-    get_invite_by_token,
+    delete_invite,
     get_invite_by_id,
+    get_invite_by_token,
     get_organization_invites,
     get_organization_invites_count,
     update_invite_status,
-    delete_invite,
-    check_existing_invite,
-    check_user_membership,
-    add_user_to_organization
 )
 
 
@@ -37,23 +34,30 @@ class TestCreateOrganizationInvite:
             "first_name": "Test",
             "last_name": "User",
             "phone": None,
-            "salutation": None
+            "salutation": None,
         }
 
         mock_result = MagicMock()
-        mock_result.data = [{
-            "id": str(uuid.uuid4()),
-            "organization_id": invite_data["organization_id"],
-            "email": invite_data["email"],
-            "role_id": invite_data["role_id"],
-            "token_hash": "hashed_token",
-            "status": "pending",
-            "expires_at": (datetime.now() + timedelta(days=7)).isoformat(),
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat()
-        }]
+        mock_result.data = [
+            {
+                "id": str(uuid.uuid4()),
+                "organization_id": invite_data["organization_id"],
+                "email": invite_data["email"],
+                "role_id": invite_data["role_id"],
+                "token_hash": "hashed_token",
+                "status": "pending",
+                "expires_at": (datetime.now() + timedelta(days=7)).isoformat(),
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+            }
+        ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -80,13 +84,18 @@ class TestCreateOrganizationInvite:
             "first_name": "Test",
             "last_name": "User",
             "phone": None,
-            "salutation": None
+            "salutation": None,
         }
 
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -110,13 +119,18 @@ class TestCreateOrganizationInvite:
             "first_name": "Test",
             "last_name": "User",
             "phone": None,
-            "salutation": None
+            "salutation": None,
         }
 
         mock_result = MagicMock()
         mock_result.data = [{"id": str(uuid.uuid4())}]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -147,14 +161,19 @@ class TestGetInviteByToken:
             "organizations": {
                 "name": "Test Org",
                 "slug": "test-org",
-                "domain": "test.com"
-            }
+                "domain": "test.com",
+            },
         }
 
         mock_result = MagicMock()
         mock_result.data = [mock_invite_data]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -181,7 +200,12 @@ class TestGetInviteByToken:
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -206,7 +230,12 @@ class TestGetInviteByToken:
         mock_result = MagicMock()
         mock_result.data = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -240,14 +269,17 @@ class TestGetInviteById:
             "organizations": {
                 "name": "Test Org",
                 "slug": "test-org",
-                "domain": "test.com"
-            }
+                "domain": "test.com",
+            },
         }
 
         mock_result = MagicMock()
         mock_result.data = [mock_invite_data]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+            "get_supabase_admin_client"
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -273,7 +305,12 @@ class TestGetInviteById:
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -303,20 +340,23 @@ class TestGetOrganizationInvites:
                 "id": str(uuid.uuid4()),
                 "organization_id": organization_id,
                 "email": "user1@example.com",
-                "status": "pending"
+                "status": "pending",
             },
             {
                 "id": str(uuid.uuid4()),
                 "organization_id": organization_id,
                 "email": "user2@example.com",
-                "status": "accepted"
-            }
+                "status": "accepted",
+            },
         ]
 
         mock_result = MagicMock()
         mock_result.data = mock_invites
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+            "get_fresh_supabase_admin_client"
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -347,7 +387,12 @@ class TestGetOrganizationInvites:
         mock_result = MagicMock()
         mock_result.data = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_fresh_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -380,7 +425,12 @@ class TestGetOrganizationInvitesCount:
         mock_result = MagicMock()
         mock_result.count = 5
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_count = MagicMock()
@@ -403,7 +453,12 @@ class TestGetOrganizationInvitesCount:
         mock_result = MagicMock()
         mock_result.count = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_count = MagicMock()
@@ -432,7 +487,12 @@ class TestUpdateInviteStatus:
         mock_result = MagicMock()
         mock_result.data = [{"id": invite_id, "status": status}]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_fresh_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_update = MagicMock()
@@ -456,7 +516,12 @@ class TestUpdateInviteStatus:
         mock_result = MagicMock()
         mock_result.data = [{"id": invite_id, "status": status}]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_fresh_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_update = MagicMock()
@@ -480,7 +545,12 @@ class TestUpdateInviteStatus:
         mock_result = MagicMock()
         mock_result.data = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_fresh_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_update = MagicMock()
@@ -504,7 +574,12 @@ class TestUpdateInviteStatus:
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_fresh_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_update = MagicMock()
@@ -531,7 +606,12 @@ class TestDeleteInvite:
         mock_result = MagicMock()
         mock_result.data = [{"id": invite_id}]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_delete = MagicMock()
@@ -554,7 +634,12 @@ class TestDeleteInvite:
         mock_result = MagicMock()
         mock_result.data = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_delete = MagicMock()
@@ -583,18 +668,25 @@ class TestCheckExistingInvite:
             "id": str(uuid.uuid4()),
             "organization_id": organization_id,
             "email": email,
-            "status": "pending"
+            "status": "pending",
         }
 
         mock_result = MagicMock()
         mock_result.data = [mock_invite_data]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = (
+                mock_limit
+            )
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -614,18 +706,23 @@ class TestCheckExistingInvite:
             "id": str(uuid.uuid4()),
             "organization_id": organization_id,
             "email": email,
-            "status": status
+            "status": status,
         }
 
         mock_result = MagicMock()
         mock_result.data = [mock_invite_data]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_table.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
+            mock_table.select.return_value.limit.return_value = mock_limit
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -642,12 +739,19 @@ class TestCheckExistingInvite:
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = (
+                mock_limit
+            )
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -669,18 +773,25 @@ class TestCheckUserMembership:
             "id": str(uuid.uuid4()),
             "organization_id": organization_id,
             "email": email,
-            "status": "active"
+            "status": "active",
         }
 
         mock_result = MagicMock()
         mock_result.data = [mock_member_data]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = (
+                mock_limit
+            )
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -698,12 +809,19 @@ class TestCheckUserMembership:
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_limit = MagicMock()
             mock_limit.execute = AsyncMock(return_value=mock_result)
-            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = mock_limit
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value = (
+                mock_limit
+            )
             mock_supabase.table.return_value = mock_table
             mock_get_client.return_value = mock_supabase
 
@@ -731,7 +849,7 @@ class TestAddUserToOrganization:
             "last_name": "User",
             "phone": None,
             "timezone": "UTC",
-            "salutation": None
+            "salutation": None,
         }
 
         mock_member_data = {
@@ -741,15 +859,28 @@ class TestAddUserToOrganization:
             "email": email,
             "role_id": role_id,
             "role_name": role_name,
-            "status": "active"
+            "status": "active",
         }
 
         mock_result = MagicMock()
         mock_result.data = [mock_member_data]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client, \
-             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value=mock_member_data)) as mock_create_user, \
-             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.is_isometrik_enabled", return_value=False):
+        with (
+            patch(
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            ) as mock_get_client,
+            patch(
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "create_new_user",
+                AsyncMock(return_value=mock_member_data),
+            ),
+            patch(
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "is_isometrik_enabled",
+                return_value=False,
+            ),
+        ):
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -759,7 +890,13 @@ class TestAddUserToOrganization:
             mock_get_client.return_value = mock_supabase
 
             result = await add_user_to_organization(
-                organization_id, invite_data, email, role_id, role_name, invited_by, isometrik_credentials={}
+                organization_id,
+                invite_data,
+                email,
+                role_id,
+                role_name,
+                invited_by,
+                isometrik_credentials={},
             )
 
             assert result["id"] is not None
@@ -783,15 +920,28 @@ class TestAddUserToOrganization:
             "last_name": "User",
             "phone": None,
             "timezone": "UTC",
-            "salutation": None
+            "salutation": None,
         }
 
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.get_supabase_admin_client") as mock_get_client, \
-             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.create_new_user", AsyncMock(return_value={})) as mock_create_user, \
-             patch("libs.shared_db.postgres_db.user_service_operations.invite_operations.is_isometrik_enabled", return_value=False):
+        with (
+            patch(
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "get_supabase_admin_client"
+            ) as mock_get_client,
+            patch(
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "create_new_user",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "libs.shared_db.postgres_db.user_service_operations.invite_operations."
+                "is_isometrik_enabled",
+                return_value=False,
+            ),
+        ):
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -801,7 +951,13 @@ class TestAddUserToOrganization:
             mock_get_client.return_value = mock_supabase
 
             result = await add_user_to_organization(
-                organization_id, invite_data, email, role_id, role_name, invited_by, isometrik_credentials={}
+                organization_id,
+                invite_data,
+                email,
+                role_id,
+                role_name,
+                invited_by,
+                isometrik_credentials={},
             )
 
             assert result == {}

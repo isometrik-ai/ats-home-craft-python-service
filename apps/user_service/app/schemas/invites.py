@@ -1,90 +1,91 @@
-# pylint: disable=invalid-name,E0213
-"""
-Invites Schemas Module
+"""Invites Schemas Module.
 
 This module contains all Pydantic models and schemas related to invites.
 These schemas are used for request/response validation and API documentation.
 """
 
 import uuid
-from typing import Optional, List, Literal
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
-from apps.user_service.app.schemas.common import PaginationBase
-from apps.user_service.app.schemas import ResponseModel
+from typing import Literal
 
-# Constants for examples
-EXAMPLE_EMAIL = "newuser@example.com"
-EXAMPLE_TIMESTAMP = "2024-12-19T10:00:00Z"
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class InviteDetailsResponse(BaseModel):
-    """
-    Response model for invitation details operations
-    """
+    """Response model for invitation details operations."""
+
     valid: bool
-    email: Optional[str] = None
-    organization_name: Optional[str] = None
-    organization_id: Optional[str] = None
-    role: Optional[str] = None
-    invited_by: Optional[str] = None
-    expires_at: Optional[str] = None
-    error: Optional[str] = None
+    email: str | None = None
+    organization_name: str | None = None
+    organization_id: str | None = None
+    role: str | None = None
+    invited_by: str | None = None
+    expires_at: str | None = None
+    error: str | None = None
 
 
 class InviteResponse(BaseModel):
-    """
-    Response model for invitation details operations
-    """
-    success: bool
-    invite_id: Optional[str] = None
-    invite_url: Optional[str] = None
-    email: Optional[str] = None
-    expires_at: Optional[str] = None
-    message: Optional[str] = None
+    """Response model for invitation details operations."""
+
+    invite_id: str | None = None
+    invite_url: str | None = None
+    email: str | None = None
+    expires_at: str | None = None
 
 
 class InviteAcceptResponse(BaseModel):
-    """
-    Response model for invitation acceptance operations
-    """
-    success: bool
-    message: Optional[str] = None
-    error: Optional[str] = None
+    """Response model for invitation acceptance operations."""
+
+    status: str = Field(..., description="Response status")
+    message: str = Field(..., description="Response message")
+    statusCode: int = Field(..., description="HTTP status code")
+    code: str = Field(..., description="Custom status code")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Invitation accepted successfully",
+                "statusCode": 202,
+                "code": "2006",
+            }
+        }
+    )
 
 
 class InviteCreateRequest(BaseModel):
-    """
-    Request model for invitation creation operations
-    """
-    salutation: Optional[Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.","Adv."]] = Field(None, description="Salutation for the user")
+    """Request model for invitation creation operations."""
+
+    salutation: Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Adv."] | None = Field(
+        None, description="Salutation for the user"
+    )
     first_name: str = Field(..., min_length=2)
-    last_name: Optional[str] = Field(None, min_length=2)
+    last_name: str | None = Field(None, min_length=2)
     email: EmailStr = Field(..., description="Email address to invite")
-    phone: Optional[str] = None
+    phone: str | None = None
     role_id: uuid.UUID = Field(default="member", description="Role: owner, admin, or member")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "email": EXAMPLE_EMAIL,
+                "email": "newuser@example.com",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
-                "expires_in_days": 7
+                "expires_in_days": 7,
             }
         }
     )
 
 
 class InviteAcceptBySettingPasswordRequest(BaseModel):
-    """
-    Request model for invitation acceptance operations
-    """
+    """Request model for invitation acceptance operations."""
+
     token: str = Field(..., description="Invite token from the URL")
     password: str = Field(..., description="Password for the user")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "token": "abc123xyz456..."
+                "token": "abc123xyz456...",
+                "password": "Password@123",
             }
         }
     )
@@ -101,37 +102,37 @@ class InviteListItem(BaseModel):
     expires_at: str = Field(..., description="ISO timestamp when invitation expires")
     created_at: str = Field(..., description="ISO timestamp when invitation was created")
     updated_at: str = Field(..., description="ISO timestamp when invitation was last updated")
-    salutation: Optional[Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.","Adv."]] = Field(None, description="Salutation for the user")
-    first_name: Optional[str] = Field(None, min_length=2)
-    last_name: Optional[str] = Field(None, min_length=2)
-    phone: Optional[str] = None
+    salutation: Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Adv."] | None = Field(
+        None, description="Salutation for the user"
+    )
+    first_name: str | None = Field(None, min_length=2)
+    last_name: str | None = Field(None, min_length=2)
+    phone: str | None = None
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "invite_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-                "email": EXAMPLE_EMAIL,
+                "email": "newuser@example.com",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "status": "pending",
                 "invited_by": "550e8400-e29b-41d4-a716-446655440000",
                 "expires_at": "2024-12-26T10:00:00Z",
-                "created_at": EXAMPLE_TIMESTAMP,
-                "updated_at": EXAMPLE_TIMESTAMP,
+                "created_at": "2024-12-19T10:00:00Z",
+                "updated_at": "2024-12-19T10:00:00Z",
                 "salutation": "Mr.",
                 "first_name": "John",
                 "last_name": "Doe",
-                "phone": "+1234567890"
+                "phone": "+1234567890",
             }
         }
     )
 
 
-class InviteListResponse(PaginationBase, ResponseModel):
+class InviteListResponse(BaseModel):
     """Response model for invitation list operations"""
 
-    data: List[InviteListItem] = Field(
-        ..., description="List of invitations if successful"
-    )
+    data: list[InviteListItem] = Field(..., description="List of invitations if successful")
     total_count: int = Field(..., description="Total number of invitations")
 
     model_config = ConfigDict(
@@ -141,18 +142,18 @@ class InviteListResponse(PaginationBase, ResponseModel):
                 "data": [
                     {
                         "invite_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-                        "email": EXAMPLE_EMAIL,
+                        "email": "newuser@example.com",
                         "role_id": "550e8400-e29b-41d4-a716-446655440000",
-                        "status": "pending", # pending, accepted, rejected, expired, revoked
+                        "status": "pending",  # pending, accepted, rejected, expired, revoked
                         "invited_by": "550e8400-e29b-41d4-a716-446655440000",
                         "expires_at": "2024-12-26T10:00:00Z",
-                        "created_at": EXAMPLE_TIMESTAMP,
-                        "updated_at": EXAMPLE_TIMESTAMP
+                        "created_at": "2024-12-19T10:00:00Z",
+                        "updated_at": "2024-12-19T10:00:00Z",
                     }
                 ],
                 "total_count": 5,
                 "page": 1,
-                "page_size": 20
+                "page_size": 20,
             }
         }
     )
@@ -163,14 +164,8 @@ class InviteListQueryParams(BaseModel):
 
     page: int = Field(default=1, ge=1, description="Page number for pagination")
     page_size: int = Field(default=20, ge=1, le=100, description="Number of items per page")
-    status: Optional[str] = Field(None, description="Filter by invitation status")
+    status: str | None = Field(None, description="Filter by invitation status")
 
     model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "page": 1,
-                "page_size": 20,
-                "status": "pending"
-            }
-        }
+        json_schema_extra={"example": {"page": 1, "page_size": 20, "status": "pending"}}
     )

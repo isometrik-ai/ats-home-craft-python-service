@@ -1,142 +1,100 @@
-
-"""
-Audit Logs API Module
+"""Audit Logs API Module
 
 This module provides CRUD operations for audit logs management.
 All endpoints include proper authentication, validation, and database operations.
-
-Author: AI Assistant
-Date: 2024-12-19
-Last Updated: 2024-12-19
 """
-from ipaddress import IPv4Address
 
-from fastapi import APIRouter, HTTPException, status, Depends, Request, Response
-from pydantic import BaseModel
-
-# Utility imports
-from apps.user_service.app.dependencies.common_utils import (
-    handle_api_exceptions,
-    format_iso_datetime,
-    safe_json_loads,
-    validate_uuid_format,
-    check_permissions,
-)
-
-# Audit logs utility imports
-from apps.user_service.app.dependencies.audit_logs.audit_logs_utils import (
-    build_audit_logs_filter_message,
-)
-
-# Schema imports
-from apps.user_service.app.schemas.audit_logs import (
-    AuditLogsResponse,
-    AuditLogItem,
-    AuditLogDetailResponse,
-    AuditLogDetailItem,
-)
-
-from apps.user_service.app.schemas.common import (
-    AuditLogsQueryParams,
-)
+from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-
-# Local imports
+from apps.user_service.app.dependencies.common_utils import (
+    check_permissions,
+    format_iso_datetime,
+    handle_api_exceptions,
+    safe_json_loads,
+)
+from apps.user_service.app.schemas.audit_logs import (
+    AuditLogDetailItem,
+    AuditLogItem,
+)
+from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
+    AuditLogFilter,
+    delete_all_audit_logs,
+    get_audit_log_by_id,
+    get_audit_logs_count,
+    get_audit_logs_list,
+)
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
-
-# Database operations imports
-from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
-    get_audit_logs_list,
-    get_audit_logs_count,
-    get_audit_log_by_id,
-    delete_all_audit_logs,
-    AuditLogFilter,
-)
+from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.response_factory import list_response, success_response
+from libs.shared_utils.status_codes import CustomStatusCode
 
 # Create router for audit logs endpoints
 router = APIRouter(prefix="/audit-logs", tags=["Audit Logs Management"])
 
-# Authentication description for API documentation
-AUTH_DESCRIPTION = "Bearer token required for authentication"
-
-
-class AuditLogResponse(BaseModel):
-    """Response model for audit log operations"""
-
-    message: str
-    status: str = "success"
-
-    def to_dict(self):
-        """Convert to dictionary for JSON serialization"""
-        return {"message": self.message, "status": self.status}
-
 
 @handle_api_exceptions("get audit logs")
-@router.get("", response_model=AuditLogsResponse, status_code=status.HTTP_200_OK)
+@router.get(
+    "",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get all audit logs for the current organization",
+    summary="Get all audit logs for the current organization",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Audit logs retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
 @limiter.limit("100/minute")
-# @audit_api_call(
-#     action_type="READ",
-#     data_classification="confidential",
-#     compliance_tags=["audit_required", "soc2_audit", "gdpr"],
-#     table_name="audit_logs",
-#     category="audit_management",
-# )
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def get_audit_logs(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
-    query_params: AuditLogsQueryParams = Depends(),
+    search: str | None = Query(
+        None,
+        description="Search term to filter audit logs by description",
+    ),
+    page: int = Query(1, ge=1, description="The page number for pagination"),
+    page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
 ):
-    """
-    Get all audit logs for the current organization (Optimized & Truly Async)
-
-    This endpoint retrieves all audit logs for the authenticated user's organization.
-    Uses truly async database operations for best performance and scalability.
-
-    Performance Features:
-    - JWT authentication
-    - Async database operations (non-blocking)
-    - Connection pooling
-    - Efficient queries with proper indexing
-    - Search functionality across description, action_type, and table_name
-    - Pagination support
-    - Organization isolation
-
-    Args:
-        request (Request): The FastAPI request object
-        current_user (dict): Decoded JWT token containing user information
-        query_params (AuditLogsQueryParams): Query parameters object containing
-            search, pagination options
-
-    Returns:
-        AuditLogsResponse: List of audit logs with detailed information
-
-    Raises:
-        HTTPException: 400 for invalid parameters
-        HTTPException: 403 for insufficient permissions
-        HTTPException: 500 for database errors
-    """
+    """Get all audit logs for the current organization"""
     # Extract and validate user context from JWT token & check permission
-    user_context = await check_permissions(current_user, SETTINGS_SYSTEM_MANAGE, "view audit logs")
+    user_context = await check_permissions(current_user, SETTINGS_SYSTEM_MANAGE)
 
     # Create filter parameters
     filter_params = AuditLogFilter(
         organization_id=user_context.organization_id,
-        search=query_params.search,
-        limit=query_params.limit,
-        offset=query_params.skip,
+        search=search,
+        limit=page_size,
+        offset=(page - 1) * page_size,
         user_id=user_context.user_id,
     )
 
     # Get audit logs using centralized database operations
     audit_logs_data = await get_audit_logs_list(filter_params)
 
+    if not audit_logs_data:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+            page=page,
+            page_size=page_size,
+        )
+
     # Get total count using centralized database operations
     total_count = await get_audit_logs_count(
-        user_context.organization_id,
-        user_context.user_id, filter_params)
+        user_context.organization_id, user_context.user_id, filter_params
+    )
 
     # Format audit logs data using utility functions
     audit_logs = [
@@ -155,7 +113,7 @@ async def get_audit_logs(
             changed_fields=safe_json_loads(audit_log["changed_fields"], None),
             compliance_tags=audit_log["compliance_tags"],
             risk_level=audit_log["risk_level"],
-            ip_address=str(IPv4Address(audit_log["ip_address"])),
+            ip_address=audit_log["ip_address"],
             description=audit_log["description"],
             timestamp=(
                 audit_log["timestamp"]
@@ -168,81 +126,47 @@ async def get_audit_logs(
         for audit_log in audit_logs_data
     ]
 
-    # Build response message using utility function
-    message = build_audit_logs_filter_message(
-        search=query_params.search,
-        skip=query_params.skip,
-        limit=query_params.limit,
-    )
-
-    return AuditLogsResponse(
-        message=message,
-        audit_logs=audit_logs,
-        total_count=total_count,
+    return list_response(
+        request=request,
+        items=audit_logs,
+        total=total_count,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        page=page,
+        page_size=page_size,
+        status_code=http_status.HTTP_200_OK,
     )
 
 
 @handle_api_exceptions("get audit log by ID")
 @router.get(
     "/{audit_log_id}",
-    response_model=AuditLogDetailResponse,
-    status_code=status.HTTP_200_OK,
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get audit log by ID",
+    summary="Get audit log by ID",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Audit log retrieved successfully"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Audit log not found"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
-# @audit_api_call(
-#     action_type="READ",
-#     data_classification="confidential",
-#     compliance_tags=[
-#         "audit_required",
-#         "soc2_audit",
-#         "gdpr",
-#     ],
-#     table_name="audit_logs",
-#     category="audit_management",
-# )
 async def get_audit_log_from_id(
-    audit_log_id: str,
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
+    audit_log_id: str = Path(..., description="The UUID of the audit log to get"),
 ):
-    """
-    Get audit log by ID with all details (Optimized & Truly Async)
-
-    This endpoint retrieves detailed information about a specific audit log including
-    all metadata and integrity information. Uses truly async database operations
-    for best performance and scalability.
-
-    Performance Features:
-    - JWT authentication
-    - Async database operations (non-blocking)
-    - Connection pooling
-    - Efficient queries with proper indexing
-    - Organization isolation
-
-    Args:
-        audit_log_id (str): UUID of the audit log to retrieve
-        request (Request): The FastAPI request object
-        current_user (dict): Decoded JWT token containing user information
-
-    Returns:
-        AuditLogDetailResponse: Detailed audit log information with all metadata
-
-    Raises:
-        HTTPException: 400 for invalid audit log ID or token data
-        HTTPException: 403 for insufficient permissions
-        HTTPException: 404 if audit log not found
-        HTTPException: 500 for database errors
-    """
-
-    # Validate audit_log_id format using utility function
-    request.state.audit_requested_id = audit_log_id
-    validate_uuid_format(audit_log_id, "audit log ID")
-
+    """Get audit log by ID"""
     # Extract and validate user context from JWT token & check permission
     user_context = await check_permissions(
         current_user=current_user,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
-        action_description="view audit log details",
     )
     # Get audit log using centralized database operations
     audit_log_data = await get_audit_log_by_id(
@@ -253,9 +177,9 @@ async def get_audit_log_from_id(
 
     # Check if audit log exists
     if not audit_log_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Audit log not found",
+        raise NotFoundException(
+            message_key="audit_logs.errors.not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
         )
 
     # Format audit log data using utility functions
@@ -274,7 +198,7 @@ async def get_audit_log_from_id(
         changed_fields=safe_json_loads(audit_log_data["changed_fields"], None),
         compliance_tags=audit_log_data["compliance_tags"],
         risk_level=audit_log_data["risk_level"],
-        ip_address=str(IPv4Address(audit_log_data["ip_address"])),
+        ip_address=audit_log_data["ip_address"],
         description=audit_log_data["description"],
         timestamp=(
             audit_log_data["timestamp"]
@@ -292,81 +216,43 @@ async def get_audit_log_from_id(
         category=audit_log_data.get("category"),
     )
 
-    return AuditLogDetailResponse(
-        message="Audit log details retrieved successfully",
-        audit_log=audit_log_detail,
+    return success_response(
+        request=request,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=audit_log_detail,
     )
 
 
 @handle_api_exceptions("delete all audit logs")
 @router.delete(
-    "", status_code=status.HTTP_204_NO_CONTENT
+    "",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Delete all audit logs from the system",
+    summary="Delete all audit logs from the system",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Audit logs deleted successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("10/minute")
-# @audit_api_call(
-#     action_type="DELETE",
-#     data_classification="confidential",
-#     compliance_tags=[
-#         "audit_required",
-#         "soc2_audit",
-#         "gdpr",
-#     ],
-#     table_name="audit_logs",
-#     category="audit_management",
-# )
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def delete_all_audit_logs_data(
     request: Request,
-    # current_user: dict = Depends(get_user_from_auth),
 ):
-    """
-    Delete all audit logs from the system (Optimized & Truly Async)
-
-    This endpoint permanently deletes all audit logs from the system.
-    This is a destructive operation and should be used with extreme caution.
-    Uses truly async database operations with proper transaction handling.
-
-    ⚠️ WARNING: This operation is irreversible and will permanently delete all audit logs.
-    This may impact compliance requirements and audit trail integrity.
-
-    Performance Features:
-    - JWT authentication
-    - Async database operations (non-blocking)
-    - Connection pooling
-    - Transaction support for data consistency
-    - Organization isolation
-    - Rate limiting (10 requests per minute)
-
-    Args:
-        request (Request): The FastAPI request object
-        current_user (dict): Decoded JWT token containing user information
-
-    Returns:
-        DeleteAuditLogsResponse: Success message with count of deleted audit logs
-
-    Raises:
-        HTTPException: 400 for invalid token data
-        HTTPException: 403 for insufficient permissions
-        HTTPException: 500 for database errors
-
-    Security Features:
-    - High-level permission required (audit.logs.delete)
-    - Rate limiting to prevent abuse
-    - Comprehensive audit logging of the deletion action
-    - Transaction rollback on failures
-    """
-    # Extract and validate user context from JWT token
-    # user_context = await extract_user_context(current_user)
-
-    # Check permission using utility function
-    # await require_permission(
-    #     permission_code="audit.logs.delete",
-    #     user_context=user_context,
-    #     db_conn=db_conn,
-    #     action_description="delete all audit logs",
-    # )
-
+    """Delete all audit logs from the system"""
     # Delete all audit logs using centralized database operations
     await delete_all_audit_logs()
 
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return success_response(
+        request=request,
+        message_key="success.deleted",
+        custom_code=CustomStatusCode.DELETED,
+        status_code=http_status.HTTP_200_OK,
+    )

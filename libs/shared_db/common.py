@@ -1,17 +1,16 @@
-"""
-Common utilities for database modules.
+"""Common utilities for database modules.
 This module provides shared functionality for setting up import paths
 and loading environment variables to avoid code duplication.
 """
 
 import os
 import sys
+
 from dotenv import load_dotenv
 
 
 def setup_import_paths_and_env():
-    """
-    Setup import paths and load environment variables.
+    """Setup import paths and load environment variables.
     This function centralizes the common setup code used by both
     postgres_db and supabase_db modules.
     """

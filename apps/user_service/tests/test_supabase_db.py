@@ -1,6 +1,4 @@
-# pylint: disable=all
-"""
-Test module for Supabase database connection management.
+"""Test module for Supabase database connection management.
 
 This module contains comprehensive tests for:
 - SupabaseClientCache singleton class
@@ -9,19 +7,20 @@ This module contains comprehensive tests for:
 - Error handling scenarios
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 from supabase import AsyncClient
 
 from libs.shared_db.supabase_db.db import (
-    SupabaseClientCache,
-    get_supabase_client,
-    get_supabase_admin_client,
-    reset_supabase_admin_client,
-    get_fresh_supabase_admin_client,
-    SUPABASE_URL,
     SUPABASE_ANON_KEY,
-    SUPABASE_SERVICE_ROLE_KEY
+    SUPABASE_SERVICE_ROLE_KEY,
+    SUPABASE_URL,
+    SupabaseClientCache,
+    get_fresh_supabase_admin_client,
+    get_supabase_admin_client,
+    get_supabase_client,
+    reset_supabase_admin_client,
 )
 
 
@@ -64,7 +63,10 @@ class TestSupabaseClientCache:
 
         # Mock create_async_client
         mock_client = AsyncMock(spec=AsyncClient)
-        with patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_client) as mock_create:
+        with patch(
+            "libs.shared_db.supabase_db.db.create_async_client",
+            return_value=mock_client,
+        ) as mock_create:
             result = await cache.get_client()
 
             # Verify client was created with correct parameters
@@ -85,7 +87,10 @@ class TestSupabaseClientCache:
 
         # Mock create_async_client
         mock_client = AsyncMock(spec=AsyncClient)
-        with patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_client) as mock_create:
+        with patch(
+            "libs.shared_db.supabase_db.db.create_async_client",
+            return_value=mock_client,
+        ) as mock_create:
             # First call
             result1 = await cache.get_client()
 
@@ -99,7 +104,6 @@ class TestSupabaseClientCache:
             assert result1 is mock_client
             assert result2 is mock_client
             assert result1 is result2
-
 
     @pytest.mark.asyncio
     async def test_get_admin_client_subsequent_calls(self):
@@ -120,9 +124,14 @@ class TestSupabaseClientCache:
         mock_auth.admin = mock_admin
         mock_admin.list_users = mock_list_users
 
-        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
-             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
-             patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client) as mock_create:
+        with (
+            patch("libs.shared_db.supabase_db.db.SUPABASE_URL", "https://test.supabase.co"),
+            patch("libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY", "test-key"),
+            patch(
+                "libs.shared_db.supabase_db.db.create_async_client",
+                return_value=mock_admin_client,
+            ) as mock_create,
+        ):
             # First call
             result1 = await cache.get_admin_client()
 
@@ -141,8 +150,6 @@ class TestSupabaseClientCache:
             assert result1 is result2
 
 
-
-
 class TestGlobalFunctions:
     """Tests for global functions get_supabase_client and get_supabase_admin_client."""
 
@@ -158,7 +165,7 @@ class TestGlobalFunctions:
         mock_client = AsyncMock(spec=AsyncClient)
         mock_cache.get_client = AsyncMock(return_value=mock_client)
 
-        with patch('libs.shared_db.supabase_db.db._cache', mock_cache):
+        with patch("libs.shared_db.supabase_db.db._cache", mock_cache):
             result = await get_supabase_client()
 
             # Verify cache.get_client was called
@@ -179,7 +186,7 @@ class TestGlobalFunctions:
         mock_admin_client = AsyncMock(spec=AsyncClient)
         mock_cache.get_admin_client = AsyncMock(return_value=mock_admin_client)
 
-        with patch('libs.shared_db.supabase_db.db._cache', mock_cache):
+        with patch("libs.shared_db.supabase_db.db._cache", mock_cache):
             result = await get_supabase_admin_client()
 
             # Verify cache.get_admin_client was called
@@ -204,16 +211,17 @@ class TestGlobalFunctions:
 
         mock_cache.get_admin_client = AsyncMock(side_effect=_mock_get_admin_client)
 
-        with patch('libs.shared_db.supabase_db.db._cache', mock_cache), \
-             patch('libs.shared_db.supabase_db.db.reset_supabase_admin_client') as mock_reset, \
-             patch('libs.shared_db.supabase_db.db.HTTPXAsyncClient') as mock_httpx:
-
+        with (
+            patch("libs.shared_db.supabase_db.db._cache", mock_cache),
+            patch("libs.shared_db.supabase_db.db.reset_supabase_admin_client") as mock_reset,
+            patch("libs.shared_db.supabase_db.db.HTTPXAsyncClient") as mock_httpx,
+        ):
             mock_http_client = MagicMock()
             mock_httpx.return_value = mock_http_client
 
             result = await get_supabase_admin_client(
                 user_agent="Custom-UA",
-                custom_headers={"X-Device-Signature": "sig-token"}
+                custom_headers={"X-Device-Signature": "sig-token"},
             )
 
             # Reset should be triggered because custom headers were provided
@@ -241,10 +249,11 @@ class TestGlobalFunctions:
         mock_admin_client = AsyncMock(spec=AsyncClient)
         mock_cache.get_admin_client = AsyncMock(return_value=mock_admin_client)
 
-        with patch('libs.shared_db.supabase_db.db._cache', mock_cache), \
-             patch('libs.shared_db.supabase_db.db.reset_supabase_admin_client') as mock_reset, \
-             patch('libs.shared_db.supabase_db.db.HTTPXAsyncClient') as mock_httpx:
-
+        with (
+            patch("libs.shared_db.supabase_db.db._cache", mock_cache),
+            patch("libs.shared_db.supabase_db.db.reset_supabase_admin_client") as mock_reset,
+            patch("libs.shared_db.supabase_db.db.HTTPXAsyncClient") as mock_httpx,
+        ):
             result = await get_supabase_admin_client()
 
             # No header => no reset and no HTTPX client construction
@@ -266,7 +275,7 @@ class TestGlobalFunctions:
         mock_cache.get_client = AsyncMock(return_value=mock_client)
         mock_cache.get_admin_client = AsyncMock(return_value=mock_admin_client)
 
-        with patch('libs.shared_db.supabase_db.db._cache', mock_cache):
+        with patch("libs.shared_db.supabase_db.db._cache", mock_cache):
             # Call both functions
             regular_client = await get_supabase_client()
             admin_client = await get_supabase_admin_client()
@@ -290,7 +299,7 @@ class TestGlobalFunctions:
         mock_cache = MagicMock()
         mock_cache.reset_admin_client = MagicMock()
 
-        with patch('libs.shared_db.supabase_db.db._cache', mock_cache):
+        with patch("libs.shared_db.supabase_db.db._cache", mock_cache):
             reset_supabase_admin_client()
 
             # Verify cache.reset_admin_client was called
@@ -308,7 +317,7 @@ class TestGlobalFunctions:
         mock_admin_client = AsyncMock(spec=AsyncClient)
         mock_cache.get_fresh_admin_client = AsyncMock(return_value=mock_admin_client)
 
-        with patch('libs.shared_db.supabase_db.db._cache', mock_cache):
+        with patch("libs.shared_db.supabase_db.db._cache", mock_cache):
             result = await get_fresh_supabase_admin_client()
 
             # Verify cache.get_fresh_admin_client was called
@@ -338,7 +347,10 @@ class TestEnvironmentVariables:
         cache = SupabaseClientCache()
 
         # Mock create_async_client to raise an exception
-        with patch('libs.shared_db.supabase_db.db.create_async_client', side_effect=Exception("Invalid URL")):
+        with patch(
+            "libs.shared_db.supabase_db.db.create_async_client",
+            side_effect=Exception("Invalid URL"),
+        ):
             with pytest.raises(Exception, match="Invalid URL"):
                 await cache.get_client()
 
@@ -352,8 +364,10 @@ class TestEnvironmentVariables:
         cache = SupabaseClientCache()
 
         # Mock the constants directly since they're imported at module level
-        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
-             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', ''):
+        with (
+            patch("libs.shared_db.supabase_db.db.SUPABASE_URL", "https://test.supabase.co"),
+            patch("libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY", ""),
+        ):
             with pytest.raises(RuntimeError, match="Missing Supabase admin configuration"):
                 await cache.get_admin_client()
 
@@ -371,7 +385,10 @@ class TestErrorScenarios:
         cache = SupabaseClientCache()
 
         # Mock create_async_client to raise an exception
-        with patch('libs.shared_db.supabase_db.db.create_async_client', side_effect=Exception("Connection failed")):
+        with patch(
+            "libs.shared_db.supabase_db.db.create_async_client",
+            side_effect=Exception("Connection failed"),
+        ):
             with pytest.raises(Exception, match="Connection failed"):
                 await cache.get_client()
 
@@ -388,9 +405,14 @@ class TestErrorScenarios:
         cache = SupabaseClientCache()
 
         # Mock environment and create_async_client to raise an exception
-        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
-             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
-             patch('libs.shared_db.supabase_db.db.create_async_client', side_effect=Exception("Admin connection failed")):
+        with (
+            patch("libs.shared_db.supabase_db.db.SUPABASE_URL", "https://test.supabase.co"),
+            patch("libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY", "test-key"),
+            patch(
+                "libs.shared_db.supabase_db.db.create_async_client",
+                side_effect=Exception("Admin connection failed"),
+            ),
+        ):
             with pytest.raises(Exception, match="Admin connection failed"):
                 await cache.get_admin_client()
 
@@ -407,7 +429,7 @@ class TestErrorScenarios:
         mock_cache = MagicMock()
         mock_cache.get_client = AsyncMock(side_effect=Exception("Cache error"))
 
-        with patch('libs.shared_db.supabase_db.db._cache', mock_cache):
+        with patch("libs.shared_db.supabase_db.db._cache", mock_cache):
             with pytest.raises(Exception, match="Cache error"):
                 await get_supabase_client()
 
@@ -427,7 +449,10 @@ class TestConcurrency:
         # Mock create_async_client
         mock_client = AsyncMock(spec=AsyncClient)
 
-        with patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_client) as mock_create:
+        with patch(
+            "libs.shared_db.supabase_db.db.create_async_client",
+            return_value=mock_client,
+        ) as mock_create:
             # Simulate concurrent calls
             import asyncio
 
@@ -435,11 +460,7 @@ class TestConcurrency:
                 return await cache.get_client()
 
             # Run multiple concurrent calls
-            results = await asyncio.gather(
-                get_client(),
-                get_client(),
-                get_client()
-            )
+            results = await asyncio.gather(get_client(), get_client(), get_client())
 
             # Should only create client once
             assert mock_create.call_count == 1
@@ -467,9 +488,14 @@ class TestConcurrency:
         mock_auth.admin = mock_admin
         mock_admin.list_users = mock_list_users
 
-        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
-             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
-             patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client) as mock_create:
+        with (
+            patch("libs.shared_db.supabase_db.db.SUPABASE_URL", "https://test.supabase.co"),
+            patch("libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY", "test-key"),
+            patch(
+                "libs.shared_db.supabase_db.db.create_async_client",
+                return_value=mock_admin_client,
+            ) as mock_create,
+        ):
             # Simulate concurrent calls
             import asyncio
 
@@ -478,9 +504,7 @@ class TestConcurrency:
 
             # Run multiple concurrent calls
             results = await asyncio.gather(
-                get_admin_client(),
-                get_admin_client(),
-                get_admin_client()
+                get_admin_client(), get_admin_client(), get_admin_client()
             )
 
             # Should only create admin client once
@@ -497,7 +521,6 @@ class TestConcurrency:
 class TestIntegration:
     """Integration tests for the complete module."""
 
-
     @pytest.mark.asyncio
     async def test_multiple_singleton_instances(self):
         """Test that multiple singleton instances share the same state."""
@@ -513,7 +536,10 @@ class TestIntegration:
         # Mock create_async_client
         mock_client = AsyncMock(spec=AsyncClient)
 
-        with patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_client):
+        with patch(
+            "libs.shared_db.supabase_db.db.create_async_client",
+            return_value=mock_client,
+        ):
             # Create client through first instance
             client1 = await cache1.get_client()
 
@@ -547,9 +573,14 @@ class TestIntegration:
         mock_auth.admin = mock_admin
         mock_admin.list_users = mock_list_users
 
-        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
-             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
-             patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client):
+        with (
+            patch("libs.shared_db.supabase_db.db.SUPABASE_URL", "https://test.supabase.co"),
+            patch("libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY", "test-key"),
+            patch(
+                "libs.shared_db.supabase_db.db.create_async_client",
+                return_value=mock_admin_client,
+            ),
+        ):
             with pytest.raises(RuntimeError, match="Supabase admin client warm-up failed"):
                 await cache.get_admin_client()
 
@@ -577,9 +608,14 @@ class TestIntegration:
         mock_auth.admin = mock_admin
         mock_admin.list_users = mock_list_users
 
-        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
-             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
-             patch('libs.shared_db.supabase_db.db.create_async_client', return_value=mock_admin_client):
+        with (
+            patch("libs.shared_db.supabase_db.db.SUPABASE_URL", "https://test.supabase.co"),
+            patch("libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY", "test-key"),
+            patch(
+                "libs.shared_db.supabase_db.db.create_async_client",
+                return_value=mock_admin_client,
+            ),
+        ):
             # Create and cache admin client
             await cache.get_admin_client()
             assert cache._supabase_admin_client is not None
@@ -615,9 +651,11 @@ class TestIntegration:
         mock_auth2.admin = mock_admin2
         mock_admin2.list_users = mock_list_users2
 
-        with patch('libs.shared_db.supabase_db.db.SUPABASE_URL', 'https://test.supabase.co'), \
-             patch('libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY', 'test-key'), \
-             patch('libs.shared_db.supabase_db.db.create_async_client') as mock_create:
+        with (
+            patch("libs.shared_db.supabase_db.db.SUPABASE_URL", "https://test.supabase.co"),
+            patch("libs.shared_db.supabase_db.db.SUPABASE_SERVICE_ROLE_KEY", "test-key"),
+            patch("libs.shared_db.supabase_db.db.create_async_client") as mock_create,
+        ):
             # First call returns first client
             mock_create.return_value = mock_admin_client1
             result1 = await cache.get_admin_client()

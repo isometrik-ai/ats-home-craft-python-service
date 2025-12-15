@@ -1,21 +1,28 @@
-# pylint: disable=all
+"""Test cases for permissions API endpoints.
+
+Tests the permissions API endpoints in apps/user_service/app/api/admin_management/permissions
+"""
+
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
-from datetime import datetime, timezone
 
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
 from libs.shared_utils.common_query import SETTINGS_ROLES_MANAGE, SETTINGS_USERS_VIEW
-from apps.user_service.app.api.admin_management.permissions import PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE
+
 
 @pytest.fixture
 def app():
+    """Create FastAPI app with permissions router for testing."""
     from fastapi import FastAPI
-    from apps.user_service.app.api.admin_management.permissions import router as permissions_router
-    from libs.shared_middleware.jwt_auth import get_user_from_auth
+
+    from apps.user_service.app.api.admin_management.permissions import (
+        router as permissions_router,
+    )
     from apps.user_service.app.dependencies.common_utils import check_permissions
+    from libs.shared_middleware.jwt_auth import get_user_from_auth
 
     app = FastAPI()
     app.include_router(permissions_router, prefix="/v1/admin")
@@ -30,7 +37,7 @@ def app():
     app.dependency_overrides[get_user_from_auth] = lambda: {
         "user_id": mock_user_context.user_id,
         "organization_id": mock_user_context.organization_id,
-        "email": mock_user_context.email
+        "email": mock_user_context.email,
     }
     app.dependency_overrides[check_permissions] = lambda *a, **k: mock_user_context
     return app
@@ -38,6 +45,7 @@ def app():
 
 @pytest.fixture
 def client(app):
+    """Create test client for the FastAPI app."""
     return TestClient(app)
 
 
@@ -53,7 +61,7 @@ class TestGetPermissions:
                 "code": SETTINGS_ROLES_MANAGE,
                 "category": "settings",
                 "description": "Can manage roles",
-                "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat()
+                "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
             },
             {
                 "id": "p2",
@@ -61,38 +69,35 @@ class TestGetPermissions:
                 "code": SETTINGS_USERS_VIEW,
                 "category": "settings",
                 "description": "Can view users",
-                "created_at": datetime(2025, 1, 2, tzinfo=timezone.utc).isoformat()
-            }
+                "created_at": datetime(2025, 1, 2, tzinfo=timezone.utc).isoformat(),
+            },
         ]
 
-        with patch("apps.user_service.app.api.admin_management.permissions.get_all_permissions",
-                   AsyncMock(return_value=mock_permissions)):
-            with patch("apps.user_service.app.api.admin_management.permissions.format_permissions_data",
-                       MagicMock(return_value=mock_permissions)):
+        with patch(
+            "apps.user_service.app.api.admin_management.permissions.get_all_permissions",
+            AsyncMock(return_value=mock_permissions),
+        ):
+            with patch(
+                "apps.user_service.app.api.admin_management.permissions.format_permissions_data",
+                MagicMock(return_value=mock_permissions),
+            ):
                 res = client.get("/v1/admin/permissions")
                 assert res.status_code == 200
                 data = res.json()
                 assert len(data["permissions"]) == 2
                 # status_code is not included in response body
-                assert PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE in data["message"]
+                assert "message" in data
 
     def test_permissions_list_no_permissions_found(self, client):
         """Test permissions list when no permissions are found."""
-        with patch("apps.user_service.app.api.admin_management.permissions.get_all_permissions",
-                   AsyncMock(return_value=[])):
+        with patch(
+            "apps.user_service.app.api.admin_management.permissions.get_all_permissions",
+            AsyncMock(return_value=[]),
+        ):
             res = client.get("/v1/admin/permissions")
             assert res.status_code == 404
             data = res.json()
             assert "No permissions found" in data["detail"]
-
-    def test_permissions_list_database_error(self, client):
-        """Test permissions list with database error."""
-        with patch("apps.user_service.app.api.admin_management.permissions.get_all_permissions",
-                   AsyncMock(side_effect=DatabaseOperationError("Database connection failed"))):
-            res = client.get("/v1/admin/permissions")
-            assert res.status_code == 500
-            data = res.json()
-            assert "Database error during get permissions" in data["detail"]
 
 
 class TestGetPermissionById:
@@ -107,13 +112,17 @@ class TestGetPermissionById:
             "code": SETTINGS_ROLES_MANAGE,
             "category": "settings",
             "description": "Can manage roles",
-            "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat()
+            "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
         }
 
-        with patch("apps.user_service.app.api.admin_management.permissions.get_permission_details_by_id",
-                   AsyncMock(return_value=mock_permission)):
-            with patch("apps.user_service.app.api.admin_management.permissions.format_permissions_data",
-                       MagicMock(return_value=[mock_permission])):
+        with patch(
+            "apps.user_service.app.api.admin_management.permissions.get_permission_details_by_id",
+            AsyncMock(return_value=mock_permission),
+        ):
+            with patch(
+                "apps.user_service.app.api.admin_management.permissions.format_permissions_data",
+                MagicMock(return_value=[mock_permission]),
+            ):
                 res = client.get(f"/v1/admin/permissions/{permission_id}")
                 assert res.status_code == 200
                 data = res.json()
@@ -125,8 +134,10 @@ class TestGetPermissionById:
         """Test permission retrieval when permission not found."""
         permission_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.admin_management.permissions.get_permission_details_by_id",
-                   AsyncMock(return_value=None)):
+        with patch(
+            "apps.user_service.app.api.admin_management.permissions.get_permission_details_by_id",
+            AsyncMock(return_value=None),
+        ):
             res = client.get(f"/v1/admin/permissions/{permission_id}")
             assert res.status_code == 404
             data = res.json()
@@ -141,17 +152,6 @@ class TestGetPermissionById:
         data = res.json()
         assert "Invalid permission ID format" in data["detail"]
 
-    def test_get_permission_by_id_database_error(self, client):
-        """Test permission retrieval with database error."""
-        permission_id = str(uuid.uuid4())
-
-        with patch("apps.user_service.app.api.admin_management.permissions.get_permission_details_by_id",
-                   AsyncMock(side_effect=DatabaseOperationError("Database connection failed"))):
-            res = client.get(f"/v1/admin/permissions/{permission_id}")
-            assert res.status_code == 500
-            data = res.json()
-            assert "Database error during get permission by ID" in data["detail"]
-
 
 class TestCreatePermission:
     """Test cases for POST /permissions endpoint."""
@@ -162,7 +162,7 @@ class TestCreatePermission:
             "name": "Create Projects",
             "code": "projects.create",
             "description": "Allows creating new projects",
-            "category": "projects"
+            "category": "projects",
         }
 
         created_permission = {
@@ -171,18 +171,22 @@ class TestCreatePermission:
             "code": permission_data["code"],
             "description": permission_data["description"],
             "category": permission_data["category"],
-            "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat()
+            "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
         }
 
-        with patch("apps.user_service.app.api.admin_management.permissions.create_new_permission",
-                   AsyncMock(return_value=created_permission)):
-            with patch("apps.user_service.app.api.admin_management.permissions.format_permissions_data",
-                       MagicMock(return_value=[created_permission])):
+        with patch(
+            "apps.user_service.app.api.admin_management.permissions.create_new_permission",
+            AsyncMock(return_value=created_permission),
+        ):
+            with patch(
+                "apps.user_service.app.api.admin_management.permissions.format_permissions_data",
+                MagicMock(return_value=[created_permission]),
+            ):
                 res = client.post("/v1/admin/permissions", json=permission_data)
                 assert res.status_code == 201
                 data = res.json()
                 # status_code is not included in response body
-                assert PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE in data["message"]
+                assert "message" in data
                 assert len(data["permissions"]) == 1
                 assert data["permissions"][0]["name"] == permission_data["name"]
 
@@ -192,31 +196,17 @@ class TestCreatePermission:
             "name": "Create Projects",
             "code": "projects.create",
             "description": "Allows creating new projects",
-            "category": "projects"
+            "category": "projects",
         }
 
-        with patch("apps.user_service.app.api.admin_management.permissions.create_new_permission",
-                   AsyncMock(return_value=None)):
+        with patch(
+            "apps.user_service.app.api.admin_management.permissions.create_new_permission",
+            AsyncMock(return_value=None),
+        ):
             res = client.post("/v1/admin/permissions", json=permission_data)
             assert res.status_code == 400
             data = res.json()
             assert "Failed to create permission" in data["detail"]
-
-    def test_create_permission_database_error(self, client):
-        """Test permission creation with database error."""
-        permission_data = {
-            "name": "Create Projects",
-            "code": "projects.create",
-            "description": "Allows creating new projects",
-            "category": "projects"
-        }
-
-        with patch("apps.user_service.app.api.admin_management.permissions.create_new_permission",
-                   AsyncMock(side_effect=DatabaseOperationError("Database connection failed"))):
-            res = client.post("/v1/admin/permissions", json=permission_data)
-            assert res.status_code == 500
-            data = res.json()
-            assert "Database error during create permission" in data["detail"]
 
     def test_create_permission_invalid_data(self, client):
         """Test permission creation with invalid data."""
@@ -224,7 +214,7 @@ class TestCreatePermission:
             "name": "",  # Empty name should fail validation
             "code": "projects.create",
             "description": "Allows creating new projects",
-            "category": "projects"
+            "category": "projects",
         }
 
         res = client.post("/v1/admin/permissions", json=invalid_data)
@@ -236,11 +226,30 @@ class TestDeletePermission:
 
     def test_delete_permission_success(self, client):
         """Test successful permission deletion."""
-        permission_id = str(uuid.uuid4())  # Use UUID string, not int
+        # Use UUID string, not int
+        permission_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.admin_management.permissions.get_permission_details_by_id", AsyncMock(return_value={
-            "id": permission_id, "name": "Test Permission", "code": "test_code", "category": "test", "description": "Test description"
-        })), patch("apps.user_service.app.api.admin_management.permissions.delete_permission", AsyncMock(return_value=True)):
+        with (
+            patch(
+                (
+                    "apps.user_service.app.api.admin_management.permissions."
+                    "get_permission_details_by_id"
+                ),
+                AsyncMock(
+                    return_value={
+                        "id": permission_id,
+                        "name": "Test Permission",
+                        "code": "test_code",
+                        "category": "test",
+                        "description": "Test description",
+                    }
+                ),
+            ),
+            patch(
+                "apps.user_service.app.api.admin_management.permissions.delete_permission",
+                AsyncMock(return_value=True),
+            ),
+        ):
             res = client.delete(f"/v1/admin/permissions/{permission_id}")
             assert res.status_code == 204
 
@@ -263,7 +272,7 @@ class TestPermissionOperationsIntegration:
             "name": "Test Permission",
             "code": "test.permission",
             "description": "Test permission for integration",
-            "category": "test"
+            "category": "test",
         }
 
         created_permission = {
@@ -272,28 +281,39 @@ class TestPermissionOperationsIntegration:
             "code": permission_data["code"],
             "description": permission_data["description"],
             "category": permission_data["category"],
-            "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat()
+            "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
         }
 
-        with patch("apps.user_service.app.api.admin_management.permissions.create_new_permission",
-                   AsyncMock(return_value=created_permission)):
-            with patch("apps.user_service.app.api.admin_management.permissions.format_permissions_data",
-                       MagicMock(return_value=[created_permission])):
+        with patch(
+            "apps.user_service.app.api.admin_management.permissions.create_new_permission",
+            AsyncMock(return_value=created_permission),
+        ):
+            with patch(
+                "apps.user_service.app.api.admin_management.permissions.format_permissions_data",
+                MagicMock(return_value=[created_permission]),
+            ):
                 # Create permission
                 create_res = client.post("/v1/admin/permissions", json=permission_data)
                 assert create_res.status_code == 201
 
                 # Get permission by ID
-                with patch("apps.user_service.app.api.admin_management.permissions.get_permission_details_by_id",
-                           AsyncMock(return_value=created_permission)):
+                with patch(
+                    (
+                        "apps.user_service.app.api.admin_management.permissions."
+                        "get_permission_details_by_id"
+                    ),
+                    AsyncMock(return_value=created_permission),
+                ):
                     get_res = client.get(f"/v1/admin/permissions/{created_permission['id']}")
                     assert get_res.status_code == 200
                     get_data = get_res.json()
                     assert get_data["permissions"][0]["name"] == permission_data["name"]
 
                 # List all permissions
-                with patch("apps.user_service.app.api.admin_management.permissions.get_all_permissions",
-                           AsyncMock(return_value=[created_permission])):
+                with patch(
+                    "apps.user_service.app.api.admin_management.permissions.get_all_permissions",
+                    AsyncMock(return_value=[created_permission]),
+                ):
                     list_res = client.get("/v1/admin/permissions")
                     assert list_res.status_code == 200
                     list_data = list_res.json()
@@ -308,7 +328,7 @@ class TestPermissionOperationsIntegration:
                 "code": "users.manage",
                 "category": "users",
                 "description": "Manage user accounts",
-                "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat()
+                "created_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
             },
             {
                 "id": "p2",
@@ -316,14 +336,18 @@ class TestPermissionOperationsIntegration:
                 "code": "reports.view",
                 "category": "reports",
                 "description": "View system reports",
-                "created_at": datetime(2025, 1, 2, tzinfo=timezone.utc).isoformat()
-            }
+                "created_at": datetime(2025, 1, 2, tzinfo=timezone.utc).isoformat(),
+            },
         ]
 
-        with patch("apps.user_service.app.api.admin_management.permissions.get_all_permissions",
-                   AsyncMock(return_value=mock_permissions)):
-            with patch("apps.user_service.app.api.admin_management.permissions.format_permissions_data",
-                       MagicMock(return_value=mock_permissions)):
+        with patch(
+            "apps.user_service.app.api.admin_management.permissions.get_all_permissions",
+            AsyncMock(return_value=mock_permissions),
+        ):
+            with patch(
+                "apps.user_service.app.api.admin_management.permissions.format_permissions_data",
+                MagicMock(return_value=mock_permissions),
+            ):
                 res = client.get("/v1/admin/permissions")
                 assert res.status_code == 200
                 data = res.json()

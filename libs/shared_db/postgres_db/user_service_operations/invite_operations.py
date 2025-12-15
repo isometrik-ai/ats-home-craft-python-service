@@ -1,56 +1,47 @@
-"""
-Organization Invite Database Operations Module
-
+"""Organization Invite Database Operations Module
 This module contains all organization invitation-related database operations.
 All SQL queries for invitation management should be centralized here.
-
-Author: AI Assistant
-Date: 2024-12-19
-Last Updated: 2024-12-19
-
-Operations Covered:
-- Invitation CRUD operations
-- Invitation status management
-- Invitation validation operations
-- Invitation search and filtering
-- Invitation token management
 """
-from libs.shared_utils.isometrik_service import is_isometrik_enabled, create_isometrik_user
+
 import os
 import secrets
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from fastapi import HTTPException
-from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.dependencies.invite_utils import hash_token
-from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
-    handle_database_errors, create_error_messages
-)
-from libs import NOW_CONSTANT
-from libs.shared_db.postgres_db.user_service_operations.user_operations import create_new_user
+from typing import Any
 
-# Initialize logger
+from apps.user_service.app.dependencies.invite_utils import hash_token
+from apps.user_service.app.dependencies.logger import get_logger
+from libs import NOW_CONSTANT
+from libs.shared_db.postgres_db.user_service_operations.user_operations import (
+    create_new_user,
+)
+from libs.shared_db.supabase_db.db import (
+    get_fresh_supabase_admin_client,
+    get_supabase_admin_client,
+)
+from libs.shared_utils.http_exceptions import ServiceUnavailableException
+from libs.shared_utils.isometrik_service import (
+    create_isometrik_user,
+    is_isometrik_enabled,
+)
+from libs.shared_utils.status_codes import CustomStatusCode
+
 logger = get_logger("invite_operations")
 
-INVITE_EXPIRY_DAYS = int(os.getenv("INVITE_EXPIRY_DAYS", 7))
+INVITE_EXPIRY_DAYS = int(os.getenv("INVITE_EXPIRY_DAYS", "7"))
 
-# ============================================================================
-# INVITATION CRUD OPERATIONS
-# ============================================================================
 
-@handle_database_errors(
-    "create_organization_invite",
-    custom_messages=create_error_messages("create_organization_invite", "creating"))
-async def create_organization_invite(invite_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a new organization invitation."""
+async def create_organization_invite(invite_data: dict[str, Any]) -> dict[str, Any]:
+    """Create a new organization invitation.
+    Args:
+        invite_data: Invite data
+    Returns:
+        dict containing the new organization invitation
+    """
     supabase = await get_supabase_admin_client()
 
-    # Generate secure token
     invite_token = secrets.token_urlsafe(32)
     token_hash = hash_token(invite_token)
 
-    # Calculate expiration date
     expires_at = datetime.now() + timedelta(days=INVITE_EXPIRY_DAYS)
 
     invite_record = {
@@ -68,7 +59,7 @@ async def create_organization_invite(invite_data: Dict[str, Any]) -> Dict[str, A
             "last_name": invite_data["last_name"],
             "phone": invite_data["phone"],
             "salutation": invite_data["salutation"],
-        }
+        },
     }
 
     table = supabase.table("organization_invites")
@@ -80,11 +71,13 @@ async def create_organization_invite(invite_data: Dict[str, Any]) -> Dict[str, A
     return {}
 
 
-@handle_database_errors(
-    "get_invite_by_token",
-    custom_messages=create_error_messages("get_invite_by_token", "getting"))
-async def get_invite_by_token(token: str) -> Optional[Dict[str, Any]]:
-    """Get invitation details by token."""
+async def get_invite_by_token(token: str) -> dict[str, Any] | None:
+    """Get invitation details by token.
+    Args:
+        token: Token
+    Returns:
+        dict containing the invitation details or None if not found
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organization_invites")
@@ -103,11 +96,13 @@ async def get_invite_by_token(token: str) -> Optional[Dict[str, Any]]:
     return result.data[0]
 
 
-@handle_database_errors(
-    "get_invite_by_id",
-    custom_messages=create_error_messages("get_invite_by_id", "getting"))
-async def get_invite_by_id(invite_id: str) -> Optional[Dict[str, Any]]:
-    """Get invitation details by ID."""
+async def get_invite_by_id(invite_id: str) -> dict[str, Any] | None:
+    """Get invitation details by ID.
+    Args:
+        invite_id: Invite ID
+    Returns:
+        dict containing the invitation details or None if not found
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organization_invites")
@@ -126,15 +121,18 @@ async def get_invite_by_id(invite_id: str) -> Optional[Dict[str, Any]]:
     return result.data[0]
 
 
-@handle_database_errors(
-    "get_organization_invites",
-    custom_messages=create_error_messages("get_organization_invites", "getting"))
 async def get_organization_invites(
-    organization_id: str,
-    limit: int = 20,
-    offset: int = 0
-) -> List[Dict[str, Any]]:
-    """Get all invitations for an organization with optional filtering."""
+    organization_id: str, limit: int = 20, offset: int = 0, status: str | None = None
+) -> list[dict[str, Any]]:
+    """Get all invitations for an organization with optional filtering.
+    Args:
+        organization_id: Organization ID
+        limit: Limit
+        offset: Offset
+        status: Status
+    Returns:
+        list of invitations
+    """
     supabase = await get_fresh_supabase_admin_client()
 
     table = supabase.table("organization_invites")
@@ -144,6 +142,9 @@ async def get_organization_invites(
     )
     eq_query = select_query.eq("organization_id", organization_id)
 
+    if status:
+        eq_query = eq_query.eq("status", status)
+
     order_query = eq_query.order("created_at", desc=True)
     limit_query = order_query.limit(limit)
     offset_query = limit_query.offset(offset)
@@ -151,38 +152,40 @@ async def get_organization_invites(
 
     return result.data if result.data else []
 
-@handle_database_errors(
-    "get_organization_invites_count",
-    custom_messages=create_error_messages("get_organization_invites_count", "getting"))
-async def get_organization_invites_count(
-    organization_id: str
-) -> int:
-    """Get count of invitations for an organization."""
+
+async def get_organization_invites_count(organization_id: str, status: str | None = None) -> int:
+    """Get count of invitations for an organization.
+    Args:
+        organization_id: Organization ID
+        status: Status
+    Returns:
+        int: Total count of invitations
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organization_invites")
     count_query = table.select("id", count="exact")
     eq_query = count_query.eq("organization_id", organization_id)
 
+    if status:
+        eq_query = eq_query.eq("status", status)
+
     result = await eq_query.execute()
     return result.count if result.count else 0
 
 
-@handle_database_errors(
-    "update_invite_status",
-    custom_messages=create_error_messages("update_invite_status", "updating"))
-async def update_invite_status(
-    invite_id: str,
-    status: str,
-    accepted_by: Optional[str] = None
-) -> bool:
-    """Update invitation status."""
+async def update_invite_status(invite_id: str, status: str, accepted_by: str | None = None) -> bool:
+    """Update invitation status.
+    Args:
+        invite_id: Invite ID
+        status: Status
+        accepted_by: Accepted by
+    Returns:
+        bool: True if invitation status was updated successfully, False otherwise
+    """
     supabase = await get_fresh_supabase_admin_client()
 
-    update_data = {
-        "status": status,
-        "updated_at": NOW_CONSTANT
-    }
+    update_data = {"status": status, "updated_at": NOW_CONSTANT}
 
     if accepted_by:
         update_data["accepted_by"] = accepted_by
@@ -196,11 +199,13 @@ async def update_invite_status(
     return result.data is not None and len(result.data) > 0
 
 
-@handle_database_errors(
-    "delete_invite",
-    custom_messages=create_error_messages("delete_invite", "deleting"))
 async def delete_invite(invite_id: str) -> bool:
-    """Delete an invitation."""
+    """Delete an invitation.
+    Args:
+        invite_id: Invite ID
+    Returns:
+        bool: True if invitation was deleted successfully, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organization_invites")
@@ -211,15 +216,17 @@ async def delete_invite(invite_id: str) -> bool:
     return result.data is not None and len(result.data) > 0
 
 
-@handle_database_errors(
-    "check_existing_invite",
-    custom_messages=create_error_messages("check_existing_invite", "checking"))
 async def check_existing_invite(
-    organization_id: str,
-    email: str,
-    status: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
-    """Check if an invitation already exists for the email and organization."""
+    organization_id: str, email: str, status: str | None = None
+) -> dict[str, Any] | None:
+    """Check if an invitation already exists for the email and organization.
+    Args:
+        organization_id: Organization ID
+        email: Email
+        status: Status
+    Returns:
+        dict containing the invitation details or None if not found
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organization_invites")
@@ -237,14 +244,14 @@ async def check_existing_invite(
     return None
 
 
-@handle_database_errors(
-    "check_user_membership",
-    custom_messages=create_error_messages("check_user_membership", "checking"))
-async def check_user_membership(
-    organization_id: str,
-    email: str
-) -> Optional[Dict[str, Any]]:
-    """Check if user is already a member of the organization."""
+async def check_user_membership(organization_id: str, email: str) -> dict[str, Any] | None:
+    """Check if user is already a member of the organization.
+    Args:
+        organization_id: Organization ID
+        email: Email
+    Returns:
+        dict containing the user membership details or None if not found
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organization_members")
@@ -258,19 +265,27 @@ async def check_user_membership(
     return None
 
 
-@handle_database_errors(
-    "add_user_to_organization",
-    custom_messages=create_error_messages("add_user_to_organization", "adding"))
 async def add_user_to_organization(
     organization_id: str,
-    invite_data: Dict[str, Any],
+    invite_data: dict[str, Any],
     email: str,
     role_id: str,
     role_name: str,
     invited_by: str,
-    isometrik_credentials: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Add user to organization as a member."""
+    isometrik_credentials: dict[str, Any],
+) -> dict[str, Any]:
+    """Add user to organization as a member.
+    Args:
+        organization_id: Organization ID
+        invite_data: Invite data
+        email: Email
+        role_id: Role ID
+        role_name: Role name
+        invited_by: Invited by
+        isometrik_credentials: Isometrik credentials
+    Returns:
+        dict containing the new user
+    """
 
     isometrik_user_id = None
     if is_isometrik_enabled():
@@ -281,13 +296,16 @@ async def add_user_to_organization(
             email=email,
             isometrik_credentials=isometrik_credentials,
             organization_id=organization_id,
-            role='member',
+            role="member",
         )
         if isometrik_response:
             isometrik_user_id = isometrik_response.get("userId", None)
-            
+
             if not isometrik_user_id:
-                raise HTTPException(status_code=400, detail="Failed to create Isometrik user")
+                raise ServiceUnavailableException(
+                    message_key="errors.isometrik.failed_to_create_user",
+                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+                )
 
     if isometrik_user_id:
         invite_data["isometrik_user_id"] = isometrik_user_id
@@ -308,7 +326,7 @@ async def add_user_to_organization(
         "isometrik_user_id": invite_data.get("isometrik_user_id", None),
         "joined_at": NOW_CONSTANT,
         "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT
+        "updated_at": NOW_CONSTANT,
     }
 
     result = await create_new_user(member_record)

@@ -1,24 +1,13 @@
-# pylint: disable=all
-
-"""
-Test module for path validators in user and organisation schemas.
-
-This module contains comprehensive tests for path validation in:
-- UpdateUserRequest.avatar_url
-- UpdateUserProfileRequest.avatar_url
-- OrganizationUpdate.logo_url
-- UpdateOrganisationRequest.logo_url
-
-Author: AI Assistant
-Date: 2025-01-14
-"""
+"""Test module for path validators in user and organisation schemas."""
 
 import pytest
 from pydantic import ValidationError
 
+from apps.user_service.app.schemas.organisations import (
+    OrganizationUpdate,
+    UpdateOrganisationRequest,
+)
 from apps.user_service.app.schemas.users import UpdateUserRequest
-from apps.user_service.app.api.admin_management.users.update_user import UpdateUserProfileRequest
-from apps.user_service.app.schemas.organisations import OrganizationUpdate, UpdateOrganisationRequest
 
 
 class TestAvatarPathValidation:
@@ -107,24 +96,6 @@ class TestAvatarPathValidation:
         assert len(errors) == 1
         assert errors[0]["loc"] == ("avatar_url",)
         assert "contains invalid characters" in str(errors[0]["msg"]).lower()
-
-    def test_update_user_profile_request_valid_path(self):
-        """Test UpdateUserProfileRequest with valid path."""
-        request = UpdateUserProfileRequest(avatar_url="house-of-apps-legal-ai/user-123/profile.jpg")
-        assert request.avatar_url == "house-of-apps-legal-ai/user-123/profile.jpg"
-
-    def test_update_user_profile_request_invalid_url(self):
-        """Test UpdateUserProfileRequest with invalid URL."""
-        with pytest.raises(ValidationError) as exc_info:
-            UpdateUserProfileRequest(avatar_url="https://example.com/avatar.jpg")
-        errors = exc_info.value.errors()
-        assert len(errors) == 1
-        assert errors[0]["loc"] == ("avatar_url",)
-
-    def test_update_user_profile_request_none_url(self):
-        """Test UpdateUserProfileRequest with None URL."""
-        request = UpdateUserProfileRequest(avatar_url=None)
-        assert request.avatar_url is None
 
     def test_path_with_whitespace_trimmed(self):
         """Test path with leading/trailing whitespace is trimmed."""
@@ -232,7 +203,7 @@ class TestLogoPathValidation:
         org = OrganizationUpdate(
             name="Test Org",
             logo_url="house-of-apps-legal-ai/org-123/logo.png",
-            industry="Technology"
+            industry="Technology",
         )
         assert org.logo_url == "house-of-apps-legal-ai/org-123/logo.png"
         assert org.name == "Test Org"
@@ -243,7 +214,7 @@ class TestLogoPathValidation:
             OrganizationUpdate(
                 name="Test Org",
                 logo_url="https://example.com/logo.png",
-                industry="Technology"
+                industry="Technology",
             )
 
 
@@ -252,8 +223,13 @@ class TestPathValidationEdgeCases:
 
     def test_path_with_uuid(self):
         """Test path with UUID."""
-        request = UpdateUserRequest(avatar_url="house-of-apps-legal-ai/0abb3450-2cc8-416a-8ff7-e7de77f2825b/women_4.jpg")
-        assert request.avatar_url == "house-of-apps-legal-ai/0abb3450-2cc8-416a-8ff7-e7de77f2825b/women_4.jpg"
+        request = UpdateUserRequest(
+            avatar_url="house-of-apps-legal-ai/0abb3450-2cc8-416a-8ff7-e7de77f2825b/women_4.jpg"
+        )
+        assert (
+            request.avatar_url
+            == "house-of-apps-legal-ai/0abb3450-2cc8-416a-8ff7-e7de77f2825b/women_4.jpg"
+        )
 
     def test_path_with_dots(self):
         """Test path with dots in filename."""
@@ -270,7 +246,7 @@ class TestPathValidationEdgeCases:
         request = UpdateUserRequest(
             full_name="Test User",
             avatar_url="house-of-apps-legal-ai/user-123/avatar.jpg",
-            timezone="UTC"
+            timezone="UTC",
         )
         assert request.avatar_url == "house-of-apps-legal-ai/user-123/avatar.jpg"
         assert request.full_name == "Test User"
@@ -281,5 +257,5 @@ class TestPathValidationEdgeCases:
             UpdateUserRequest(
                 full_name="Test User",
                 avatar_url="https://example.com/avatar.jpg",
-                timezone="UTC"
+                timezone="UTC",
             )

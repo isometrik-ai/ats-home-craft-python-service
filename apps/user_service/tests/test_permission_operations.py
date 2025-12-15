@@ -1,16 +1,21 @@
-# pylint: disable=all
+"""Test cases for permission operations module.
+
+Tests functions in permission_operations.py module.
+"""
+
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime
 
+from apps.user_service.app.schemas.admin_access_management import (
+    CreatePermissionRequest,
+)
 from libs.shared_db.postgres_db.user_service_operations.permission_operations import (
     create_new_permission,
+    get_all_permissions,
     get_permission_details_by_id,
-    get_all_permissions
 )
-from apps.user_service.app.schemas.admin_access_management import CreatePermissionRequest
 
 
 class TestPermissionOperations:
@@ -28,7 +33,7 @@ class TestPermissionOperations:
             name="Test Permission",
             code="test.permission",
             category="test",
-            description="Test permission description"
+            description="Test permission description",
         )
 
         mock_created_permission = {
@@ -38,14 +43,21 @@ class TestPermissionOperations:
             "category": permission_data.category,
             "description": permission_data.description,
             "organization_id": organization_id,
-            "created_at": "2024-01-01T00:00:00Z"
+            "created_at": "2024-01-01T00:00:00Z",
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_created_permission]
-            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_permission(permission_data, organization_id)
@@ -61,14 +73,21 @@ class TestPermissionOperations:
             name="Test Permission",
             code="test.permission",
             category="test",
-            description="Test permission description"
+            description="Test permission description",
         )
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_permission(permission_data, organization_id)
@@ -83,7 +102,7 @@ class TestPermissionOperations:
             name="Minimal Permission",
             code="minimal.permission",
             category="minimal",
-            description=""
+            description="",
         )
 
         mock_created_permission = {
@@ -93,14 +112,21 @@ class TestPermissionOperations:
             "category": permission_data.category,
             "description": permission_data.description,
             "organization_id": organization_id,
-            "created_at": "2024-01-01T00:00:00Z"
+            "created_at": "2024-01-01T00:00:00Z",
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_created_permission]
-            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_permission(permission_data, organization_id)
@@ -121,14 +147,21 @@ class TestPermissionOperations:
             "category": "test",
             "description": "Test permission description",
             "organization_id": organization_id,
-            "created_at": "2024-01-01T00:00:00Z"
+            "created_at": "2024-01-01T00:00:00Z",
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_permission]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await get_permission_details_by_id(permission_id, organization_id)
@@ -142,11 +175,18 @@ class TestPermissionOperations:
         permission_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await get_permission_details_by_id(permission_id, organization_id)
@@ -167,14 +207,21 @@ class TestPermissionOperations:
             "description": "Test permission description",
             "organization_id": organization_id,
             "created_at": "2024-01-01T00:00:00Z",
-            "role_count": 3
+            "role_count": 3,
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_permission]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await get_permission_details_by_id(permission_id, organization_id)
@@ -195,7 +242,7 @@ class TestPermissionOperations:
                 "category": "users",
                 "description": "Read users permission",
                 "organization_id": organization_id,
-                "created_at": "2024-01-01T00:00:00Z"
+                "created_at": "2024-01-01T00:00:00Z",
             },
             {
                 "id": str(uuid.uuid4()),
@@ -204,7 +251,7 @@ class TestPermissionOperations:
                 "category": "users",
                 "description": "Write users permission",
                 "organization_id": organization_id,
-                "created_at": "2024-01-02T00:00:00Z"
+                "created_at": "2024-01-02T00:00:00Z",
             },
             {
                 "id": str(uuid.uuid4()),
@@ -213,15 +260,22 @@ class TestPermissionOperations:
                 "category": "admin",
                 "description": "Admin access permission",
                 "organization_id": organization_id,
-                "created_at": "2024-01-03T00:00:00Z"
-            }
+                "created_at": "2024-01-03T00:00:00Z",
+            },
         ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = mock_permissions
-            mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.order.return_value.execute = AsyncMock(return_value=mock_result)
+            (
+                mock_supabase.table.return_value.select.return_value.order.return_value.execute
+            ) = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)
@@ -235,11 +289,18 @@ class TestPermissionOperations:
         """Test retrieval of all permissions when no permissions found."""
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.order.return_value.execute = AsyncMock(return_value=mock_result)
+            (
+                mock_supabase.table.return_value.select.return_value.order.return_value.execute
+            ) = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)
@@ -259,7 +320,7 @@ class TestPermissionOperations:
                 "category": "reports",
                 "description": "View reports",
                 "organization_id": organization_id,
-                "created_at": "2024-01-03T00:00:00Z"
+                "created_at": "2024-01-03T00:00:00Z",
             },
             {
                 "id": str(uuid.uuid4()),
@@ -268,7 +329,7 @@ class TestPermissionOperations:
                 "category": "system",
                 "description": "System administration",
                 "organization_id": organization_id,
-                "created_at": "2024-01-02T00:00:00Z"
+                "created_at": "2024-01-02T00:00:00Z",
             },
             {
                 "id": str(uuid.uuid4()),
@@ -277,15 +338,22 @@ class TestPermissionOperations:
                 "category": "users",
                 "description": "Manage users",
                 "organization_id": organization_id,
-                "created_at": "2024-01-01T00:00:00Z"
-            }
+                "created_at": "2024-01-01T00:00:00Z",
+            },
         ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = mock_permissions
-            mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.order.return_value.execute = AsyncMock(return_value=mock_result)
+            (
+                mock_supabase.table.return_value.select.return_value.order.return_value.execute
+            ) = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)
@@ -309,7 +377,7 @@ class TestPermissionOperations:
                 "description": "Read users permission",
                 "organization_id": organization_id,
                 "created_at": "2024-01-01T00:00:00Z",
-                "role_count": 5
+                "role_count": 5,
             },
             {
                 "id": str(uuid.uuid4()),
@@ -319,15 +387,22 @@ class TestPermissionOperations:
                 "description": "Write users permission",
                 "organization_id": organization_id,
                 "created_at": "2024-01-02T00:00:00Z",
-                "role_count": 2
-            }
+                "role_count": 2,
+            },
         ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = mock_permissions
-            mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.order.return_value.execute = AsyncMock(return_value=mock_result)
+            (
+                mock_supabase.table.return_value.select.return_value.order.return_value.execute
+            ) = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)
@@ -344,7 +419,7 @@ class TestPermissionOperations:
             name="Special & Permission",
             code="special.permission@test",
             category="special-category",
-            description="Permission with special chars: @#$%^&*()"
+            description="Permission with special chars: @#$%^&*()",
         )
 
         mock_created_permission = {
@@ -354,14 +429,21 @@ class TestPermissionOperations:
             "category": permission_data.category,
             "description": permission_data.description,
             "organization_id": organization_id,
-            "created_at": "2024-01-01T00:00:00Z"
+            "created_at": "2024-01-01T00:00:00Z",
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_created_permission]
-            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await create_new_permission(permission_data, organization_id)
@@ -372,7 +454,7 @@ class TestPermissionOperations:
             assert result["category"] == "special-category"
 
     @pytest.mark.asyncio
-    async def test_get_permission_details_by_id_with_long_description(self):
+    async def test_get_permission_details_long_desc(self):
         """Test permission retrieval with long description."""
         permission_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
@@ -385,14 +467,21 @@ class TestPermissionOperations:
             "category": "test",
             "description": long_description,
             "organization_id": organization_id,
-            "created_at": "2024-01-01T00:00:00Z"
+            "created_at": "2024-01-01T00:00:00Z",
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_permission]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await get_permission_details_by_id(permission_id, organization_id)
@@ -413,7 +502,7 @@ class TestPermissionOperations:
                 "category": "用户",
                 "description": "管理用户权限",
                 "organization_id": organization_id,
-                "created_at": "2024-01-01T00:00:00Z"
+                "created_at": "2024-01-01T00:00:00Z",
             },
             {
                 "id": str(uuid.uuid4()),
@@ -422,15 +511,22 @@ class TestPermissionOperations:
                 "category": "システム",
                 "description": "システム管理権限",
                 "organization_id": organization_id,
-                "created_at": "2024-01-02T00:00:00Z"
-            }
+                "created_at": "2024-01-02T00:00:00Z",
+            },
         ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.permission_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.permission_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = mock_permissions
-            mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.order.return_value.execute = AsyncMock(return_value=mock_result)
+            (
+                mock_supabase.table.return_value.select.return_value.order.return_value.execute
+            ) = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await get_all_permissions(organization_id)

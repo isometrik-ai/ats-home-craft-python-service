@@ -1,89 +1,54 @@
-"""
-Organization Invite Management API Module
-
+"""Organization Invite Management API Module
 This module provides comprehensive organization invitation management APIs.
 All endpoints include proper authentication, validation, and database operations.
-
-Author: AI Assistant
-Date: 2024-12-19
-Last Updated: 2024-12-19
-
-Endpoints Covered:
-- Create organization invitation
-- List organization invitations
-- Get invitation details
-- Accept invitation
-- Reject invitation
-- Resend invitation
-- Revoke invitation
-- Delete invitation
 """
 
-import uuid
 import os
-from typing import Optional
-from dataclasses import dataclass
 
-from fastapi import APIRouter, HTTPException, status, Depends, Body, Query, Request
-from datetime import datetime, timezone
-# Logger import
-# from apps.user_service.app.api.admin_management.users import update_user
-from apps.user_service.app.dependencies.logger import get_logger
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
+from fastapi import status as http_status
 
+# Schema imports
 from apps.user_service.app.app_instance import limiter
+
+# Audit logging import
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 
 # Local imports - app dependencies and schemas
 from apps.user_service.app.dependencies.common_utils import (
-    extract_user_context,
-    handle_api_exceptions,
-    validate_pagination_params,
-    validate_uuid_format,
-    require_permission,
     check_permissions,
+    handle_api_exceptions,
+    validate_uuid_format,
 )
-from apps.user_service.app.dependencies.invite_utils import (
-    validate_email_format,
-    build_invite_details_response,
-    build_invite_list_item,
-    handle_invite_validation_error,
-    handle_invite_permission_error,
-    generate_invite_url,
-    check_organization_capacity,
-    validate_organization_access,
-)
+from apps.user_service.app.dependencies.invite_utils import build_invite_list_item
 
-# Audit logging import
-from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
-    audit_api_call,
+# Logger import
+from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.dependencies.organisation_utils import (
+    validate_organization_subscription,
 )
-
-# Schema imports
-from apps.user_service.app.api.auth import _is_password_strong, PASSWORD_CONDITION_MESSAGE_EXTENDED
+from apps.user_service.app.dependencies.user_utils import build_full_name
 from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.schemas.invites import (
-    InviteCreateRequest,
-    InviteResponse,
     InviteAcceptBySettingPasswordRequest,
     InviteAcceptResponse,
+    InviteCreateRequest,
     InviteListResponse,
+    InviteResponse,
 )
-
-# Third-party imports
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception, sign_up_supabase_user
-from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_user
 
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.invite_operations import (
+    add_user_to_organization,
+    check_existing_invite,
+    check_user_membership,
     create_organization_invite,
-    get_invite_by_token,
+    delete_invite,
     get_invite_by_id,
+    get_invite_by_token,
     get_organization_invites,
     get_organization_invites_count,
     update_invite_status,
-    delete_invite,
-    check_existing_invite,
-    check_user_membership,
-    add_user_to_organization
 )
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
     get_organisation_details_by_id,
@@ -91,142 +56,57 @@ from libs.shared_db.postgres_db.user_service_operations.organisation_operations 
 from libs.shared_db.postgres_db.user_service_operations.role_operations import (
     get_role_by_id,
 )
+from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
 
-from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USERS_MANAGE
+# Third-party imports
+from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
+    sign_up_supabase_user,
+)
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USERS_MANAGE
 
 # Email service import
 from libs.shared_utils.email_utils import send_organization_invitation_email
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    ForbiddenException,
+    InternalServerErrorException,
+    NotFoundException,
+)
+from libs.shared_utils.response_factory import list_response, success_response
+from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger("invite-api")
+
 
 # Create router for invite endpoints
 router = APIRouter(prefix="/invite", tags=["Organization Invitations"])
 
-# Initialize logger for invite module
-logger = get_logger("invite-api")
 
-# Authentication description for API documentation
-INVITE_NOT_FOUND_MESSAGE = "Invitation not found"
-
-# Configure this based on your environment
 BASE_URL = os.getenv("BASE_URL")
 
-# Constants for repeated strings
-ORGANIZATION_MANAGE_PERMISSION = "organization.appscrip.manage"
-INVITATION_ID_LABEL = "invitation ID"
-DATABASE_ERROR_MESSAGE = "Database transaction failed - Request ID: %s, Error: %s"
-INVALID_INVITATION_TOKEN_MESSAGE = "Invalid invitation token"
-INVALID_INVITATION_REQUEST_MESSAGE = INVALID_INVITATION_TOKEN_MESSAGE + " Request ID: %s"
-
-
-
-@dataclass
-class InviteQueryParams:
-    """Query parameters for invitation listing and filtering."""
-
-    page: int = 1
-    page_size: int = 20
-    status: Optional[str] = None
-
-
-def get_invite_query_params(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    status: Optional[str] = Query(None),
-) -> InviteQueryParams:
-    """
-    Dependency function to extract and validate invitation query parameters.
-
-    Args:
-        page: Page number for pagination
-        page_size: Number of items per page
-        status: Filter by invitation status
-
-    Returns:
-        InviteQueryParams: Validated query parameters
-    """
-    return InviteQueryParams(
-        page=page, page_size=page_size, status=status
-    )
-
-
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
-
-def _validate_invite_request(request: InviteCreateRequest) -> None:
-    """
-    Validate invitation request data.
-
-    Args:
-        request: Invitation creation request
-
-    Raises:
-        HTTPException: If validation fails
-    """
-    # Validate email format
-    if not validate_email_format(request.email):
-        handle_invite_validation_error("email", request.email, "Invalid email format")
-
-    # Validate role
-    if not isinstance(request.role_id, uuid.UUID):
-        handle_invite_validation_error(
-            "role", request.role_id, "Invalid role ID")
-
-
-async def _process_invite_list_request(
-    user_context, organization_id: str, query_params: InviteQueryParams
-):
-    """
-    Process the complete invitation list request.
-
-    Args:
-        user_context: User context from JWT
-        organization_id: Organization ID
-        query_params: Query parameters
-
-    Returns:
-        tuple: (invitations, total_count, page, page_size, message)
-    """
-    # Validate organization access
-    if not await validate_organization_access(user_context, organization_id):
-        handle_invite_permission_error("access organization invitations")
-
-    # Validate and process query parameters
-    page, page_size, offset = validate_pagination_params(
-        query_params.page, query_params.page_size
-    )
-
-    # Execute queries and get results
-    invitations_data = await get_organization_invites(
-        organization_id=organization_id,
-        limit=page_size,
-        offset=offset
-    )
-    total_count = await get_organization_invites_count(
-        organization_id=organization_id,
-    )
-
-    # Process results
-    invitations = [build_invite_list_item(invite) for invite in invitations_data]
-
-    # Build response message
-    message = f"Retrieved {len(invitations)} invitations"
-
-    return invitations, total_count, page, page_size, message
-
-
-# ============================================================================
-# API ENDPOINTS
-# ============================================================================
-
-# IMPORTANT: Specific routes must come BEFORE parameterized routes to avoid conflicts
-# Routes like /accept, /reject, /cleanup must be defined before /{organization_id}
 
 @handle_api_exceptions("accept invitation by setting password")
 @router.post(
     "/set-password",
-    response_model=InviteAcceptResponse,
-    status_code=status.HTTP_202_ACCEPTED,
+    description="Accept an organization invitation by setting password",
+    summary="Accept an organization invitation by setting password",
+    status_code=http_status.HTTP_202_ACCEPTED,
+    response_model=None,
+    responses={
+        http_status.HTTP_202_ACCEPTED: {
+            "model": InviteAcceptResponse,
+            "description": "Invitation accepted successfully",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_409_CONFLICT: {"description": "Conflict"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -241,101 +121,81 @@ async def _process_invite_list_request(
     table_name="organization_invites",
     category="INVITATION",
 )
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def accept_and_set_password_invitation(
     request: Request,
     body: InviteAcceptBySettingPasswordRequest = Body(...),
 ):
-    """
-    Accept an organization invitation
-
-    Args:
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-        body (InviteAcceptBySettingPasswordRequest): Invitation acceptance data
-
-    Returns:
-        InviteAcceptResponse: Success response with organization details
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Set audit context for invitation acceptance
-    request.state.audit_table = "organization_invites"
-    request.state.audit_description = f"Accepted invitation for token: {body.token}"
-    request.state.audit_risk_level = "medium"
-
-    if not body.password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password is required"
-        )
-
-    if not _is_password_strong(body.password):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
-        )
-
-    # Get invitation details by token
-    invitation_data = await get_invite_by_token(body.token)
-
-    if not invitation_data:
-        logger.warning(INVALID_INVITATION_REQUEST_MESSAGE, request_id)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=INVALID_INVITATION_TOKEN_MESSAGE
-        )
-
-    # Check if user is already a member
-    existing_member = await check_user_membership(
-        invitation_data["organization_id"],
-        invitation_data["email"]
-    )
-    if existing_member:
-        logger.info("User already a member - Request ID: %s, User: %s",
-                request_id, invitation_data["email"])
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User is already a member of this organization"
-        )
-
-    organization_data = await get_organisation_details_by_id(invitation_data["organization_id"])
-    if not organization_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found"
-        )
-
-    role_name = await get_role_by_id(invitation_data['role_id'], invitation_data["organization_id"])
-
+    """Accept an organization invitation by setting password"""
     try:
-        inv_meta = invitation_data["metadata"]
+        # Set audit context for invitation acceptance
+        request.state.audit_table = "organization_invites"
+        request.state.audit_description = f"Accepted invitation for token: {body.token}"
+        request.state.audit_risk_level = "medium"
 
-        signup_result = await sign_up_supabase_user(SignupRequest(
-            email=invitation_data["email"],
-            password=body.password,
-            first_name=inv_meta.get("first_name", None),
-            last_name=inv_meta.get("last_name", None),
-            phone=inv_meta.get("phone", None),
-            timezone="UTC",
-            salutation=inv_meta.get("salutation", None),
-            verification_id="",
-            verification_code="",
-        ))
-
-        if not signup_result:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create user account"
+        # Get invitation details by token
+        invitation_data = await get_invite_by_token(body.token)
+        if not invitation_data:
+            raise NotFoundException(
+                message_key="invitations.errors.invitation_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        isometrik_credentials = organization_data.get("settings", {}).get("isometrik_application_details", {})
+        # Check if user is already a member
+        existing_member = await check_user_membership(
+            invitation_data["organization_id"], invitation_data["email"]
+        )
+        if existing_member:
+            raise ConflictException(
+                message_key="invitations.errors.user_already_a_member",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        organization_data = await get_organisation_details_by_id(invitation_data["organization_id"])
+        if not organization_data:
+            raise NotFoundException(
+                message_key="invitations.errors.organization_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        role_name = await get_role_by_id(
+            invitation_data["role_id"], invitation_data["organization_id"]
+        )
+        if not role_name:
+            raise NotFoundException(
+                message_key="invitations.errors.role_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        inv_meta = invitation_data["metadata"]
+
+        signup_result = await sign_up_supabase_user(
+            SignupRequest(
+                email=invitation_data["email"],
+                password=body.password,
+                first_name=inv_meta.get("first_name", None),
+                last_name=inv_meta.get("last_name", None),
+                phone=inv_meta.get("phone", None),
+                timezone="UTC",
+                salutation=inv_meta.get("salutation", None),
+                verification_id="",
+                verification_code="",
+            )
+        )
+
+        if not signup_result:
+            raise InternalServerErrorException(
+                message_key="errors.internal_server_error",
+                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+            )
+
+        isometrik_credentials = organization_data.get("settings", {}).get(
+            "isometrik_application_details", {}
+        )
 
         if not isometrik_credentials:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Isometrik application not found"
+            raise NotFoundException(
+                message_key="invitations.errors.isometrik_application_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
 
         # Add user to organization
@@ -350,41 +210,47 @@ async def accept_and_set_password_invitation(
                 "salutation": inv_meta.get("salutation", None),
             },
             email=invitation_data["email"],
-            role_id=invitation_data['role_id'],
+            role_id=invitation_data["role_id"],
             role_name=role_name["name"],
             invited_by=invitation_data["invited_by"],
-            isometrik_credentials=isometrik_credentials
+            isometrik_credentials=isometrik_credentials,
         )
 
         # Update invitation status
-        await update_invite_status(
-            invitation_data["id"],
-            "accepted",
-            signup_result.user.id
+        await update_invite_status(invitation_data["id"], "accepted", signup_result.user.id)
+
+        return success_response(
+            request=request,
+            message_key="invitations.success.invitation_accepted",
+            custom_code=CustomStatusCode.ACCEPTED,
+            status_code=http_status.HTTP_202_ACCEPTED,
         )
 
-        return InviteAcceptResponse(
-            success=True,
-            message="Invitation accepted successfully"
-        )
-
-    except HTTPException as signup_error:
-        raise signup_error
-    except Exception as db_error:
-        log_exception()
-        logger.error("Database error accepting invitation - Request ID: %s, Error: %s",
-                    request_id, str(db_error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to accept invitation"
-        ) from db_error
+    except HTTPException as error:
+        raise error
+    except Exception as error:
+        logger.error("Error accepting invitation - Error: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        ) from error
 
 
 @handle_api_exceptions("create organization invitation")
 @router.post(
     "/{organization_id}",
     response_model=InviteResponse,
-    status_code=status.HTTP_201_CREATED,
+    description="Create a new organization invitation",
+    summary="Create a new organization invitation",
+    status_code=http_status.HTTP_201_CREATED,
+    responses={
+        http_status.HTTP_201_CREATED: {
+            "model": InviteResponse,
+            "description": "Invitation created successfully",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -399,90 +265,71 @@ async def accept_and_set_password_invitation(
     table_name="organization_invites",
     category="INVITATION",
 )
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def create_invitation(
     organization_id: str,
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     body: InviteCreateRequest = Body(...),
 ):
-    """
-    Create a new organization invitation (Requires: organization.appscrip.manage)
-
-    This endpoint creates an invitation for a user to join an organization with a specific role.
-
-    Args:
-        organization_id (str): The UUID of the organization
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-        body (InviteCreateRequest): Invitation creation data
-
-    Returns:
-        InviteResponse: Success response with invitation details
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Set audit context for invitation creation
-    request.state.audit_table = "organization_invites"
-    temp_string = f"Created invitation for email: {body.email} in organization: {organization_id}"
-    request.state.audit_description = temp_string
-    request.state.audit_risk_level = "medium"
-
-    # Validate organization ID format
-    validate_uuid_format(organization_id, "organization ID")
-
-    # Extract user context & Check permissions
-    user_context = await check_permissions(
-        current_user=current_user,
-        permission_codes=SETTINGS_USERS_MANAGE,
-        organization_id=organization_id,
-        action_description="create organization invitations"
-    )
-
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-
-    # Validate organization access
-    if not await validate_organization_access(user_context, organization_id):
-        handle_invite_permission_error("create organization invitations")
-
-    # Validate request data
-    _validate_invite_request(body)
-
-    # Get organization details
-    organization_data = await get_organisation_details_by_id(organization_id)
-    if not organization_data:
-        logger.warning("Organization not found - Request ID: %s", request_id)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found"
-        )
-
-    # Check organization capacity
-    await check_organization_capacity(organization_data)
-
-    # Check if user is already a member
-    existing_member = await check_user_membership(organization_id, body.email)
-    if existing_member:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User is already a member of this organization"
-        )
-
-    # Check for existing pending invitation
-    existing_invite = await check_existing_invite(organization_id, body.email)
-    if existing_invite:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A pending invitation already exists for this email"
-        )
-
-    # Create invitation
+    """Create a new organization invitation"""
     try:
+        # Set audit context for invitation creation
+        request.state.audit_table = "organization_invites"
+        temp_string = (
+            f"Created invitation for email: {body.email} in organization: {organization_id}"
+        )
+        request.state.audit_description = temp_string
+        request.state.audit_risk_level = "medium"
+
+        # Validate organization ID format
+        validate_uuid_format(organization_id, "organization ID")
+
+        # Extract user context & Check permissions
+        user_context = await check_permissions(
+            current_user=current_user,
+            permission_codes=SETTINGS_USERS_MANAGE,
+            organization_id=organization_id,
+        )
+
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+
+        if not user_context.organization_id == organization_id:
+            raise ForbiddenException(
+                message_key="errors.forbidden",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+
+        # Get organization details
+        organization_data = await get_organisation_details_by_id(organization_id)
+        if not organization_data:
+            raise NotFoundException(
+                message_key="invitations.errors.organization_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        # Check organization capacity
+        await validate_organization_subscription(organization_data)
+
+        # Check if user is already a member
+        existing_member = await check_user_membership(organization_id, body.email)
+        if existing_member:
+            raise ConflictException(
+                message_key="invitations.errors.user_already_a_member",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        # Check for existing pending invitation
+        existing_invite = await check_existing_invite(organization_id, body.email)
+        if existing_invite:
+            raise ConflictException(
+                message_key="invitations.errors.pending_invitation_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
         invite_data = {
             "organization_id": organization_id,
             "email": body.email,
@@ -496,125 +343,171 @@ async def create_invitation(
 
         created_invite = await create_organization_invite(invite_data)
 
-        # Generate invitation URL (you may need to configure your base URL)
-        invite_url = generate_invite_url(BASE_URL, created_invite["token_hash"])
+        # Generate invitation URL
+        invite_url = (
+            f"{BASE_URL.rstrip('/')}/invite/accept/"
+            f"?token={created_invite['token_hash']}&page=invite-user"
+        )
 
         role_name = await get_role_by_id(body.role_id, organization_id)
-        inviter_name = await get_user_by_id(user_context.user_id)
+        if not role_name:
+            raise NotFoundException(
+                message_key="invitations.errors.role_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
 
-        inviter_full_name, invitee_full_name = "", ""
+        inviter = await get_user_by_id(user_context.user_id)
 
-        for z in [body.salutation, body.first_name, body.last_name]:
-            if z:
-                invitee_full_name += f"{z} "
+        invitee_full_name = build_full_name(body.salutation, body.first_name, body.last_name)
 
-        user_meta = inviter_name.user.user_metadata
-        for z in [user_meta.get("salutation", None), user_meta.get("first_name", None), user_meta.get("last_name", None)]:
-            if z:
-                inviter_full_name += f"{z} "
+        user_meta = inviter.user.user_metadata or {}
+        inviter_full_name = build_full_name(
+            user_meta.get("salutation"),
+            user_meta.get("first_name"),
+            user_meta.get("last_name"),
+        )
 
         # Send invitation email
-        email_sent = send_organization_invitation_email(
+        await send_organization_invitation_email(
             email=body.email,
             organization_name=organization_data["name"],
-            inviter_name=inviter_full_name.strip(),  # You might want to get the actual name
+            inviter_name=inviter_full_name.strip(),
             invitee_name=invitee_full_name.strip(),
             invite_url=invite_url,
             role_name=role_name["name"],
-            expires_at=created_invite["expires_at"]
-        )
-
-        if not email_sent:
-            logger.warning("Failed to send invitation email - Request ID: %s, Email: %s",
-                         request_id, body.email)
-
-        logger.info("Invitation created successfully - Request ID: %s, Invite ID: %s",
-                   request_id, created_invite["id"])
-
-        return InviteResponse(
-            success=True,
-            invite_id=created_invite["id"],
-            invite_url=invite_url,
-            email=body.email,
             expires_at=created_invite["expires_at"],
-            message="Invitation created successfully"
         )
-    except HTTPException as email_error:
-        raise email_error
 
-    except Exception as db_error:
-        log_exception()
-        logger.error(DATABASE_ERROR_MESSAGE, request_id, str(db_error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create invitation"
-        ) from db_error
+        return success_response(
+            request=request,
+            message_key="invitations.success.invitation_created",
+            custom_code=CustomStatusCode.CREATED,
+            status_code=http_status.HTTP_201_CREATED,
+            data=InviteResponse(
+                invite_id=created_invite["id"],
+                invite_url=invite_url,
+                email=body.email,
+                expires_at=created_invite["expires_at"],
+            ),
+        )
+
+    except HTTPException as error:
+        raise error
+    except Exception as error:
+        logger.error("Error creating organization invitation - Error: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        ) from error
 
 
 @handle_api_exceptions("get organization invitations")
 @router.get(
     "/{organization_id}",
-    response_model=InviteListResponse,
-    status_code=status.HTTP_200_OK
+    description="Get list of all invitations for an organization",
+    summary="Get list of all invitations for an organization",
+    status_code=http_status.HTTP_200_OK,
+    response_model=None,
+    responses={
+        http_status.HTTP_200_OK: {
+            "model": InviteListResponse,
+            "description": "List of invitations with pagination info",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+    },
 )
 @limiter.limit("100/minute")
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def get_organization_invitations(
-    organization_id: str,
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
-    query_params: InviteQueryParams = Depends(get_invite_query_params),
+    organization_id: str = Path(..., description="The UUID of the organization"),
+    page: int = Query(1, ge=1, description="The page number for pagination"),
+    page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
+    status: str | None = Query(None, description="The status of the invitations"),
 ):
-    """
-    Get list of all invitations for an organization (Requires: organization.appscrip.manage)
+    """Get list of all invitations for an organization with pagination"""
+    try:
+        # Validate organization ID format
+        validate_uuid_format(organization_id, "organization ID")
 
-    Args:
-        organization_id (str): The UUID of the organization
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-        query_params (InviteQueryParams): Query parameters for filtering and pagination
+        # Extract user context
+        user_context = await check_permissions(
+            current_user=current_user,
+            permission_codes=SETTINGS_SYSTEM_MANAGE,
+            organization_id=organization_id,
+        )
 
-    Returns:
-        InviteListResponse: List of invitations with pagination info
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
+        if not user_context.organization_id == organization_id:
+            raise ForbiddenException(
+                message_key="errors.forbidden",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
 
-    # Set audit context for invitation listing
-    request.state.audit_table = "organization_invites"
-    request.state.audit_description = f"Retrieved invitations for organization: {organization_id}"
-    request.state.audit_risk_level = "low"
+        # Execute queries and get results
+        invitations_data = await get_organization_invites(
+            organization_id=organization_id,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            status=status,
+        )
 
-    # Validate organization ID format
-    validate_uuid_format(organization_id, "organization ID")
+        if not invitations_data:
+            return success_response(
+                request=request,
+                message_key="success.no_data",
+                custom_code=CustomStatusCode.NO_CONTENT,
+                status_code=http_status.HTTP_204_NO_CONTENT,
+            )
 
-    # Extract user context
-    user_context = await check_permissions(current_user=current_user,
-        permission_codes=SETTINGS_SYSTEM_MANAGE,
-        action_description="view organization invitations",
-        organization_id=organization_id)
-    # Process the request
-    invitations, total_count, page, page_size, message = (
-        await _process_invite_list_request(user_context, organization_id, query_params)
-    )
+        invitations_list = [build_invite_list_item(invite) for invite in invitations_data]
 
-    logger.info("Retrieved invitations - Request ID: %s, Count: %s",
-            request_id, len(invitations))
+        total_count = await get_organization_invites_count(
+            organization_id=organization_id, status=status
+        )
 
-    return InviteListResponse(
-        message=message,
-        data=invitations,
-        total_count=total_count,
-        page=page,
-        page_size=page_size,
-    )
+        return list_response(
+            request=request,
+            items=invitations_list,
+            total=total_count,
+            message_key="success.retrieved",
+            page=page,
+            page_size=page_size,
+            status_code=http_status.HTTP_200_OK,
+            custom_code=CustomStatusCode.SUCCESS,
+        )
+    except HTTPException as error:
+        raise error
+    except Exception as error:
+        logger.error("Error getting organization invitations - Error: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+            params={"operation_name": "get organization invitations"},
+        ) from error
 
 
 @handle_api_exceptions("resend invitation")
 @router.put(
     "/resend/{invite_id}",
-    response_model=InviteResponse,
-    status_code=status.HTTP_200_OK,
+    description="Resend an organization invitation",
+    summary="Resend an organization invitation",
+    status_code=http_status.HTTP_202_ACCEPTED,
+    response_model=None,
+    responses={
+        http_status.HTTP_202_ACCEPTED: {
+            "model": InviteResponse,
+            "description": "Invitation resent successfully",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -629,129 +522,133 @@ async def get_organization_invitations(
     table_name="organization_invites",
     category="INVITATION",
 )
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def resend_invitation(
-    invite_id: str,
     request: Request,
-    current_user: dict = Depends(get_user_from_auth)
+    current_user: dict = Depends(get_user_from_auth),
+    invite_id: str = Path(..., description="The UUID of the invitation"),
 ):
-    """
-    Resend an organization invitation (Requires: organization.appscrip.manage)
+    """Resend an organization invitation"""
+    try:
+        # Set audit context for invitation resend
+        request.state.audit_table = "organization_invites"
+        request.state.audit_requested_id = invite_id
+        request.state.audit_description = f"Resent invitation for ID: {invite_id}"
+        request.state.audit_risk_level = "low"
 
-    Args:
-        invite_id (str): The UUID of the invitation
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-
-    Returns:
-        InviteResponse: Success response
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Set audit context for invitation resend
-    request.state.audit_table = "organization_invites"
-    request.state.audit_requested_id = invite_id
-    request.state.audit_description = f"Resent invitation for ID: {invite_id}"
-    request.state.audit_risk_level = "low"
-
-    # Validate invitation ID format
-    validate_uuid_format(invite_id, INVITATION_ID_LABEL)
-
-    # Extract user context
-    user_context = await check_permissions(current_user=current_user,
-        permission_codes=SETTINGS_SYSTEM_MANAGE,
-        action_description="resend organization invitations")
-
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-
-    # Get invitation details
-    invitation_data = await get_invite_by_id(invite_id)
-
-    if not invitation_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=INVITE_NOT_FOUND_MESSAGE,
+        # Extract user context
+        user_context = await check_permissions(
+            current_user=current_user,
+            permission_codes=SETTINGS_SYSTEM_MANAGE,
         )
 
-    # Validate organization access
-    if not await validate_organization_access(user_context, invitation_data["organization_id"]):
-        handle_invite_permission_error("resend organization invitations")
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
 
-    # Resend invitation email
-    try:
-        # Get organization details
-        organization_data = await get_organisation_details_by_id(invitation_data["organization_id"])
+        # Get invitation details
+        invitation_data = await get_invite_by_id(invite_id)
 
-        # Generate invitation URL
-        invite_url = generate_invite_url(BASE_URL, invitation_data["token_hash"])
-
-        role_name = await get_role_by_id(invitation_data["role_id"], organization_data["id"])
-        inviter_name = await get_user_by_id(invitation_data["invited_by"])
-
-        if not role_name:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Role not found"
+        if not invitation_data:
+            raise NotFoundException(
+                message_key="invitations.errors.invitation_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        inviter_full_name, invitee_full_name = "", ""
+        if not user_context.organization_id == invitation_data["organization_id"]:
+            raise ForbiddenException(
+                message_key="errors.forbidden",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
 
-        user_meta = inviter_name.user.user_metadata
-        for z in [user_meta.get("salutation", None), user_meta.get("first_name", None), user_meta.get("last_name", None)]:
-            if z:
-                inviter_full_name += f"{z} "
+        # Get organization details
+        organization_data = await get_organisation_details_by_id(invitation_data["organization_id"])
+        if not organization_data:
+            raise NotFoundException(
+                message_key="invitations.errors.organization_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
 
-        inv_meta = invitation_data["metadata"]
-        for z in [inv_meta.get("salutation", None), inv_meta.get("first_name", None), inv_meta.get("last_name", None)]:
-            if z:
-                invitee_full_name += f"{z} "
+        # Generate invitation URL
+        invite_url = (
+            f"{BASE_URL.rstrip('/')}/invite/accept/"
+            f"?token={invitation_data['token_hash']}&page=invite-user"
+        )
+
+        role_name = await get_role_by_id(invitation_data["role_id"], organization_data["id"])
+
+        if not role_name:
+            raise NotFoundException(
+                message_key="invitations.errors.role_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        inviter = await get_user_by_id(invitation_data["invited_by"])
+
+        invitee_full_name = build_full_name(
+            invitation_data["metadata"].get("salutation"),
+            invitation_data["metadata"].get("first_name"),
+            invitation_data["metadata"].get("last_name"),
+        )
+
+        user_meta = inviter.user.user_metadata or {}
+        inviter_full_name = build_full_name(
+            user_meta.get("salutation"),
+            user_meta.get("first_name"),
+            user_meta.get("last_name"),
+        )
 
         # Send invitation email
-        email_sent = send_organization_invitation_email(
+        await send_organization_invitation_email(
             email=invitation_data["email"],
             organization_name=organization_data["name"],
-            inviter_name=inviter_full_name.strip(),  # You might want to get the actual name
+            inviter_name=inviter_full_name.strip(),
             invitee_name=invitee_full_name.strip(),
             invite_url=invite_url,
             role_name=role_name["name"],
-            expires_at=invitation_data["expires_at"]
-        )
-
-        if not email_sent:
-            logger.warning("Failed to resend invitation email - Request ID: %s, Email: %s",
-                         request_id, invitation_data["email"])
-
-        logger.info("Invitation resent - Request ID: %s, Invite ID: %s, Email: %s",
-                   request_id, invite_id, invitation_data["email"])
-
-        return InviteResponse(
-            success=True,
-            invite_id=invite_id,
-            invite_url=invite_url,
-            email=invitation_data["email"],
             expires_at=invitation_data["expires_at"],
-            message="Invitation resent successfully"
         )
 
-    except Exception as email_error:
-        logger.error("Failed to resend invitation email - Request ID: %s, Error: %s",
-                   request_id, str(email_error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to resend invitation email"
-        ) from email_error
-
+        return success_response(
+            request=request,
+            message_key="invitations.success.invitation_resent",
+            custom_code=CustomStatusCode.ACCEPTED,
+            status_code=http_status.HTTP_202_ACCEPTED,
+            data=InviteResponse(
+                invite_id=invite_id,
+                invite_url=invite_url,
+                email=invitation_data["email"],
+                expires_at=invitation_data["expires_at"],
+            ),
+        )
+    except HTTPException as error:
+        raise error
+    except Exception as error:
+        logger.error("Error resending organization invitation - Error: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        ) from error
 
 
 @handle_api_exceptions("delete invitation")
 @router.delete(
     "/{invite_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    description="Delete an organization invitation",
+    summary="Delete an organization invitation",
+    status_code=http_status.HTTP_200_OK,
+    response_model=None,
+    responses={
+        http_status.HTTP_200_OK: {"description": "Invitation deleted successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -766,81 +663,60 @@ async def resend_invitation(
     table_name="organization_invites",
     category="INVITATION",
 )
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def delete_invitation(
-    invite_id: str,
     request: Request,
-    current_user: dict = Depends(get_user_from_auth)
+    current_user: dict = Depends(get_user_from_auth),
+    invite_id: str = Path(..., description="The UUID of the invitation"),
 ):
-    """
-    Delete an organization invitation (Requires: organization.appscrip.manage)
+    """Delete an organization invitation"""
+    try:
+        # Set audit context for invitation deletion
+        request.state.audit_table = "organization_invites"
+        request.state.audit_requested_id = invite_id
+        request.state.audit_description = f"Deleted invitation for ID: {invite_id}"
+        request.state.audit_risk_level = "high"
 
-    Args:
-        invite_id (str): The UUID of the invitation
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-
-    Returns:
-        InviteResponse: Success response
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Set audit context for invitation deletion
-    request.state.audit_table = "organization_invites"
-    request.state.audit_requested_id = invite_id
-    request.state.audit_description = f"Deleted invitation for ID: {invite_id}"
-    request.state.audit_risk_level = "high"
-
-    # Validate invitation ID format
-    validate_uuid_format(invite_id, INVITATION_ID_LABEL)
-
-    # Extract user context
-    user_context = await check_permissions(
-        current_user=current_user,
-        permission_codes=SETTINGS_SYSTEM_MANAGE,
-        action_description="delete organization invitations",
-    )
-
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-
-    # Get invitation details
-    invitation_data = await get_invite_by_id(invite_id)
-
-    if not invitation_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=INVITE_NOT_FOUND_MESSAGE,
+        # Extract user context
+        user_context = await check_permissions(
+            current_user=current_user,
+            permission_codes=SETTINGS_SYSTEM_MANAGE,
         )
 
-    # Validate organization access
-    if not await validate_organization_access(user_context, invitation_data["organization_id"]):
-        handle_invite_permission_error("delete organization invitations")
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
 
-    # Delete invitation
-    try:
-        result = await delete_invite(invite_id)
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=INVITE_NOT_FOUND_MESSAGE,
+        # Get invitation details
+        invitation_data = await get_invite_by_id(invite_id)
+
+        if not invitation_data:
+            raise NotFoundException(
+                message_key="invitations.errors.invitation_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        logger.info("Invitation deleted successfully - Request ID: %s, Invite ID: %s",
-                   request_id, invite_id)
+        if not user_context.organization_id == invitation_data["organization_id"]:
+            raise ForbiddenException(
+                message_key="errors.forbidden",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
 
-        return None
+        await delete_invite(invite_id)
 
-    except HTTPException as http_error:
-        raise http_error
-    except Exception as db_error:
-        log_exception()
-        logger.error(DATABASE_ERROR_MESSAGE, request_id, str(db_error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete invitation"
-        ) from db_error
+        return success_response(
+            request=request,
+            message_key="invitations.success.invitation_deleted",
+            custom_code=CustomStatusCode.DELETED,
+            status_code=http_status.HTTP_200_OK,
+        )
+
+    except HTTPException as error:
+        raise error
+    except Exception as error:
+        logger.error("Error deleting organization invitation - Error: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        ) from error

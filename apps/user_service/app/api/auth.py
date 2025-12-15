@@ -1,101 +1,98 @@
-"""
-Authentication API Module
-
+"""Authentication API Module
 This module provides authentication operations using Supabase.
 Includes login and signup functionality with proper error handling.
-
-Author: AI Assistant
-Date: 2024-12-19
-Last Updated: 2024-12-19
 """
+
+import os
 
 # Standard library imports
 import re
-import os
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Any
 
 # Third-party imports
 import jwt
-from fastapi import APIRouter, HTTPException, status, Body, Request, Depends, Response
-from supabase_auth.errors import AuthApiError
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import status as http_status
 
-# Internal utility imports
-from apps.user_service.app.dependencies.common_utils import (
-    handle_api_exceptions
+from apps.user_service.app.api.verification_codes import (
+    _validate_verification_record,
+    _verify_code_and_update_record,
 )
 
-# Logger import
-from apps.user_service.app.dependencies.logger import get_logger
+# App instance
+from apps.user_service.app.app_instance import limiter
 
 # Audit logging imports
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 
+# Internal utility imports
+from apps.user_service.app.dependencies.common_utils import handle_api_exceptions
+
+# Logger import
+from apps.user_service.app.dependencies.logger import get_logger
+
 # Schema imports
 from apps.user_service.app.schemas.auth import (
     AuthLogin,
-    SignupRequest,
-    UserInfo,
     AuthResponse,
-    VerifyEmailRequest,
-    VerifyEmailResponse,
-    ResetPasswordRequest,
-    PasswordResponse,
-    ForgotPasswordRequest,
-    ForgotPasswordResponse,
-    SetPasswordRequest,
     ChangePasswordRequest,
     ChangePasswordResponse,
     Check2FAStatusRequest,
     Check2FAStatusResponse,
-    PASSWORD_CONDITION_MESSAGE_EXTENDED
-
-)
-
-# App instance
-from apps.user_service.app.app_instance import limiter
-
-# Shared library imports
-from libs.shared_middleware.jwt_auth import get_user_from_token, get_user_from_auth
-
-# Email utilities
-from libs.shared_utils.email_utils import (
-    send_password_reset_confirmation_email,
-    send_welcome_email,
-    send_password_change_success_email,
-    send_password_reset_success_email
-)
-
-from libs.shared_db.postgres_db.user_service_operations.user_operations import (
-    get_auth_user_by_email,
-    get_organization_member_status_by_email
-)
-from libs.shared_db.supabase_db.admin_operations.user import (
-    delete_auth_user,
-    update_password_with_link_identity
-)
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
-    login_user,
-    sign_up_supabase_user,
-    reset_the_password_email,
-    update_password_with_token,
-    log_exception,
-    refresh_session
-)
-from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
-    get_verification_code_by_id,
-)
-from apps.user_service.app.api.verification_codes import (
-    _validate_verification_record,
-    _verify_code_and_update_record,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    PasswordResponse,
+    ResetPasswordRequest,
+    SetPasswordRequest,
+    SignupRequest,
+    UserInfo,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
 )
 from apps.user_service.app.schemas.verification_codes import (
     VerificationType,
     VerifyVerificationCodeRequest,
 )
+from libs.shared_db.postgres_db.user_service_operations.user_operations import (
+    get_auth_user_by_email,
+    get_organization_member_status_by_email,
+)
+from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
+    get_verification_code_by_id,
+)
+from libs.shared_db.supabase_db.admin_operations.user import (
+    delete_auth_user,
+    update_password_with_link_identity,
+)
+from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
+    login_user,
+    refresh_session,
+    reset_the_password_email,
+    sign_up_supabase_user,
+    update_password_with_token,
+)
+
+# Shared library imports
+from libs.shared_middleware.jwt_auth import get_user_from_auth, get_user_from_token
+
+# Email utilities
+from libs.shared_utils.email_utils import (
+    send_password_change_success_email,
+    send_password_reset_success_email,
+    send_welcome_email,
+)
+from libs.shared_utils.http_exceptions import (
+    BadRequestException,
+    ForbiddenException,
+    InternalServerErrorException,
+    NotFoundException,
+)
+from libs.shared_utils.response_factory import success_response
+from libs.shared_utils.status_codes import CustomStatusCode
 
 # Modify sys.path to support monorepo imports
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -111,22 +108,15 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # Initialize logger for auth module
 logger = get_logger("auth-api")
 
-EMAIL_NOT_FOUND_MESSAGE = "Email Is Not Registered! Please Signup First To Login."
-INVALID_LOGIN_CREDS = "Invalid login credentials"
-TWO_FA_VERIFICATION_FAILED = "2FA verification failed"
-TWO_FA_REQUIRED = "2FA verification is required. Please provide verification_id and verification_code"
-
 # ============================================================================
 # SIGNUP HELPER FUNCTIONS
 # ============================================================================
 
+
 async def _validate_verification_code_for_signup(
-    verification_id: str,
-    email: str,
-    verification_code: str
+    verification_id: str, email: str, verification_code: str
 ) -> None:
-    """
-    Validate verification code for signup (cross-security check).
+    """Validate verification code for signup (cross-security check).
 
     Args:
         verification_id: Verification code ID
@@ -134,135 +124,89 @@ async def _validate_verification_code_for_signup(
         verification_code: Verification code to validate
 
     Raises:
-        HTTPException: If validation fails
+        BadRequestException: If verification code is invalid
+        ConflictException: If verification code is already verified
     """
     verification_record = await get_verification_code_by_id(verification_id)
 
     if not verification_record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Verification code not found"
+        raise BadRequestException(
+            message_key="verification_codes.errors.verification_code_not_found",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
 
     if not verification_record.get("verified", False):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Verification code must be verified before signup. Please verify your email first."
+        raise BadRequestException(
+            message_key="verification_codes.errors.verification_code_not_verified",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
 
     stored_given_input = verification_record.get("given_input")
     if stored_given_input != email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Email '{email}' does not match the verification record. Expected: '{stored_given_input}'"
+        raise BadRequestException(
+            message_key="verification_codes.errors.verification_code_invalid",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
 
     stored_code = verification_record.get("verification_code")
     if verification_code != stored_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid verification code"
+        raise BadRequestException(
+            message_key="verification_codes.errors.verification_code_invalid",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
 
 
-def _extract_session(session):
-    """
-    Extract session object if available.
+def _extract_session(session: Any | None) -> Any | None:
+    """Extract session object if available.
 
     Args:
-        session: Session object
+        session (Any | None): Session object (type depends on auth provider)
 
     Returns:
-        Session object if available, None otherwise
+        Any | None: Session object if available, None otherwise
     """
-    if session and hasattr(session, 'access_token'):
+    if session and hasattr(session, "access_token"):
         return session
     return None
 
 
-async def _get_session_after_signup(
-    signup_result,
-    email: str,
-    password: str
-):
-    """
-    Get session after signup, trying signup session first, then login if needed.
+async def _get_session_after_signup(signup_result: Any, email: str, password: str) -> Any | None:
+    """Get session after signup, trying signup session first, then login if needed.
 
     Args:
-        signup_result: Result from sign_up_supabase_user
-        email: User email
-        password: User password
+        signup_result (Any): Result from sign_up_supabase_user (type depends on auth provider)
+        email (str): User email
+        password (str): User password
 
     Returns:
-        Session object if available, None otherwise
+        Any | None: Session object if available, None otherwise
     """
     session = _extract_session(signup_result.session)
     if session:
         return session
 
-    try:
-        login_result = await login_user(email, password)
+    login_result = await login_user(email, password)
+    if login_result:
         return _extract_session(login_result.session)
-    except Exception as login_error:
-        logger.warning("Could not get session after signup for %s: %s", email, str(login_error))
-
     return None
 
 
-def _send_welcome_email_safely(email: str, first_name: str) -> None:
-    """
-    Send welcome email safely without failing the signup operation.
-
-    Args:
-        email: User email
-        first_name: User first name
-    """
-    try:
-        email_sent = send_welcome_email(email=email, first_name=first_name)
-        if not email_sent:
-            logger.warning("Failed to send welcome email to %s", email)
-    except Exception as email_error:
-        logger.error("Error sending welcome email: %s", str(email_error))
-
-
 def _validate_password_strength(password: str) -> None:
-    """
-    Validate password strength and raise exception if weak.
+    """Validate password strength and raise exception if weak.
 
     Args:
         password: Password to validate
 
     Raises:
-        HTTPException: If password is weak
+        BadRequestException: If password is weak
     """
-    if not _is_password_strong(password):
-        raise HTTPException(
-            status_code=400,
-            detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
+    password_pattern = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{6,}$")
+
+    if not bool(password_pattern.match(password)):
+        raise BadRequestException(
+            message_key="auth.errors.password_strength",
+            custom_code=CustomStatusCode.INVALID_DATA,
         )
-
-
-
-
-def _is_password_strong(password: str) -> bool:
-    """
-    Check if password is strong.
-    Checks This Conditions:
-    1. At least 6 characters
-    2. At least one uppercase letter
-    3. At least one lowercase letter
-    4. At least one number
-    5. At least one special character
-
-    Args:
-        password (str): Password to check
-
-    Returns:
-        bool: True if password is strong, False otherwise
-    """
-    password_pattern = re.compile(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{6,}$')
-
-    return bool(password_pattern.match(password))
 
 
 # ============================================================================
@@ -270,9 +214,8 @@ def _is_password_strong(password: str) -> bool:
 # ============================================================================
 
 
-def _is_2fa_enabled(user_metadata: dict) -> tuple[bool, Optional[dict]]:
-    """
-    Check if 2FA is enabled in user metadata.
+def _is_2fa_enabled(user_metadata: dict) -> tuple[bool, dict | None]:
+    """Check if 2FA is enabled in user metadata.
 
     Args:
         user_metadata: User metadata from auth.users
@@ -289,29 +232,26 @@ def _is_2fa_enabled(user_metadata: dict) -> tuple[bool, Optional[dict]]:
 
 
 def _validate_2fa_credentials_required(
-    verification_id: Optional[str],
-    verification_code: Optional[str]
+    verification_id: str | None, verification_code: str | None
 ) -> None:
-    """
-    Validate that 2FA credentials are provided when required.
+    """Validate that 2FA credentials are provided when required.
 
     Args:
-        verification_id: Optional verification code ID
-        verification_code: Optional verification code
+        verification_id: Verification code ID
+        verification_code: Verification code
 
     Raises:
-        HTTPException: If credentials are missing
+        BadRequestException: If credentials are missing
     """
     if not verification_id or not verification_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=TWO_FA_REQUIRED
+        raise BadRequestException(
+            message_key="verification_codes.errors.verification_code_invalid",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
 
 
 async def _get_and_validate_verification_record(verification_id: str) -> dict:
-    """
-    Get and validate verification code record.
+    """Get and validate verification code record.
 
     Args:
         verification_id: Verification code ID
@@ -320,44 +260,37 @@ async def _get_and_validate_verification_record(verification_id: str) -> dict:
         Verification record dictionary
 
     Raises:
-        HTTPException: If record not found or invalid
+        BadRequestException: If record not found or invalid
     """
     verification_record = await get_verification_code_by_id(verification_id)
-    
-    if not verification_record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Verification code not found"
-        )
-    
     stored_given_input = verification_record.get("given_input")
-    if not stored_given_input:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=TWO_FA_VERIFICATION_FAILED
+
+    if not verification_record or not stored_given_input:
+        raise BadRequestException(
+            message_key="verification_codes.errors.verification_code_invalid",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
-    
+
     return verification_record
 
 
-def _validate_phone_match(stored_given_input: str, user_phone: Optional[str]) -> None:
-    """
-    Validate that stored phone matches user's phone.
+def _validate_phone_match(stored_given_input: str, user_phone: str | None) -> None:
+    """Validate that stored phone matches user's phone.
 
     Args:
         stored_given_input: Stored phone from verification record
         user_phone: User's phone number
 
     Raises:
-        HTTPException: If phones don't match
+        BadRequestException: If phones don't match
     """
     if user_phone and stored_given_input != user_phone:
         normalized_stored = stored_given_input.lstrip("+")
         normalized_user = user_phone.lstrip("+")
         if normalized_stored != normalized_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=TWO_FA_VERIFICATION_FAILED
+            raise BadRequestException(
+                message_key="auth.errors.verification_code_not_matched_phone",
+                custom_code=CustomStatusCode.BAD_REQUEST,
             )
 
 
@@ -366,10 +299,9 @@ def _create_verification_request(
     verification_id: str,
     verification_code: str,
     stored_given_input: str,
-    email: str
+    email: str,
 ) -> VerifyVerificationCodeRequest:
-    """
-    Create VerifyVerificationCodeRequest based on verification type.
+    """Create VerifyVerificationCodeRequest based on verification type.
 
     Args:
         verification_preference: Verification preference dict
@@ -382,542 +314,424 @@ def _create_verification_request(
         VerifyVerificationCodeRequest object
 
     Raises:
-        HTTPException: If email doesn't match for EMAIL type
+        BadRequestException: If email doesn't match for EMAIL type
     """
     verification_method = verification_preference.get("type", "EMAIL").upper()
-    
+
     if verification_method == "PHONE":
         return VerifyVerificationCodeRequest(
             type=VerificationType.PHONE_NUMBER,
             verification_id=verification_id,
             verification_code=verification_code,
-            phoneNumber=stored_given_input
+            phoneNumber=stored_given_input,
         )
-    else:
-        # For email verification, verify that stored_given_input matches user's email
-        if stored_given_input.lower() != email.lower():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=TWO_FA_VERIFICATION_FAILED
-            )
-        return VerifyVerificationCodeRequest(
-            type=VerificationType.EMAIL,
-            verification_id=verification_id,
-            verification_code=verification_code,
-            email=stored_given_input
+    # For email verification, verify that stored_given_input matches user's email
+    if stored_given_input.lower() != email.lower():
+        raise BadRequestException(
+            message_key="auth.errors.verification_code_not_matched_email",
+            custom_code=CustomStatusCode.INVALID_DATA,
         )
-
-
-async def _verify_2fa_code(
-    verification_record: dict,
-    verify_data: VerifyVerificationCodeRequest,
-    verification_code: str,
-    verification_id: str
-) -> None:
-    """
-    Verify 2FA code and update record.
-
-    Args:
-        verification_record: Verification record dictionary
-        verify_data: VerifyVerificationCodeRequest object
-        verification_code: Verification code
-        verification_id: Verification code ID
-
-    Raises:
-        HTTPException: If verification fails
-    """
-    try:
-        _validate_verification_record(verification_record, verify_data)
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=TWO_FA_VERIFICATION_FAILED
-        ) from e
-    
-    try:
-        await _verify_code_and_update_record(
-            verification_record,
-            verification_code,
-            verification_id
-        )
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=TWO_FA_VERIFICATION_FAILED
-        ) from e
+    return VerifyVerificationCodeRequest(
+        type=VerificationType.EMAIL,
+        verification_id=verification_id,
+        verification_code=verification_code,
+        email=stored_given_input,
+    )
 
 
 async def _check_and_verify_2fa(
     user_metadata: dict,
-    verification_id: Optional[str],
-    verification_code: Optional[str],
+    verification_id: str | None,
+    verification_code: str | None,
     email: str,
-    user_phone: Optional[str] = None
+    user_phone: str | None = None,
 ) -> None:
-    """
-    Check if user has 2FA enabled and verify the code if required.
+    """Check if user has 2FA enabled and verify the code if required.
 
     Args:
         user_metadata: User metadata from auth.users
-        verification_id: Optional verification code ID
-        verification_code: Optional verification code
+        verification_id: Verification code ID
+        verification_code: Verification code
         email: User email for verification
-        user_phone: Optional user phone number (for PHONE type verification)
+        user_phone: User phone number (for PHONE type verification)
 
     Raises:
-        HTTPException: If 2FA is enabled but verification fails
+        BadRequestException: If 2FA is enabled but verification fails
     """
     is_enabled, verification_preference = _is_2fa_enabled(user_metadata)
     if not is_enabled:
         return
-    
+
     _validate_2fa_credentials_required(verification_id, verification_code)
-    
+
     verification_record = await _get_and_validate_verification_record(verification_id)
     stored_given_input = verification_record.get("given_input")
-    
+
     # Validate phone match if PHONE type
     verification_method = verification_preference.get("type", "EMAIL").upper()
     if verification_method == "PHONE":
         _validate_phone_match(stored_given_input, user_phone)
-    
+
     verify_data = _create_verification_request(
         verification_preference,
         verification_id,
         verification_code,
         stored_given_input,
-        email
-    )
-    
-    await _verify_2fa_code(
-        verification_record,
-        verify_data,
-        verification_code,
-        verification_id
+        email,
     )
 
+    await _validate_verification_record(verification_record, verify_data)
 
-@router.post("/login", response_model=AuthResponse, status_code=status.HTTP_200_OK)
+    await _verify_code_and_update_record(verification_record, verification_code, verification_id)
+
+
+@handle_api_exceptions("login")
+@router.post(
+    "/login",
+    response_model=AuthResponse,
+    status_code=http_status.HTTP_200_OK,
+    description="Login endpoint with optional 2FA support",
+    summary="Login endpoint with optional 2FA support",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Login successful"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
 @limiter.limit("100/minute")
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def login(request: Request, data: AuthLogin):
-    """
-    User login endpoint with optional 2FA support
-
-    Args:
-        request (Request): FastAPI request object
-        data (AuthLogin): Login credentials containing email, password, and optional 2FA fields
-
-    Returns:
-        AuthResponse: Access token and user information
-
-    Raises:
-        HTTPException: 
-            - 400 for invalid credentials or 2FA verification failure
-            - 500 for other errors
-    """
+    """User login endpoint with optional 2FA support"""
     try:
         all_user = await get_auth_user_by_email(data.email)
         if all_user is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=EMAIL_NOT_FOUND_MESSAGE
+            raise NotFoundException(
+                message_key="auth.errors.email_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # Check if user has 2FA enabled and verify if needed
         user_metadata = all_user.user_metadata or {}
-        user_phone = getattr(all_user, 'phone', None)  # Get phone from auth.users
+        user_phone = getattr(all_user, "phone", None)  # Get phone from auth.users
         await _check_and_verify_2fa(
             user_metadata=user_metadata,
             verification_id=data.verification_id,
             verification_code=data.verification_code,
             email=data.email,
-            user_phone=user_phone
+            user_phone=user_phone,
         )
 
-        # Extract headers
         user_agent = request.headers.get("User-Agent")
         device_signature = request.headers.get("X-Device-Signature")
 
         result = await login_user(
-            email=data.email, 
-            password=data.password, 
+            email=data.email,
+            password=data.password,
             user_agent=user_agent,
             device_signature=device_signature,
         )
-        
-        # Validate result structure
+
         if not result:
-            logger.error("login_user returned None or empty result for email: %s", data.email)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Authentication failed: Invalid response from authentication service"
+            raise InternalServerErrorException(
+                message_key="auth.errors.authentication_failed",
+                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
-        
-        if not hasattr(result, 'session') or result.session is None:
-            logger.error("login_user result missing session for email: %s", data.email)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Authentication failed: Session data is missing"
+
+        if not hasattr(result, "session") or result.session is None:
+            raise InternalServerErrorException(
+                message_key="auth.errors.authentication_failed",
+                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
-        
-        if not hasattr(result, 'user') or result.user is None:
-            logger.error("login_user result missing user for email: %s", data.email)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Authentication failed: User data is missing"
+
+        if not hasattr(result, "user") or result.user is None:
+            raise InternalServerErrorException(
+                message_key="auth.errors.authentication_failed",
+                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
-        
-        # Safely access session attributes
+
         session = result.session
         user = result.user
-        user_metadata = getattr(user, 'user_metadata', {}) or {}
-        
+        user_metadata = getattr(user, "user_metadata", {}) or {}
+
         # Validate required session attributes
-        if not hasattr(session, 'access_token') or not session.access_token:
-            logger.error("login_user session missing access_token for email: %s", data.email)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Authentication failed: Access token is missing"
+        if not hasattr(session, "access_token") or not session.access_token:
+            raise InternalServerErrorException(
+                message_key="auth.errors.authentication_failed",
+                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
-        
-        return AuthResponse(
-            access_token=session.access_token,
-            refresh_token=getattr(session, 'refresh_token', None),
-            expires_in=getattr(session, 'expires_in', None),
-            expires_at=getattr(session, 'expires_at', None),
-            user=UserInfo(
-                id=getattr(user, 'id', None),
-                email=getattr(user, 'email', None),
-                first_name=user_metadata.get("first_name", None),
-                last_name=user_metadata.get("last_name", None),
-                phone=user_metadata.get("phone", None),
-                timezone=user_metadata.get("timezone", None),
-                org_setup_status_completed=bool(user_metadata.get("organization_id", False)),
-                organization_id=user_metadata.get("organization_id", None),
+
+        return success_response(
+            request=request,
+            message_key="auth.success.login_successful",
+            custom_code=CustomStatusCode.SUCCESS,
+            status_code=http_status.HTTP_200_OK,
+            data=AuthResponse(
+                access_token=session.access_token,
+                refresh_token=getattr(session, "refresh_token", None),
+                expires_in=getattr(session, "expires_in", None),
+                expires_at=getattr(session, "expires_at", None),
+                user=UserInfo(
+                    id=getattr(user, "id", None),
+                    email=getattr(user, "email", None),
+                    first_name=user_metadata.get("first_name", None),
+                    last_name=user_metadata.get("last_name", None),
+                    phone=user_metadata.get("phone", None),
+                    timezone=user_metadata.get("timezone", None),
+                    org_setup_status_completed=bool(user_metadata.get("organization_id", False)),
+                    organization_id=user_metadata.get("organization_id", None),
+                ),
             ),
         )
-    except HTTPException:
-        raise
-    except AuthApiError as error:
-        # AuthApiError from Supabase for invalid credentials
-        # login_user already handles "Email not confirmed" as HTTPException 403
-        # So any AuthApiError here is likely invalid credentials
-        if error.status == 400 and error.message == INVALID_LOGIN_CREDS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=INVALID_LOGIN_CREDS
-            ) from error
-        elif hasattr(error, 'status') and hasattr(error, 'message'):
-            raise HTTPException(
-                status_code=error.status,
-                detail=error.message
-            ) from error
-        # For any other AuthApiError, treat as invalid credentials (most common case)
-        logger.warning("AuthApiError during login (treating as invalid credentials): %s", str(error))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_LOGIN_CREDS
-        ) from error
+    except HTTPException as error:
+        raise error
     except Exception as error:
-        log_exception()
-        error_str = str(error).lower()
-        error_type = type(error).__name__
-        
-        # Log detailed error information for debugging
-        logger.error(
-            "Unexpected error during login - Type: %s, Error: %s, Email: %s",
-            error_type, str(error), data.email
-        )
-        
-        # Check for invalid credentials in error message
-        if INVALID_LOGIN_CREDS in error_str or \
-           ("invalid" in error_str and "credential" in error_str):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=INVALID_LOGIN_CREDS
-            ) from error
-        
-        # Provide more detailed error message
-        error_detail = f"Authentication failed: {error_type}"
-        if hasattr(error, '__cause__') and error.__cause__:
-            error_detail += f" - {str(error.__cause__)}"
-        else:
-            error_detail += f" - {str(error)}"
-            
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=error_detail
+        logger.error("Error logging in: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         ) from error
 
 
-@router.put("/refresh",response_model=AuthResponse,status_code=status.HTTP_200_OK)
+@handle_api_exceptions("refresh")
+@router.put(
+    "/refresh",
+    response_model=AuthResponse,
+    status_code=http_status.HTTP_200_OK,
+    description="Refresh user session",
+    summary="Refresh user session",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Session refreshed successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
 @limiter.limit("100/minute")
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def refresh(request: Request):
-    """
-    Refresh user session
-    """
+    """Refresh user session"""
     try:
         access_token = request.headers.get("Access-Token").strip()
-        refresh_token = request.headers.get("Refresh-Token",None).strip()
-        try:
-            decoded = jwt.decode(access_token,os.getenv("SUPABASE_JWT_SECRET"),algorithms=["HS256"],audience="authenticated")
-            if datetime.fromtimestamp(decoded.get("exp")) >= datetime.now():
-                raise HTTPException(status_code=400, detail="Token is not expired")
-        except jwt.ExpiredSignatureError:
-            res = await refresh_session(refresh_token)
+        refresh_token = request.headers.get("Refresh-Token", None).strip()
+        decoded = jwt.decode(
+            access_token,
+            os.getenv("SUPABASE_JWT_SECRET"),
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+        if datetime.fromtimestamp(decoded.get("exp")) >= datetime.now():
+            raise BadRequestException(
+                message_key="auth.errors.token_not_expired",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+
         res = await refresh_session(refresh_token)
 
         user_metadata = res.user.user_metadata or {}
-        return AuthResponse(
-            access_token=res.session.access_token,
-            refresh_token=res.session.refresh_token,
-            expires_in=res.session.expires_in,
-            expires_at=res.session.expires_at,
-            user=UserInfo(
-                id=res.user.id,
-                email=res.user.email,
-                first_name=user_metadata.get("first_name"),
-                last_name=user_metadata.get("last_name"),
-                phone=user_metadata.get("phone"),
-                timezone=user_metadata.get("timezone"),
-                org_setup_status_completed=bool(user_metadata.get("organization_id")),
-                organization_id=user_metadata.get("organization_id"),
-            )
+        return success_response(
+            request=request,
+            message_key="auth.success.session_refreshed",
+            custom_code=CustomStatusCode.SUCCESS,
+            status_code=http_status.HTTP_200_OK,
+            data=AuthResponse(
+                access_token=res.session.access_token,
+                refresh_token=res.session.refresh_token,
+                expires_in=res.session.expires_in,
+                expires_at=res.session.expires_at,
+                user=UserInfo(
+                    id=res.user.id,
+                    email=res.user.email,
+                    first_name=user_metadata.get("first_name"),
+                    last_name=user_metadata.get("last_name"),
+                    phone=user_metadata.get("phone"),
+                    timezone=user_metadata.get("timezone"),
+                    org_setup_status_completed=bool(user_metadata.get("organization_id")),
+                    organization_id=user_metadata.get("organization_id"),
+                ),
+            ),
         )
     except HTTPException as error:
         raise error
     except Exception as error:
-        log_exception()
-        raise HTTPException(status_code=500, detail="Authentication failed "+str(error)) from error
+        logger.error("Error refreshing session: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        ) from error
 
 
+@handle_api_exceptions("set password")
 @router.post(
     "/set-password",
-    status_code=status.HTTP_202_ACCEPTED,
+    status_code=http_status.HTTP_202_ACCEPTED,
     response_model=PasswordResponse,
-    description="Set password for user Signed Up from Google or Magic Link.")
-@limiter.limit("10/minute")
-# pylint: disable=unused-argument  # Required by @limiter.limit
+    description="Set password for user Signed Up from Google or Magic Link.",
+    summary="Set password for user Signed Up from Google or Magic Link.",
+    responses={
+        http_status.HTTP_202_ACCEPTED: {"description": "Password set successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("100/minute")
 async def set_password(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
-    data: SetPasswordRequest = Body(...)):
-    """
-    Set password for user Signed Up from Google or Magic Link.
-    """
+    data: SetPasswordRequest = Body(...),
+):
+    """Set password for user Signed Up from Google or Magic Link."""
     try:
-        if not _is_password_strong(data.password):
-            raise HTTPException(
-                status_code=400,
-                detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
-            )
-        result = await update_password_with_link_identity(current_user['sub'], data.password)
+        _validate_password_strength(data.password)
+
+        result = await update_password_with_link_identity(current_user["sub"], data.password)
         if result:
-            return PasswordResponse(
-                message="Password set successfully"
+            return success_response(
+                request=request,
+                message_key="auth.success.password_set_successfully",
+                custom_code=CustomStatusCode.SUCCESS,
+                status_code=http_status.HTTP_202_ACCEPTED,
             )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to set password"
+        raise BadRequestException(
+            message_key="auth.errors.failed_to_set_password",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
     except HTTPException as error:
         raise error
-    except Exception:
-        log_exception()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to set password")
+    except Exception as error:
+        logger.error("Error setting password: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        ) from error
 
 
+@handle_api_exceptions("forgot password")
 @router.post(
     "/forgot-password",
     response_model=ForgotPasswordResponse,
-    status_code=status.HTTP_200_OK
+    status_code=http_status.HTTP_200_OK,
+    description="Send password reset email to user (only if email exists in system)",
+    summary="Send password reset email to user (only if email exists in system)",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Password reset email sent successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
 )
-@limiter.limit("10/minute")
-# pylint: disable=unused-argument  # Required by @limiter.limit
-async def forgot_password(request: Request, data: ForgotPasswordRequest):
-    """
-    Send password reset email to user (only if email exists in system)
-
-    This endpoint sends a password reset email containing a secure token. The user will receive
-    an email with a link like:
-    http://localhost:3000/#access_token=eyJhbGciOiJIUzI1NiIs...&expires_at=1758009136&expires_in=3600&refresh_token=4bz3ixdhgdbv&token_type=bearer&type=recovery
-
-    To complete the password reset:
-    1. User clicks the link in the email
-    2. Frontend extracts the access_token from the URL hash
-    3. Frontend calls POST /auth/reset-password with the token and new password
-
-    Args:
-        request (Request): FastAPI request object
-        data (ForgotPasswordRequest): Email address for password reset
-        db_conn: Database connection for email validation
-
-    Returns:
-        ForgotPasswordResponse: Success response if email exists
-
-    Raises:
-        HTTPException: 404 for email not found, 500 for system errors
-
-    Example:
-        Request:
-        {
-            "email": "user@example.com"
-        }
-
-        Response (200 OK):
-        {
-            "status_code": 200,
-            "message": "Password reset email sent successfully. Please check your email."
-        }
-
-        Response (404 Not Found):
-        {
-            "detail": "Email not found in our system. Please check your Inbox and try again."
-        }
-    """
-
+@limiter.limit("100/minute")
+async def forgot_password(
+    request: Request,
+    data: ForgotPasswordRequest = Body(...),
+):
+    """Send password reset email to user (only if email exists in system)"""
     try:
-        # First, check if email exists in auth.users table
         user = await get_auth_user_by_email(data.email)
         if not user:
-            raise HTTPException(
-                status_code=404,
-                detail="Email not found in our system.Please check your email and try again."
+            raise NotFoundException(
+                message_key="auth.errors.email_not_found_in_system",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
 
         # Send password reset email only if user exists
         await reset_the_password_email(data.email)
-        return ForgotPasswordResponse(
-            message="Password reset email sent successfully. Please check your email."
+        return success_response(
+            request=request,
+            message_key="auth.success.password_reset_email_sent",
+            custom_code=CustomStatusCode.SUCCESS,
+            status_code=http_status.HTTP_200_OK,
         )
     except HTTPException as error:
         raise error
     except Exception as error:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process password reset request. Please try again."
+        logger.error("Error sending password reset email: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         ) from error
 
 
-@router.post("/reset-password", response_model=PasswordResponse, status_code=status.HTTP_200_OK)
-@limiter.limit("10/minute")
-# pylint: disable=unused-argument  # Required by @limiter.limit
+@handle_api_exceptions("reset password")
+@router.post(
+    "/reset-password",
+    response_model=PasswordResponse,
+    status_code=http_status.HTTP_200_OK,
+    description="Reset user password using token from email",
+    summary="Reset user password using token from email",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Password reset successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("100/minute")
 async def reset_password(
     request: Request,
-    data: ResetPasswordRequest):
-    """
-    Reset user password using token from email
-
-    This endpoint is used to complete the password reset process.
-    The token should be extracted from the password reset email URL
-    that the user received after calling POST /auth/forgot-password.
-
-    The email URL format is:
-    http://localhost:3000/#access_token=eyJhbGciOiJIUzI1NiIs...&expires_at=1758009136&expires_in=3600&refresh_token=4bz3ixdhgdbv&token_type=bearer&type=recovery
-
-    Frontend should extract the access_token from the URL hash and send it as the 'token' parameter.
-
-    Args:
-        request (Request): FastAPI request object
-        data (ResetPasswordRequest): Reset token (access_token from email URL) and new password
-
-    Returns:
-        PasswordResponse: Success response
-
-    Raises:
-        HTTPException: 400 for invalid token/password, 500 for other errors
-
-    Example:
-        Request:
-        {
-            "token": "eyJhbGciOiJIUzI1NiIsImtpZCI6IjllaFhpRHlFNXFGK2lwVHYiLCJ0eXAiOiJKV1QifQ...",
-            "new_password": "newpassword123"
-        }
-
-        Response (200 OK):
-        {
-            "status_code": 200,
-            "message": "Password reset successfully. You can now login with your new password."
-        }
-
-        Response (400 Bad Request):
-        {
-            "detail": "Invalid or expired reset token. Please request a new password reset."
-        }
-    """
-
+    data: ResetPasswordRequest = Body(...),
+):
+    """Reset user password using token from email"""
     try:
         user = get_user_from_token(data.token)
         if not user:
-            raise HTTPException(
-                status_code=404,
-                detail="User not found"
+            raise NotFoundException(
+                message_key="auth.errors.email_not_found_in_system",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        if not _is_password_strong(data.new_password):
-            raise HTTPException(
-                status_code=400,
-                detail=PASSWORD_CONDITION_MESSAGE_EXTENDED
-            )
+        _validate_password_strength(data.new_password)
 
-        result = await update_password_with_token(user['sub'], data.new_password)
+        result = await update_password_with_token(user["sub"], data.new_password)
         if result.user:
-
             # Send password reset success email to user
-            user_email = user.get('email', '')
-            user_metadata = user.get('user_metadata', {})
-            user_name = user_metadata.get('full_name', '') or \
-                       f"{user_metadata.get('first_name', '')} {user_metadata.get('last_name', '')}".strip() or \
-                       user_email.split('@')[0]
-
-            try:
-                email_sent = send_password_reset_success_email(email=user_email, user_name=user_name)
-                if not email_sent:
-                    logger.warning("Failed to send password reset success email to %s", user_email)
-                    # Note: We don't fail the entire operation if email fails
-                    # The password reset was successful, only the email notification failed
-            except Exception as email_error:
-                logger.error("Error sending password reset success email: %s", str(email_error))
-                # Note: We don't fail the entire operation if email fails
-
-            return PasswordResponse(
-                message="Password reset successfully. You can now login with your new password."
+            user_email = user.get("email", "")
+            user_metadata = user.get("user_metadata", {})
+            user_name = (
+                user_metadata.get("full_name", "")
+                or (
+                    f"{user_metadata.get('first_name', '')} {user_metadata.get('last_name', '')}"
+                ).strip()
+                or user_email.split("@")[0]
             )
-        logger.error("Password update failed - no user in result")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to update password. Please try again."
+
+            send_password_reset_success_email(email=user_email, user_name=user_name)
+            return success_response(
+                request=request,
+                message_key="auth.success.password_reset_successfully",
+                custom_code=CustomStatusCode.SUCCESS,
+                status_code=http_status.HTTP_200_OK,
+            )
+        raise BadRequestException(
+            message_key="auth.errors.failed_to_update_password",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
 
+    except HTTPException as error:
+        raise error
     except Exception as error:
-        log_exception()
-        if isinstance(error, HTTPException):
-            raise error
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to reset password. Please try again."
+        logger.error("Error resetting password: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         ) from error
 
-    # 2. Organization creation based on account type
-    # 3. Super Admin role and permissions setup
-    # 4. Organization member creation with role assignment
 
-    # Account Types:
-    # - Personal: Individual account for freelancers, students, personal use
-    # - Business: Corporate account for companies, teams, organizations
-
-    # - Organization slug generation with uniqueness validation
-    # - Trial status for new organizations
-    # - Automatic Super Admin role assignment
-    # - Complete permission system setup
-
-    # X- Organization slug uniqueness validation
 @router.post(
-    "/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
+    "/signup",
+    response_model=AuthResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    description="Signup endpoint for both personal and business accounts",
+    summary="Signup endpoint for both personal and business accounts",
+    responses={
+        http_status.HTTP_201_CREATED: {"description": "User signed up successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_409_CONFLICT: {"description": "Duplicate email"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -933,229 +747,192 @@ async def reset_password(
 )
 @handle_api_exceptions("signup")
 async def signup(
-    request: Request, # pylint: disable=unused-argument
+    request: Request,
     signup_data: SignupRequest = Body(...),
 ):
+    """User signup endpoint for both personal and business accounts
+    This endpoint creates a complete account setup including User signup with Supabase Auth
     """
-    ## User signup endpoint for both personal and business accounts
-    ## This endpoint creates a complete account setup including User signup with Supabase Auth
+    try:
+        _validate_password_strength(signup_data.password)
 
-    ### Features:
-    - Email validation and duplicate checking
-    - Password strength requirements (minimum 6 characters)
-
-    ### Args:
-        signup_data (SignupRequest): Signup data including user credentials and info
-
-    ### Returns:
-        SignupResponse: Success response with user data
-
-    ### Raises:
-        HTTPException: 400 for validation errors
-        HTTPException: 409 for duplicate email
-        HTTPException: 500 for database or Supabase errors
-
-    ### Security Features:
-    - Password hashing handled by Supabase
-    - Email validation and uniqueness checking
-    - Transaction rollback on failures
-    - Proper error handling without exposing internal details
-    """
-
-    _validate_password_strength(signup_data.password)
-
-    await _validate_verification_code_for_signup(
-        verification_id=signup_data.verification_id,
-        email=signup_data.email,
-        verification_code=signup_data.verification_code
-    )
-
-    signup_result = await sign_up_supabase_user(signup_data)
-
-    session = await _get_session_after_signup(
-        signup_result=signup_result,
-        email=signup_data.email,
-        password=signup_data.password
-    )
-
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create session after signup"
+        await _validate_verification_code_for_signup(
+            verification_id=signup_data.verification_id,
+            email=signup_data.email,
+            verification_code=signup_data.verification_code,
         )
 
-    _send_welcome_email_safely(
-        email=signup_data.email,
-        first_name=signup_data.first_name
-    )
+        signup_result = await sign_up_supabase_user(signup_data)
 
-    return AuthResponse(
-        access_token=session.access_token,
-        refresh_token=session.refresh_token,
-        expires_in=session.expires_in,
-        expires_at=session.expires_at,
-        user=UserInfo(
-            id=signup_result.user.id,
-            email=signup_result.user.email,
-            first_name=signup_result.user.user_metadata.get("first_name", None),
-            last_name=signup_result.user.user_metadata.get("last_name", None),
-            phone=signup_result.user.user_metadata.get("phone", None),
-            timezone=signup_result.user.user_metadata.get("timezone", None),
-        ),
-    )
+        session = await _get_session_after_signup(
+            signup_result=signup_result,
+            email=signup_data.email,
+            password=signup_data.password,
+        )
+
+        if not session:
+            raise InternalServerErrorException(
+                message_key="errors.internal_server_error",
+                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+            )
+
+        send_welcome_email(email=signup_data.email, first_name=signup_data.first_name)
+
+        return success_response(
+            request=request,
+            message_key="auth.success.user_signed_up",
+            custom_code=CustomStatusCode.SUCCESS,
+            status_code=http_status.HTTP_201_CREATED,
+            data=AuthResponse(
+                access_token=session.access_token,
+                refresh_token=session.refresh_token,
+                expires_in=session.expires_in,
+                expires_at=session.expires_at,
+                user=UserInfo(
+                    id=signup_result.user.id,
+                    email=signup_result.user.email,
+                    first_name=signup_result.user.user_metadata.get("first_name", None),
+                    last_name=signup_result.user.user_metadata.get("last_name", None),
+                    phone=signup_result.user.user_metadata.get("phone", None),
+                    timezone=signup_result.user.user_metadata.get("timezone", None),
+                ),
+            ),
+        )
+    except HTTPException as error:
+        raise error
+    except Exception as error:
+        logger.error("Error signing up user: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        ) from error
 
 
 @handle_api_exceptions("verify email")
 @router.post(
-    "/email/verify", response_model=VerifyEmailResponse, status_code=status.HTTP_200_OK
+    "/email/verify",
+    response_model=VerifyEmailResponse,
+    status_code=http_status.HTTP_200_OK,
+    description="Verify user email and status by determining user type from auth.users metadata.",
+    summary="Verify user email and status by determining user type from auth.users metadata.",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Email verified and active"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
 )
-# pylint: disable=unused-argument  # Required by @limiter.limit
+@limiter.limit("100/minute")
+@handle_api_exceptions("verify email")
 async def verify_email(
     request: Request,
     body: VerifyEmailRequest = Body(...),
 ):
-    """
-    Verify user email and status by determining user type from auth.users metadata
-    and checking the corresponding table for status.
-
-    Returns email_found=True if email exists in auth.users, regardless of user type or status.
-    """
+    """Verify user email and status by determining user type from auth.users metadata
+    and checking the corresponding table for status."""
     try:
-        # 1) Get user from auth.users using centralized operation
         auth_user = await get_auth_user_by_email(body.email)
         if not auth_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "message": EMAIL_NOT_FOUND_MESSAGE
-                }
+            raise NotFoundException(
+                message_key="auth.errors.email_not_found_in_system",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # 2) Get organization member status by email
         status_value = await get_organization_member_status_by_email(body.email)
         if status_value is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "message": EMAIL_NOT_FOUND_MESSAGE
-                }
+            raise NotFoundException(
+                message_key="auth.errors.email_not_found_in_system",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
-        elif status_value != "active":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "message": "Account is not active. Please contact support."
-                }
+        if status_value != "active":
+            raise ForbiddenException(
+                message_key="auth.errors.account_not_active",
+                custom_code=CustomStatusCode.FORBIDDEN,
             )
-        else:
-            # User exists in auth.users but not in organization_members table
-            return VerifyEmailResponse(
-                message="Email verified and active.",
-                email_found=True,
-                status="active",
-                can_login=True
-            )
+        return success_response(
+            request=request,
+            message_key="auth.success.email_verified",
+            custom_code=CustomStatusCode.SUCCESS,
+            status_code=http_status.HTTP_200_OK,
+        )
 
-    # 4) User exists in auth.users but is not organization_member or has no user type
-    # Still return email_found=True since email exists
     except HTTPException as error:
         raise error
     except Exception as error:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "message": "Failed to verify email"
-            }
+        logger.error("Error verifying email: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         ) from error
 
 
 @handle_api_exceptions("delete user")
-@router.delete("/user", status_code=status.HTTP_204_NO_CONTENT)
-# pylint: disable=unused-argument  # Required by @limiter.limit
+@router.delete(
+    "/user",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    description="Delete user directly from auth.users table without validation",
+    summary="Delete user directly from auth.users table without validation",
+    responses={
+        http_status.HTTP_204_NO_CONTENT: {"description": "User deleted successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="confidential",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="auth.users",
+    category="USER_DELETE",
+)
 async def delete_user(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth)
+    current_user: dict = Depends(get_user_from_auth),
 ):
-    """
-    Delete user directly from auth.users table without validation.
-
-    This endpoint allows administrators to delete a user account directly
-    from the database auth.users table. Use with caution as this operation
-    is irreversible and will remove all user authentication data.
-
-    Args:
-        user_id (str): The ID of the user to delete
-
-    Returns:
-        dict: Success response with deletion confirmation
-
-    Raises:
-        HTTPException: 500 for database errors or deletion failures
-
-    Security Note:
-    - This endpoint requires database access privileges
-    - No validation is performed - user will be deleted immediately
-    - All associated auth data will be removed from the database
-    """
+    """Delete user directly from auth.users table without validation."""
     try:
-        user_id = current_user['sub']
+        user_id = current_user["sub"]
 
         result = await delete_auth_user(user_id)
 
         if result is not None:
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No user found with ID {user_id}")
-    except HTTPException:
-        raise
+            return success_response(
+                request=request,
+                message_key="auth.success.user_deleted",
+                custom_code=CustomStatusCode.SUCCESS,
+                status_code=http_status.HTTP_200_OK,
+            )
+        raise NotFoundException(
+            message_key="auth.errors.user_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    except HTTPException as error:
+        raise error
     except Exception as error:
         logger.error("Failed to delete user %s: %s", user_id, error)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete user: {str(error)}"
-        ) from error
-
-
-# ============================================================================
-# CHANGE PASSWORD API
-# ============================================================================
-
-def _handle_password_update_error(error: Exception) -> None:
-    """
-    Handle errors during password update and raise appropriate HTTPException.
-
-    Args:
-        error: The exception that occurred during password update
-
-    Raises:
-        HTTPException: Appropriate error based on error message
-    """
-    error_message = str(error).lower()
-    logger.error("Error updating password: %s", str(error))
-
-    # Check for specific Supabase errors
-    if "user not allowed" in error_message or "not allowed" in error_message:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is restricted. Please contact support if you believe this is an error."
-        ) from error
-    elif "auth" in error_message or "authentication" in error_message:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication service error. Please try again later."
-        ) from error
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update password"
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         ) from error
 
 
 @router.post(
     "/change-password",
     response_model=ChangePasswordResponse,
-    status_code=status.HTTP_200_OK
+    status_code=http_status.HTTP_200_OK,
+    description="Change user password endpoint. Requires authentication.",
+    summary="Change user password endpoint. Requires authentication.",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Password changed successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
 )
 @limiter.limit("10/minute")
 @audit_api_call(
@@ -1167,205 +944,95 @@ def _handle_password_update_error(error: Exception) -> None:
 )
 @handle_api_exceptions("change_password")
 async def change_password(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     data: ChangePasswordRequest = Body(...),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """
-    Change user password endpoint.
-
-    Requires authentication. Validates current password before updating to new password.
-
-    Args:
-        data: ChangePasswordRequest containing current_password and new_password
-        current_user: Authenticated user from JWT token
-
-    Returns:
-        ChangePasswordResponse: Success message
-
-    Raises:
-        HTTPException: 400 for invalid current password or validation errors
-        HTTPException: 500 for server errors
-    """
+    """Change user password endpoint."""
     user_id = current_user.get("sub")
     user_email = current_user.get("email")
 
     if not user_id or not user_email:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user information"
+        raise BadRequestException(
+            message_key="auth.errors.failed_to_set_password",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
 
     # Validate new password strength
     _validate_password_strength(data.new_password)
 
-    # Step :1 ) verify current password matches database password (must pass before proceeding)
-    try:
-        await login_user(user_email, data.current_password)
-    except HTTPException as e:
-        # if e.status_code == 401 or e.status_code == 403:
-        if e.status_code == 400 and e.detail == INVALID_LOGIN_CREDS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect"
-            ) from e
-        else:
-            raise e
+    await login_user(user_email, data.current_password)
 
-    # Step :2 ) Check if new password is same as current password
     if data.current_password == data.new_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New password must be different from current password"
+        raise BadRequestException(
+            message_key="auth.errors.new_password_must_be_different_from_current_password",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
-    # Check if new password is same as current password in database
-    # Attempt login with new password - if it succeeds, new password = current password
+    await update_password_with_link_identity(user_id, data.new_password)
 
-    # Step :3 ) Update password
-    try:
-        result = await update_password_with_link_identity(user_id, data.new_password)
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update password"
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        _handle_password_update_error(e)
+    user_metadata = current_user.get("user_metadata", {})
+    if user_metadata.get("first_name"):
+        user_name = user_metadata.get("first_name")
+    elif user_metadata.get("full_name"):
+        user_name = user_metadata.get("full_name")
+    else:
+        user_name = user_email.split("@")[0]
 
-    # Send password change success email
-    try:
-        user_metadata = current_user.get("user_metadata", {})
-        if user_metadata.get("first_name"):
-            user_name = user_metadata.get("first_name")
-        elif user_metadata.get("full_name"):
-            user_name = user_metadata.get("full_name")
-        else:
-            user_name = user_email.split('@')[0]
-
-        email_sent = send_password_change_success_email(email=user_email, user_name=user_name)
-        if not email_sent:
-            logger.warning("Failed to send password change success email to %s", user_email)
-    except Exception as email_error:
-        logger.error("Error sending password change success email: %s", str(email_error))
-        # Don't fail the operation if email fails
-
-    return ChangePasswordResponse(
-        message="Password changed successfully"
+    send_password_change_success_email(email=user_email, user_name=user_name)
+    return success_response(
+        request=request,
+        message_key="auth.success.password_changed_successfully",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
     )
-
-
-# ============================================================================
-# CHECK 2FA STATUS API
-# ============================================================================
-
-async def _validate_credentials_for_2fa_check(email: str, password: str) -> None:
-    """
-    Validate user credentials for 2FA status check.
-    
-    Args:
-        email: User email
-        password: User password
-        
-    Raises:
-        HTTPException: If credentials are invalid
-    """
-    try:
-        await login_user(email, password)
-    except HTTPException as e:
-        # Re-raise HTTPException as-is (e.g., invalid credentials)
-        raise e
-    except AuthApiError as error:
-        # AuthApiError from Supabase for invalid credentials
-        if error.status == 400 and error.message == INVALID_LOGIN_CREDS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=INVALID_LOGIN_CREDS
-            ) from error
-        if hasattr(error, 'status') and hasattr(error, 'message'):
-            raise HTTPException(
-                status_code=error.status,
-                detail=error.message
-            ) from error
-        # For any other AuthApiError, treat as invalid credentials
-        logger.warning("AuthApiError during 2FA status check (treating as invalid credentials): %s", str(error))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_LOGIN_CREDS
-        ) from error
-    except Exception as error:
-        error_str = str(error).lower()
-        # Check for invalid credentials in error message
-        if INVALID_LOGIN_CREDS in error_str or \
-           ("invalid" in error_str and "credential" in error_str):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=INVALID_LOGIN_CREDS
-            ) from error
-        # For other errors, log and re-raise as generic error
-        log_exception()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to validate credentials"
-        ) from error
 
 
 @router.post(
     "/verify/account",
     response_model=Check2FAStatusResponse,
-    status_code=status.HTTP_200_OK
+    description="Check if 2FA is enabled for a user account.",
+    summary="Check if 2FA is enabled for a user account.",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        http_status.HTTP_200_OK: {"description": "2FA is enabled"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
 )
 @limiter.limit("10/minute")
-# pylint: disable=unused-argument  # Required by @limiter.limit
 @handle_api_exceptions("check_2fa_status")
 async def check_2fa_status(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     data: Check2FAStatusRequest = Body(...),
 ):
-    """
-    Check if 2FA is enabled for a user account.
-
-    This endpoint validates the user's credentials (email and password) and
-    returns whether 2FA is enabled for their account.
-
-    Args:
-        request (Request): FastAPI request object
-        data (Check2FAStatusRequest): Email and password for validation
-
-    Returns:
-        Check2FAStatusResponse: Response containing two_fa_enabled boolean
-
-    Raises:
-        HTTPException:
-            - 400: Email not registered or invalid credentials
-            - 500: Internal server error
-    """
+    """Check if 2FA is enabled for a user account."""
     try:
-        # Step 1: Check if user account exists
         all_user = await get_auth_user_by_email(data.email)
         if all_user is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=EMAIL_NOT_FOUND_MESSAGE
+            raise NotFoundException(
+                message_key="auth.errors.email_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # Step 2: Validate email and password are correct
-        await _validate_credentials_for_2fa_check(data.email, data.password)
+        await login_user(data.email, data.password)
 
-        # Step 3: Check if 2FA is enabled
         user_metadata = all_user.user_metadata or {}
         is_enabled, _ = _is_2fa_enabled(user_metadata)
-
-        return Check2FAStatusResponse(
-            two_fa_enabled=is_enabled
+        return success_response(
+            request=request,
+            message_key="success.ok",
+            custom_code=CustomStatusCode.SUCCESS,
+            status_code=http_status.HTTP_200_OK,
+            data=Check2FAStatusResponse(two_fa_enabled=is_enabled),
         )
 
-    except HTTPException:
-        raise
+    except HTTPException as error:
+        raise error
     except Exception as error:
-        log_exception()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to check 2FA status"
+        logger.error("Error checking 2FA status: %s", str(error))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         ) from error

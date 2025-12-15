@@ -2,12 +2,14 @@
 
 import os
 import sys
+
 from apps.user_service.app.dependencies.logger import get_logger
 
 logger = get_logger("common_utils")
 
 ROLE_TYPES = ["system", "custom"]
 # libs/shared_utils/common_query.py
+
 
 def log_exception():
     """Log exception details"""
@@ -199,7 +201,6 @@ DEFAULT_PERMISSIONS = [
         "settings",
     ),
 ]
-
 
 
 # Common SELECT fields for roles

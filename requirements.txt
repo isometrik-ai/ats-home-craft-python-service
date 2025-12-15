@@ -41,3 +41,6 @@ typesense==0.20.0
 
 # Vector database support
 pgvector==0.2.4
+
+# Pre-commit
+pre-commit>=4.5.0

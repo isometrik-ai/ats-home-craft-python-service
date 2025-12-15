@@ -1,198 +1,32 @@
-
-
+"""Sessions Management API Module
+This module provides endpoints for managing user sessions.
 """
-Sessions Management API Module
 
-This module provides CRUD operations for user session management.
-
-"""
-from typing import Optional
-
-from fastapi import APIRouter, HTTPException, status, Depends, Request
-from pydantic import BaseModel
-
-# Logger import
-from apps.user_service.app.dependencies.logger import get_logger
-
-# Utility imports
-from apps.user_service.app.dependencies.common_utils import (
-    format_iso_datetime,
-    validate_pagination_params,
-    check_permissions,
-    extract_user_context,
-)
-
-# Schema imports
-from apps.user_service.app.schemas.admin_access_management import (
-    SessionItem,
-    SessionQueryParams,
-    SessionsResponse
-)
-
-from apps.user_service.app.schemas.auth import SessionFilter
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-
-
-# Local imports
-from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USERS_VIEW
-from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_db.postgres_db.user_service_operations.session_operations import (
-    get_sessions_with_count,
-    get_org_sessions_with_count,
+from apps.user_service.app.dependencies.common_utils import (
+    check_permissions,
+    extract_user_context,
+    format_iso_datetime,
 )
+from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.schemas.admin_access_management import SessionItem
+from apps.user_service.app.schemas.auth import SessionFilter
+from libs.shared_db.postgres_db.user_service_operations.session_operations import (
+    get_org_sessions_with_count,
+    get_sessions_with_count,
+)
+from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USERS_VIEW
+from libs.shared_utils.http_exceptions import BadRequestException
+from libs.shared_utils.response_factory import list_response
+from libs.shared_utils.status_codes import CustomStatusCode
 
-
-# Create router for sessions endpoints
 router = APIRouter(prefix="/sessions", tags=["Sessions Management"])
 
-# Initialize logger for sessions module
 logger = get_logger("sessions-api")
-
-# Authentication description for API documentation
-AUTH_DESCRIPTION = "Bearer token required for authentication"
-
-
-class SessionResponse(BaseModel):
-    """Response model for session operations"""
-
-    message: str
-    status: str = "success"
-
-    def to_dict(self):
-        """Convert to dictionary for JSON serialization"""
-        return {"message": self.message, "status": self.status}
-
-
-def extract_session_id_from_token(current_user: dict) -> str:
-    """
-    Extract session ID from JWT token.
-    This function extracts the session ID from the JWT token's 'session_id' claim.
-    The session ID is used to track and manage user sessions.
-
-    """
-    session_id = current_user.get("session_id")
-    if not session_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session ID not found in token",
-        )
-
-    # Validate that session_id is not None or empty string
-    if session_id is None or session_id == "":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session ID is null or empty in token",
-        )
-
-    return session_id
-
-
-def get_client_ip(request: Request) -> str:
-    """
-    Extract client IP address from request.
-
-    This function handles various proxy scenarios and extracts the real client IP.
-
-    """
-    # Check for forwarded headers (common with proxies)
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # Take the first IP in the chain
-        return forwarded_for.split(",")[0].strip()
-
-    # Check for real IP header
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip
-
-    # Fallback to client host
-    return request.client.host if request.client else "unknown"
-
-
-def get_user_agent(request: Request) -> str:
-    """
-    Extract user agent from request headers.
-
-    """
-    return request.headers.get("User-Agent", "unknown")
-
-
-def get_device_fingerprint(request: Request) -> str:
-    """
-    Extract device fingerprint from request headers.
-
-    """
-    return request.headers.get("X-Device-Fingerprint")
-
-
-def get_risk_score(request: Request) -> int:
-    """
-    Extract risk score from request headers or calculate based on context.
-
-    """
-    # Try to get from header first
-    # risk_score_header = request.headers.get("X-Risk-Score")
-    # if risk_score_header:
-    #     try:
-    #         return int(risk_score_header)
-    #     except ValueError:
-    #         pass
-
-    # Calculate risk score based on context
-    risk_score = 0
-
-    # Check for suspicious headers
-    if not request.headers.get("User-Agent"):
-        risk_score += 20
-
-    # Check for proxy/VPN indicators
-    if request.headers.get("X-Forwarded-For") or request.headers.get("X-Real-IP"):
-        risk_score += 10
-
-    return min(risk_score, 100)
-
-
-def get_login_method(request: Request) -> str:
-    """
-    Determine login method from request context.
-
-    """
-    # Check for MFA headers
-    if request.headers.get("X-MFA-Token"):
-        return "mfa"
-
-    # Check for SSO headers
-    if request.headers.get("X-SSO-Provider"):
-        return "sso"
-
-    # Default to password-based login
-    return "password"
-
-
-def build_session_filter_message(
-    search: Optional[str] = None,
-    session_status: Optional[str] = None,
-    login_method: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
-) -> str:
-    """
-    Build response message based on applied filters.
-
-    """
-    filters = []
-
-    if search:
-        filters.append(f"search='{search}'")
-    if session_status:
-        filters.append(f"status='{session_status}'")
-    if login_method:
-        filters.append(f"login_method='{login_method}'")
-
-    filter_text = f" with filters: {', '.join(filters)}" if filters else ""
-
-    return f"Sessions retrieved successfully (page {page}, {page_size} per page){filter_text}"
 
 
 def _format_session_item(session_data: dict) -> SessionItem:
@@ -222,228 +56,171 @@ def _format_session_item(session_data: dict) -> SessionItem:
     )
 
 
-async def _fetch_sessions_data(
-    user_context, query_params, page_size: int, offset: int
+@router.get(
+    "",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get all sessions for the current organization",
+    summary="Get all sessions for the current organization",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Sessions retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+async def get_sessions_list(
+    request: Request,
+    current_user: dict = Depends(get_user_from_auth),
+    search: str | None = Query(
+        None,
+        description="Search term to filter sessions by user email or IP address (case-insensitive)",
+    ),
+    page: int = Query(1, ge=1, description="The page number for pagination"),
+    page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
+    session_status: str | None = Query(
+        None, description="Filter by session status (active, inactive, terminated)"
+    ),
+    login_method: str | None = Query(
+        None, description="Filter by login method (password, sso, mfa)"
+    ),
 ):
-    """Fetch sessions data and count using centralized operations."""
+    """Get all sessions for the current organization"""
+    # Extract user context from JWT token
+    user_context = await extract_user_context(current_user)
+
+    if user_context.organization_id:
+        await check_permissions(
+            current_user=current_user,
+            permission_codes=SETTINGS_SYSTEM_MANAGE,
+        )
+
     # Create SessionFilter from query_params
     filters = SessionFilter(
-        search=query_params.search,
-        session_status=query_params.session_status,
-        login_method=query_params.login_method,
+        search=search,
+        session_status=session_status,
+        login_method=login_method,
         limit=page_size,
-        offset=offset,
+        offset=(page - 1) * page_size,
     )
 
     # Get sessions and count in a single optimized database call
     result = await get_sessions_with_count(
         organization_id=user_context.organization_id,
         user_id=user_context.user_id,
-        filters=filters
-    )
-
-    return result["data"], result["total_count"]
-
-
-async def _fetch_org_sessions_data(
-    organization_id, query_params, page_size: int, offset: int
-):
-    """Fetch organization-wide sessions data and count (all users in org)."""
-    filters = SessionFilter(
-        search=query_params.search,
-        session_status=query_params.session_status,
-        login_method=query_params.login_method,
-        limit=page_size,
-        offset=offset,
-    )
-
-    result = await get_org_sessions_with_count(
-        organization_id=organization_id,
         filters=filters,
     )
 
-    return result["data"], result["total_count"]
-
-
-@router.get("", response_model=SessionsResponse, status_code=status.HTTP_200_OK)
-@limiter.limit("100/minute")
-# @audit_api_call(
-#     action_type="READ",
-#     data_classification="confidential",
-#     compliance_tags=[
-#         "hipaa",  # Session access tracking is critical for HIPAA compliance
-#         "soc2_audit",  # Session management is essential for SOC2 compliance
-#         "audit_required",  # Session list access must be logged for security audits
-#     ],
-#     table_name="user_sessions",
-#     category="SESSION",
-# )
-async def get_sessions_details(
-    request: Request,
-    current_user: dict = Depends(get_user_from_auth),
-    query_params: SessionQueryParams = Depends(),
-):
-    """
-    Get all sessions for the current organization (Optimized & Truly Async)
-
-
-    Args:
-        request (Request): The FastAPI request object
-        current_user (dict): Decoded JWT token containing user information
-        query_params (SessionQueryParams): Query parameters object containing
-            search, pagination, and filter options
-
-    Returns:
-        SessionsResponse: List of sessions with pagination information
-
-    """
-    # # Generate request ID for tracking
-    # request_id = str(uuid.uuid4())
-
-    # Extract user context from JWT token
-    user_context = await extract_user_context(current_user)
-
-    # Check permissions only if user has an organization_id
-    # Allow users without organization_id to view their sessions (organization_id can be None)
-    # This supports personal accounts that don't belong to an organization
-    if user_context.organization_id:
-        await check_permissions(
-            current_user=current_user,
-            permission_codes=SETTINGS_SYSTEM_MANAGE,
-            action_description="view sessions list"
-        )
-
-    # Set audit context for session list access
-    request.state.audit_table = "user_sessions"
-    request.state.audit_description = (
-        f"Admin accessed session list with search: '{query_params.search or 'none'}'"
-    )
-    request.state.audit_risk_level = "medium"
-
-    # Validate pagination parameters and calculate offset
-    page, page_size, offset = validate_pagination_params(
-        query_params.page, query_params.page_size
-    )
-
-    # Fetch sessions data and count
-    sessions_data, total_count = await _fetch_sessions_data(
-        user_context, query_params, page_size, offset
-    )
+    sessions_data = result["data"]
+    total_count = result["total_count"]
 
     # Format sessions data using utility functions
     sessions = [_format_session_item(session) for session in sessions_data]
 
-    # Build response message using utility function
-    message = build_session_filter_message(
-        search=query_params.search,
-        session_status=query_params.session_status,
-        login_method=query_params.login_method,
+    return list_response(
+        request=request,
+        items=sessions,
+        total=total_count,
         page=page,
         page_size=page_size,
-    )
-
-    # Set audit data for session list access
-    request.state.raw_audit_new_data = {
-        "total_sessions": total_count,
-        "page": page,
-        "page_size": page_size,
-        "filters_applied": {
-            "search": query_params.search,
-            "session_status": query_params.session_status,
-            "login_method": query_params.login_method,
-        },
-    }
-
-    return SessionsResponse(
-        message=message,
-        sessions=sessions,
-        total_count=total_count,
-        page=page,
-        page_size=page_size,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
     )
 
 
 @router.get(
     "/all",
-    response_model=SessionsResponse,
-    status_code=status.HTTP_200_OK,
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get all sessions for all users in the current organization",
+    summary="Get all sessions for all users in the current organization",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Sessions retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
 async def get_organization_sessions(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
-    query_params: SessionQueryParams = Depends(),
+    search: str | None = Query(
+        None,
+        description="Search term to filter sessions by user email or IP address (case-insensitive)",
+    ),
+    page: int = Query(1, ge=1, description="The page number for pagination"),
+    page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
+    session_status: str | None = Query(
+        None, description="Filter by session status (active, inactive, terminated)"
+    ),
+    login_method: str | None = Query(
+        None, description="Filter by login method (password, sso, mfa)"
+    ),
 ):
-    """
-    Get all sessions for all users in the current organization.
-
+    """Get all sessions for all users in the current organization.
     Intended for org-level admins with settings management permission.
     """
     # Extract context and enforce permissions in a single helper call
     user_context = await check_permissions(
         current_user=current_user,
         permission_codes=SETTINGS_USERS_VIEW,
-        action_description="view organization-wide sessions list",
     )
 
     # Require organization_id – org-wide listing doesn't apply to personal accounts
     if not user_context.organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Organization ID is required to list organization-wide sessions",
+        raise BadRequestException(
+            message_key="sessions.errors.bad_request",
+            custom_code=CustomStatusCode.BAD_REQUEST,
         )
 
-    # Set audit context
-    request.state.audit_table = "user_sessions"
-    request.state.audit_description = (
-        f"Admin accessed organization-wide session list with search: "
-        f"'{query_params.search or 'none'}'"
-    )
-    request.state.audit_risk_level = "high"
-
-    # Validate pagination parameters and calculate offset
-    page, page_size, offset = validate_pagination_params(
-        query_params.page,
-        query_params.page_size,
-    )
-
     # Fetch sessions data and count
-    sessions_data, total_count = await _fetch_org_sessions_data(
-        organization_id=user_context.organization_id,
-        query_params=query_params,
-        page_size=page_size,
-        offset=offset,
+    filters = SessionFilter(
+        search=search,
+        session_status=session_status,
+        login_method=login_method,
+        limit=page_size,
+        offset=(page - 1) * page_size,
     )
 
-    # Format sessions data
+    result = await get_org_sessions_with_count(
+        organization_id=user_context.organization_id,
+        filters=filters,
+    )
+
+    sessions_data = result["data"]
+    total_count = result["total_count"]
+
+    if not sessions_data:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+        )
+
+    # Format sessions data using utility functions
     sessions = [_format_session_item(session) for session in sessions_data]
 
-    # Build response message
-    message = build_session_filter_message(
-        search=query_params.search,
-        session_status=query_params.session_status,
-        login_method=query_params.login_method,
+    return list_response(
+        request=request,
+        items=sessions,
+        total=total_count,
         page=page,
         page_size=page_size,
-    )
-
-    # Audit payload
-    request.state.raw_audit_new_data = {
-        "total_sessions": total_count,
-        "page": page,
-        "page_size": page_size,
-        "filters_applied": {
-            "search": query_params.search,
-            "session_status": query_params.session_status,
-            "login_method": query_params.login_method,
-        },
-        "scope": "organization",
-    }
-
-    return SessionsResponse(
-        message=message,
-        sessions=sessions,
-        total_count=total_count,
-        page=page,
-        page_size=page_size,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
     )

@@ -1,0 +1,148 @@
+{
+  "errors": {},
+  "success": {},
+  "invitations": {
+    "errors": {
+      "invitation_not_found": "The invitation you are trying to access does not exist.",
+      "user_already_a_member": "User is already a member of this organization",
+      "organization_not_found": "The organization you are trying to accept the invitation for does not exist.",
+      "role_not_found": "The role you are trying to access does not exist.",
+      "isometrik_application_not_found": "Isometrik application not found",
+      "organization_subscription_missing": "The organization has not subscribed to any plan.",
+      "invalid_max_users": "The organization has reached the maximum member limit for the current plan.",
+      "subscription_expired": "Your organization's subscription has expired. Please renew your plan.",
+      "pending_invitation_exists": "A pending invitation already exists for this email."
+    },
+    "success": {
+      "invitation_accepted": "Invitation accepted successfully.",
+      "invitation_resent": "Invitation resent successfully."
+    }
+  },
+  "organisations": {
+    "errors": {
+      "invalid_organisation_status": "Status must be one of: {allowed_statuses}",
+      "forbidden": "You don't have permission to perform this action",
+      "conflict": "You already belong to an organization.",
+      "slug_conflict": "The slug you provided is already in use. Please choose a different one.",
+      "not_found": "The organisation you are trying to access does not exist.",
+      "user_not_a_member_of_any_organization": "You are not part of any organization yet. Please join one to proceed."
+    },
+    "success": {
+      "organisation_created": "Organisation created successfully.",
+      "organisation_updated": "Organisation updated successfully.",
+      "organisation_deleted": "Organisation deleted successfully."
+    }
+  },
+  "auth": {
+    "errors": {
+      "practice_areas_overlap": "Secondary practice areas cannot overlap with primary ones: {practice_areas}",
+      "password_too_short": "Password must be at least 6 characters long",
+      "password_strength": "Password must be at least 6 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+      "verification_code_not_found": "Verification code not found",
+      "verification_code_not_verified": "Verification code must be verified",
+      "verification_code_not_matched_email": "Verification code does not match the email",
+      "verification_code_not_matched_phone": "Verification code does not match the phone number",
+      "2fa_credentials_required": "2FA credentials are required",
+      "two_fa_verification_failed": "2FA verification failed",
+      "email_not_found": "Email not found for the given credentials. Please sign up before logging in.",
+      "authentication_failed": "Authentication failed. Please try again.",
+      "token_not_expired": "Token is still valid and cannot be refreshed yet.",
+      "failed_to_set_password": "Failed to set password. Please try again.",
+      "email_not_found_in_system": "Email not found in our system. Please check your email and try again.",
+      "failed_to_update_password": "Failed to update password. Please try again.",
+      "account_not_active": "Account is not active. Please verify your email and try again.",
+      "user_not_found": "User not found in our system. Please check your email and try again.",
+      "new_password_must_be_different_from_current_password": "New password must be different from current password"
+    },
+    "success": {
+      "login_successful": "Login successful.",
+      "session_refreshed": "Session refreshed successfully.",
+      "password_set_successfully": "Password set successfully.",
+      "password_reset_email_sent": "Password reset email sent successfully. Please check your email.",
+      "password_reset_successfully": "Password reset successfully. You can now login with your new password.",
+      "user_signed_up": "User signed up successfully.",
+      "email_verified": "Email verified successfully.",
+      "password_changed_successfully": "Password changed successfully.",
+      "2fa_status_checked": "2FA status checked successfully."
+    }
+  },
+  "verification_codes": {
+    "errors": {
+      "email_required": "Email is required",
+      "phoneNumber_required": "Phone number is required",
+      "phoneNumber_provided": "Phone number should not be provided",
+      "email_provided": "Email should not be provided",
+      "email_same_as_current": "The entered email is the same as your current email. No changes were made.",
+      "email_already_registered": "This email is already registered with another account. Please use a different email.",
+      "phone_already_registered": "This phone number is already registered with another account. Please use a different phone number.",
+      "phone_same_as_current": "The entered phone number is the same as your current phone number. No changes were made.",
+      "verification_code_invalid": "The verification code you entered is invalid.",
+      "verification_code_already_verified": "The verification code you entered has already been verified.",
+      "verification_code_not_verified": "The verification code is not verified. Please complete verification before proceeding.",
+      "verification_code_not_found": "The verification code you are trying to access does not exist.",
+      "verification_code_expired": "The verification code has expired. Please request a new one.",
+      "verification_code_ownership_mismatch": "You can only verify your own verification codes.",
+      "maximum_send_otp_attempts_reached": "Maximum send OTP attempts ({max_attempts}) reached. Please try again later."
+    },
+    "success": {
+      "verification_code_sent": "Verification code sent successfully.",
+      "verification_code_verified": "Verification code verified successfully."
+    }
+  },
+  "permissions": {
+    "errors": {
+      "creation_failed": "Failed to create permission",
+      "deletion_failed": "Failed to delete permission"
+    },
+    "success": {
+      "creation_successful": "Permission created successfully",
+      "deletion_successful": "Permission deleted successfully"
+    }
+  },
+  "roles": {
+    "errors": {
+      "role_not_found": "The role you are trying to access does not exist.",
+      "role_name_already_exists": "The role name '{role_name}' already exists.",
+      "role_in_use": "Cannot delete role. It is currently assigned to {member_count} organization member(s)"
+    },
+    "success": {
+      "created": "Role created successfully.",
+      "updated": "Role updated successfully.",
+      "deleted": "Role deleted successfully."
+    }
+  },
+  "audit_logs": {
+    "errors": {
+      "not_found": "The audit log you are trying to access does not exist."
+    }
+  },
+  "sessions": {
+    "errors": {
+      "bad_request": "Organization ID is required to list organization-wide sessions"
+    }
+  },
+  "users": {
+    "errors": {
+      "self_action": "You cannot perform this action on yourself",
+      "user_not_found": "The user you are trying to access does not exist.",
+      "organization_user_not_found": "The organization user you are trying to access does not exist.",
+      "invalid_verification_method": "Verification method must be either 'PHONE' or 'EMAIL'",
+      "two_fa_enabled_required": "two_fa_enabled must be provided when updating verification_method",
+      "no_fields_provided_for_update": "No fields provided for update"
+    },
+    "success": {
+      "email_updated": "User email updated successfully",
+      "user_banned": "User banned successfully",
+      "user_unbanned": "User unbanned successfully",
+      "user_profile_updated": "User profile updated successfully"
+    }
+  },
+  "presigned_url": {
+    "errors": {
+      "r2_credentials_not_configured": "R2 credentials not configured. Please set R2_ACCESS_KEY, R2_SECRET_KEY, and R2_ACCOUNT_ID environment variables."
+    },
+    "success": {
+      "presigned_url_generated": "Presigned URL generated successfully."
+    }
+  }
+}

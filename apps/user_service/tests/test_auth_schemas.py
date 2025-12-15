@@ -1,62 +1,47 @@
-# pylint: disable=all
+"""Test module for auth schemas."""
 
-"""
-Test module for auth schemas.
-
-This module contains comprehensive tests for all Pydantic schemas and enums
-defined in apps.user_service.app.schemas.auth.
-
-Author: AI Assistant
-Date: 2024-12-19
-Last Updated: 2024-12-19
-"""
+from datetime import datetime, timezone
 
 import pytest
-from datetime import datetime, timezone
 from fastapi import HTTPException
 
-from apps.user_service.app.schemas.auth import (
-    # Enums
+from apps.user_service.app.schemas.auth import (  # Enums; Basic Models; Complex Models
     AccountType,
-    PlanType,
-    FirmSize,
-    YourRole,
-    ExpectedMembers,
-    ComplianceStandard,
     AuditingFrequency,
-    EncryptionRequirement,
-    SupportServiceOption,
-    CustomizationOption,
-    CustomIntegration,
-    CustomReporting,
-    PracticeArea,
-    Specialization,
-    PreferredIntegration,
-
-    # Basic Models
-    SessionFilter,
     AuthLogin,
-    MemberBody,
-    VerifyEmailRequest,
-    VerifyEmailResponse,
-    UserInfo,
-    OrganizationInfo,
     AuthResponse,
-    SignupResponse,
-    SetPasswordRequest,
-    ResetPasswordRequest,
-    PasswordResponse,
+    CompanyData,
+    ComplianceSecurity,
+    ComplianceStandard,
+    CustomIntegration,
+    CustomizationOption,
+    CustomReporting,
+    EncryptionRequirement,
+    EnterpriseFeatures,
+    ExpectedMembers,
+    FirmSize,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
-
-    # Complex Models
-    User,
-    TeamSetup,
-    ComplianceSecurity,
+    MemberBody,
+    OrganizationInfo,
+    PasswordResponse,
+    PlanType,
+    PracticeArea,
+    PreferredIntegration,
     PrimaryContactInformation,
-    EnterpriseFeatures,
-    CompanyData,
+    ResetPasswordRequest,
+    SessionFilter,
+    SetPasswordRequest,
+    SignupResponse,
     SignupWizardResponse,
+    Specialization,
+    SupportServiceOption,
+    TeamSetup,
+    User,
+    UserInfo,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
+    YourRole,
 )
 
 
@@ -154,7 +139,7 @@ class TestBasicModels:
             session_status="active",
             login_method="email",
             limit=10,
-            offset=5
+            offset=5,
         )
         assert session_filter.search == "test"
         assert session_filter.session_status == "active"
@@ -182,7 +167,7 @@ class TestBasicModels:
             email="test@example.com",
             full_name="John Doe",
             phone="+1234567890",
-            timezone="America/New_York"
+            timezone="America/New_York",
         )
         assert member.email == "test@example.com"
         assert member.full_name == "John Doe"
@@ -197,10 +182,7 @@ class TestBasicModels:
     def test_verify_email_response_model(self):
         """Test VerifyEmailResponse model."""
         response = VerifyEmailResponse(
-            message="Email verified",
-            email_found=True,
-            status="active",
-            can_login=True
+            message="Email verified", email_found=True, status="active", can_login=True
         )
         assert response.message == "Email verified"
         assert response.email_found is True
@@ -209,10 +191,7 @@ class TestBasicModels:
 
         # Test with None status
         response = VerifyEmailResponse(
-            message="Email not found",
-            email_found=False,
-            status=None,
-            can_login=False
+            message="Email not found", email_found=False, status=None, can_login=False
         )
         assert response.status is None
 
@@ -239,7 +218,7 @@ class TestBasicModels:
             slug="test-org",
             account_type="business",
             plan_type="professional",
-            status="active"
+            status="active",
         )
         assert org_info.id == "org123"
         assert org_info.name == "Test Org"
@@ -270,7 +249,7 @@ class TestBasicModels:
         """Test SignupResponse model."""
         response = SignupResponse(
             message="User created successfully",
-            data={"user_id": "123", "email": "test@example.com"}
+            data={"user_id": "123", "email": "test@example.com"},
         )
         assert response.message == "User created successfully"
         assert response.data == {"user_id": "123", "email": "test@example.com"}
@@ -282,16 +261,12 @@ class TestBasicModels:
 
     def test_forgot_password_response_model(self):
         """Test ForgotPasswordResponse model."""
-        response = ForgotPasswordResponse(
-            message="Password reset email sent"
-        )
+        response = ForgotPasswordResponse(message="Password reset email sent")
         assert response.message == "Password reset email sent"
 
     def test_reset_password_response_model(self):
         """Test PasswordResponse model."""
-        response = PasswordResponse(
-            message="Password reset successfully"
-        )
+        response = PasswordResponse(message="Password reset successfully")
         assert response.message == "Password reset successfully"
 
 
@@ -319,7 +294,7 @@ class TestFieldValidators:
         company_data = CompanyData(
             company_name="Test Company",
             primary_practice_areas=[PracticeArea.LITIGATION],
-            company_size=FirmSize.SOLO_PRACTITIONER
+            company_size=FirmSize.SOLO_PRACTITIONER,
         )
         assert company_data.company_name == "Test Company"
 
@@ -330,7 +305,7 @@ class TestFieldValidators:
         company_data = CompanyData(
             company_name="  Test Company  ",
             primary_practice_areas=[PracticeArea.LITIGATION],
-            company_size=FirmSize.SOLO_PRACTITIONER
+            company_size=FirmSize.SOLO_PRACTITIONER,
         )
         assert company_data.company_name == "  Test Company  "
 
@@ -341,7 +316,7 @@ class TestFieldValidators:
             company_name="Test Company",
             company_website="example.com",
             primary_practice_areas=[PracticeArea.LITIGATION],
-            company_size=FirmSize.SOLO_PRACTITIONER
+            company_size=FirmSize.SOLO_PRACTITIONER,
         )
         assert company_data.company_website == "example.com"
 
@@ -350,7 +325,7 @@ class TestFieldValidators:
             company_name="Test Company",
             company_website="http://example.com",
             primary_practice_areas=[PracticeArea.LITIGATION],
-            company_size=FirmSize.SOLO_PRACTITIONER
+            company_size=FirmSize.SOLO_PRACTITIONER,
         )
         assert company_data.company_website == "http://example.com"
 
@@ -359,7 +334,7 @@ class TestFieldValidators:
             company_name="Test Company",
             company_website="https://example.com",
             primary_practice_areas=[PracticeArea.LITIGATION],
-            company_size=FirmSize.SOLO_PRACTITIONER
+            company_size=FirmSize.SOLO_PRACTITIONER,
         )
         assert company_data.company_website == "https://example.com"
 
@@ -368,7 +343,7 @@ class TestFieldValidators:
             company_name="Test Company",
             company_website=None,
             primary_practice_areas=[PracticeArea.LITIGATION],
-            company_size=FirmSize.SOLO_PRACTITIONER
+            company_size=FirmSize.SOLO_PRACTITIONER,
         )
         assert company_data.company_website is None
 
@@ -384,10 +359,13 @@ class TestComplexValidation:
                 company_name="Solo Practice",
                 company_size=FirmSize.SOLO_PRACTITIONER,
                 need_help_importing_data=True,
-                primary_practice_areas=[PracticeArea.LITIGATION]
+                primary_practice_areas=[PracticeArea.LITIGATION],
             )
         assert exc_info.value.status_code == 400
-        assert "need_help_importing_data is not applicable for Solo Practitioner" in exc_info.value.detail
+        assert (
+            "need_help_importing_data is not applicable for Solo Practitioner"
+            in exc_info.value.detail
+        )
 
         # Test that need_migration_assistance is not allowed
         with pytest.raises(HTTPException) as exc_info:
@@ -395,10 +373,13 @@ class TestComplexValidation:
                 company_name="Solo Practice",
                 company_size=FirmSize.SOLO_PRACTITIONER,
                 need_migration_assistance=True,
-                primary_practice_areas=[PracticeArea.LITIGATION]
+                primary_practice_areas=[PracticeArea.LITIGATION],
             )
         assert exc_info.value.status_code == 400
-        assert "need_migration_assistance is not applicable for Solo Practitioner" in exc_info.value.detail
+        assert (
+            "need_migration_assistance is not applicable for Solo Practitioner"
+            in exc_info.value.detail
+        )
 
         # Test that compliance_security is now optional (no longer raises error)
         compliance_security = ComplianceSecurity(
@@ -406,14 +387,14 @@ class TestComplexValidation:
             data_retention_period="7 years",
             auditing_frequency=AuditingFrequency.ANNUAL,
             encryption_requirements=[EncryptionRequirement.AES_256_ENCRYPTION],
-            compliance_officer_email="compliance@test.com"
+            compliance_officer_email="compliance@test.com",
         )
         # compliance_security is now optional for all firm types
         company_data = CompanyData(
             company_name="Solo Practice",
             company_size=FirmSize.SOLO_PRACTITIONER,
             compliance_security=compliance_security,
-            primary_practice_areas=[PracticeArea.LITIGATION]
+            primary_practice_areas=[PracticeArea.LITIGATION],
         )
         assert company_data.compliance_security == compliance_security
 
@@ -423,22 +404,21 @@ class TestComplexValidation:
                 company_name="Solo Practice",
                 company_size=FirmSize.SOLO_PRACTITIONER,
                 preferred_integration=[PreferredIntegration.MICROSOFT_OFFICE_365],
-                primary_practice_areas=[PracticeArea.LITIGATION]
+                primary_practice_areas=[PracticeArea.LITIGATION],
             )
         assert exc_info.value.status_code == 400
-        assert "preferred_integration is not applicable for Solo Practitioner" in exc_info.value.detail
+        assert (
+            "preferred_integration is not applicable for Solo Practitioner" in exc_info.value.detail
+        )
 
         # Test that team_setup is not allowed
-        team_setup = TeamSetup(
-            your_role=YourRole.PARTNER,
-            expected_members=ExpectedMembers.ONE
-        )
+        team_setup = TeamSetup(your_role=YourRole.PARTNER, expected_members=ExpectedMembers.ONE)
         with pytest.raises(HTTPException) as exc_info:
             CompanyData(
                 company_name="Solo Practice",
                 company_size=FirmSize.SOLO_PRACTITIONER,
                 team_setup=team_setup,
-                primary_practice_areas=[PracticeArea.LITIGATION]
+                primary_practice_areas=[PracticeArea.LITIGATION],
             )
         assert exc_info.value.status_code == 400
         assert "team_setup is not applicable for Solo Practitioner" in exc_info.value.detail
@@ -451,19 +431,20 @@ class TestComplexValidation:
             custom_integration=[CustomIntegration.SALESFORCE_CRM],
             custom_reporting=[CustomReporting.EXECUTIVE_DASHBOARD],
             primary_contact_information=PrimaryContactInformation(
-                contact_name="John Doe",
-                contact_email="john@test.com"
-            )
+                contact_name="John Doe", contact_email="john@test.com"
+            ),
         )
         with pytest.raises(HTTPException) as exc_info:
             CompanyData(
                 company_name="Solo Practice",
                 company_size=FirmSize.SOLO_PRACTITIONER,
                 enterprise_features=enterprise_features,
-                primary_practice_areas=[PracticeArea.LITIGATION]
+                primary_practice_areas=[PracticeArea.LITIGATION],
             )
         assert exc_info.value.status_code == 400
-        assert "enterprise_features is not applicable for Solo Practitioner" in exc_info.value.detail
+        assert (
+            "enterprise_features is not applicable for Solo Practitioner" in exc_info.value.detail
+        )
 
     def test_small_firm_restrictions(self):
         """Test Small Firm restrictions - covers lines 487-493."""
@@ -475,19 +456,21 @@ class TestComplexValidation:
             custom_integration=[CustomIntegration.SALESFORCE_CRM],
             custom_reporting=[CustomReporting.EXECUTIVE_DASHBOARD],
             primary_contact_information=PrimaryContactInformation(
-                contact_name="John Doe",
-                contact_email="john@test.com"
-            )
+                contact_name="John Doe", contact_email="john@test.com"
+            ),
         )
         with pytest.raises(HTTPException) as exc_info:
             CompanyData(
                 company_name="Small Firm",
                 company_size=FirmSize.SMALL_FIRM,
                 enterprise_features=enterprise_features,
-                primary_practice_areas=[PracticeArea.LITIGATION]
+                primary_practice_areas=[PracticeArea.LITIGATION],
             )
         assert exc_info.value.status_code == 400
-        assert "enterprise_features is not applicable for Small Firm (2-10 attorneys)" in exc_info.value.detail
+        assert (
+            "enterprise_features is not applicable for Small Firm (2-10 attorneys)"
+            in exc_info.value.detail
+        )
 
         # Test that compliance_security is now optional (no longer raises error)
         compliance_security = ComplianceSecurity(
@@ -495,14 +478,14 @@ class TestComplexValidation:
             data_retention_period="7 years",
             auditing_frequency=AuditingFrequency.ANNUAL,
             encryption_requirements=[EncryptionRequirement.AES_256_ENCRYPTION],
-            compliance_officer_email="compliance@test.com"
+            compliance_officer_email="compliance@test.com",
         )
         # compliance_security is now optional for all firm types
         company_data = CompanyData(
             company_name="Small Firm",
             company_size=FirmSize.SMALL_FIRM,
             compliance_security=compliance_security,
-            primary_practice_areas=[PracticeArea.LITIGATION]
+            primary_practice_areas=[PracticeArea.LITIGATION],
         )
         assert company_data.compliance_security == compliance_security
 
@@ -516,62 +499,75 @@ class TestComplexValidation:
             custom_integration=[CustomIntegration.SALESFORCE_CRM],
             custom_reporting=[CustomReporting.EXECUTIVE_DASHBOARD],
             primary_contact_information=PrimaryContactInformation(
-                contact_name="John Doe",
-                contact_email="john@test.com"
-            )
+                contact_name="John Doe", contact_email="john@test.com"
+            ),
         )
         # This should work fine - Mid-Size/Large firms can have enterprise features
         company_data = CompanyData(
             company_name="Mid-Size Firm",
             company_size=FirmSize.MID_SIZE_LARGE_FIRM,
             enterprise_features=enterprise_features,
-            primary_practice_areas=[PracticeArea.LITIGATION]
+            primary_practice_areas=[PracticeArea.LITIGATION],
         )
         assert company_data.company_size == FirmSize.MID_SIZE_LARGE_FIRM
         assert company_data.enterprise_features == enterprise_features
 
     def test_enterprise_firm_requirements(self):
         """Test Enterprise Firm requirements - covers lines 510-511."""
-        # Test that enterprise_features should be None for Enterprise firms according to validation
-        # This should work fine - Enterprise firms should not have enterprise_features according to validation
         company_data = CompanyData(
             company_name="Enterprise Firm",
             company_size=FirmSize.ENTERPRISE_FIRM,
-            enterprise_features=None,  # Enterprise firms should not have enterprise_features according to validation
-            primary_practice_areas=[PracticeArea.LITIGATION]
+            enterprise_features=None,
+            primary_practice_areas=[PracticeArea.LITIGATION],
         )
         assert company_data.company_size == FirmSize.ENTERPRISE_FIRM
         assert company_data.enterprise_features is None
 
     def test_practice_areas_overlap_validation(self):
         """Test secondary practice areas overlap validation - covers lines 518-520."""
-        # Test overlapping practice areas - should raise HTTPException
         with pytest.raises(HTTPException) as exc_info:
             CompanyData(
                 company_name="Test Firm",
-                primary_practice_areas=[PracticeArea.LITIGATION, PracticeArea.CORPORATE_LAW],
-                secondary_practice_areas=[PracticeArea.LITIGATION, PracticeArea.REAL_ESTATE],
-                company_size=FirmSize.SMALL_FIRM
+                primary_practice_areas=[
+                    PracticeArea.LITIGATION,
+                    PracticeArea.CORPORATE_LAW,
+                ],
+                secondary_practice_areas=[
+                    PracticeArea.LITIGATION,
+                    PracticeArea.REAL_ESTATE,
+                ],
+                company_size=FirmSize.SMALL_FIRM,
             )
         assert exc_info.value.status_code == 400
         assert "Secondary practice areas cannot overlap with primary ones" in exc_info.value.detail
 
-        # Test valid non-overlapping practice areas
         company_data = CompanyData(
             company_name="Test Firm",
-            primary_practice_areas=[PracticeArea.LITIGATION, PracticeArea.CORPORATE_LAW],
-            secondary_practice_areas=[PracticeArea.REAL_ESTATE, PracticeArea.FAMILY_LAW],
-            company_size=FirmSize.SMALL_FIRM
+            primary_practice_areas=[
+                PracticeArea.LITIGATION,
+                PracticeArea.CORPORATE_LAW,
+            ],
+            secondary_practice_areas=[
+                PracticeArea.REAL_ESTATE,
+                PracticeArea.FAMILY_LAW,
+            ],
+            company_size=FirmSize.SMALL_FIRM,
         )
-        assert company_data.primary_practice_areas == [PracticeArea.LITIGATION, PracticeArea.CORPORATE_LAW]
-        assert company_data.secondary_practice_areas == [PracticeArea.REAL_ESTATE, PracticeArea.FAMILY_LAW]
+        assert company_data.primary_practice_areas == [
+            PracticeArea.LITIGATION,
+            PracticeArea.CORPORATE_LAW,
+        ]
+        assert company_data.secondary_practice_areas == [
+            PracticeArea.REAL_ESTATE,
+            PracticeArea.FAMILY_LAW,
+        ]
 
         # Test with None secondary practice areas - should be valid
         company_data = CompanyData(
             company_name="Test Firm",
             primary_practice_areas=[PracticeArea.LITIGATION],
             company_size=FirmSize.SOLO_PRACTITIONER,
-            secondary_practice_areas=None
+            secondary_practice_areas=None,
         )
         assert company_data.secondary_practice_areas is None
 
@@ -582,8 +578,7 @@ class TestComplexModels:
     def test_team_setup_model(self):
         """Test TeamSetup model."""
         team_setup = TeamSetup(
-            your_role=YourRole.PARTNER,
-            expected_members=ExpectedMembers.TWO_TO_FIVE
+            your_role=YourRole.PARTNER, expected_members=ExpectedMembers.TWO_TO_FIVE
         )
         assert team_setup.your_role == YourRole.PARTNER
         assert team_setup.expected_members == ExpectedMembers.TWO_TO_FIVE
@@ -591,17 +586,25 @@ class TestComplexModels:
     def test_compliance_security_model(self):
         """Test ComplianceSecurity model."""
         compliance_security = ComplianceSecurity(
-            required_compliance_standards=[ComplianceStandard.HIPAA, ComplianceStandard.GDPR],
+            required_compliance_standards=[
+                ComplianceStandard.HIPAA,
+                ComplianceStandard.GDPR,
+            ],
             data_retention_period="7 years",
             auditing_frequency=AuditingFrequency.QUARTERLY,
             encryption_requirements=[EncryptionRequirement.AES_256_ENCRYPTION],
             compliance_officer_email="compliance@test.com",
-            additional_requirements="Additional security requirements"
+            additional_requirements="Additional security requirements",
         )
-        assert compliance_security.required_compliance_standards == [ComplianceStandard.HIPAA, ComplianceStandard.GDPR]
+        assert compliance_security.required_compliance_standards == [
+            ComplianceStandard.HIPAA,
+            ComplianceStandard.GDPR,
+        ]
         assert compliance_security.data_retention_period == "7 years"
         assert compliance_security.auditing_frequency == AuditingFrequency.QUARTERLY
-        assert compliance_security.encryption_requirements == [EncryptionRequirement.AES_256_ENCRYPTION]
+        assert compliance_security.encryption_requirements == [
+            EncryptionRequirement.AES_256_ENCRYPTION
+        ]
         assert compliance_security.compliance_officer_email == "compliance@test.com"
         assert compliance_security.additional_requirements == "Additional security requirements"
 
@@ -610,7 +613,7 @@ class TestComplexModels:
         contact_info = PrimaryContactInformation(
             contact_name="John Doe",
             contact_email="john@test.com",
-            contact_phone="+1234567890"
+            contact_phone="+1234567890",
         )
         assert contact_info.contact_name == "John Doe"
         assert contact_info.contact_email == "john@test.com"
@@ -618,16 +621,14 @@ class TestComplexModels:
 
         # Test without phone
         contact_info = PrimaryContactInformation(
-            contact_name="Jane Doe",
-            contact_email="jane@test.com"
+            contact_name="Jane Doe", contact_email="jane@test.com"
         )
         assert contact_info.contact_phone is None
 
     def test_enterprise_features_model(self):
         """Test EnterpriseFeatures model."""
         primary_contact = PrimaryContactInformation(
-            contact_name="John Doe",
-            contact_email="john@test.com"
+            contact_name="John Doe", contact_email="john@test.com"
         )
 
         enterprise_features = EnterpriseFeatures(
@@ -638,13 +639,18 @@ class TestComplexModels:
             customization_options=[CustomizationOption.CUSTOM_BRANDING],
             custom_integration=[CustomIntegration.SALESFORCE_CRM],
             custom_reporting=[CustomReporting.EXECUTIVE_DASHBOARD],
-            primary_contact_information=primary_contact
+            primary_contact_information=primary_contact,
         )
 
         assert enterprise_features.expected_number_of_users == 150
         assert enterprise_features.preferred_go_live_date == "12/31/2024"
-        assert enterprise_features.support_service_options == [SupportServiceOption.DEDICATED_SUPPORT_24_7]
-        assert enterprise_features.sla_requirements == ["99.9% uptime", "4-hour response time"]
+        assert enterprise_features.support_service_options == [
+            SupportServiceOption.DEDICATED_SUPPORT_24_7
+        ]
+        assert enterprise_features.sla_requirements == [
+            "99.9% uptime",
+            "4-hour response time",
+        ]
         assert enterprise_features.customization_options == [CustomizationOption.CUSTOM_BRANDING]
         assert enterprise_features.custom_integration == [CustomIntegration.SALESFORCE_CRM]
         assert enterprise_features.custom_reporting == [CustomReporting.EXECUTIVE_DASHBOARD]
@@ -656,7 +662,7 @@ class TestComplexModels:
             first_name="John",
             last_name="Doe",
             phone="+1234567890",
-            timezone="America/New_York"
+            timezone="America/New_York",
         )
         assert user.first_name == "John"
         assert user.last_name == "Doe"
@@ -664,11 +670,7 @@ class TestComplexModels:
         assert user.timezone == "America/New_York"
 
         # Test without phone
-        user = User(
-            first_name="Jane",
-            last_name="Smith",
-            timezone="UTC"
-        )
+        user = User(first_name="Jane", last_name="Smith", timezone="UTC")
         assert user.phone is None
 
     def test_signup_wizard_response_model(self):
@@ -676,17 +678,14 @@ class TestComplexModels:
         response = SignupWizardResponse(
             message="Signup wizard completed successfully",
             data={"user_id": "123", "company_id": "456"},
-            validation_passed=True
+            validation_passed=True,
         )
         assert response.message == "Signup wizard completed successfully"
         assert response.data == {"user_id": "123", "company_id": "456"}
         assert response.validation_passed is True
 
         # Test with default validation_passed
-        response = SignupWizardResponse(
-            message="Signup wizard completed",
-            data={"user_id": "123"}
-        )
+        response = SignupWizardResponse(message="Signup wizard completed", data={"user_id": "123"})
         assert response.validation_passed is True
 
 
@@ -698,7 +697,7 @@ class TestEdgeCases:
         company_data = CompanyData(
             company_name="Test Company",
             primary_practice_areas=[PracticeArea.LITIGATION],
-            company_size=FirmSize.SOLO_PRACTITIONER
+            company_size=FirmSize.SOLO_PRACTITIONER,
         )
         assert company_data.company_name == "Test Company"
         assert company_data.primary_practice_areas == [PracticeArea.LITIGATION]
@@ -720,8 +719,7 @@ class TestEdgeCases:
     def test_maximum_valid_company_data(self):
         """Test CompanyData with all fields populated."""
         team_setup = TeamSetup(
-            your_role=YourRole.PARTNER,
-            expected_members=ExpectedMembers.TWO_TO_FIVE
+            your_role=YourRole.PARTNER, expected_members=ExpectedMembers.TWO_TO_FIVE
         )
 
         compliance_security = ComplianceSecurity(
@@ -729,7 +727,7 @@ class TestEdgeCases:
             data_retention_period="7 years",
             auditing_frequency=AuditingFrequency.ANNUAL,
             encryption_requirements=[EncryptionRequirement.AES_256_ENCRYPTION],
-            compliance_officer_email="compliance@test.com"
+            compliance_officer_email="compliance@test.com",
         )
 
         company_data = CompanyData(
@@ -740,7 +738,10 @@ class TestEdgeCases:
             description="A comprehensive test company",
             logo_url="https://example.com/logo.png",
             referral_source="Google",
-            primary_practice_areas=[PracticeArea.LITIGATION, PracticeArea.CORPORATE_LAW],
+            primary_practice_areas=[
+                PracticeArea.LITIGATION,
+                PracticeArea.CORPORATE_LAW,
+            ],
             secondary_practice_areas=[PracticeArea.REAL_ESTATE],
             specializations=[Specialization.MEDIATION],
             team_setup=team_setup,
@@ -748,7 +749,7 @@ class TestEdgeCases:
             need_help_importing_data=True,
             need_migration_assistance=True,
             compliance_security=compliance_security,
-            enterprise_features=None,  # Enterprise firms should not have enterprise_features according to validation
+            enterprise_features=None,
         )
 
         assert company_data.company_name == "Full Test Company"
@@ -758,7 +759,10 @@ class TestEdgeCases:
         assert company_data.description == "A comprehensive test company"
         assert company_data.logo_url == "https://example.com/logo.png"
         assert company_data.referral_source == "Google"
-        assert company_data.primary_practice_areas == [PracticeArea.LITIGATION, PracticeArea.CORPORATE_LAW]
+        assert company_data.primary_practice_areas == [
+            PracticeArea.LITIGATION,
+            PracticeArea.CORPORATE_LAW,
+        ]
         assert company_data.secondary_practice_areas == [PracticeArea.REAL_ESTATE]
         assert company_data.specializations == [Specialization.MEDIATION]
         assert company_data.team_setup == team_setup
@@ -766,17 +770,14 @@ class TestEdgeCases:
         assert company_data.need_help_importing_data is True
         assert company_data.need_migration_assistance is True
         assert company_data.compliance_security == compliance_security
-        assert company_data.enterprise_features is None  # Enterprise firms should not have enterprise_features according to validation
+        assert (
+            company_data.enterprise_features is None
+        )  # Enterprise firms should not have enterprise_features according to validation
 
     def test_field_length_boundaries(self):
         """Test field length boundaries."""
         # Test User model field lengths
-        user = User(
-            first_name="A",
-            last_name="B",
-            phone="1",
-            timezone="C"
-        )
+        user = User(first_name="A", last_name="B", phone="1", timezone="C")
         assert user.first_name == "A"
         assert user.last_name == "B"
         assert user.phone == "1"
@@ -784,9 +785,7 @@ class TestEdgeCases:
 
         # Test PrimaryContactInformation field lengths
         contact_info = PrimaryContactInformation(
-            contact_name="A",
-            contact_email="a@test.com",
-            contact_phone="1"
+            contact_name="A", contact_email="a@test.com", contact_phone="1"
         )
         assert contact_info.contact_name == "A"
         assert contact_info.contact_email == "a@test.com"
@@ -798,7 +797,7 @@ class TestEdgeCases:
         company_data = CompanyData(
             company_name="Test Company",
             primary_practice_areas=[PracticeArea.LITIGATION],
-            company_size=FirmSize.SOLO_PRACTITIONER
+            company_size=FirmSize.SOLO_PRACTITIONER,
         )
         assert len(company_data.primary_practice_areas) == 1
 
@@ -808,17 +807,16 @@ class TestEdgeCases:
             primary_practice_areas=[
                 PracticeArea.LITIGATION,
                 PracticeArea.CORPORATE_LAW,
-                PracticeArea.REAL_ESTATE
+                PracticeArea.REAL_ESTATE,
             ],  # Exactly 3 items
-            company_size=FirmSize.SOLO_PRACTITIONER
+            company_size=FirmSize.SOLO_PRACTITIONER,
         )
         assert len(company_data.primary_practice_areas) == 3
 
     def test_enterprise_features_user_count_boundary(self):
         """Test EnterpriseFeatures user count boundary."""
         primary_contact = PrimaryContactInformation(
-            contact_name="John Doe",
-            contact_email="john@test.com"
+            contact_name="John Doe", contact_email="john@test.com"
         )
 
         # Test minimum user count (ge=100)
@@ -828,6 +826,6 @@ class TestEdgeCases:
             customization_options=[CustomizationOption.CUSTOM_BRANDING],
             custom_integration=[CustomIntegration.SALESFORCE_CRM],
             custom_reporting=[CustomReporting.EXECUTIVE_DASHBOARD],
-            primary_contact_information=primary_contact
+            primary_contact_information=primary_contact,
         )
         assert enterprise_features.expected_number_of_users == 100

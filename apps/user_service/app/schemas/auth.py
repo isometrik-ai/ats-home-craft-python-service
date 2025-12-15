@@ -1,26 +1,13 @@
-# pylint: disable=invalid-name,E0213,C0301
-"""
-Auth Schemas Module
+"""Auth Schemas Module"""
 
-"""
-
-import base64
-import secrets
-import hashlib
-from enum import Enum
-from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
-from pydantic import BaseModel, Field, model_validator, EmailStr, field_validator
-from fastapi import HTTPException, status
+from enum import Enum
+from typing import Any, Literal
 
-from apps.user_service.app.schemas import _bad_request, ResponseModel
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
-# ============================================================================
-# ENUMS AND CONSTANTS
-# ============================================================================
-
-PASSWORD_CONDITION_MESSAGE = "Password must be at least 6 characters long"
-PASSWORD_CONDITION_MESSAGE_EXTENDED = PASSWORD_CONDITION_MESSAGE + " and contain at least one uppercase letter, one lowercase letter, one number, and one special character."
+from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 
 class AccountType(str, Enum):
@@ -39,17 +26,12 @@ class PlanType(str, Enum):
     TRIAL = "trial"
 
 
-# ============================================================================
-# REQUEST MODELS
-# ============================================================================
-
-
 class SessionFilter(BaseModel):
     """Request model for Session Filter"""
 
-    search: Optional[str] = None
-    session_status: Optional[str] = None
-    login_method: Optional[str] = None
+    search: str | None = None
+    session_status: str | None = None
+    login_method: str | None = None
     limit: int = 20
     offset: int = 0
 
@@ -59,8 +41,12 @@ class AuthLogin(BaseModel):
 
     email: EmailStr = Field(..., examples=["test@example.com"])
     password: str
-    verification_id: Optional[str] = Field(None, description="Verification code ID for 2FA (required if 2FA is enabled)")
-    verification_code: Optional[str] = Field(None, description="Verification code for 2FA (required if 2FA is enabled)")
+    verification_id: str | None = Field(
+        None, description="Verification code ID for 2FA (required if 2FA is enabled)"
+    )
+    verification_code: str | None = Field(
+        None, description="Verification code for 2FA (required if 2FA is enabled)"
+    )
 
 
 class Check2FAStatusRequest(BaseModel):
@@ -75,7 +61,7 @@ class MemberBody(BaseModel):
 
     email: EmailStr
     full_name: str
-    phone: Optional[str] = None
+    phone: str | None = None
     timezone: str = "UTC"
 
 
@@ -90,7 +76,7 @@ class VerifyEmailResponse(BaseModel):
 
     message: str
     email_found: bool
-    status: Optional[Literal["active", "suspended"]]  # 'active', 'suspended', or None
+    status: Literal["active", "suspended"] | None = None
     can_login: bool
 
 
@@ -99,37 +85,29 @@ class SignupRequest(BaseModel):
 
     email: EmailStr
     password: str = Field(..., min_length=6)
-    salutation: Optional[Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.","Adv."]] = Field(None, description="Salutation for the user")
+    salutation: Literal["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Adv."] | None = Field(
+        None, description="Salutation for the user"
+    )
     first_name: str = Field(..., min_length=2)
-    last_name: Optional[str] = Field(None, min_length=2)
+    last_name: str | None = Field(None, min_length=2)
     # job_title: Optional[str] = None
-    phone: Optional[str] = None
-    timezone: Optional[str] = Field(default="UTC",max_length=3)
-    verification_id: str = Field(..., description="Verification code ID from verification-code/send endpoint")
+    phone: str | None = None
+    timezone: str | None = Field(default="UTC", max_length=3)
+    verification_id: str = Field(
+        ..., description="Verification code ID from verification-code/send endpoint"
+    )
     verification_code: str = Field(..., description="Verification code to verify email")
 
     @classmethod
-    @field_validator("first_name")
-    def validate_name_fields(cls, v):
-        """Validate name fields are not empty and meet minimum length requirements"""
-        if not v or not v.strip():
-            raise ValueError("Name fields cannot be empty")
-        if len(v.strip()) < 2:
-            raise ValueError("Name must be at least 2 characters long")
-        return v.strip()
-
-    @classmethod
     @field_validator("password")
-    def validate_password(cls, v):
+    def validate_password(cls, value) -> str:
         """Validate password meets minimum length requirements"""
-        if len(v) < 6:
-            raise ValueError(PASSWORD_CONDITION_MESSAGE)
-        return v
-
-
-# ============================================================================
-# RESPONSE MODELS
-# ============================================================================
+        if len(value) < 6:
+            raise ValidationException(
+                message_key="errors.password_too_short",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+        return value
 
 
 class UserInfo(BaseModel):
@@ -137,12 +115,12 @@ class UserInfo(BaseModel):
 
     id: str
     email: str
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    phone: Optional[str] = None
-    tzone: Optional[str] = Field(alias="timezone")
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    timezone: str | None = Field(alias="timezone")
     org_setup_status_completed: bool = False
-    organization_id: Optional[str] = None
+    organization_id: str | None = None
 
 
 class OrganizationInfo(BaseModel):
@@ -166,13 +144,16 @@ class AuthResponse(BaseModel):
     user: UserInfo
 
 
-class SignupResponse(ResponseModel):
+class SignupResponse(BaseModel):
     """Response model for signup operations"""
 
+    message: str = Field(..., description="Response message describing the operation result")
     data: dict
+
 
 class SetPasswordRequest(BaseModel):
     """Request model for set password operations"""
+
     password: str
 
 
@@ -190,15 +171,20 @@ class ResetPasswordRequest(BaseModel):
 
     @classmethod
     @field_validator("new_password")
-    def validate_password(cls, v):
+    def validate_password(cls, value):
         """Validate password meets minimum length requirements"""
-        if len(v) < 6:
-            raise ValueError(PASSWORD_CONDITION_MESSAGE)
-        return v
+        if len(value) < 6:
+            raise ValidationException(
+                message_key="errors.password_too_short",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+        return value
 
 
-class PasswordResponse(ResponseModel):
+class PasswordResponse(BaseModel):
     """Response model for set/reset password operations"""
+
+    message: str = Field(..., description="Response message describing the operation result")
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -207,8 +193,10 @@ class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
 
-class ForgotPasswordResponse(ResponseModel):
+class ForgotPasswordResponse(BaseModel):
     """Response model for forgot password operations"""
+
+    message: str = Field(..., description="Response message describing the operation result")
 
 
 class ChangePasswordRequest(BaseModel):
@@ -217,17 +205,22 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., description="Current password for verification")
     new_password: str = Field(..., min_length=6, description="New password to set")
 
+    @classmethod
     @field_validator("new_password")
-    def validate_password(cls, v):
+    def validate_password(cls, value):
         """Validate password meets minimum length requirements"""
-        if len(v) < 6:
-            raise ValueError(PASSWORD_CONDITION_MESSAGE)
-        return v
+        if len(value) < 6:
+            raise ValidationException(
+                message_key="errors.password_too_short",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+        return value
 
 
-class ChangePasswordResponse(ResponseModel):
+class ChangePasswordResponse(BaseModel):
     """Response model for change password operations"""
-    message: str = Field(default="Password changed successfully", description="Response message")
+
+    message: str = Field(..., description="Response message describing the operation result")
 
 
 class Check2FAStatusResponse(BaseModel):
@@ -236,23 +229,9 @@ class Check2FAStatusResponse(BaseModel):
     two_fa_enabled: bool = Field(..., description="Whether 2FA is enabled for the user")
 
 
-# """
-# Signup Wizard Schemas
-
-# This module contains Pydantic schemas for the signup wizard API endpoint.
-# Includes validation for firm information, practice areas, and enterprise features.
-
-# Author: AI Assistant
-# Date: 2024-12-19
-# Last Updated: 2024-12-19
-# """
-
-# ============================================================================
-# ENUMS
-# ============================================================================
-
 class FirmSize(str, Enum):
     """Firm size options for signup wizard."""
+
     SOLO_PRACTITIONER = "Solo Practitioner"
     SMALL_FIRM = "Small Firm (2-10 attorneys)"
     MID_SIZE_LARGE_FIRM = "Mid-Size/Large Firm (11-100 attorneys)"
@@ -261,6 +240,7 @@ class FirmSize(str, Enum):
 
 class YourRole(str, Enum):
     """User role options in the firm."""
+
     PARTNER = "partner"
     ASSOCIATE = "associate"
     COUNSEL = "counsel"
@@ -272,6 +252,7 @@ class YourRole(str, Enum):
 
 class ExpectedMembers(str, Enum):
     """Expected team size options."""
+
     ONE = "1"
     TWO_TO_FIVE = "2-5"
     SIX_TO_TEN = "6-10"
@@ -282,6 +263,7 @@ class ExpectedMembers(str, Enum):
 
 class ComplianceStandard(str, Enum):
     """Compliance standards options."""
+
     HIPAA = "HIPAA"
     GDPR = "GDPR"
     CCPA = "CCPA"
@@ -292,6 +274,7 @@ class ComplianceStandard(str, Enum):
 
 class AuditingFrequency(str, Enum):
     """Auditing frequency options."""
+
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
     BI_ANNUAL = "bi-annual"
@@ -300,6 +283,7 @@ class AuditingFrequency(str, Enum):
 
 class EncryptionRequirement(str, Enum):
     """Encryption requirements options."""
+
     AES_256_ENCRYPTION = "AES-256 Encryption"
     TLS_1_3_FOR_DATA_IN_TRANSIT = "TLS 1.3 for Data in Transit"
     FULL_DISK_ENCRYPTION = "Full Disk Encryption"
@@ -308,6 +292,7 @@ class EncryptionRequirement(str, Enum):
 
 class SupportServiceOption(str, Enum):
     """Support service options."""
+
     DEDICATED_SUPPORT_24_7 = "24/7 Dedicated Support"
     DEDICATED_ACCOUNT_MANAGER = "Dedicated Account Manager"
     PRIORITY_TRAINING_ONBOARDING = "Priority Training & Onboarding"
@@ -315,6 +300,7 @@ class SupportServiceOption(str, Enum):
 
 class CustomizationOption(str, Enum):
     """Customization options."""
+
     CUSTOM_BRANDING = "Custom Branding"
     WHITE_LABELING = "White Labeling"
     ADVANCED_API_ACCESS = "Advanced API Access"
@@ -322,6 +308,7 @@ class CustomizationOption(str, Enum):
 
 class CustomIntegration(str, Enum):
     """Custom integration options."""
+
     SALESFORCE_CRM = "Salesforce CRM"
     MICROSOFT_SHAREPOINT = "Microsoft SharePoint"
     WORKDAY = "Workday"
@@ -332,6 +319,7 @@ class CustomIntegration(str, Enum):
 
 class CustomReporting(str, Enum):
     """Custom reporting options."""
+
     EXECUTIVE_DASHBOARD = "Executive Dashboard"
     COMPLIANCE_REPORTS = "Compliance Reports"
     PERFORMANCE_ANALYTICS = "Performance Analytics"
@@ -342,6 +330,7 @@ class CustomReporting(str, Enum):
 
 class PracticeArea(str, Enum):
     """Primary practice area options."""
+
     LITIGATION = "Litigation"
     CORPORATE_LAW = "Corporate Law"
     REAL_ESTATE = "Real Estate"
@@ -361,6 +350,7 @@ class PracticeArea(str, Enum):
 
 class Specialization(str, Enum):
     """Specialization options."""
+
     MEDIATION = "Mediation"
     ARBITRATION = "Arbitration"
     CLASS_ACTION = "Class Action"
@@ -373,6 +363,7 @@ class Specialization(str, Enum):
 
 class PreferredIntegration(str, Enum):
     """Preferred integration options."""
+
     MICROSOFT_OFFICE_365 = "Microsoft Office 365"
     GOOGLE_WORKSPACE = "Google Workspace"
     MICROSOFT_OUTLOOK = "Microsoft Outlook"
@@ -389,67 +380,72 @@ class PreferredIntegration(str, Enum):
     LAWPAY = "LawPay"
 
 
-# ============================================================================
-# SCHEMAS
-# ============================================================================
-
 class User(BaseModel):
     """User information."""
+
     first_name: str = Field(..., min_length=1, max_length=50)
-    last_name: Optional[str] = Field(None, min_length=1, max_length=50)
-    phone: Optional[str] = Field(None, min_length=1, max_length=20)
-    timezone: Optional[str] = Field(None, min_length=1, max_length=50)
+    last_name: str | None = Field(None, min_length=1, max_length=50)
+    phone: str | None = Field(None, min_length=1, max_length=20)
+    timezone: str | None = Field(None, min_length=1, max_length=50)
+
 
 class TeamSetup(BaseModel):
     """Team setup information."""
+
     your_role: YourRole
     expected_members: ExpectedMembers
 
 
 class ComplianceSecurity(BaseModel):
     """Compliance and security requirements."""
-    required_compliance_standards: List[ComplianceStandard]
+
+    required_compliance_standards: list[ComplianceStandard]
     data_retention_period: str = Field(..., description="Data retention period (e.g., '7 years')")
     auditing_frequency: AuditingFrequency
-    encryption_requirements: List[EncryptionRequirement]
+    encryption_requirements: list[EncryptionRequirement]
     compliance_officer_email: str = Field(
-        ..., pattern=r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        ..., pattern=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     )
-    additional_requirements: Optional[str] = None
+    additional_requirements: str | None = None
 
 
 class PrimaryContactInformation(BaseModel):
     """Primary contact information for enterprise firms."""
+
     contact_name: str = Field(..., min_length=1, max_length=100)
-    contact_email: str = Field(..., pattern=r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-    contact_phone: Optional[str] = Field(None, min_length=1, max_length=20)
+    contact_email: str = Field(..., pattern=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+    contact_phone: str | None = Field(None, min_length=1, max_length=20)
 
 
 class EnterpriseFeatures(BaseModel):
     """Enterprise-specific features and requirements."""
+
     expected_number_of_users: int = Field(
-        ..., ge=100, description="Must be 100 or more for enterprise")
-    preferred_go_live_date: Optional[str] = Field(None, pattern=r'^\d{2}/\d{2}/\d{4}$')
-    support_service_options: List[SupportServiceOption]
-    sla_requirements: List[str] = Field(default_factory=list)
-    customization_options: List[CustomizationOption]
-    custom_integration: List[CustomIntegration]
-    custom_reporting: List[CustomReporting]
+        ..., ge=100, description="Must be 100 or more for enterprise"
+    )
+    preferred_go_live_date: str | None = Field(None, pattern=r"^\d{2}/\d{2}/\d{4}$")
+    support_service_options: list[SupportServiceOption]
+    sla_requirements: list[str] = Field(default_factory=list)
+    customization_options: list[CustomizationOption]
+    custom_integration: list[CustomIntegration]
+    custom_reporting: list[CustomReporting]
     primary_contact_information: PrimaryContactInformation
+
 
 class Address(BaseModel):
     """Address information."""
-    address_line: Optional[str] = Field(None, min_length=1, max_length=100)
-    city: Optional[str] = Field(None, min_length=1, max_length=100)
-    state: Optional[str] = Field(None, min_length=1, max_length=100)
-    zip_code: Optional[str] = Field(None, min_length=1, max_length=7)
+
+    address_line: str | None = Field(None, min_length=1, max_length=100)
+    city: str | None = Field(None, min_length=1, max_length=100)
+    state: str | None = Field(None, min_length=1, max_length=100)
+    zip_code: str | None = Field(None, min_length=1, max_length=7)
     country: str = Field(..., min_length=1, max_length=100)
 
 
 class Subscription(BaseModel):
     """Subscription information."""
 
-    max_users: Optional[int] = Field(
+    max_users: int | None = Field(
         default=None,
         ge=1,
         description="Maximum number of licensed seats for the organisation",
@@ -458,134 +454,66 @@ class Subscription(BaseModel):
         default=PlanType.TRIAL,
         description="Current subscription plan type",
     )
-    start_date: Optional[str] = Field(
+    start_date: str | None = Field(
         default=None,
         description="ISO timestamp when the subscription becomes active",
     )
-    end_date: Optional[str] = Field(
+    end_date: str | None = Field(
         default=None,
         description="ISO timestamp when the subscription expires",
     )
+
 
 class CompanyData(BaseModel):
     """Company signup data model"""
 
     company_name: str
-    company_website: Optional[str] = None
-    industry: Optional[str] = None
-    company_size: Optional[FirmSize] = None
-    description: Optional[str] = None
-    logo_url: Optional[str] = None
-    address: Optional[Address] = None
-    referral_source: Optional[str] = None
-    primary_practice_areas: List[PracticeArea] = Field(..., min_length=1, max_length=3)
-    secondary_practice_areas: Optional[List[PracticeArea]] = None
-    specializations: Optional[List[Specialization]] = None
-    team_setup: Optional[TeamSetup] = None
-    preferred_integration: Optional[List[PreferredIntegration]] = None
-    need_help_importing_data: Optional[bool] = False
-    need_migration_assistance: Optional[bool] = False
-    compliance_security: Optional[ComplianceSecurity] = None
-    enterprise_features: Optional[EnterpriseFeatures] = None
-
-
-    @classmethod
-    @field_validator("company_name")
-    def validate_company_name(cls, v):
-        """Validate non-empty company name with minimum 2 characters."""
-        if not v or not v.strip():
-            raise ValueError("Company name cannot be empty")
-        if len(v.strip()) < 2:
-            raise ValueError("Company name must be at least 2 characters long")
-        return v.strip()
+    company_website: str | None = None
+    industry: str | None = None
+    company_size: FirmSize | None = None
+    description: str | None = None
+    logo_url: str | None = None
+    address: Address | None = None
+    referral_source: str | None = None
+    primary_practice_areas: list[PracticeArea] = Field(..., min_length=1, max_length=3)
+    secondary_practice_areas: list[PracticeArea] | None = None
+    specializations: list[Specialization] | None = None
+    team_setup: TeamSetup | None = None
+    preferred_integration: list[PreferredIntegration] | None = None
+    need_help_importing_data: bool | None = False
+    need_migration_assistance: bool | None = False
+    compliance_security: ComplianceSecurity | None = None
+    enterprise_features: EnterpriseFeatures | None = None
 
     @classmethod
     @field_validator("company_website")
-    def validate_website(cls, v):
+    def validate_website(cls, value):
         """Ensure company website starts with http:// or https://."""
-        if v and not v.startswith(("http://", "https://")):
-            return f"https://{v}"
-        return v
+        if value and not value.startswith(("http://", "https://")):
+            return f"https://{value}"
+        return value
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_enterprise_features_and_practice_areas(self):
         """Validate enterprise features and practice areas based on firm size."""
-        def check_field_applicability(field_list, firm_type):
-            for field, expected in field_list:
-                value = getattr(self, field)
-                if value != expected:
-                    _bad_request(f"{field} is not applicable for {firm_type.value}")
-
-        match self.company_size:
-            # Solo Practitioner validations
-            case FirmSize.SOLO_PRACTITIONER:
-                # Reduce cognitive complexity by using a loop over field names and expected values
-                solo_fields = [
-                    ("need_help_importing_data", False),
-                    ("need_migration_assistance", False),
-                    ("preferred_integration", None),
-                    ("team_setup", None),
-                    ("enterprise_features", None),
-                ]
-                check_field_applicability(solo_fields, FirmSize.SOLO_PRACTITIONER)
-
-            # Small Firm (2-10 attorneys) validations
-            case FirmSize.SMALL_FIRM:
-                small_firm_fields = [
-                    ("enterprise_features", None),
-                ]
-                check_field_applicability(small_firm_fields, FirmSize.SMALL_FIRM)
-
-            # Mid-Size/Large Firm (11-100 attorneys) validations
-            case FirmSize.MID_SIZE_LARGE_FIRM:
-                # No restrictions - compliance_security is optional for all firm types
-                pass
-
-            # Enterprise Firm validations
-            case FirmSize.ENTERPRISE_FIRM:
-                # enterprise_features is allowed and optional for Enterprise Firms
-                # No restrictions needed
-                pass
-
-            case _:
-                _bad_request('Invalid firm size')
 
         # Validate secondary practice areas don't overlap with primary ones
         if self.secondary_practice_areas is not None:
             overlap = set(self.primary_practice_areas) & set(self.secondary_practice_areas)
             if overlap:
-                deatil_string = 'Secondary practice areas cannot overlap with primary ones: '
-                deatil_string += str(list(overlap))
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=deatil_string
+                detail_string = ", ".join(overlap)
+                raise ValidationException(
+                    message_key="errors.practice_areas_overlap",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                    params={"practice_areas": detail_string},
                 )
 
         return self
 
 
-
-class SignupWizardResponse(ResponseModel):
+class SignupWizardResponse(BaseModel):
     """Signup wizard response."""
-    data: Dict[str, Any]
+
+    data: dict[str, Any]
+    message: str = Field(..., description="Response message describing the operation result")
     validation_passed: bool = True
-
-
-def generate_pkce_pair():
-    """Generates a PKCE code verifier and code challenge."""
-    # Generate a secure random string for the code verifier (RFC 7636).
-    # It must be between 43 and 128 characters long. We generate 32 bytes,
-    # which is 43 URL-safe base64 characters.
-    verifier_bytes = secrets.token_bytes(32)
-    code_verifier = base64.urlsafe_b64encode(verifier_bytes).rstrip(b'=').decode('utf-8')
-
-    # Hash the code verifier using SHA256.
-    challenge_bytes = hashlib.sha256(code_verifier.encode('utf-8')).digest()
-
-    # Base64-URL-encode the SHA256 hash.
-    code_challenge = base64.urlsafe_b64encode(challenge_bytes).rstrip(b'=').decode('utf-8')
-
-    return code_verifier, code_challenge
-
-# Example usage
-CODE_VERIFIER, CODE_CHALLENGE = generate_pkce_pair()

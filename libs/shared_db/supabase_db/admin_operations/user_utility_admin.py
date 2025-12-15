@@ -1,40 +1,42 @@
-"""
-User Utility Admin Operations Module
+"""User Utility Admin Operations Module
 This module contains all user-related admin operations.
 All Supabase Auth admin API operations for user management should be centralized here.
 """
 
-from typing import Optional, Tuple
-
 from fastapi import HTTPException, status
-from supabase_auth.errors import AuthApiError
 
-from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.schemas.users import CreateUserRequest
-from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.dependencies.common_utils import UserContext
-
-from libs.shared_utils.email_utils import send_email
-from libs.shared_utils.common_query import log_exception
-from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
-from libs.shared_db.supabase_db.db import get_supabase_admin_client, get_fresh_supabase_admin_client, get_supabase_client
-from libs.shared_db.supabase_db.admin_operations.user import update_email_of_user
+from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.schemas.auth import SignupRequest
+from apps.user_service.app.schemas.users import CreateUserRequest
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_user_profile_by_id,
     update_user_email,
 )
+from libs.shared_db.supabase_db.admin_operations.user import update_email_of_user
+from libs.shared_db.supabase_db.db import (
+    get_fresh_supabase_admin_client,
+    get_supabase_admin_client,
+)
+from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
+from libs.shared_utils.email_utils import send_email
+from libs.shared_utils.http_exceptions import (
+    BadRequestException,
+    InternalServerErrorException,
+)
+from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("user_utility_admin")
 
 
-async def update_supabase_user_email(
-    user_id: str, organization_id: str, email: str
-):
-    """
-    Update user email and send magic link notification
+async def update_supabase_user_email(user_id: str, organization_id: str, email: str):
+    """Update user email and send magic link notification
+    Args:
+        user_id: User ID
+        organization_id: Organization ID
+        email: New email address
     """
     try:
-        # Get user information before updating email for email notification
         user_info = await get_user_profile_by_id(user_id, organization_id)
 
         if user_info is None:
@@ -73,19 +75,15 @@ async def update_supabase_user_email(
         raise
     except Exception as e:  # ⬅️ handle every other failure
         logger.error("Error updating Supabase user email: %s", str(e))
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error"
-        ) from e
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error") from e
 
-async def generate_magic_link(email: str) -> Optional[str]:
-    """
-    Generate a magic link using Supabase Auth Admin API generateLink.
 
+async def generate_magic_link(email: str) -> str | None:
+    """Generate a magic link using Supabase Auth Admin API generateLink
     Args:
-        email (str): User's email address
-
+        email: User's email address
     Returns:
-        Optional[str]: Generated magic link URL or None if failed
+        Generated magic link URL or None if failed
     """
     try:
         supabase_client = await get_supabase_admin_client()
@@ -111,20 +109,23 @@ async def generate_magic_link(email: str) -> Optional[str]:
         logger.error("Unexpected error generating magic link: %s", str(error))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate magic link"
+            detail="Failed to generate magic link",
         ) from error
 
 
-def create_admin_update_email_content(user: dict, magic_link: str) -> Tuple[str, str]:
-    """
-    Create email subject and content for admin update notification with magic link.
+def create_admin_update_email_content(user: dict, magic_link: str) -> tuple[str, str]:
+    """Create email subject and content for admin update notification with magic link
+    Args:
+        user: User information containing full_name, email
+        magic_link: Generated magic link for authentication
+    Returns:
+        tuple[str, str]: Email subject and HTML message content
 
     Args:
-        user (dict): User information containing full_name, email
-        magic_link (str): Generated magic link for authentication
-
+        user: User information containing full_name, email
+        magic_link: Generated magic link for authentication
     Returns:
-        Tuple[str, str]: Email subject and HTML message content
+        tuple[str, str]: Email subject and HTML message content
     """
     full_name = user.get("full_name", "")
 
@@ -176,12 +177,9 @@ def create_admin_update_email_content(user: dict, magic_link: str) -> Tuple[str,
 
 
 async def send_admin_update_email(user: dict) -> bool:
-    """
-    Send admin update notification email with magic link.
-
+    """Send admin update notification email with magic link
     Args:
         user: User information containing id, full_name, email
-
     Returns:
         bool: True if email was sent successfully, False otherwise
     """
@@ -217,23 +215,16 @@ async def send_admin_update_email(user: dict) -> bool:
         logger.error("Unexpected error sending admin update email: %s", str(error))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send admin update email"
+            detail="Failed to send admin update email",
         ) from error
 
-async def sign_up_supabase_user(body: SignupRequest):
-    """
-    Create user in Supabase Auth using auth.signUp for user-initiated registration.
-    This is for user signup (like in signup API) and requires email confirmation.
 
+async def sign_up_supabase_user(body: SignupRequest):
+    """Create user in Supabase Auth using auth.signUp for user-initiated registration
     Args:
         body: Request body with user data
-organization_id: Organization ID to associate with user
-
     Returns:
         dict: Supabase auth response containing user and session information
-
-    Raises:
-        HTTPException: For duplicate email or Supabase errors
     """
     try:
         supabase = await get_supabase_admin_client()
@@ -249,68 +240,24 @@ organization_id: Organization ID to associate with user
                         "timezone": body.timezone,
                         "salutation": body.salutation,
                     }
-                }
+                },
             }
         )
         if not supabase_response.user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to create user account"
+            raise BadRequestException(
+                message_key="errors.bad_request",
+                custom_code=CustomStatusCode.BAD_REQUEST,
             )
 
         return supabase_response
+    except Exception as e:
+        logger.error("Unexpected error signing up user: %s", str(e))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        ) from e
 
-    except HTTPException:
-        # Re-raise HTTPExceptions as-is (e.g., from the user=None check above)
-        raise
-    except Exception as supabase_error:
-        # Check for duplicate email/user errors FIRST, regardless of exception type
-        error_message = str(supabase_error).lower()
-        error_type = type(supabase_error).__name__
 
-        # Log for debugging
-        logger.warning("Signup error - Type: %s, Message: %s", error_type, error_message)
-
-        # Check error message and also check error attributes if available
-        error_str_lower = error_message + " " + " ".join(
-            str(getattr(supabase_error, attr, "")).lower()
-            for attr in ("message", "detail")
-            if getattr(supabase_error, attr, None))
-        if getattr(supabase_error, "args", None):
-            error_str_lower += " " + " ".join(str(arg).lower() for arg in supabase_error.args)
-
-        if any(kw in error_str_lower for kw in [
-            "already_exists", "duplicate", "already registered",
-            "user already registered", "email already",
-            "user already exists", "already been registered"
-        ]):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
-            ) from supabase_error
-
-        handle_supabase_signup_exceptions(supabase_error)
-
-        # Default to 500 for unexpected errors
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user account",
-        ) from supabase_error
-
-def handle_supabase_signup_exceptions(supabase_error):
-    """
-    Handles specific supabase signup exceptions and raises appropriate HTTPException.
-    """
-    if isinstance(supabase_error, (ConnectionError, TimeoutError)):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service temporarily unavailable. Please try again later.",
-        ) from supabase_error
-
-    if isinstance(supabase_error, (ValueError, AuthApiError)):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid request: {str(supabase_error)}",
-        ) from supabase_error
 # ============================================================================
 # AUTHENTICATION FUNCTIONS
 # ============================================================================
@@ -319,67 +266,50 @@ def handle_supabase_signup_exceptions(supabase_error):
 async def login_user(
     email: str,
     password: str,
-    user_agent: Optional[str] = None,
-    device_signature: Optional[str] = None,
+    user_agent: str | None = None,
+    device_signature: str | None = None,
 ) -> dict:
-    """
-    Attempts to log in a user with the provided email and password.
+    """Attempts to log in a user with the provided email and password.
     Returns the result from Supabase or raises an exception on failure.
 
     Args:
-        email (str): User's email address
-        password (str): User's password
-        user_agent (Optional[str]): User-Agent header value
-        device_signature (Optional[str]): X-Device-Signature header value
+        email: User's email address
+        password: User's password
+        user_agent: User-Agent header value
+        device_signature: X-Device-Signature header value
 
     Returns:
-        Any: Supabase authentication result
+        dict: Supabase authentication result
 
     Raises:
         Exception: If authentication fails
     """
     try:
-        # Build custom headers dict
         custom_headers = {}
         if device_signature:
             custom_headers["X-Device-Signature"] = device_signature
 
-        # Get Supabase client with custom headers
         supabase = await get_supabase_admin_client(
             user_agent=user_agent,
-            custom_headers=custom_headers if custom_headers else None
+            custom_headers=custom_headers if custom_headers else None,
         )
 
-        result = await supabase.auth.sign_in_with_password(
-            {"email": email, "password": password}
-        )
+        result = await supabase.auth.sign_in_with_password({"email": email, "password": password})
         return result
-    except AuthApiError as error:
-        if error.status == 400 and error.message == "Email not confirmed":
-            raise HTTPException(status_code=403, detail="Email not confirmed. Please check your email Inbox for the confirmation link.") from error
-        elif error.status == 400 and error.message == "Invalid login credentials":
-            raise HTTPException(status_code=400, detail="Invalid Password") from error
-        else:
-            raise HTTPException(status_code=error.status, detail=error.message) from error
     except Exception as error:
-        log_exception()
-        logger.error(error)
+        logger.error("Unexpected error while logging in user: %s", str(error))
         raise
 
 
 async def invite_user_with_email(body: CreateUserRequest, user_context: UserContext) -> str:
-    """
-    Invite user with email using Supabase Auth Admin API.
-
+    """Invite user with email using Supabase Auth Admin API
     Args:
-        body (CreateUserRequest): Request body with user data
-        user_context (UserContext): User context containing organization ID
-
+        body: Request body with user data
+        user_context: User context containing organization ID
     Returns:
         str: Created user ID
-
     Raises:
-        HTTPException: For duplicate email or Supabase errors
+        HTTPException: If the user already exists or the email is invalid
     """
     try:
         supabase = await get_supabase_admin_client()
@@ -408,74 +338,61 @@ async def invite_user_with_email(body: CreateUserRequest, user_context: UserCont
                 detail="User with this email already exists in the organization",
             ) from e
 
-        logger.error("Email: %s, Error: %s",body.email,str(e))
+        logger.error("Email: %s, Error: %s", body.email, str(e))
         raise HTTPException(
             status_code=409,
             detail=str(e),
         ) from e
 
+
 async def reset_the_password_email(email: str):
-    """
-    Reset password email using Supabase Auth Admin API.
+    """Reset password email using Supabase Auth Admin API
+    Args:
+        email: User's email address
+    Returns:
+        dict: Supabase auth response containing user and session information
+    Raises:
+        Exception: If the email is invalid or the password reset email fails
     """
     try:
         supabase = await get_fresh_supabase_admin_client()
         return await supabase.auth.reset_password_email(email)
 
-    except (AttributeError, TypeError) as e:
-        logger.error("AttributeError while resetting password email: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal error while sending password reset email.",
-        ) from e
-    except ValueError as e:
-        logger.error("ValueError while resetting password email: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid email address provided.",
-        ) from e
-    except AuthApiError as e:
-        logger.error("Supabase Auth API error while resetting password email: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to send password reset email due to authentication service error.",
-        ) from e
     except Exception as e:
         logger.error("Unexpected error while resetting password email: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected error occurred while sending password reset email.",
-        ) from e
+        raise e
+
 
 async def update_password_with_token(token: str, new_password: str) -> dict:
-    """
-    Update password with token using Supabase Auth Admin API.
+    """Update password with token using Supabase Auth Admin API
+    Args:
+        token: User's token
+        new_password: New password
+    Returns:
+        dict: Supabase auth response containing user and session information
+    Raises:
+        Exception: If the password update fails
     """
     try:
         supabase = await get_supabase_admin_client()
         return await supabase.auth.admin.update_user_by_id(token, {"password": new_password})
     except Exception as e:
         logger.error("Unexpected error while updating password with token: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected error occurred while updating password with token.",
-        ) from e
+        raise e
+
 
 async def refresh_session(refresh_token: str) -> dict:
-    """
-    Refresh user session using Supabase Auth Admin API.
+    """Refresh user session using Supabase Auth Admin API
+    Args:
+        refresh_token: User's refresh token
+    Returns:
+        dict: Supabase auth response containing user and session information
+    Raises:
+        Exception: If the refresh token is invalid
     """
     try:
         supabase = await get_supabase_admin_client()
         return await supabase.auth.refresh_session(refresh_token)
-    except AuthApiError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid request: {str(e)}",
-        ) from e
     except Exception as e:
         logger.error("Unexpected error while refreshing session: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unexpected error occurred while refreshing session.",
-        ) from e
+        raise e

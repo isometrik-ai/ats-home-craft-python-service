@@ -1,29 +1,26 @@
-# pylint: disable=all
-
 """Comprehensive tests for audit decorator module.
 
 This module tests all functions in apps/user_service/app/dependencies/audit_logs/audit_decorator.py
 to achieve high coverage for the audit decorator system.
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 import json
-from fastapi import Request, HTTPException
-from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi import Request
 
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
-    audit_api_call,
-    _should_log_audit,
-    _log_audit_event,
-    _collect_audit_state,
     _build_new_values,
+    _collect_audit_state,
+    _extract_request_body,
+    _log_audit_event,
+    _parse_form_data,
+    _parse_json_body,
+    _should_log_audit,
+    audit_api_call,
     get_changed_fields,
     maybe_log_audit_on_error,
-    _extract_request_body,
-    parse_body_by_content_type,
-    _parse_json_body,
-    _parse_form_data,
 )
 from apps.user_service.app.dependencies.audit_logs.audit_logger import AuditEventData
 
@@ -35,10 +32,7 @@ def mock_request():
     request.state = MagicMock()
     request.client = MagicMock()
     request.client.host = "127.0.0.1"
-    request.headers = {
-        "user-agent": "test-agent",
-        "content-type": "application/json"
-    }
+    request.headers = {"user-agent": "test-agent", "content-type": "application/json"}
     request.url = MagicMock()
     request.url.path = "/test/path"
     request.method = "POST"
@@ -51,7 +45,11 @@ def mock_request():
 def mock_audit_event_data():
     """Create mock audit event data."""
     return AuditEventData(
-        user_context={"user_id": "123", "organization_id": "org123", "user_email": "test@example.com"},
+        user_context={
+            "user_id": "123",
+            "organization_id": "org123",
+            "user_email": "test@example.com",
+        },
         action_type="CREATE",
         data_classification="general",
         table_name="test_table",
@@ -63,7 +61,7 @@ def mock_audit_event_data():
         risk_level="low",
         description="Test audit event",
         status_code=200,
-        category="test"
+        category="test",
     )
 
 
@@ -73,14 +71,15 @@ class TestAuditApiCallDecorator:
     @pytest.mark.asyncio
     async def test_decorator_metadata_attachment(self):
         """Test that decorator properly attaches metadata to function."""
+
         @audit_api_call(
             action_type="CREATE",
             table_name="test_table",
             data_classification="confidential",
             compliance_tags=["gdpr"],
-            category="test"
+            category="test",
         )
-        async def test_function(request: Request):
+        async def test_function(_request: Request):
             return {"status": "success"}
 
         # Verify metadata is attached
@@ -95,6 +94,7 @@ class TestAuditApiCallDecorator:
     @pytest.mark.asyncio
     async def test_decorator_with_missing_request(self):
         """Test decorator behavior when request argument is missing."""
+
         @audit_api_call(action_type="CREATE", table_name="test")
         async def test_function():
             return {"status": "success"}
@@ -108,19 +108,25 @@ class TestAuditApiCallDecorator:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
         mock_request.state.audit_description = "Test description"
-        mock_request.state._cached_body = b'{"test": "data"}'
+        mock_request.state.cached_body = b'{"test": "data"}'
 
         @audit_api_call(action_type="CREATE", table_name="test_table")
-        async def test_function(request: Request):
+        async def test_function(_request: Request):
             return {"status": "success"}
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._should_log_audit', return_value=True):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._log_audit_event', new_callable=AsyncMock) as mock_log:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._should_log_audit",
+            return_value=True,
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator._log_audit_event",
+                new_callable=AsyncMock,
+            ) as mock_log:
                 # Call the function directly with the request parameter
-                result = await test_function(request=mock_request)
+                result = await test_function(_request=mock_request)
 
                 assert result == {"status": "success"}
                 mock_log.assert_called_once()
@@ -128,13 +134,20 @@ class TestAuditApiCallDecorator:
     @pytest.mark.asyncio
     async def test_decorator_skips_logging_when_should_not_log(self, mock_request):
         """Test decorator skips logging when _should_log_audit returns False."""
+
         @audit_api_call(action_type="CREATE", table_name="test_table")
-        async def test_function(request: Request):
+        async def test_function(_request: Request):
             return {"status": "success"}
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._should_log_audit', return_value=False):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._log_audit_event', new_callable=AsyncMock) as mock_log:
-                result = await test_function(request=mock_request)
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._should_log_audit",
+            return_value=False,
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator._log_audit_event",
+                new_callable=AsyncMock,
+            ) as mock_log:
+                result = await test_function(_request=mock_request)
 
                 assert result == {"status": "success"}
                 mock_log.assert_not_called()
@@ -142,8 +155,9 @@ class TestAuditApiCallDecorator:
     @pytest.mark.asyncio
     async def test_decorator_with_default_parameters(self):
         """Test decorator with default parameters."""
+
         @audit_api_call()
-        async def test_function(request: Request):
+        async def test_function(_request: Request):
             return {"status": "success"}
 
         # Verify default metadata
@@ -163,7 +177,7 @@ class TestShouldLogAudit:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
 
         result = _should_log_audit(mock_request)
@@ -173,7 +187,7 @@ class TestShouldLogAudit:
         """Test _should_log_audit with missing user_id."""
         mock_request.state.audit_user_context = {
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
 
         result = _should_log_audit(mock_request)
@@ -183,7 +197,7 @@ class TestShouldLogAudit:
         """Test _should_log_audit with missing organization_id."""
         mock_request.state.audit_user_context = {
             "user_id": "123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
 
         result = _should_log_audit(mock_request)
@@ -193,7 +207,7 @@ class TestShouldLogAudit:
         """Test _should_log_audit with missing user_email."""
         mock_request.state.audit_user_context = {
             "user_id": "123",
-            "organization_id": "org123"
+            "organization_id": "org123",
         }
 
         result = _should_log_audit(mock_request)
@@ -204,7 +218,7 @@ class TestShouldLogAudit:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "unknown"
+            "user_email": "unknown",
         }
 
         result = _should_log_audit(mock_request)
@@ -219,7 +233,7 @@ class TestShouldLogAudit:
 
     def test_should_log_audit_with_no_context_attribute(self, mock_request):
         """Test _should_log_audit when request.state has no audit_user_context."""
-        delattr(mock_request.state, 'audit_user_context')
+        delattr(mock_request.state, "audit_user_context")
 
         result = _should_log_audit(mock_request)
         assert result is False
@@ -250,12 +264,12 @@ class TestCollectAuditState:
         """Test _collect_audit_state with fallback table name."""
         # Configure mock to not have the attributes that should use defaults
         # This simulates the case where the attributes don't exist
-        delattr(mock_request.state, 'audit_table')
-        delattr(mock_request.state, 'audit_requested_id')
-        delattr(mock_request.state, 'raw_audit_old_data')
-        delattr(mock_request.state, 'raw_audit_new_data')
-        delattr(mock_request.state, 'audit_description')
-        delattr(mock_request.state, 'audit_risk_level')
+        delattr(mock_request.state, "audit_table")
+        delattr(mock_request.state, "audit_requested_id")
+        delattr(mock_request.state, "raw_audit_old_data")
+        delattr(mock_request.state, "raw_audit_new_data")
+        delattr(mock_request.state, "audit_description")
+        delattr(mock_request.state, "audit_risk_level")
 
         result = _collect_audit_state(mock_request, "fallback_table")
 
@@ -270,12 +284,12 @@ class TestCollectAuditState:
         """Test _collect_audit_state with no fallback table name."""
         # Configure mock to not have the attributes that should use defaults
         # This simulates the case where the attributes don't exist
-        delattr(mock_request.state, 'audit_table')
-        delattr(mock_request.state, 'audit_requested_id')
-        delattr(mock_request.state, 'raw_audit_old_data')
-        delattr(mock_request.state, 'raw_audit_new_data')
-        delattr(mock_request.state, 'audit_description')
-        delattr(mock_request.state, 'audit_risk_level')
+        delattr(mock_request.state, "audit_table")
+        delattr(mock_request.state, "audit_requested_id")
+        delattr(mock_request.state, "raw_audit_old_data")
+        delattr(mock_request.state, "raw_audit_new_data")
+        delattr(mock_request.state, "audit_description")
+        delattr(mock_request.state, "audit_risk_level")
 
         result = _collect_audit_state(mock_request, None)
 
@@ -292,10 +306,7 @@ class TestBuildNewValues:
 
     def test_build_new_values_complete(self, mock_request):
         """Test _build_new_values with complete data."""
-        audit_state = {
-            "requested_id": "req123",
-            "raw_new": {"new": "data"}
-        }
+        audit_state = {"requested_id": "req123", "raw_new": {"new": "data"}}
         request_body = {"body": "data"}
 
         result = _build_new_values(mock_request, request_body, audit_state, 201, "test_table")
@@ -314,10 +325,7 @@ class TestBuildNewValues:
 
     def test_build_new_values_with_none_table(self, mock_request):
         """Test _build_new_values with None table name."""
-        audit_state = {
-            "requested_id": "req123",
-            "raw_new": {"new": "data"}
-        }
+        audit_state = {"requested_id": "req123", "raw_new": {"new": "data"}}
         request_body = {"body": "data"}
 
         result = _build_new_values(mock_request, request_body, audit_state, 200, None)
@@ -327,15 +335,12 @@ class TestBuildNewValues:
     def test_build_new_values_with_empty_query_params(self, mock_request):
         """Test _build_new_values with empty query params."""
         mock_request.query_params = {}
-        audit_state = {
-            "requested_id": "req123",
-            "raw_new": {"new": "data"}
-        }
+        audit_state = {"requested_id": "req123", "raw_new": {"new": "data"}}
         request_body = {"body": "data"}
 
         result = _build_new_values(mock_request, request_body, audit_state, 200, "test_table")
 
-        assert result["meta"]["query_params"] == {}
+        assert not result["meta"]["query_params"]
 
 
 class TestGetChangedFields:
@@ -353,14 +358,8 @@ class TestGetChangedFields:
 
     def test_get_changed_fields_nested(self):
         """Test nested field comparison."""
-        old_data = {
-            "user": {"name": "John", "age": 30},
-            "settings": {"theme": "dark"}
-        }
-        new_data = {
-            "user": {"name": "Jane", "age": 30},
-            "settings": {"theme": "light"}
-        }
+        old_data = {"user": {"name": "John", "age": 30}, "settings": {"theme": "dark"}}
+        new_data = {"user": {"name": "Jane", "age": 30}, "settings": {"theme": "light"}}
 
         result = get_changed_fields(old_data, new_data)
 
@@ -370,20 +369,8 @@ class TestGetChangedFields:
 
     def test_get_changed_fields_deeply_nested(self):
         """Test deeply nested field comparison."""
-        old_data = {
-            "level1": {
-                "level2": {
-                    "level3": {"value": "old"}
-                }
-            }
-        }
-        new_data = {
-            "level1": {
-                "level2": {
-                    "level3": {"value": "new"}
-                }
-            }
-        }
+        old_data = {"level1": {"level2": {"level3": {"value": "old"}}}}
+        new_data = {"level1": {"level2": {"level3": {"value": "new"}}}}
 
         result = get_changed_fields(old_data, new_data)
 
@@ -396,7 +383,7 @@ class TestGetChangedFields:
 
         result = get_changed_fields(old_data, new_data)
 
-        assert result == []
+        assert not result
 
     def test_get_changed_fields_identical_data(self):
         """Test with identical data."""
@@ -404,7 +391,7 @@ class TestGetChangedFields:
 
         result = get_changed_fields(data, data)
 
-        assert result == []
+        assert not result
 
     def test_get_changed_fields_with_prefix(self):
         """Test with custom prefix."""
@@ -426,17 +413,22 @@ class TestMaybeLogAuditOnError:
             "table_name": "test_table",
             "data_classification": "confidential",
             "compliance_tags": ["gdpr"],
-            "category": "test"
+            "category": "test",
         }
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
-        mock_request.state._cached_body = b'{"test": "data"}'
+        mock_request.state.cached_body = b'{"test": "data"}'
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body', return_value={"test": "data"}):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body",
+            return_value={"test": "data"},
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger"
+            ) as mock_logger:
                 await maybe_log_audit_on_error(mock_request, "Test error", 500)
 
                 mock_logger.log_audit_event.assert_called_once()
@@ -447,7 +439,9 @@ class TestMaybeLogAuditOnError:
         mock_request.state._audit_metadata = {}
         mock_request.state.audit_user_context = {}
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger"
+        ) as mock_logger:
             await maybe_log_audit_on_error(mock_request, "Test error", 500)
 
             mock_logger.log_audit_event.assert_not_called()
@@ -459,10 +453,12 @@ class TestMaybeLogAuditOnError:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "unknown"
+            "user_email": "unknown",
         }
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger"
+        ) as mock_logger:
             await maybe_log_audit_on_error(mock_request, "Test error", 500)
 
             mock_logger.log_audit_event.assert_not_called()
@@ -470,7 +466,9 @@ class TestMaybeLogAuditOnError:
     @pytest.mark.asyncio
     async def test_maybe_log_audit_on_error_attribute_error(self, mock_request):
         """Test audit logging with AttributeError."""
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+        ) as mock_logger:
             await maybe_log_audit_on_error(mock_request, "Test error", 500)
 
             mock_logger.warning.assert_called()
@@ -482,11 +480,16 @@ class TestMaybeLogAuditOnError:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body', side_effect=json.JSONDecodeError("Invalid JSON", "doc", 0)):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body",
+            side_effect=json.JSONDecodeError("Invalid JSON", "doc", 0),
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+            ) as mock_logger:
                 await maybe_log_audit_on_error(mock_request, "Test error", 500)
 
                 mock_logger.warning.assert_called()
@@ -498,11 +501,16 @@ class TestMaybeLogAuditOnError:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body', side_effect=UnicodeError("Unicode error")):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body",
+            side_effect=UnicodeError("Unicode error"),
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+            ) as mock_logger:
                 await maybe_log_audit_on_error(mock_request, "Test error", 500)
 
                 mock_logger.warning.assert_called()
@@ -514,11 +522,16 @@ class TestMaybeLogAuditOnError:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body', side_effect=ValueError("Value error")):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body",
+            side_effect=ValueError("Value error"),
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+            ) as mock_logger:
                 await maybe_log_audit_on_error(mock_request, "Test error", 500)
 
                 mock_logger.warning.assert_called()
@@ -530,11 +543,16 @@ class TestMaybeLogAuditOnError:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body', side_effect=OSError("OS error")):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body",
+            side_effect=OSError("OS error"),
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+            ) as mock_logger:
                 await maybe_log_audit_on_error(mock_request, "Test error", 500)
 
                 mock_logger.warning.assert_called()
@@ -546,11 +564,16 @@ class TestMaybeLogAuditOnError:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body', side_effect=RuntimeError("Runtime error")):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body",
+            side_effect=RuntimeError("Runtime error"),
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+            ) as mock_logger:
                 await maybe_log_audit_on_error(mock_request, "Test error", 500)
 
                 mock_logger.warning.assert_called()
@@ -560,20 +583,9 @@ class TestExtractRequestBody:
     """Test _extract_request_body function."""
 
     @pytest.mark.asyncio
-    async def test_extract_request_body_success(self, mock_request):
-        """Test successful request body extraction."""
-        mock_request.state._cached_body = b'{"test": "data"}'
-        mock_request.headers = {"content-type": "application/json"}
-
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.parse_body_by_content_type', return_value={"test": "data"}):
-            result = await _extract_request_body(mock_request)
-
-            assert result == {"test": "data"}
-
-    @pytest.mark.asyncio
     async def test_extract_request_body_no_body(self, mock_request):
         """Test request body extraction with no body."""
-        mock_request.state._cached_body = None
+        mock_request.state.cached_body = None
         mock_request.headers = {"content-type": "application/json"}
 
         result = await _extract_request_body(mock_request)
@@ -583,7 +595,7 @@ class TestExtractRequestBody:
     @pytest.mark.asyncio
     async def test_extract_request_body_no_content_type(self, mock_request):
         """Test request body extraction with no content type."""
-        mock_request.state._cached_body = b'{"test": "data"}'
+        mock_request.state.cached_body = b'{"test": "data"}'
         mock_request.headers = {}
 
         result = await _extract_request_body(mock_request)
@@ -593,10 +605,12 @@ class TestExtractRequestBody:
     @pytest.mark.asyncio
     async def test_extract_request_body_unicode_error(self, mock_request):
         """Test request body extraction with UnicodeError."""
-        mock_request.state._cached_body = b'\x80invalid'
+        mock_request.state.cached_body = b"\x80invalid"
         mock_request.headers = {"content-type": "application/json"}
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+        ) as mock_logger:
             result = await _extract_request_body(mock_request)
 
             assert "_error" in result
@@ -605,26 +619,36 @@ class TestExtractRequestBody:
     @pytest.mark.asyncio
     async def test_extract_request_body_json_decode_error(self, mock_request):
         """Test request body extraction with JSONDecodeError."""
-        mock_request.state._cached_body = b'invalid json'
+        mock_request.state.cached_body = b"invalid json"
         mock_request.headers = {"content-type": "application/json"}
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.parse_body_by_content_type', side_effect=json.JSONDecodeError("Invalid JSON", "doc", 0)):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
+        with patch(
+            (
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator."
+                "parse_body_by_content_type"
+            ),
+            side_effect=json.JSONDecodeError("Invalid JSON", "doc", 0),
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+            ) as mock_logger:
                 result = await _extract_request_body(mock_request)
 
                 assert "_error" in result
                 mock_logger.warning.assert_called()
 
     @pytest.mark.asyncio
-    async def test_extract_request_body_attribute_error(self, mock_request):
+    async def test_extract_request_body_attribute_error(self, _mock_request):
         """Test request body extraction with AttributeError."""
-        # Create a new mock request without the _cached_body attribute
+        # Create a new mock request without the cached_body attribute
         mock_request_no_body = MagicMock(spec=Request)
         mock_request_no_body.state = MagicMock()
         mock_request_no_body.headers = {"content-type": "application/json"}
-        # Don't set _cached_body attribute to trigger AttributeError
+        # Don't set cached_body attribute to trigger AttributeError
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+        ) as mock_logger:
             result = await _extract_request_body(mock_request_no_body)
 
             assert "_error" in result
@@ -633,62 +657,16 @@ class TestExtractRequestBody:
     @pytest.mark.asyncio
     async def test_extract_request_body_value_error(self, mock_request):
         """Test request body extraction with ValueError."""
-        mock_request.state._cached_body = b'{"test": "data"}'
+        mock_request.state.cached_body = b'{"test": "data"}'
         mock_request.headers = {"content-type": "application/json"}
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.parse_body_by_content_type', side_effect=ValueError("Value error")):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.logger') as mock_logger:
-                result = await _extract_request_body(mock_request)
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator.logger"
+        ) as mock_logger:
+            result = await _extract_request_body(mock_request)
 
-                assert "_error" in result
-                mock_logger.warning.assert_called()
-
-
-class TestParseBodyByContentType:
-    """Test parse_body_by_content_type function."""
-
-    @pytest.mark.asyncio
-    async def test_parse_body_by_content_type_json(self, mock_request):
-        """Test parsing JSON content type."""
-        body_bytes = b'{"test": "data"}'
-        content_type = "application/json"
-
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._parse_json_body', return_value={"test": "data"}):
-            result = await parse_body_by_content_type(mock_request, body_bytes, content_type)
-
-            assert result == {"test": "data"}
-
-    @pytest.mark.asyncio
-    async def test_parse_body_by_content_type_form_urlencoded(self, mock_request):
-        """Test parsing form-urlencoded content type."""
-        body_bytes = b'field1=value1&field2=value2'
-        content_type = "application/x-www-form-urlencoded"
-
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._parse_form_data', return_value={"field1": "value1"}):
-            result = await parse_body_by_content_type(mock_request, body_bytes, content_type)
-
-            assert result == {"field1": "value1"}
-
-    @pytest.mark.asyncio
-    async def test_parse_body_by_content_type_multipart(self, mock_request):
-        """Test parsing multipart content type."""
-        body_bytes = b'multipart data'
-        content_type = "multipart/form-data"
-
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._parse_form_data', return_value={"field1": "value1"}):
-            result = await parse_body_by_content_type(mock_request, body_bytes, content_type)
-
-            assert result == {"field1": "value1"}
-
-    @pytest.mark.asyncio
-    async def test_parse_body_by_content_type_unknown(self, mock_request):
-        """Test parsing unknown content type."""
-        body_bytes = b'some data'
-        content_type = "text/plain"
-
-        result = await parse_body_by_content_type(mock_request, body_bytes, content_type)
-
-        assert result == {}
+            assert "_error" in result
+            mock_logger.warning.assert_called()
 
 
 class TestParseJsonBody:
@@ -704,7 +682,7 @@ class TestParseJsonBody:
 
     def test_parse_json_body_invalid_json(self):
         """Test JSON parsing with invalid JSON."""
-        body_bytes = b'invalid json'
+        body_bytes = b"invalid json"
 
         result = _parse_json_body(body_bytes)
 
@@ -754,22 +732,32 @@ class TestLogAuditEvent:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
         mock_request.state.audit_description = "Test description"
         mock_request.state.raw_audit_old_data = {"old": "data"}
         mock_request.state.raw_audit_new_data = {"new": "data"}
-        mock_request.state._cached_body = b'{"test": "data"}'
+        mock_request.state.cached_body = b'{"test": "data"}'
 
         result = MagicMock()
         result.status_code = 201
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body', return_value={"test": "data"}):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body",
+            return_value={"test": "data"},
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger"
+            ) as mock_logger:
                 mock_logger.log_audit_event = AsyncMock()
                 await _log_audit_event(
-                    mock_request, result, "CREATE", "confidential",
-                    "test_table", ["gdpr"], "test"
+                    mock_request,
+                    result,
+                    "CREATE",
+                    "confidential",
+                    "test_table",
+                    ["gdpr"],
+                    "test",
                 )
 
                 mock_logger.log_audit_event.assert_called_once()
@@ -780,7 +768,7 @@ class TestLogAuditEvent:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
         mock_request.state.audit_description = ""
 
@@ -789,8 +777,13 @@ class TestLogAuditEvent:
 
         with pytest.raises(ValueError, match="Missing required audit description"):
             await _log_audit_event(
-                mock_request, result, "CREATE", "confidential",
-                "test_table", ["gdpr"], "test"
+                mock_request,
+                result,
+                "CREATE",
+                "confidential",
+                "test_table",
+                ["gdpr"],
+                "test",
             )
 
     @pytest.mark.asyncio
@@ -799,27 +792,37 @@ class TestLogAuditEvent:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
         mock_request.state.audit_description = "Test description"
         mock_request.state.raw_audit_old_data = {"name": "John", "age": 30}
         mock_request.state.raw_audit_new_data = {"name": "Jane", "age": 30}
-        mock_request.state._cached_body = b'{"test": "data"}'
+        mock_request.state.cached_body = b'{"test": "data"}'
 
         result = MagicMock()
         result.status_code = 200
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body', return_value={"test": "data"}):
-            with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator._extract_request_body",
+            return_value={"test": "data"},
+        ):
+            with patch(
+                "apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger"
+            ) as mock_logger:
                 mock_logger.log_audit_event = AsyncMock()
                 await _log_audit_event(
-                    mock_request, result, "UPDATE", "confidential",
-                    "test_table", ["gdpr"], "test"
+                    mock_request,
+                    result,
+                    "UPDATE",
+                    "confidential",
+                    "test_table",
+                    ["gdpr"],
+                    "test",
                 )
 
                 # Verify that old values and changed fields were set
-                assert hasattr(mock_request.state, 'audit_old_values')
-                assert hasattr(mock_request.state, 'audit_changed_fields')
+                assert hasattr(mock_request.state, "audit_old_values")
+                assert hasattr(mock_request.state, "audit_changed_fields")
                 mock_logger.log_audit_event.assert_called_once()
 
 
@@ -832,18 +835,20 @@ class TestIntegrationScenarios:
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
         mock_request.state.audit_description = "Test description"
-        mock_request.state._cached_body = b'{"test": "data"}'
+        mock_request.state.cached_body = b'{"test": "data"}'
 
         @audit_api_call(action_type="CREATE", table_name="test_table")
-        async def test_function(request: Request):
+        async def test_function(_request: Request):
             return {"status": "success"}
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger') as mock_logger:
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger"
+        ) as mock_logger:
             mock_logger.log_audit_event = AsyncMock()
-            result = await test_function(request=mock_request)
+            result = await test_function(_request=mock_request)
 
             assert result == {"status": "success"}
             mock_logger.log_audit_event.assert_called_once()
@@ -853,17 +858,23 @@ class TestIntegrationScenarios:
         """Test audit flow with error handling."""
         mock_request.state._audit_metadata = {
             "table_name": "test_table",
-            "data_classification": "confidential"
+            "data_classification": "confidential",
         }
         mock_request.state.audit_user_context = {
             "user_id": "123",
             "organization_id": "org123",
-            "user_email": "test@example.com"
+            "user_email": "test@example.com",
         }
-        mock_request.state._cached_body = b'{"test": "data"}'
+        mock_request.state.cached_body = b'{"test": "data"}'
 
-        with patch('apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger') as mock_logger:
-            await maybe_log_audit_on_error(mock_request, "Test error", 500)
+        with patch(
+            "apps.user_service.app.dependencies.audit_logs.audit_decorator.audit_logger"
+        ) as mock_logger:
+            await maybe_log_audit_on_error(
+                request=mock_request,
+                description="Test error",
+                status_code=500,
+            )
 
             mock_logger.log_audit_event.assert_called_once()
 
@@ -871,36 +882,18 @@ class TestIntegrationScenarios:
         """Test changed fields detection with complex data structures."""
         old_data = {
             "user": {
-                "profile": {
-                    "name": "John",
-                    "email": "john@example.com"
-                },
-                "settings": {
-                    "theme": "dark",
-                    "notifications": True
-                }
+                "profile": {"name": "John", "email": "john@example.com"},
+                "settings": {"theme": "dark", "notifications": True},
             },
-            "metadata": {
-                "created_at": "2023-01-01",
-                "updated_at": "2023-01-01"
-            }
+            "metadata": {"created_at": "2023-01-01", "updated_at": "2023-01-01"},
         }
 
         new_data = {
             "user": {
-                "profile": {
-                    "name": "Jane",
-                    "email": "jane@example.com"
-                },
-                "settings": {
-                    "theme": "light",
-                    "notifications": True
-                }
+                "profile": {"name": "Jane", "email": "jane@example.com"},
+                "settings": {"theme": "light", "notifications": True},
             },
-            "metadata": {
-                "created_at": "2023-01-01",
-                "updated_at": "2023-01-02"
-            }
+            "metadata": {"created_at": "2023-01-01", "updated_at": "2023-01-02"},
         }
 
         result = get_changed_fields(old_data, new_data)

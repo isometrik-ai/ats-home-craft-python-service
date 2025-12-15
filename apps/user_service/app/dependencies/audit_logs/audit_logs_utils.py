@@ -1,99 +1,22 @@
-# pylint: disable=R0902
-"""
-Audit Logs Utility Functions Module
+"""Audit Logs Utility Functions Module.
 
 This module contains utility functions for audit logs API operations.
 These functions handle validation, query building, and data formatting.
-
-Author: AI Assistant
-Date: 2024-12-19
-Last Updated: 2024-12-19
 """
+
 import json
-from typing import Optional
-from fastapi import HTTPException, status
 
 
-# Query building functions moved to centralized audit_operations.py
-# These functions are now available as:
-# - build_audit_logs_filter_query -> in audit_operations.py (improved version)
-# - build_audit_logs_count_query -> in audit_operations.py (improved version)
-# - build_audit_log_by_id_query -> in audit_operations.py (improved version)
-# - build_delete_all_audit_logs_query -> in audit_operations.py (improved version)
-
-
-def build_audit_logs_filter_message(
-    search: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 20,
-) -> str:
-    """
-    Build response message for audit logs filter operation.
+def format_audit_log_data(audit_log_row: dict) -> dict:
+    """Format audit log data from database row to API response format.
 
     Args:
-        search (Optional[str]): Search term used in filtering
-        skip (int): Number of records skipped
-        limit (int): Number of records returned
-
-    Returns:
-        str: Formatted response message
-    """
-    if search:
-        return (
-            f"Audit logs retrieved successfully "
-            f"(search: '{search}', showing {limit} records "
-            f"starting from position {skip + 1})"
-        )
-
-    return (
-        f"Audit logs retrieved successfully "
-        f"(showing {limit} records starting from position {skip + 1})"
-    )
-
-
-def check_audit_logs_view_permission(
-    user_context,
-    # db_conn,
-) -> dict:
-    """
-    Check if user has permission to view audit logs.
-
-    Args:
-        user_context: User context from JWT token
-        db_conn: Database connection
-
-    Returns:
-        dict: User context if permission is granted
-
-    Raises:
-        HTTPException: If user doesn't have permission
-    """
-    # For audit logs, typically only admin users or users with specific audit permissions
-    # should be able to view them. This is a basic implementation.
-    # You may want to add more sophisticated permission checking based on your requirements.
-
-    if not user_context or not user_context.get("organization_id"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user context: missing organization_id",
-        )
-
-    # Add your specific permission logic here
-    # For example, check if user has "audit.view" or "admin" permissions
-
-    return user_context
-
-
-def format_audit_log_data(audit_log_row) -> dict:
-    """
-    Format audit log data from database row to API response format.
-
-    Args:
-        audit_log_row: Database row containing audit log data
+        audit_log_row (dict): Database row containing audit log data
 
     Returns:
         dict: Formatted audit log data
     """
+    # pylint: disable=too-complex
     # Parse JSON fields if they exist
     old_values = None
     new_values = None
@@ -142,21 +65,18 @@ def format_audit_log_data(audit_log_row) -> dict:
         "ip_address": audit_log_row["ip_address"],
         "description": audit_log_row["description"],
         "timestamp": (
-            audit_log_row["timestamp"].isoformat()
-            if audit_log_row["timestamp"]
-            else None
+            audit_log_row["timestamp"].isoformat() if audit_log_row["timestamp"] else None
         ),
         "status_code": audit_log_row.get("status_code"),
         "category": audit_log_row.get("category"),
     }
 
 
-def format_audit_log_detail_data(audit_log_row) -> dict:
-    """
-    Format detailed audit log data from database row to API response format.
+def format_audit_log_detail_data(audit_log_row: dict) -> dict:
+    """Format detailed audit log data from database row to API response format.
 
     Args:
-        audit_log_row: Database row containing detailed audit log data
+        audit_log_row (dict): Database row containing detailed audit log data
 
     Returns:
         dict: Formatted detailed audit log data
@@ -178,13 +98,3 @@ def format_audit_log_detail_data(audit_log_row) -> dict:
     )
 
     return basic_data
-
-
-# Database operations and query building functions moved to centralized audit_operations.py
-# These functions are now available as:
-# - check_audit_log_exists -> get_audit_log_by_id from audit_operations
-# - get_audit_logs_count -> get_audit_logs_count from audit_operations
-# - build_audit_logs_filter_query -> in audit_operations.py (improved version)
-# - build_audit_logs_count_query -> in audit_operations.py (improved version)
-# - build_audit_log_by_id_query -> in audit_operations.py (improved version)
-# - build_delete_all_audit_logs_query -> in audit_operations.py (improved version)

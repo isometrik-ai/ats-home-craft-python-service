@@ -1,31 +1,20 @@
-"""
-Centralized Logger Module
+"""Centralized Logger Module.
 
 This module provides a centralized logging configuration for the entire application.
 It sets up structured logging with proper formatting, log levels, and handlers.
 
-Features:
-- Structured JSON logging for production
-- Human-readable logging for development
-- Configurable log levels via environment variables
-- Request ID tracking
-- Performance logging capabilities
-- Error tracking and monitoring
-
-Author: AI Assistant
-Date: 2024-12-19
 """
 
+import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
-import json
 from contextvars import ContextVar
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 # Context variable for request ID tracking
-request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 # IST timezone (UTC+5:30)
 IST_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
@@ -94,12 +83,11 @@ class CustomTextFormatter(logging.Formatter):
 
 
 def setup_logging(
-    log_level: Optional[str] = None,
-    environment: Optional[str] = None,
+    log_level: str | None = None,
+    environment: str | None = None,
     service_name: str = "user-service",
 ) -> logging.Logger:
-    """
-    Set up centralized logging configuration.
+    """Set up centralized logging configuration.
 
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -149,12 +137,17 @@ def setup_logging(
     return logger
 
 
-def get_logger(name: str = None) -> logging.Logger:
-    """
-    Get a logger instance with the specified name.
+def get_logger(name: str | None = None) -> logging.Logger:
+    """Get a logger instance with the specified name.
     If a name is provided, return a logger with that name
     configured to use the same handlers and level as 'user-service'.
     Otherwise, return the main 'user-service' logger.
+
+    Args:
+        name (str | None): Name of the logger to get
+
+    Returns:
+        logging.Logger: Logger instance
     """
     # Retrieve the primary application logger
     service_logger = logging.getLogger("user-service")
@@ -176,8 +169,7 @@ def get_logger(name: str = None) -> logging.Logger:
 
 
 def set_request_id(request_id: str):
-    """
-    Set the request ID for the current context.
+    """Set the request ID for the current context.
 
     Args:
         request_id: Unique identifier for the request
@@ -185,9 +177,8 @@ def set_request_id(request_id: str):
     request_id_var.set(request_id)
 
 
-def get_request_id() -> Optional[str]:
-    """
-    Get the current request ID.
+def get_request_id() -> str | None:
+    """Get the current request ID.
 
     Returns:
         Optional[str]: Current request ID or None
@@ -199,27 +190,23 @@ def log_with_context(
     logger: logging.Logger,
     level: str,
     message: str,
-    extra_fields: Optional[Dict[str, Any]] = None,
+    extra_fields: dict[str, Any] | None = None,
     **kwargs,
 ):
-    """
-    Log a message with additional context fields.
+    """Log a message with additional context fields.
 
     Args:
-        logger: Logger instance
-        level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        message: Log message
-        extra_fields: Additional fields to include in the log
+        logger (logging.Logger): Logger instance
+        level (str): Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        message (str): Log message
+        extra_fields (dict[str, Any] | None): Additional fields to include in the log
         **kwargs: Additional keyword arguments to include
     """
-    # Combine extra_fields and kwargs
     all_extra = {}
     if extra_fields:
         all_extra.update(extra_fields)
     if kwargs:
         all_extra.update(kwargs)
-
-    # Create a log record with extra fields
     if all_extra:
         record = logger.makeRecord(
             logger.name,

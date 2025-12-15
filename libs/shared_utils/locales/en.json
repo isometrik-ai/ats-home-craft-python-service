@@ -1,0 +1,43 @@
+{
+    "errors": {
+        "unauthorized": "Authentication is required to access this resource",
+        "forbidden": "You don't have permission to perform this action",
+        "token_expired": "Token expired. Please refresh your authentication token.",
+        "invalid_token": "Invalid token. Please provide a valid authentication token.",
+        "authentication_failed": "Authentication failed.",
+        "user_not_found": "Requested user with ID {user_id} not found",
+        "not_found": "Requested resource not found",
+        "validation": "Validation error: {message}",
+        "conflict": "Conflict",
+        "internal_server_error": "An internal server error occurred",
+        "missing_required_param": "Missing required parameter: {param_name}",
+        "method_not_allowed": "Method {method} is not allowed for this path: {path}. Please use the correct HTTP method according to the API documentation.",
+        "missing_headers": "Required headers missing: {headers}",
+        "rate_limit_exceeded": "Rate limit exceeded. Please try again after some time.",
+        "required_headers_missing": "Required headers missing: {missing_headers}",
+        "invalid_platform": "Invalid platform value '{platform}': {error}",
+        "invalid_uuid_format": "Invalid {field_name} format",
+        "invalid_pagination_page": "Page must be a positive integer: {page}",
+        "invalid_pagination_page_size": "Page size must be between 1 and {max_page_size}: {page_size}",
+        "password_strength": "Password must be at least 6 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        "isometrik": {
+            "failed_to_create_application": "Failed to create Isometrik application",
+            "failed_to_create_user": "Failed to create Isometrik user"
+        },
+        "external_service_unavailable": "The external service is currently unavailable. Please try again later.",
+        "service_unavailable": "Service unavailable",
+        "external_api_bad_request": "The external API returned a bad request. Please try again later.",
+        "external_api_rate_limited": "The external API returned a rate limit error. Please try again later.",
+        "insufficient_permissions": "You do not have sufficient permissions to perform this action.",
+        "missing_configuration": "Missing configuration. Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set.",
+        "invalid_access_token_or_user_not_found": "Invalid access token or user not found.",
+        "access_token_expired": "Access token has expired. Please refresh your token.",
+        "value_error": "Value error: {error}",
+        "failed_to_create_isometrik_user": "Failed to create Isometrik user. Please try again later."
+    },
+    "success": {
+        "retrieved": "Retrieved successfully",
+        "no_data": "No data found",
+        "ok": "OK"
+    }
+}

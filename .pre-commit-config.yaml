@@ -1,0 +1,115 @@
+default_language_version:
+  python: python3.13
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-ast
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-case-conflict
+      - id: check-docstring-first
+      - id: check-executables-have-shebangs
+      # - id: check-symlinks
+      - id: check-toml
+      - id: check-vcs-permalinks
+      - id: debug-statements
+      - id: mixed-line-ending
+      # - id: requirements-txt-fixer
+      # - id: forbid-submodules
+      - id: no-commit-to-branch
+        args: ["--branch", "main", "--branch", "master"]
+        stages: [manual]
+      - id: check-builtin-literals
+      # - id: check-xml
+
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.3.1
+    hooks:
+      - id: autoflake
+        args:
+          [
+            --remove-all-unused-imports,
+            --remove-unused-variables,
+            --in-place,
+            --recursive,
+          ]
+        exclude: ^(docs/|migrations/)
+
+  - repo: https://github.com/pycqa/isort
+    rev: 6.0.1
+    hooks:
+      - id: isort
+        args: ["--profile", "black", "--filter-files"]
+        exclude: ^(docs/|migrations/)
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.19.1
+    hooks:
+      # Disable this since we're already on Python 3.13 and it's making lots of changes
+      - id: pyupgrade
+        args: [--py313-plus]
+        name: Upgrade code to Python 3.13+
+        stages: [manual]  # This makes the hook run only when explicitly requested
+
+  - repo: https://github.com/asottile/yesqa
+    rev: v1.5.0
+    hooks:
+      - id: yesqa
+        name: Unused noqa
+
+  - repo: https://github.com/PyCQA/pylint
+    rev: v3.3.7
+    hooks:
+      - id: pylint
+        name: pylint
+        entry: pylint
+        language: python
+        types: [python]
+        args:
+          [
+            "--rcfile=.pylintrc",
+            "--output-format=colorized",
+            "apps",
+            "libs",
+            "--disable=E0401",
+          ]
+        exclude: ^(docs/|migrations/|alembic/)
+        additional_dependencies:
+          [
+            "fastapi==0.115.12",
+            "sqlalchemy==2.0.40",
+            "pydantic==2.11.3",
+            "pydantic-settings==2.8.1",
+            "uvicorn==0.34.1",
+            "aiokafka>=0.12.0",
+            "aiohttp==3.11.18",
+            "redis",
+            "slowapi",
+            "alembic",
+            "starlette",
+            "anyio",
+            "python-dotenv",
+          ]
+
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.22
+    hooks:
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat_frontmatter
+        exclude: CHANGELOG.md

@@ -1,15 +1,14 @@
-# pylint: disable=invalid-name,E0213
-"""
-Verification Codes Schemas Module
+"""Verification Codes Schemas Module.
 
 This module contains Pydantic schemas for verification code operations.
 """
 
 from enum import Enum
-from typing import Optional
-from pydantic import BaseModel, Field, EmailStr, model_validator
 
-from apps.user_service.app.schemas import ResponseModel
+from pydantic import BaseModel, EmailStr, Field, model_validator
+
+from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 # Re-export enums for easier imports
 __all__ = [
@@ -22,18 +21,16 @@ __all__ = [
 ]
 
 
-# ============================================================================
-# ENUMS
-# ============================================================================
-
 class VerificationType(str, Enum):
     """Verification type enumeration"""
+
     EMAIL = "EMAIL"
     PHONE_NUMBER = "PHONE_NUMBER"
 
 
 class VerificationTrigger(str, Enum):
     """Verification trigger/purpose enumeration"""
+
     SIGNUP_EMAIL_VERIFICATION = "SIGNUP_EMAIL_VERIFICATION"
     SIGNUP_PHONE_VERIFICATION = "SIGNUP_PHONE_VERIFICATION"
     EMAIL_UPDATE = "EMAIL_UPDATE"
@@ -44,27 +41,43 @@ class VerificationTrigger(str, Enum):
 # REQUEST MODELS
 # ============================================================================
 
+
 class SendVerificationCodeRequest(BaseModel):
     """Request model for sending verification code"""
 
     type: VerificationType = Field(..., description="Type of verification: EMAIL or PHONE_NUMBER")
-    email: Optional[EmailStr] = Field(None, description="Email address for verification")
-    phoneNumber: Optional[str] = Field(None, description="Phone number for verification")
-    verification_method: Optional[str] = Field(None, description="Optional verification method field (e.g., 'signup_verification')")
+    email: EmailStr | None = Field(None, description="Email address for verification")
+    phoneNumber: str | None = Field(None, description="Phone number for verification")
+    verification_method: str | None = Field(
+        None,
+        description="Optional verification method field (e.g., 'signup_verification')",
+    )
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_email_or_phone(self):
         """Validate that either email or phoneNumber is provided based on type"""
         if self.type == VerificationType.EMAIL:
             if not self.email:
-                raise ValueError("Email is required when type is EMAIL")
+                raise ValidationException(
+                    message_key="verification_codes.errors.email_required",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
             if self.phoneNumber:
-                raise ValueError("phoneNumber should not be provided when type is EMAIL")
+                raise ValidationException(
+                    message_key="verification_codes.errors.phoneNumber_provided",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
         elif self.type == VerificationType.PHONE_NUMBER:
             if not self.phoneNumber:
-                raise ValueError("phoneNumber is required when type is PHONE_NUMBER")
+                raise ValidationException(
+                    message_key="verification_codes.errors.phoneNumber_required",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
             if self.email:
-                raise ValueError("email should not be provided when type is PHONE_NUMBER")
+                raise ValidationException(
+                    message_key="verification_codes.errors.email_provided",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
         return self
 
 
@@ -74,22 +87,34 @@ class VerifyVerificationCodeRequest(BaseModel):
     type: VerificationType = Field(..., description="Type of verification: EMAIL or PHONE_NUMBER")
     verification_id: str = Field(..., description="ID of the verification code record")
     verification_code: str = Field(..., description="The verification code to verify")
-    email: Optional[EmailStr] = Field(None, description="Email address for verification")
-    phoneNumber: Optional[str] = Field(None, description="Phone number for verification")
+    email: EmailStr | None = Field(None, description="Email address for verification")
+    phoneNumber: str | None = Field(None, description="Phone number for verification")
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_email_or_phone(self):
         """Validate that either email or phoneNumber is provided based on type"""
         if self.type == VerificationType.EMAIL:
             if not self.email:
-                raise ValueError("Email is required when type is EMAIL")
+                raise ValidationException(
+                    message_key="verification_codes.errors.email_required",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
             if self.phoneNumber:
-                raise ValueError("phoneNumber should not be provided when type is EMAIL")
+                raise ValidationException(
+                    message_key="verification_codes.errors.phoneNumber_provided",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
         elif self.type == VerificationType.PHONE_NUMBER:
             if not self.phoneNumber:
-                raise ValueError("phoneNumber is required when type is PHONE_NUMBER")
+                raise ValidationException(
+                    message_key="verification_codes.errors.phoneNumber_required",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
             if self.email:
-                raise ValueError("email should not be provided when type is PHONE_NUMBER")
+                raise ValidationException(
+                    message_key="verification_codes.errors.email_provided",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
         return self
 
 
@@ -97,16 +122,19 @@ class VerifyVerificationCodeRequest(BaseModel):
 # RESPONSE MODELS
 # ============================================================================
 
-class SendVerificationCodeResponse(ResponseModel):
+
+class SendVerificationCodeResponse(BaseModel):
     """Response model for sending verification code"""
 
     verification_id: str = Field(..., description="ID of the created verification code")
     expiryAt: int = Field(..., description="Expiry timestamp (Unix timestamp in milliseconds)")
-    message: str = Field(default="Verification code sent successfully", description="Response message")
+    message: str = Field(
+        default="Verification code sent successfully", description="Response message"
+    )
     attemptsLeft: int = Field(..., description="Number of send OTP attempts remaining for today")
 
 
-class VerifyVerificationCodeResponse(ResponseModel):
+class VerifyVerificationCodeResponse(BaseModel):
     """Response model for verifying verification code"""
 
     verified: bool = Field(..., description="Whether the verification was successful")

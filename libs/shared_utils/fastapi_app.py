@@ -1,23 +1,25 @@
-"""
-FastAPI application initialization utilities.
+"""FastAPI application initialization utilities.
 
 This module provides shared functionality for initializing FastAPI applications
 with common configurations like rate limiting.
 """
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
+from starlette.types import Lifespan
+
+from libs.shared_utils.http_exceptions import RateLimitExceededException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 
-def create_fastapi_app(lifespan=None) -> tuple[FastAPI, Limiter]:
-    """
-    Create a FastAPI application with rate limiting configured.
+def create_fastapi_app(lifespan: Lifespan | None = None) -> tuple[FastAPI, Limiter]:
+    """Create a FastAPI application with rate limiting configured.
 
     Args:
-        lifespan: Optional lifespan event handler for startup/shutdown events
+        lifespan: Lifespan event handler for startup/shutdown events
 
     Returns:
         tuple[FastAPI, Limiter]: A tuple containing the FastAPI app instance and limiter
@@ -36,25 +38,14 @@ def create_fastapi_app(lifespan=None) -> tuple[FastAPI, Limiter]:
     # consistency with the unified exception handler pattern
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_exceeded_handler(_request, _exc):
-        """
-        Handles the RateLimitExceeded exception globally.
-
+        """Handles the RateLimitExceeded exception globally.
         This function is triggered when a request exceeds the defined rate limit.
         It raises an HTTPException with a 429 status code, which will be handled by
         the unified exception handler to ensure proper CORS headers and consistent
-        error response format.
-
-        Args:
-            request: The incoming HTTP request object.
-            exc: The exception instance containing details about the rate limit exceedance.
-
-        Raises:
-            HTTPException: A 429 status code exception that will be handled by the
-                          unified exception handler with proper CORS headers.
-        """
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded. Please try again later.",
+        error response format."""
+        raise RateLimitExceededException(
+            message_key="errors.rate_limit_exceeded",
+            custom_code=CustomStatusCode.RATE_LIMIT_EXCEEDED,
         )
 
     return app, limiter

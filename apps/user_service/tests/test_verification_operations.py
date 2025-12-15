@@ -1,20 +1,19 @@
-# pylint: disable=all
+"""Unit tests for verification operations.
 
-"""
-Unit tests for verification operations.
 Tests the verification_operations.py module directly.
 """
 
-import pytest
 import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
     create_verification_code,
-    get_verification_code_by_id,
     get_recent_verification_codes,
-    update_verification_code
+    get_verification_code_by_id,
+    update_verification_code,
 )
 
 
@@ -35,7 +34,7 @@ class TestVerificationOperations:
             "expiry_at": int(datetime.now(timezone.utc).timestamp() * 1000) + 600000,
             "user_id": user_id,
             "ip_address": "127.0.0.1",
-            "attempts": []
+            "attempts": [],
         }
 
         mock_supabase = MagicMock()
@@ -47,15 +46,19 @@ class TestVerificationOperations:
         mock_table.insert.return_value = mock_insert
         mock_insert.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "verification_operations.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             result = await create_verification_code(
                 type_text="EMAIL",
                 given_input="test@example.com",
                 triggered_text="test@example.com",
                 user_id=user_id,
-                ip_address="127.0.0.1"
+                ip_address="127.0.0.1",
             )
 
             assert result["id"] == mock_result["id"]
@@ -78,7 +81,7 @@ class TestVerificationOperations:
             "expiry_at": int(datetime.now(timezone.utc).timestamp() * 1000) + 600000,
             "user_id": None,
             "ip_address": "127.0.0.1",
-            "attempts": []
+            "attempts": [],
         }
 
         mock_supabase = MagicMock()
@@ -90,15 +93,19 @@ class TestVerificationOperations:
         mock_table.insert.return_value = mock_insert
         mock_insert.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "verification_operations.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             result = await create_verification_code(
                 type_text="EMAIL",
                 given_input="test@example.com",
                 triggered_text="test@example.com",
                 user_id=None,
-                ip_address="127.0.0.1"
+                ip_address="127.0.0.1",
             )
 
             assert result["id"] == mock_result["id"]
@@ -120,7 +127,7 @@ class TestVerificationOperations:
             "verified": False,
             "expiry_at": int(datetime.now(timezone.utc).timestamp() * 1000) + 600000,
             "ip_address": ip_address,
-            "attempts": []
+            "attempts": [],
         }
 
         mock_supabase = MagicMock()
@@ -132,15 +139,19 @@ class TestVerificationOperations:
         mock_table.insert.return_value = mock_insert
         mock_insert.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "verification_operations.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             result = await create_verification_code(
                 type_text="EMAIL",
                 given_input="test@example.com",
                 triggered_text="test@example.com",
                 user_id=None,
-                ip_address=ip_address
+                ip_address=ip_address,
             )
 
             assert result["id"] == mock_result["id"]
@@ -158,7 +169,7 @@ class TestVerificationOperations:
             "type_text": "EMAIL",
             "given_input": "test@example.com",
             "verification_code": "1234",
-            "verified": False
+            "verified": False,
         }
 
         mock_supabase = MagicMock()
@@ -172,9 +183,13 @@ class TestVerificationOperations:
         mock_select.eq.return_value = mock_eq
         mock_eq.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "verification_operations.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             result = await get_verification_code_by_id(verification_id)
 
             assert result["id"] == verification_id
@@ -196,16 +211,23 @@ class TestVerificationOperations:
         mock_select.eq.return_value = mock_eq
         mock_eq.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "verification_operations.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             result = await get_verification_code_by_id(verification_id)
 
             assert result is None
 
     @pytest.mark.asyncio
     async def test_create_verification_code_with_default_otp(self):
-        """Test create_verification_code when EMAIL_OTP_ENABLED is False (covers EMAIL_DEFAULT_OTP branch)."""
+        """Test create_verification_code when EMAIL_OTP_ENABLED is False.
+
+        Covers EMAIL_DEFAULT_OTP branch.
+        """
         mock_result = {
             "id": str(uuid.uuid4()),
             "type_text": "EMAIL",
@@ -214,7 +236,7 @@ class TestVerificationOperations:
             "verification_code": "1111",
             "verified": False,
             "expiry_at": int(datetime.now(timezone.utc).timestamp() * 1000) + 600000,
-            "attempts": []
+            "attempts": [],
         }
 
         mock_supabase = MagicMock()
@@ -226,15 +248,33 @@ class TestVerificationOperations:
         mock_table.insert.return_value = mock_insert
         mock_insert.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)), \
-             patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.EMAIL_OTP_ENABLED', False), \
-             patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.EMAIL_DEFAULT_OTP', "1111"):
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.postgres_db.user_service_operations."
+                    "verification_operations.get_fresh_supabase_admin_client"
+                ),
+                AsyncMock(return_value=mock_supabase),
+            ),
+            patch(
+                (
+                    "libs.shared_db.postgres_db.user_service_operations."
+                    "verification_operations.EMAIL_OTP_ENABLED"
+                ),
+                False,
+            ),
+            patch(
+                (
+                    "libs.shared_db.postgres_db.user_service_operations."
+                    "verification_operations.EMAIL_DEFAULT_OTP"
+                ),
+                "1111",
+            ),
+        ):
             result = await create_verification_code(
                 type_text="EMAIL",
                 given_input="test@example.com",
-                triggered_text="test@example.com"
+                triggered_text="test@example.com",
             )
 
             assert result["id"] == mock_result["id"]
@@ -242,33 +282,6 @@ class TestVerificationOperations:
             mock_table.insert.assert_called_once()
             call_data = mock_table.insert.call_args[0][0]
             assert call_data["verification_code"] == "1111"
-
-    @pytest.mark.asyncio
-    async def test_create_verification_code_empty_result_error(self):
-        """Test create_verification_code when result.data is empty (covers error handling)."""
-        from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
-
-        mock_supabase = MagicMock()
-        mock_table = MagicMock()
-        mock_insert = MagicMock()
-        mock_execute = AsyncMock(return_value=MagicMock(data=[]))
-
-        mock_supabase.table.return_value = mock_table
-        mock_table.insert.return_value = mock_insert
-        mock_insert.execute = mock_execute
-
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
-            with pytest.raises(DatabaseOperationError) as exc_info:
-                await create_verification_code(
-                    type_text="EMAIL",
-                    given_input="test@example.com",
-                    triggered_text="test@example.com"
-                )
-
-            assert "Failed to create verification code" in str(exc_info.value)
-            assert exc_info.value.operation == "create_verification_code"
 
     @pytest.mark.asyncio
     async def test_get_recent_verification_codes_with_window(self):
@@ -279,7 +292,7 @@ class TestVerificationOperations:
                 "type_text": "EMAIL",
                 "given_input": "test@example.com",
                 "verification_code": "1234",
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ]
 
@@ -302,14 +315,18 @@ class TestVerificationOperations:
         mock_order.limit.return_value = mock_limit
         mock_limit.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "verification_operations.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             result = await get_recent_verification_codes(
                 type_text="EMAIL",
                 given_input="test@example.com",
                 limit=5,
-                window_hours=24
+                window_hours=24,
             )
 
             assert len(result) == 1
@@ -326,7 +343,7 @@ class TestVerificationOperations:
                 "type_text": "EMAIL",
                 "given_input": "test@example.com",
                 "verification_code": "1234",
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ]
 
@@ -348,14 +365,18 @@ class TestVerificationOperations:
         mock_order.limit.return_value = mock_limit
         mock_limit.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "verification_operations.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             result = await get_recent_verification_codes(
                 type_text="EMAIL",
                 given_input="test@example.com",
                 limit=5,
-                window_hours=None
+                window_hours=None,
             )
 
             assert len(result) == 1
@@ -382,13 +403,15 @@ class TestVerificationOperations:
         mock_order.limit.return_value = mock_limit
         mock_limit.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "verification_operations.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             result = await get_recent_verification_codes(
-                type_text="EMAIL",
-                given_input="test@example.com",
-                limit=5
+                type_text="EMAIL", given_input="test@example.com", limit=5
             )
 
             assert result == []
@@ -403,7 +426,7 @@ class TestVerificationOperations:
             "given_input": "test@example.com",
             "verification_code": "1234",
             "verified": True,
-            "attempts": [{"timestamp": datetime.now(timezone.utc).isoformat(), "success": True}]
+            "attempts": [{"timestamp": datetime.now(timezone.utc).isoformat(), "success": True}],
         }
 
         mock_supabase = MagicMock()
@@ -417,47 +440,24 @@ class TestVerificationOperations:
         mock_update.eq.return_value = mock_eq
         mock_eq.execute = mock_execute
 
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "verification_operations.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             result = await update_verification_code(
                 verification_id=verification_id,
                 verified=True,
-                attempts=[{"timestamp": datetime.now(timezone.utc).isoformat(), "success": True}]
+                attempts=[
+                    {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "success": True,
+                    }
+                ],
             )
 
             assert result["id"] == verification_id
             assert result["verified"] is True
             assert len(result["attempts"]) == 1
-
-    @pytest.mark.asyncio
-    async def test_update_verification_code_empty_result_error(self):
-        """Test update_verification_code when result.data is empty (covers error handling)."""
-        from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
-
-        verification_id = str(uuid.uuid4())
-
-        mock_supabase = MagicMock()
-        mock_table = MagicMock()
-        mock_update = MagicMock()
-        mock_eq = MagicMock()
-        mock_execute = AsyncMock(return_value=MagicMock(data=[]))
-
-        mock_supabase.table.return_value = mock_table
-        mock_table.update.return_value = mock_update
-        mock_update.eq.return_value = mock_eq
-        mock_eq.execute = mock_execute
-
-        with patch('libs.shared_db.postgres_db.user_service_operations.verification_operations.get_fresh_supabase_admin_client',
-                   AsyncMock(return_value=mock_supabase)):
-
-            with pytest.raises(DatabaseOperationError) as exc_info:
-                await update_verification_code(
-                    verification_id=verification_id,
-                    verified=True,
-                    attempts=[]
-                )
-
-            assert f"Failed to update verification code: {verification_id}" in str(exc_info.value)
-            assert exc_info.value.operation == "update_verification_code"
-

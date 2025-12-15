@@ -1,15 +1,21 @@
 """Presigned URL schemas for S3/R2 upload operations."""
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PresignedUrlRequest(BaseModel):
     """Request model for generating presigned URL."""
 
     file_name: str = Field(..., description="Name of the file to upload")
-    path: str = Field(..., description="Path prefix for the file (e.g., 'user-id' or 'org-id/user-id')")
+    path: str = Field(
+        ...,
+        description="Path prefix for the file (e.g., 'user-id' or 'org-id/user-id')",
+    )
     bucket: str = Field(..., description="Bucket name")
-    content_type: str = Field(..., description="Content type of the file (e.g., 'image/jpeg', 'application/pdf')")
+    content_type: str = Field(
+        ...,
+        description="Content type of the file (e.g., 'image/jpeg', 'application/pdf')",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -33,10 +39,12 @@ class PresignedUrlResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "url": "https://<ACCOUNT_ID>.r2.cloudflarestorage.com/your-bucket-name/user-123/document.pdf?X-Amz-Algorithm=...",
+                "url": (
+                    "https://<ACCOUNT_ID>.r2.cloudflarestorage.com/"
+                    "your-bucket-name/user-123/document.pdf?X-Amz-Algorithm=..."
+                ),
                 "fileName": "document.pdf",
                 "bucket": "my-bucket",
             }
         }
     )
-

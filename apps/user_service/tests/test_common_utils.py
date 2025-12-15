@@ -1,48 +1,33 @@
-# pylint: disable=all
+"""Test module for common utilities functionality."""
 
-"""
-Test module for common utilities functionality.
-
-This module contains comprehensive tests for:
-- UserContext and PerformanceTimer dataclasses
-- Permission utilities and validation
-- User context extraction
-- UUID validation
-- Pagination validation
-- Exception handling decorators
-- Helper functions
-- Error scenarios and edge cases
-"""
-
-import pytest
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import HTTPException, status
 
 from apps.user_service.app.dependencies.common_utils import (
-    UserContext,
-    PerformanceTimer,
-    format_permissions_data,
-    extract_user_context,
-    require_permission,
-    check_permissions,
-    validate_uuid_format,
-    validate_pagination_params,
-    handle_api_exceptions,
-    format_iso_datetime,
-    safe_json_loads,
-    get_user_in_organization,
-    set_audit_old_data_from_user,
-    ROLE_TYPES,
-    ORG_STATUSES,
-    USER_STATUSES,
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
-    UUID_PATTERN
+    ORG_STATUSES,
+    ROLE_TYPES,
+    USER_STATUSES,
+    UUID_PATTERN,
+    PerformanceTimer,
+    UserContext,
+    check_permissions,
+    extract_user_context,
+    format_iso_datetime,
+    format_permissions_data,
+    get_user_in_organization,
+    handle_api_exceptions,
+    require_permission,
+    safe_json_loads,
+    set_audit_old_data_from_user,
+    validate_uuid_format,
 )
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 
 
@@ -55,7 +40,7 @@ class TestUserContext:
             user_id="user123",
             email="test@example.com",
             organization_id="org123",
-            user_type="organization_member"
+            user_type="organization_member",
         )
 
         assert user_context.user_id == "user123"
@@ -65,10 +50,7 @@ class TestUserContext:
 
     def test_user_context_creation_with_minimal_fields(self):
         """Test UserContext creation with only required fields."""
-        user_context = UserContext(
-            user_id="user123",
-            email="test@example.com"
-        )
+        user_context = UserContext(user_id="user123", email="test@example.com")
 
         assert user_context.user_id == "user123"
         assert user_context.email == "test@example.com"
@@ -81,7 +63,7 @@ class TestUserContext:
             user_id="user123",
             email="test@example.com",
             organization_id=None,
-            user_type=None
+            user_type=None,
         )
 
         assert user_context.user_id == "user123"
@@ -103,8 +85,7 @@ class TestPerformanceTimer:
 
     def test_performance_timer_checkpoint(self):
         """Test PerformanceTimer checkpoint functionality."""
-        # Mock time.time to control elapsed time
-        with patch('time.time') as mock_time:
+        with patch("time.time") as mock_time:
             mock_time.side_effect = [1000.0, 1000.1]  # 100ms elapsed
 
             timer = PerformanceTimer("test_operation")
@@ -115,8 +96,7 @@ class TestPerformanceTimer:
 
     def test_performance_timer_total_time(self):
         """Test PerformanceTimer total_time functionality."""
-        # Mock time.time to control elapsed time
-        with patch('time.time') as mock_time:
+        with patch("time.time") as mock_time:
             mock_time.side_effect = [1000.0, 1000.2]  # 200ms elapsed
 
             timer = PerformanceTimer("test_operation")
@@ -125,7 +105,7 @@ class TestPerformanceTimer:
 
             assert abs(elapsed - 200.0) < 0.001  # Allow small floating-point differences
 
-    def test_performance_timer_checkpoint_without_start_time(self):
+    def test_perf_timer_checkpoint_without_start_time(self):
         """Test PerformanceTimer checkpoint when start_time is None."""
         timer = PerformanceTimer("test_operation")
         timer.start_time = None
@@ -133,7 +113,7 @@ class TestPerformanceTimer:
         with pytest.raises(AssertionError, match="Timer not initialized"):
             timer.checkpoint()
 
-    def test_performance_timer_total_time_without_start_time(self):
+    def test_perf_timer_total_time_without_start_time(self):
         """Test PerformanceTimer total_time when start_time is None."""
         timer = PerformanceTimer("test_operation")
         timer.start_time = None
@@ -155,7 +135,7 @@ class TestFormatPermissionsData:
                 "code": "users.manage",
                 "category": "user_management",
                 "description": "Manage user accounts",
-                "created_at": datetime(2024, 1, 1, tzinfo=timezone.utc)
+                "created_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
             },
             {
                 "id": "perm2",
@@ -163,8 +143,8 @@ class TestFormatPermissionsData:
                 "code": "roles.view",
                 "category": "role_management",
                 "description": "View role information",
-                "created_at": None
-            }
+                "created_at": None,
+            },
         ]
 
         result = format_permissions_data(permissions_data)
@@ -173,7 +153,6 @@ class TestFormatPermissionsData:
         assert isinstance(result[0], PermissionItem)
         assert isinstance(result[1], PermissionItem)
 
-        # Check first permission
         assert result[0].id == "perm1"
         assert result[0].name == "Manage Users"
         assert result[0].code == "users.manage"
@@ -181,7 +160,6 @@ class TestFormatPermissionsData:
         assert result[0].description == "Manage user accounts"
         assert result[0].created_at == "2024-01-01T00:00:00+00:00"
 
-        # Check second permission
         assert result[1].id == "perm2"
         assert result[1].name == "View Roles"
         assert result[1].code == "roles.view"
@@ -197,7 +175,7 @@ class TestFormatPermissionsData:
         assert result == []
 
     def test_format_permissions_data_with_string_datetime(self):
-        """Test formatting permissions data with string datetime (should work)."""
+        """Test formatting permissions data with string datetime."""
         permissions_data = [
             {
                 "id": "perm1",
@@ -205,7 +183,7 @@ class TestFormatPermissionsData:
                 "code": "test.code",
                 "category": "test",
                 "description": "Test description",
-                "created_at": "2024-01-01T00:00:00Z"
+                "created_at": "2024-01-01T00:00:00Z",
             }
         ]
 
@@ -227,8 +205,8 @@ class TestExtractUserContext:
             "email": "test@example.com",
             "user_metadata": {
                 "organization_id": "org123",
-                "type": "organization_member"
-            }
+                "type": "organization_member",
+            },
         }
 
         result = await extract_user_context(current_user)
@@ -245,12 +223,13 @@ class TestExtractUserContext:
         current_user = {
             "sub": "user123",
             "email": "test@example.com",
-            "user_metadata": {}
+            "user_metadata": {},
         }
 
-        with patch('apps.user_service.app.dependencies.common_utils.get_user_by_id', AsyncMock(return_value=MagicMock(
-            user=MagicMock(user_metadata={})
-        ))):
+        with patch(
+            "apps.user_service.app.dependencies.common_utils.get_user_by_id",
+            AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+        ):
             result = await extract_user_context(current_user)
 
             assert isinstance(result, UserContext)
@@ -262,10 +241,7 @@ class TestExtractUserContext:
     @pytest.mark.asyncio
     async def test_extract_user_context_missing_user_id(self):
         """Test user context extraction with missing user ID."""
-        current_user = {
-            "email": "test@example.com",
-            "user_metadata": {}
-        }
+        current_user = {"email": "test@example.com", "user_metadata": {}}
 
         with pytest.raises(HTTPException) as exc_info:
             await extract_user_context(current_user)
@@ -276,10 +252,7 @@ class TestExtractUserContext:
     @pytest.mark.asyncio
     async def test_extract_user_context_missing_email(self):
         """Test user context extraction with missing email."""
-        current_user = {
-            "sub": "user123",
-            "user_metadata": {}
-        }
+        current_user = {"sub": "user123", "user_metadata": {}}
 
         with pytest.raises(HTTPException) as exc_info:
             await extract_user_context(current_user)
@@ -290,14 +263,12 @@ class TestExtractUserContext:
     @pytest.mark.asyncio
     async def test_extract_user_context_empty_user_metadata(self):
         """Test user context extraction with empty user_metadata."""
-        current_user = {
-            "sub": "user123",
-            "email": "test@example.com"
-        }
+        current_user = {"sub": "user123", "email": "test@example.com"}
 
-        with patch('apps.user_service.app.dependencies.common_utils.get_user_by_id', AsyncMock(return_value=MagicMock(
-            user=MagicMock(user_metadata={})
-        ))):
+        with patch(
+            "apps.user_service.app.dependencies.common_utils.get_user_by_id",
+            AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+        ):
             result = await extract_user_context(current_user)
 
             assert result.user_id == "user123"
@@ -311,7 +282,7 @@ class TestExtractUserContext:
         current_user = {
             "sub": "user123",
             "email": "test@example.com",
-            "user_metadata": None
+            "user_metadata": None,
         }
 
         with pytest.raises(AttributeError):
@@ -325,58 +296,60 @@ class TestRequirePermission:
     async def test_require_permission_success_single(self):
         """Test successful permission check with single permission."""
         user_context = UserContext(
-            user_id="user123",
-            email="test@example.com",
-            organization_id="org123"
+            user_id="user123", email="test@example.com", organization_id="org123"
         )
 
-        with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
-                  AsyncMock(return_value=True)) as mock_check, \
-             patch('time.time', side_effect=[1000.0, 1000.1]):
-
+        with (
+            patch(
+                "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+                AsyncMock(return_value=True),
+            ) as mock_check,
+            patch("time.time", side_effect=[1000.0, 1000.1]),
+        ):
             await require_permission("users.manage", user_context, "manage users")
 
             mock_check.assert_called_once_with(
                 permission_code=["users.manage"],
                 user_id="user123",
-                organisation_id=None
+                organisation_id=None,
             )
 
     @pytest.mark.asyncio
     async def test_require_permission_success_multiple(self):
         """Test successful permission check with multiple permissions."""
         user_context = UserContext(
-            user_id="user123",
-            email="test@example.com",
-            organization_id="org123"
+            user_id="user123", email="test@example.com", organization_id="org123"
         )
 
-        with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
-                  AsyncMock(return_value=True)) as mock_check, \
-             patch('time.time', side_effect=[1000.0, 1000.1]), \
-             patch('builtins.print') as mock_print:
-
+        with (
+            patch(
+                "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+                AsyncMock(return_value=True),
+            ) as mock_check,
+            patch("time.time", side_effect=[1000.0, 1000.1]),
+        ):
             await require_permission(["users.manage", "roles.view"], user_context, "manage users")
 
             mock_check.assert_called_once_with(
                 permission_code=["users.manage", "roles.view"],
                 user_id="user123",
-                organisation_id=None
+                organisation_id=None,
             )
 
     @pytest.mark.asyncio
     async def test_require_permission_denied(self):
         """Test permission check when user lacks permission."""
         user_context = UserContext(
-            user_id="user123",
-            email="test@example.com",
-            organization_id="org123"
+            user_id="user123", email="test@example.com", organization_id="org123"
         )
 
-        with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
-                  AsyncMock(return_value=False)) as mock_check, \
-             patch('time.time', side_effect=[1000.0, 1000.1, 1000.2]):
-
+        with (
+            patch(
+                "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+                AsyncMock(return_value=False),
+            ),
+            patch("time.time", side_effect=[1000.0, 1000.1, 1000.2]),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await require_permission("users.manage", user_context, "manage users")
 
@@ -387,15 +360,16 @@ class TestRequirePermission:
     async def test_require_permission_without_timing(self):
         """Test permission check without timing."""
         user_context = UserContext(
-            user_id="user123",
-            email="test@example.com",
-            organization_id="org123"
+            user_id="user123", email="test@example.com", organization_id="org123"
         )
 
-        with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
-                  AsyncMock(return_value=True)) as mock_check, \
-             patch('builtins.print') as mock_print:
-
+        with (
+            patch(
+                "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+                AsyncMock(return_value=True),
+            ) as mock_check,
+            patch("builtins.print") as mock_print,
+        ):
             await require_permission("users.manage", user_context, "manage users")
 
             mock_check.assert_called_once()
@@ -406,20 +380,19 @@ class TestRequirePermission:
     async def test_require_permission_with_none_organization_id(self):
         """Test permission check with None organization_id."""
         user_context = UserContext(
-            user_id="user123",
-            email="test@example.com",
-            organization_id=None
+            user_id="user123", email="test@example.com", organization_id=None
         )
 
-        with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
-                  AsyncMock(return_value=True)) as mock_check:
-
+        with patch(
+            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            AsyncMock(return_value=True),
+        ) as mock_check:
             await require_permission("users.manage", user_context, "manage users")
 
             mock_check.assert_called_once_with(
                 permission_code=["users.manage"],
                 user_id="user123",
-                organisation_id=None
+                organisation_id=None,
             )
 
 
@@ -432,23 +405,27 @@ class TestCheckPermissions:
         current_user = {
             "sub": "user123",
             "email": "test@example.com",
-            "user_metadata": {"organization_id": "org123"}
+            "user_metadata": {"organization_id": "org123"},
         }
 
-        with patch('apps.user_service.app.dependencies.common_utils.extract_user_context') as mock_extract, \
-             patch('apps.user_service.app.dependencies.common_utils.require_permission') as mock_require:
-
+        with (
+            patch(
+                "apps.user_service.app.dependencies.common_utils.extract_user_context"
+            ) as mock_extract,
+            patch(
+                "apps.user_service.app.dependencies.common_utils.require_permission"
+            ) as mock_require,
+        ):
             mock_user_context = UserContext("user123", "test@example.com", "org123")
             mock_extract.return_value = mock_user_context
 
-            result = await check_permissions(current_user, "users.manage", "manage users")
+            result = await check_permissions(current_user, "users.manage")
 
             mock_extract.assert_called_once_with(current_user)
             mock_require.assert_called_once_with(
                 permission_code="users.manage",
                 user_context=mock_user_context,
-                action_description="manage users",
-                organization_id="org123"
+                organization_id="org123",
             )
             assert result == mock_user_context
 
@@ -458,12 +435,17 @@ class TestCheckPermissions:
         current_user = {
             "sub": "user123",
             "email": "test@example.com",
-            "user_metadata": {"organization_id": "org123"}
+            "user_metadata": {"organization_id": "org123"},
         }
 
-        with patch('apps.user_service.app.dependencies.common_utils.extract_user_context') as mock_extract, \
-             patch('apps.user_service.app.dependencies.common_utils.require_permission') as mock_require:
-
+        with (
+            patch(
+                "apps.user_service.app.dependencies.common_utils.extract_user_context"
+            ) as mock_extract,
+            patch(
+                "apps.user_service.app.dependencies.common_utils.require_permission"
+            ) as mock_require,
+        ):
             mock_user_context = UserContext("user123", "test@example.com", "org123")
             mock_extract.return_value = mock_user_context
 
@@ -472,8 +454,7 @@ class TestCheckPermissions:
             mock_require.assert_called_once_with(
                 permission_code=["users.manage", "roles.view"],
                 user_context=mock_user_context,
-                action_description="access role details",
-                organization_id="org123"
+                organization_id="org123",
             )
             assert result == mock_user_context
 
@@ -483,12 +464,17 @@ class TestCheckPermissions:
         current_user = {
             "sub": "user123",
             "email": "test@example.com",
-            "user_metadata": {"organization_id": "org123"}
+            "user_metadata": {"organization_id": "org123"},
         }
 
-        with patch('apps.user_service.app.dependencies.common_utils.extract_user_context') as mock_extract, \
-             patch('apps.user_service.app.dependencies.common_utils.require_permission') as mock_require:
-
+        with (
+            patch(
+                "apps.user_service.app.dependencies.common_utils.extract_user_context"
+            ) as mock_extract,
+            patch(
+                "apps.user_service.app.dependencies.common_utils.require_permission"
+            ) as mock_require,
+        ):
             mock_user_context = UserContext("user123", "test@example.com", "org123")
             mock_extract.return_value = mock_user_context
 
@@ -497,8 +483,7 @@ class TestCheckPermissions:
             mock_require.assert_called_once_with(
                 permission_code="users.manage",
                 user_context=mock_user_context,
-                action_description="access role details",
-                organization_id="org123"
+                organization_id="org123",
             )
 
 
@@ -514,7 +499,7 @@ class TestValidateUuidFormat:
         validate_uuid_format(valid_uuid)
 
     @pytest.mark.asyncio
-    async def test_validate_uuid_format_valid_with_custom_field_name(self):
+    async def test_validate_uuid_valid_with_custom_field(self):
         """Test UUID validation with custom field name."""
         valid_uuid = str(uuid.uuid4())
 
@@ -533,7 +518,7 @@ class TestValidateUuidFormat:
         assert "Invalid ID format" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
-    async def test_validate_uuid_format_invalid_with_custom_field_name(self):
+    async def test_validate_uuid_invalid_with_custom_field(self):
         """Test UUID validation with invalid UUID and custom field name."""
         invalid_uuid = "not-a-uuid"
 
@@ -560,96 +545,13 @@ class TestValidateUuidFormat:
             validate_uuid_format(None)
 
 
-class TestValidatePaginationParams:
-    """Tests for validate_pagination_params function."""
-
-    def test_validate_pagination_params_valid(self):
-        """Test valid pagination parameters."""
-        page, page_size, offset = validate_pagination_params(page=2, page_size=10)
-
-        assert page == 2
-        assert page_size == 10
-        assert offset == 10  # (2-1) * 10
-
-    def test_validate_pagination_params_defaults(self):
-        """Test pagination parameters with defaults."""
-        page, page_size, offset = validate_pagination_params()
-
-        assert page == 1
-        assert page_size == 20
-        assert offset == 0
-
-    def test_validate_pagination_params_custom_max(self):
-        """Test pagination parameters with custom max page size."""
-        page, page_size, offset = validate_pagination_params(page=1, page_size=50, max_page_size=200)
-
-        assert page == 1
-        assert page_size == 50
-        assert offset == 0
-
-    def test_validate_pagination_params_page_zero(self):
-        """Test pagination parameters with page=0."""
-        with pytest.raises(HTTPException) as exc_info:
-            validate_pagination_params(page=0)
-
-        assert exc_info.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-        assert "Page must be a positive integer" in str(exc_info.value.detail)
-
-    def test_validate_pagination_params_page_negative(self):
-        """Test pagination parameters with negative page."""
-        with pytest.raises(HTTPException) as exc_info:
-            validate_pagination_params(page=-1)
-
-        assert exc_info.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-        assert "Page must be a positive integer" in str(exc_info.value.detail)
-
-    def test_validate_pagination_params_page_size_zero(self):
-        """Test pagination parameters with page_size=0."""
-        with pytest.raises(HTTPException) as exc_info:
-            validate_pagination_params(page_size=0)
-
-        assert exc_info.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-        assert "Page size must be between 1 and 100" in str(exc_info.value.detail)
-
-    def test_validate_pagination_params_page_size_negative(self):
-        """Test pagination parameters with negative page_size."""
-        with pytest.raises(HTTPException) as exc_info:
-            validate_pagination_params(page_size=-1)
-
-        assert exc_info.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-        assert "Page size must be between 1 and 100" in str(exc_info.value.detail)
-
-    def test_validate_pagination_params_page_size_too_large(self):
-        """Test pagination parameters with page_size exceeding max."""
-        with pytest.raises(HTTPException) as exc_info:
-            validate_pagination_params(page_size=101)
-
-        assert exc_info.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-        assert "Page size must be between 1 and 100" in str(exc_info.value.detail)
-
-    def test_validate_pagination_params_page_size_at_max(self):
-        """Test pagination parameters with page_size at maximum."""
-        page, page_size, offset = validate_pagination_params(page_size=100)
-
-        assert page == 1
-        assert page_size == 100
-        assert offset == 0
-
-    def test_validate_pagination_params_custom_max_exceeded(self):
-        """Test pagination parameters exceeding custom max."""
-        with pytest.raises(HTTPException) as exc_info:
-            validate_pagination_params(page_size=150, max_page_size=100)
-
-        assert exc_info.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-        assert "Page size must be between 1 and 100" in str(exc_info.value.detail)
-
-
 class TestHandleApiExceptions:
     """Tests for handle_api_exceptions decorator."""
 
     @pytest.mark.asyncio
     async def test_handle_api_exceptions_success(self):
         """Test decorator with successful function execution."""
+
         @handle_api_exceptions("test operation")
         async def test_func():
             return "success"
@@ -658,8 +560,9 @@ class TestHandleApiExceptions:
         assert result == "success"
 
     @pytest.mark.asyncio
-    async def test_handle_api_exceptions_http_exception_passthrough(self):
+    async def test_handle_api_exc_http_exception_passthrough(self):
         """Test decorator passes through HTTPException."""
+
         @handle_api_exceptions("test operation")
         async def test_func():
             raise HTTPException(status_code=404, detail="Not found")
@@ -671,21 +574,9 @@ class TestHandleApiExceptions:
         assert "Not found" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
-    async def test_handle_api_exceptions_database_operation_error(self):
-        """Test decorator handles DatabaseOperationError."""
-        @handle_api_exceptions("test operation")
-        async def test_func():
-            raise DatabaseOperationError("Database connection failed")
-
-        with pytest.raises(HTTPException) as exc_info:
-            await test_func()
-
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert "Database error during test operation" in str(exc_info.value.detail)
-
-    @pytest.mark.asyncio
     async def test_handle_api_exceptions_generic_exception(self):
         """Test decorator handles generic exceptions."""
+
         @handle_api_exceptions("test operation")
         async def test_func():
             raise ValueError("Something went wrong")
@@ -699,6 +590,7 @@ class TestHandleApiExceptions:
     @pytest.mark.asyncio
     async def test_handle_api_exceptions_with_args_and_kwargs(self):
         """Test decorator preserves function arguments."""
+
         @handle_api_exceptions("test operation")
         async def test_func(arg1, arg2, kwarg1=None, kwarg2=None):
             return f"{arg1}-{arg2}-{kwarg1}-{kwarg2}"
@@ -762,7 +654,7 @@ class TestSafeJsonLoads:
 
         assert result is None
 
-    def test_safe_json_loads_invalid_json_string_with_default(self):
+    def test_safe_json_loads_invalid_with_default(self):
         """Test parsing invalid JSON string with default."""
         json_str = '{"key": "value", "number": 123'  # Missing closing brace
         result = safe_json_loads(json_str, default={})
@@ -822,12 +714,13 @@ class TestGetUserInOrganization:
         user_data = {
             "user_id": "user123",
             "email": "test@example.com",
-            "full_name": "Test User"
+            "full_name": "Test User",
         }
 
-        with patch('apps.user_service.app.dependencies.common_utils.get_user_profile_by_id',
-                  AsyncMock(return_value=user_data)) as mock_get_profile:
-
+        with patch(
+            "apps.user_service.app.dependencies.common_utils.get_user_profile_by_id",
+            AsyncMock(return_value=user_data),
+        ) as mock_get_profile:
             result = await get_user_in_organization("user123", "org123")
 
             mock_get_profile.assert_called_once_with("user123", "org123")
@@ -836,9 +729,10 @@ class TestGetUserInOrganization:
     @pytest.mark.asyncio
     async def test_get_user_in_organization_user_not_found(self):
         """Test user not found in organization."""
-        with patch('apps.user_service.app.dependencies.common_utils.get_user_profile_by_id',
-                  AsyncMock(return_value=None)) as mock_get_profile:
-
+        with patch(
+            "apps.user_service.app.dependencies.common_utils.get_user_profile_by_id",
+            AsyncMock(return_value=None),
+        ) as mock_get_profile:
             with pytest.raises(HTTPException) as exc_info:
                 await get_user_in_organization("user123", "org123")
 
@@ -849,9 +743,10 @@ class TestGetUserInOrganization:
     @pytest.mark.asyncio
     async def test_get_user_in_organization_empty_user_data(self):
         """Test empty user data returned."""
-        with patch('apps.user_service.app.dependencies.common_utils.get_user_profile_by_id',
-                  AsyncMock(return_value={})) as mock_get_profile:
-
+        with patch(
+            "apps.user_service.app.dependencies.common_utils.get_user_profile_by_id",
+            AsyncMock(return_value={}),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_user_in_organization("user123", "org123")
 
@@ -880,7 +775,7 @@ class TestSetAuditOldDataFromUser:
             "role_id": "role123",
             "organization_id": "org123",
             "joined_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
-            "last_active_at": datetime(2024, 1, 2, tzinfo=timezone.utc)
+            "last_active_at": datetime(2024, 1, 2, tzinfo=timezone.utc),
         }
 
         set_audit_old_data_from_user(request, current_user_data)
@@ -898,7 +793,7 @@ class TestSetAuditOldDataFromUser:
             "role_id": "role123",
             "organization_id": "org123",
             "joined_at": "2024-01-01T00:00:00+00:00",
-            "last_active_at": "2024-01-02T00:00:00+00:00"
+            "last_active_at": "2024-01-02T00:00:00+00:00",
         }
 
         assert request.state.raw_audit_old_data == expected_audit_data
@@ -912,7 +807,7 @@ class TestSetAuditOldDataFromUser:
             "user_id": "user123",
             "email": "test@example.com",
             "full_name": "Test User",
-            "organization_id": "org123"
+            "organization_id": "org123",
         }
 
         set_audit_old_data_from_user(request, current_user_data)
@@ -928,7 +823,7 @@ class TestSetAuditOldDataFromUser:
             "avatar_url": None,
             "status": None,
             "role_id": "",
-            "organization_id": "org123"
+            "organization_id": "org123",
         }
 
         assert request.state.raw_audit_old_data == expected_audit_data
@@ -943,14 +838,14 @@ class TestSetAuditOldDataFromUser:
             "email": "test@example.com",
             "full_name": "Test User",
             "organization_id": "org123",
-            "role_id": None
+            "role_id": None,
         }
 
         set_audit_old_data_from_user(request, current_user_data)
 
         assert request.state.raw_audit_old_data["role_id"] == "None"  # str(None) = "None"
 
-    def test_set_audit_old_data_from_user_without_timestamps(self):
+    def test_set_audit_old_data_without_timestamps(self):
         """Test setting audit data without timestamp fields."""
         request = MagicMock()
         request.state = MagicMock()
@@ -959,7 +854,7 @@ class TestSetAuditOldDataFromUser:
             "user_id": "user123",
             "email": "test@example.com",
             "full_name": "Test User",
-            "organization_id": "org123"
+            "organization_id": "org123",
         }
 
         set_audit_old_data_from_user(request, current_user_data)
@@ -995,6 +890,7 @@ class TestConstants:
     def test_uuid_pattern_constant(self):
         """Test UUID_PATTERN constant."""
         import re
+
         valid_uuid = str(uuid.uuid4())
         invalid_uuid = "not-a-uuid"
 
@@ -1011,15 +907,16 @@ class TestIntegration:
         current_user = {
             "sub": "user123",
             "email": "test@example.com",
-            "user_metadata": {"organization_id": "org123"}
+            "user_metadata": {"organization_id": "org123"},
         }
 
-        with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
-                  AsyncMock(return_value=True)) as mock_check:
-
+        with patch(
+            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            AsyncMock(return_value=True),
+        ) as mock_check:
             # Test the complete workflow
             user_context = await extract_user_context(current_user)
-            await require_permission("users.manage", user_context, "manage users")
+            await require_permission("users.manage", user_context)
 
             assert user_context.user_id == "user123"
             assert user_context.email == "test@example.com"
@@ -1032,25 +929,18 @@ class TestIntegration:
         current_user = {
             "sub": "user123",
             "email": "test@example.com",
-            "user_metadata": {"organization_id": "org123"}
+            "user_metadata": {"organization_id": "org123"},
         }
 
-        with patch('apps.user_service.app.dependencies.common_utils.check_user_access_async',
-                  AsyncMock(return_value=True)) as mock_check:
-
+        with patch(
+            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            AsyncMock(return_value=True),
+        ) as mock_check:
             result = await check_permissions(current_user, "users.manage", "manage users")
 
             assert isinstance(result, UserContext)
             assert result.user_id == "user123"
             mock_check.assert_called_once()
-
-    def test_pagination_workflow(self):
-        """Test pagination parameter validation workflow."""
-        # Test various pagination scenarios
-        page, page_size, offset = validate_pagination_params(page=3, page_size=25)
-        assert page == 3
-        assert page_size == 25
-        assert offset == 50  # (3-1) * 25
 
     def test_json_parsing_workflow(self):
         """Test JSON parsing workflow."""

@@ -1,34 +1,35 @@
-# pylint: disable=R0902
-"""
-Audit Decorator Module
+"""Audit Decorator Module."""
 
-"""
-from functools import wraps
-from typing import Optional, Any, List
-from uuid import uuid4
-from datetime import datetime, timezone
 import json
+from datetime import datetime, timezone
+from functools import wraps
+from typing import Any
+from uuid import uuid4
+
 from fastapi import Request
+from fastapi import status as http_status
 
 from apps.user_service.app.dependencies.audit_logs.audit_logger import (
-    audit_logger,
     AuditEventData,
+    audit_logger,
 )
 from apps.user_service.app.dependencies.logger import get_logger
 
-# Use the shared application logger
-logger = get_logger()
+logger = get_logger("audit_logs")
 
 
 def audit_api_call(
-    action_type: Optional[str] = None,
-    table_name: Optional[str] = None,
+    action_type: str | None = None,
+    table_name: str | None = None,
     data_classification: str = "general",
-    compliance_tags: Optional[List[str]] = None,
-    category: Optional[str] = None,
+    compliance_tags: list[str] | None = None,
+    category: str | None = None,
 ):
-    """
-    Decorator to automatically log audit metadata for API calls.
+    """Decorator to automatically log audit metadata for API calls.
+
+    This decorator wraps API endpoints to automatically capture and log
+    audit metadata including action type, table name, data classification,
+    compliance tags, and category.
 
     Args:
         action_type (str): Type of action (e.g., CREATE, UPDATE, DELETE).
@@ -51,8 +52,6 @@ def audit_api_call(
         @wraps(func)
         async def wrapper(**kwargs):
             request: Request = kwargs.get("request")
-            if request is None:
-                raise ValueError("Request must be passed as a keyword argument")
 
             request.state.audit_metadata = func.audit_metadata
 
@@ -60,16 +59,16 @@ def audit_api_call(
             if not _should_log_audit(request):
                 return result
 
-            await _log_audit_event(request, result, action_type, data_classification,
-                                 table_name, compliance_tags, category)
+            await _log_audit_event(
+                request,
+                result,
+                action_type,
+                data_classification,
+                table_name,
+                compliance_tags,
+                category,
+            )
             return result
-
-            # except HTTPException as http_exc:
-            #     await maybe_log_audit_on_error(request, str(http_exc.detail))
-            #     raise
-            # except Exception as e:
-            #     logger.exception("Unexpected error during audit logging")
-            #     raise
 
         return wrapper
 
@@ -85,9 +84,15 @@ def _should_log_audit(request: Request) -> bool:
     )
 
 
-async def _log_audit_event(request: Request, result: Any, action_type: str,
-                          data_classification: str, table_name: str,
-                          compliance_tags: Optional[List[str]], category: Optional[str]):
+async def _log_audit_event(
+    request: Request,
+    result: Any,
+    action_type: str,
+    data_classification: str,
+    table_name: str,
+    compliance_tags: list[str] | None,
+    category: str | None,
+):
     """Log the audit event with collected data."""
     user_context = getattr(request.state, "audit_user_context", {})
     audit_state = _collect_audit_state(request, table_name)
@@ -97,8 +102,9 @@ async def _log_audit_event(request: Request, result: Any, action_type: str,
 
     request_body = await _extract_request_body(request)
     status_code = getattr(result, "status_code", 200)
-    request.state.audit_new_values = _build_new_values(request, request_body,
-                                                      audit_state, status_code, table_name)
+    request.state.audit_new_values = _build_new_values(
+        request, request_body, audit_state, status_code, table_name
+    )
 
     if audit_state["raw_old"]:
         request.state.audit_old_values = {"data": audit_state["raw_old"]}
@@ -125,7 +131,7 @@ async def _log_audit_event(request: Request, result: Any, action_type: str,
     await audit_logger.log_audit_event(audit_event_data, request)
 
 
-def _collect_audit_state(request: Request, table_name: Optional[str]) -> dict:
+def _collect_audit_state(request: Request, table_name: str | None) -> dict:
     """Collect audit state data from request."""
     return {
         "table": getattr(request.state, "audit_table", table_name or ""),
@@ -133,12 +139,17 @@ def _collect_audit_state(request: Request, table_name: Optional[str]) -> dict:
         "raw_old": getattr(request.state, "raw_audit_old_data", None),
         "raw_new": getattr(request.state, "raw_audit_new_data", None),
         "description": getattr(request.state, "audit_description", ""),
-        "risk_level": getattr(request.state, "audit_risk_level", "low")
+        "risk_level": getattr(request.state, "audit_risk_level", "low"),
     }
 
 
-def _build_new_values(request: Request, request_body: Any, audit_state: dict,
-                    status_code: int, table_name: Optional[str]) -> dict:
+def _build_new_values(
+    request: Request,
+    request_body: Any,
+    audit_state: dict,
+    status_code: int,
+    table_name: str | None,
+) -> dict:
     """Build new values for audit logging."""
     return {
         "meta": {
@@ -155,14 +166,22 @@ def _build_new_values(request: Request, request_body: Any, audit_state: dict,
             "request_body": request_body,
             "content_type": request.headers.get("content-type"),
         },
-        "data": audit_state["raw_new"]
+        "data": audit_state["raw_new"],
     }
 
 
-def get_changed_fields(old_data: dict, new_data: dict, prefix: str = "") -> List[str]:
-    """
-    Recursively compares old and new data to identify changed fields.
+def get_changed_fields(old_data: dict, new_data: dict, prefix: str = "") -> list[str]:
+    """Recursively compares old and new data to identify changed fields.
+
     Only includes fields that exist in both old and new data and have different values.
+
+    Args:
+        old_data (dict): Original data dictionary
+        new_data (dict): Updated data dictionary
+        prefix (str): Optional prefix for nested field names (default: "")
+
+    Returns:
+        list[str]: List of changed field names
     """
     changed = []
 
@@ -183,14 +202,19 @@ def get_changed_fields(old_data: dict, new_data: dict, prefix: str = "") -> List
 
 
 async def maybe_log_audit_on_error(
-    request: Request, description: str, status_code: int = 500
-):
-    """
-    Fallback audit logging for failed requests or unhandled exceptions.
-    Captures query params and request body in addition to metadata.
-    """
-    # return
+    request: Request,
+    description: str,
+    status_code: int = http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+) -> None:
+    """Fallback audit logging for failed requests or unhandled exceptions.
 
+    Captures query params and request body in addition to metadata.
+
+    Args:
+        request (Request): FastAPI request object
+        description (str): Description of the error/event
+        status_code (int): HTTP status code (default: 500)
+    """
     try:
         metadata = getattr(request.state, "_audit_metadata", {})
         user_context = getattr(request.state, "audit_user_context", {})
@@ -201,7 +225,7 @@ async def maybe_log_audit_on_error(
         user_email = user_context.get("user_email")
 
         if not all([organization_id, user_id, user_email]) or user_email == "unknown":
-            return  # Skip audit logging
+            return
 
         if not user_context or user_context.get("user_email") == "unknown":
             return
@@ -273,17 +297,26 @@ async def maybe_log_audit_on_error(
 
 
 async def _extract_request_body(request: Request) -> Any:
-    """
-    Safely extracts request body (uses cached bytes from middleware).
+    """Safely extracts request body (uses cached bytes from middleware).
+
+    Args:
+        request (Request): FastAPI request object
+
+    Returns:
+        Any: Parsed request body as dictionary or empty dict if parsing fails
     """
     try:
-        body_bytes = getattr(request.state, "_cached_body", None)
+        body_bytes = getattr(request.state, "cached_body", None)
         content_type = request.headers.get("content-type", "")
 
         if not body_bytes or not content_type:
             return {}
 
-        return await parse_body_by_content_type(request, body_bytes, content_type)
+        if content_type.startswith("application/json"):
+            return _parse_json_body(body_bytes)
+        if content_type.startswith(("application/x-www-form-urlencoded", "multipart/form-data")):
+            return await _parse_form_data(request, content_type)
+        return {}
 
     except (UnicodeDecodeError, json.JSONDecodeError) as err:
         logger.warning("Failed to decode request body: %s", str(err))
@@ -294,15 +327,6 @@ async def _extract_request_body(request: Request) -> Any:
     except (ValueError, TypeError) as err:
         logger.warning("Invalid request data: %s", str(err))
         return {"_error": f"Invalid request data: {str(err)}"}
-
-
-async def parse_body_by_content_type(request: Request, body_bytes: bytes, content_type: str) -> Any:
-    """Parse request body based on content type."""
-    if content_type.startswith("application/json"):
-        return _parse_json_body(body_bytes)
-    elif content_type.startswith(("application/x-www-form-urlencoded", "multipart/form-data")):
-        return await _parse_form_data(request, content_type)
-    return {}
 
 
 def _parse_json_body(body_bytes: bytes) -> Any:

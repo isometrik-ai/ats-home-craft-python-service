@@ -1,77 +1,90 @@
-# pylint: disable=all
+"""Test cases for presigned URL API endpoints.
 
-"""
-Test cases for presigned URL API endpoints.
-Tests the GET /upload/presigned-url endpoint for generating presigned URLs for Cloudflare R2 uploads.
+Tests the GET /upload/presigned-url endpoint for generating presigned URLs
+for Cloudflare R2 uploads.
 """
 
 import sys
-from unittest.mock import MagicMock
-
-# Mock boto3 and botocore in sys.modules BEFORE any other imports
-# This prevents ImportError when presigned_url module tries to import boto3
-class MockClientError(Exception):
-    """Mock ClientError for testing."""
-    def __init__(self, error_response, operation_name):
-        self.response = error_response
-        self.operation_name = operation_name
-        super().__init__(f"{operation_name}: {error_response}")
-
-class MockConfig:
-    """Mock Config for testing."""
-    def __init__(self, **kwargs):
-        self.signature_version = kwargs.get("signature_version", "v4")
-
-# Create mock boto3 module with proper structure
-class MockBoto3Module:
-    """Mock boto3 module."""
-    @staticmethod
-    def client(*args, **kwargs):
-        """Mock boto3.client function."""
-        mock_client = MagicMock()
-        mock_client.generate_presigned_url = MagicMock(return_value="https://mock-url.com")
-        return mock_client
-
-mock_boto3_module = MockBoto3Module()
-
-# Create mock botocore module with proper structure
-class MockBotocoreExceptions:
-    """Mock botocore.exceptions module."""
-    ClientError = MockClientError
-
-class MockBotocoreConfig:
-    """Mock botocore.config module."""
-    Config = MockConfig
-
-class MockBotocoreModule:
-    """Mock botocore module."""
-    def __init__(self):
-        self.exceptions = MockBotocoreExceptions()
-        self.config = MockBotocoreConfig()
-
-mock_botocore_module = MockBotocoreModule()
-
-# Inject mocks into sys.modules BEFORE any imports that might use them
-sys.modules['boto3'] = mock_boto3_module
-sys.modules['botocore'] = mock_botocore_module
-sys.modules['botocore.exceptions'] = mock_botocore_module.exceptions
-sys.modules['botocore.config'] = mock_botocore_module.config
+import uuid
+from unittest.mock import MagicMock, patch
 
 # Now import other modules
 import pytest
-import uuid
-from unittest.mock import patch
-from fastapi.testclient import TestClient
 from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 # Import the router after mocking boto3
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 
+
+# Mock boto3 and botocore in sys.modules BEFORE any other imports
+# This prevents ImportError when presigned_url module tries to import boto3
+class MockClientError(Exception):
+    """Mock ClientError for testing."""
+
+    def __init__(self, error_response, operation_name):
+        self.response = error_response
+        self.operation_name = operation_name
+        super().__init__(f"{operation_name}: {error_response}")
+
+
+class MockConfig:
+    """Mock Config for testing."""
+
+    def __init__(self, **kwargs):
+        self.signature_version = kwargs.get("signature_version", "v4")
+
+
+# Create mock boto3 module with proper structure
+class MockBoto3Module:
+    """Mock boto3 module."""
+
+    @staticmethod
+    def client(*_args, **_kwargs):
+        """Mock boto3.client function."""
+        mock_client = MagicMock()
+        mock_client.generate_presigned_url = MagicMock(return_value="https://mock-url.com")
+        return mock_client
+
+
+mock_boto3_module = MockBoto3Module()
+
+
+# Create mock botocore module with proper structure
+class MockBotocoreExceptions:
+    """Mock botocore.exceptions module."""
+
+    ClientError = MockClientError
+
+
+class MockBotocoreConfig:
+    """Mock botocore.config module."""
+
+    Config = MockConfig
+
+
+class MockBotocoreModule:
+    """Mock botocore module."""
+
+    def __init__(self):
+        self.exceptions = MockBotocoreExceptions()
+        self.config = MockBotocoreConfig()
+
+
+mock_botocore_module = MockBotocoreModule()
+
+# Inject mocks into sys.modules BEFORE any imports that might use them
+sys.modules["boto3"] = mock_boto3_module
+sys.modules["botocore"] = mock_botocore_module
+sys.modules["botocore.exceptions"] = mock_botocore_module.exceptions
+sys.modules["botocore.config"] = mock_botocore_module.config
+
+
 # Use actual classes if available, otherwise use mocks
 try:
-    from botocore.exceptions import ClientError
     from botocore.config import Config
+    from botocore.exceptions import ClientError
 except ImportError:
     ClientError = MockClientError
     Config = MockConfig
@@ -105,10 +118,12 @@ def client(app):
 @pytest.fixture
 def mock_r2_credentials():
     """Mock R2 environment variables."""
-    with patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"), \
-         patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"):
+    with (
+        patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"),
+        patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"),
+    ):
         yield
 
 
@@ -128,9 +143,12 @@ def mock_s3_client():
 # ============================================================================
 
 
-def test_get_presigned_url_success_with_all_params(client, mock_r2_credentials, mock_s3_client):
+def test_get_presigned_url_success_with_all_params(client, mock_s3_client):
     """Test successful presigned URL generation with all parameters."""
-    with patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
+    with patch(
+        "apps.user_service.app.api.presigned_url.boto3.client",
+        return_value=mock_s3_client,
+    ):
         response = client.get(
             "/upload/presigned-url",
             params={
@@ -159,9 +177,12 @@ def test_get_presigned_url_success_with_all_params(client, mock_r2_credentials, 
         assert call_args[1]["ExpiresIn"] == 300  # 5 minutes
 
 
-def test_get_presigned_url_success_with_default_bucket(client, mock_r2_credentials, mock_s3_client):
+def test_get_presigned_url_success_with_default_bucket(client, mock_s3_client):
     """Test successful presigned URL generation with all required parameters."""
-    with patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
+    with patch(
+        "apps.user_service.app.api.presigned_url.boto3.client",
+        return_value=mock_s3_client,
+    ):
         response = client.get(
             "/upload/presigned-url",
             params={
@@ -185,9 +206,12 @@ def test_get_presigned_url_success_with_default_bucket(client, mock_r2_credentia
         assert call_args[1]["Params"]["ContentType"] == "application/pdf"
 
 
-def test_get_presigned_url_success_with_content_type(client, mock_r2_credentials, mock_s3_client):
+def test_get_presigned_url_success_with_content_type(client, mock_s3_client):
     """Test successful presigned URL generation with content type."""
-    with patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
+    with patch(
+        "apps.user_service.app.api.presigned_url.boto3.client",
+        return_value=mock_s3_client,
+    ):
         response = client.get(
             "/upload/presigned-url",
             params={
@@ -209,16 +233,21 @@ def test_get_presigned_url_success_with_content_type(client, mock_r2_credentials
         assert call_args[1]["Params"]["Key"] == "user-456/image.jpg"
 
 
-def test_get_presigned_url_success_with_custom_bucket(client, mock_r2_credentials, mock_s3_client):
+def test_get_presigned_url_success_with_custom_bucket(client, mock_s3_client):
     """Test successful presigned URL generation with custom bucket parameter."""
-    with patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
+    with patch(
+        "apps.user_service.app.api.presigned_url.boto3.client",
+        return_value=mock_s3_client,
+    ):
         response = client.get(
             "/upload/presigned-url",
             params={
                 "file_name": "document.docx",
                 "path": "org-789/user-123",
                 "bucket": "my-custom-bucket",
-                "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "content_type": (
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ),
             },
         )
 
@@ -237,7 +266,7 @@ def test_get_presigned_url_success_with_custom_bucket(client, mock_r2_credential
 # ============================================================================
 
 
-def test_get_presigned_url_missing_file_name(client, mock_r2_credentials):
+def test_get_presigned_url_missing_file_name(client):
     """Test presigned URL generation fails when fileName is missing."""
     response = client.get("/upload/presigned-url")
 
@@ -246,14 +275,17 @@ def test_get_presigned_url_missing_file_name(client, mock_r2_credentials):
     assert "detail" in data
 
 
-def test_get_presigned_url_empty_file_name(client, mock_r2_credentials):
+def test_get_presigned_url_empty_file_name(client):
     """Test presigned URL generation fails when file_name is empty."""
-    response = client.get("/upload/presigned-url", params={
-        "file_name": "",
-        "path": "user-123",
-        "bucket": "test-bucket",
-        "content_type": "application/pdf",
-    })
+    response = client.get(
+        "/upload/presigned-url",
+        params={
+            "file_name": "",
+            "path": "user-123",
+            "bucket": "test-bucket",
+            "content_type": "application/pdf",
+        },
+    )
 
     assert response.status_code == 400
     data = response.json()
@@ -262,16 +294,24 @@ def test_get_presigned_url_empty_file_name(client, mock_r2_credentials):
 
 def test_get_presigned_url_missing_bucket_no_env(client, mock_s3_client):
     """Test presigned URL generation fails when bucket is missing."""
-    with patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"), \
-         patch("apps.user_service.app.api.presigned_url.R2_BUCKET", None), \
-         patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
-        response = client.get("/upload/presigned-url", params={
-            "file_name": "test.pdf",
-            "path": "user-123",
-            "content_type": "application/pdf",
-        })
+    with (
+        patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"),
+        patch("apps.user_service.app.api.presigned_url.R2_BUCKET", None),
+        patch(
+            "apps.user_service.app.api.presigned_url.boto3.client",
+            return_value=mock_s3_client,
+        ),
+    ):
+        response = client.get(
+            "/upload/presigned-url",
+            params={
+                "file_name": "test.pdf",
+                "path": "user-123",
+                "content_type": "application/pdf",
+            },
+        )
 
         assert response.status_code == 422  # FastAPI validation error for missing required field
 
@@ -283,16 +323,21 @@ def test_get_presigned_url_missing_bucket_no_env(client, mock_s3_client):
 
 def test_get_presigned_url_missing_r2_access_key(client):
     """Test presigned URL generation fails when R2_ACCESS_KEY is missing."""
-    with patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", None), \
-         patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"), \
-         patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"):
-        response = client.get("/upload/presigned-url", params={
-            "file_name": "test.pdf",
-            "path": "user-123",
-            "bucket": "test-bucket",
-            "content_type": "application/pdf",
-        })
+    with (
+        patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", None),
+        patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"),
+        patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"),
+    ):
+        response = client.get(
+            "/upload/presigned-url",
+            params={
+                "file_name": "test.pdf",
+                "path": "user-123",
+                "bucket": "test-bucket",
+                "content_type": "application/pdf",
+            },
+        )
 
         assert response.status_code == 500
         data = response.json()
@@ -301,16 +346,21 @@ def test_get_presigned_url_missing_r2_access_key(client):
 
 def test_get_presigned_url_missing_r2_secret_key(client):
     """Test presigned URL generation fails when R2_SECRET_KEY is missing."""
-    with patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", None), \
-         patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"), \
-         patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"):
-        response = client.get("/upload/presigned-url", params={
-            "file_name": "test.pdf",
-            "path": "user-123",
-            "bucket": "test-bucket",
-            "content_type": "application/pdf",
-        })
+    with (
+        patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", None),
+        patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"),
+        patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"),
+    ):
+        response = client.get(
+            "/upload/presigned-url",
+            params={
+                "file_name": "test.pdf",
+                "path": "user-123",
+                "bucket": "test-bucket",
+                "content_type": "application/pdf",
+            },
+        )
 
         assert response.status_code == 500
         data = response.json()
@@ -319,16 +369,21 @@ def test_get_presigned_url_missing_r2_secret_key(client):
 
 def test_get_presigned_url_missing_r2_account_id(client):
     """Test presigned URL generation fails when R2_ACCOUNT_ID is missing."""
-    with patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", None), \
-         patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"):
-        response = client.get("/upload/presigned-url", params={
-            "file_name": "test.pdf",
-            "path": "user-123",
-            "bucket": "test-bucket",
-            "content_type": "application/pdf",
-        })
+    with (
+        patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", None),
+        patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"),
+    ):
+        response = client.get(
+            "/upload/presigned-url",
+            params={
+                "file_name": "test.pdf",
+                "path": "user-123",
+                "bucket": "test-bucket",
+                "content_type": "application/pdf",
+            },
+        )
 
         assert response.status_code == 500
         data = response.json()
@@ -340,7 +395,7 @@ def test_get_presigned_url_missing_r2_account_id(client):
 # ============================================================================
 
 
-def test_get_presigned_url_boto3_client_error(client, mock_r2_credentials, mock_s3_client):
+def test_get_presigned_url_boto3_client_error(client, mock_s3_client):
     """Test presigned URL generation fails when boto3 raises ClientError."""
     # Mock ClientError from boto3
     error_response = {"Error": {"Code": "AccessDenied", "Message": "Access denied"}}
@@ -348,31 +403,43 @@ def test_get_presigned_url_boto3_client_error(client, mock_r2_credentials, mock_
         error_response, "generate_presigned_url"
     )
 
-    with patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
-        response = client.get("/upload/presigned-url", params={
-            "file_name": "test.pdf",
-            "path": "user-123",
-            "bucket": "test-bucket",
-            "content_type": "application/pdf",
-        })
+    with patch(
+        "apps.user_service.app.api.presigned_url.boto3.client",
+        return_value=mock_s3_client,
+    ):
+        response = client.get(
+            "/upload/presigned-url",
+            params={
+                "file_name": "test.pdf",
+                "path": "user-123",
+                "bucket": "test-bucket",
+                "content_type": "application/pdf",
+            },
+        )
 
         assert response.status_code == 500
         data = response.json()
         assert "Failed to generate presigned URL" in data["detail"]
 
 
-def test_get_presigned_url_boto3_unexpected_error(client, mock_r2_credentials, mock_s3_client):
+def test_get_presigned_url_boto3_unexpected_error(client, mock_s3_client):
     """Test presigned URL generation handles unexpected boto3 errors."""
     # Mock unexpected exception
     mock_s3_client.generate_presigned_url.side_effect = Exception("Unexpected error")
 
-    with patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
-        response = client.get("/upload/presigned-url", params={
-            "file_name": "test.pdf",
-            "path": "user-123",
-            "bucket": "test-bucket",
-            "content_type": "application/pdf",
-        })
+    with patch(
+        "apps.user_service.app.api.presigned_url.boto3.client",
+        return_value=mock_s3_client,
+    ):
+        response = client.get(
+            "/upload/presigned-url",
+            params={
+                "file_name": "test.pdf",
+                "path": "user-123",
+                "bucket": "test-bucket",
+                "content_type": "application/pdf",
+            },
+        )
 
         assert response.status_code == 500
         data = response.json()
@@ -384,9 +451,12 @@ def test_get_presigned_url_boto3_unexpected_error(client, mock_r2_credentials, m
 # ============================================================================
 
 
-def test_get_presigned_url_special_characters_in_filename(client, mock_r2_credentials, mock_s3_client):
+def test_get_presigned_url_special_chars(client, mock_s3_client):
     """Test presigned URL generation with special characters in filename."""
-    with patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
+    with patch(
+        "apps.user_service.app.api.presigned_url.boto3.client",
+        return_value=mock_s3_client,
+    ):
         response = client.get(
             "/upload/presigned-url",
             params={
@@ -406,10 +476,13 @@ def test_get_presigned_url_special_characters_in_filename(client, mock_r2_creden
         assert call_args[1]["Params"]["Key"] == "user-123/test file (1).pdf"
 
 
-def test_get_presigned_url_long_filename(client, mock_r2_credentials, mock_s3_client):
+def test_get_presigned_url_long_filename(client, mock_s3_client):
     """Test presigned URL generation with long filename."""
     long_filename = "a" * 200 + ".pdf"
-    with patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
+    with patch(
+        "apps.user_service.app.api.presigned_url.boto3.client",
+        return_value=mock_s3_client,
+    ):
         response = client.get(
             "/upload/presigned-url",
             params={
@@ -425,7 +498,7 @@ def test_get_presigned_url_long_filename(client, mock_r2_credentials, mock_s3_cl
         assert data["fileName"] == long_filename
 
 
-def test_get_presigned_url_various_content_types(client, mock_r2_credentials, mock_s3_client):
+def test_get_presigned_url_various_content_types(client, mock_s3_client):
     """Test presigned URL generation with various content types."""
     content_types = [
         "image/png",
@@ -435,7 +508,10 @@ def test_get_presigned_url_various_content_types(client, mock_r2_credentials, mo
         "video/mp4",
     ]
 
-    with patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=mock_s3_client):
+    with patch(
+        "apps.user_service.app.api.presigned_url.boto3.client",
+        return_value=mock_s3_client,
+    ):
         for content_type in content_types:
             response = client.get(
                 "/upload/presigned-url",
@@ -465,17 +541,20 @@ def test_get_presigned_url_various_content_types(client, mock_r2_credentials, mo
 def test_get_r2_client_configuration():
     """Test that R2 client is configured correctly."""
     from apps.user_service.app.api.presigned_url import get_r2_client
+
     # Config is imported at the top of the file
 
-    with patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"), \
-         patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"), \
-         patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"), \
-         patch("boto3.client") as mock_boto3_client:
+    with (
+        patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", "test-access-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", "test-secret-key"),
+        patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", "test-account-id"),
+        patch("apps.user_service.app.api.presigned_url.R2_BUCKET", "test-bucket"),
+        patch("boto3.client") as mock_boto3_client,
+    ):
         mock_client_instance = MagicMock()
         mock_boto3_client.return_value = mock_client_instance
 
-        client = get_r2_client()
+        get_r2_client()
 
         # Verify boto3.client was called with correct parameters
         mock_boto3_client.assert_called_once()
@@ -493,12 +572,13 @@ def test_get_r2_client_missing_credentials():
     """Test that get_r2_client raises HTTPException when credentials are missing."""
     from apps.user_service.app.api.presigned_url import get_r2_client
 
-    with patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", None), \
-         patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", None), \
-         patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", None):
+    with (
+        patch("apps.user_service.app.api.presigned_url.R2_ACCESS_KEY", None),
+        patch("apps.user_service.app.api.presigned_url.R2_SECRET_KEY", None),
+        patch("apps.user_service.app.api.presigned_url.R2_ACCOUNT_ID", None),
+    ):
         with pytest.raises(HTTPException) as exc_info:
             get_r2_client()
 
         assert exc_info.value.status_code == 500
         assert "R2 credentials not configured" in exc_info.value.detail
-

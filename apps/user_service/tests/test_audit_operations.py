@@ -1,7 +1,4 @@
-# pylint: disable=all
-
-"""
-Test module for audit operations database functions.
+"""Test module for audit operations database functions.
 
 This module contains comprehensive tests for:
 - create_audit_log
@@ -13,20 +10,21 @@ This module contains comprehensive tests for:
 - bulk_create_audit_logs
 """
 
-import pytest
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
-    create_audit_log,
-    get_audit_log_by_id,
-    delete_all_audit_logs,
-    get_audit_logs_list,
-    get_audit_logs_count,
-    get_last_audit_log_hash,
+    AuditLogFilter,
     bulk_create_audit_logs,
-    AuditLogFilter
+    create_audit_log,
+    delete_all_audit_logs,
+    get_audit_log_by_id,
+    get_audit_logs_count,
+    get_audit_logs_list,
+    get_last_audit_log_hash,
 )
 
 
@@ -57,17 +55,24 @@ class TestCreateAuditLog:
             "description": "User created",
             "retention_date": datetime.now(timezone.utc),
             "status_code": 200,
-            "category": "user_management"
+            "category": "user_management",
         }
 
         mock_result = MagicMock()
-        mock_result.data = [{"id": str(uuid.uuid4()), "organization_id": audit_data["organization_id"]}]
+        mock_result.data = [
+            {"id": str(uuid.uuid4()), "organization_id": audit_data["organization_id"]}
+        ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
-            mock_execute = MagicMock()
+            MagicMock()
 
             mock_table.insert.return_value = mock_insert
             mock_insert.execute = AsyncMock(return_value=mock_result)
@@ -96,13 +101,18 @@ class TestCreateAuditLog:
             "ip_address": "192.0.2.1",
             "timestamp": datetime.now(timezone.utc),
             "hash_signature": "xyz789",
-            "description": "Organization updated"
+            "description": "Organization updated",
         }
 
         mock_result = MagicMock()
         mock_result.data = [{"id": str(uuid.uuid4())}]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -132,13 +142,18 @@ class TestCreateAuditLog:
             "ip_address": "10.0.0.1",
             "timestamp": datetime.now(timezone.utc),
             "hash_signature": "hash123",
-            "description": "Session deleted"
+            "description": "Session deleted",
         }
 
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -166,13 +181,18 @@ class TestGetAuditLogById:
             "user_id": str(uuid.uuid4()),
             "user_email": "test@example.com",
             "action_type": "CREATE",
-            "description": "Test audit log"
+            "description": "Test audit log",
         }
 
         mock_result = MagicMock()
         mock_result.data = [mock_audit_log]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -203,7 +223,12 @@ class TestGetAuditLogById:
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -237,7 +262,12 @@ class TestDeleteAllAuditLogs:
 
         mock_delete_result = MagicMock()
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -270,7 +300,12 @@ class TestDeleteAllAuditLogs:
 
         mock_delete_result = MagicMock()
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -299,21 +334,30 @@ class TestGetAuditLogsList:
     async def test_get_audit_logs_list_success(self):
         """Test successful audit logs list retrieval."""
         organization_id = str(uuid.uuid4())
-        filter_params = AuditLogFilter(
-            organization_id=organization_id,
-            limit=10,
-            offset=0
-        )
+        filter_params = AuditLogFilter(organization_id=organization_id, limit=10, offset=0)
 
         mock_audit_logs = [
-            {"id": str(uuid.uuid4()), "organization_id": organization_id, "action_type": "CREATE"},
-            {"id": str(uuid.uuid4()), "organization_id": organization_id, "action_type": "UPDATE"}
+            {
+                "id": str(uuid.uuid4()),
+                "organization_id": organization_id,
+                "action_type": "CREATE",
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "organization_id": organization_id,
+                "action_type": "UPDATE",
+            },
         ]
 
         mock_result = MagicMock()
         mock_result.data = mock_audit_logs
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -348,13 +392,18 @@ class TestGetAuditLogsList:
             end_date=datetime.now(timezone.utc),
             search="test",
             limit=5,
-            offset=10
+            offset=10,
         )
 
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -389,16 +438,17 @@ class TestGetAuditLogsList:
     @pytest.mark.asyncio
     async def test_get_audit_logs_list_no_data(self):
         """Test audit logs list when no data is returned."""
-        filter_params = AuditLogFilter(
-            organization_id=str(uuid.uuid4()),
-            limit=10,
-            offset=0
-        )
+        filter_params = AuditLogFilter(organization_id=str(uuid.uuid4()), limit=10, offset=0)
 
         mock_result = MagicMock()
         mock_result.data = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -427,15 +477,17 @@ class TestGetAuditLogsCount:
     async def test_get_audit_logs_count_success(self):
         """Test successful audit logs count retrieval."""
         organization_id = str(uuid.uuid4())
-        filter_params = AuditLogFilter(
-            organization_id=organization_id,
-            action_type="CREATE"
-        )
+        filter_params = AuditLogFilter(organization_id=organization_id, action_type="CREATE")
 
         mock_result = MagicMock()
         mock_result.count = 15
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -458,15 +510,17 @@ class TestGetAuditLogsCount:
     @pytest.mark.asyncio
     async def test_get_audit_logs_count_with_search(self):
         """Test audit logs count with search filter."""
-        filter_params = AuditLogFilter(
-            organization_id=str(uuid.uuid4()),
-            search="test search"
-        )
+        filter_params = AuditLogFilter(organization_id=str(uuid.uuid4()), search="test search")
 
         mock_result = MagicMock()
         mock_result.count = 3
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -489,14 +543,17 @@ class TestGetAuditLogsCount:
     @pytest.mark.asyncio
     async def test_get_audit_logs_count_no_count(self):
         """Test audit logs count when count is None."""
-        filter_params = AuditLogFilter(
-            organization_id=str(uuid.uuid4())
-        )
+        filter_params = AuditLogFilter(organization_id=str(uuid.uuid4()))
 
         mock_result = MagicMock()
         mock_result.count = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -527,7 +584,12 @@ class TestGetLastAuditLogHash:
         mock_result = MagicMock()
         mock_result.data = [{"hash_signature": mock_hash}]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -557,7 +619,12 @@ class TestGetLastAuditLogHash:
         mock_result = MagicMock()
         mock_result.data = []
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_select = MagicMock()
@@ -601,7 +668,7 @@ class TestBulkCreateAuditLogs:
                 "timestamp": datetime.now(timezone.utc),
                 "hash_signature": "hash1",
                 "description": "User 1 created",
-                "retention_date": datetime.now(timezone.utc)
+                "retention_date": datetime.now(timezone.utc),
             },
             {
                 "organization_id": str(uuid.uuid4()),
@@ -617,17 +684,22 @@ class TestBulkCreateAuditLogs:
                 "timestamp": datetime.now(timezone.utc),
                 "hash_signature": "hash2",
                 "description": "Profile 2 updated",
-                "retention_date": datetime.now(timezone.utc)
-            }
+                "retention_date": datetime.now(timezone.utc),
+            },
         ]
 
         mock_result = MagicMock()
         mock_result.data = [
             {"id": str(uuid.uuid4()), "hash_signature": "hash1"},
-            {"id": str(uuid.uuid4()), "hash_signature": "hash2"}
+            {"id": str(uuid.uuid4()), "hash_signature": "hash2"},
         ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -667,14 +739,19 @@ class TestBulkCreateAuditLogs:
                 "timestamp": datetime.now(timezone.utc),
                 "hash_signature": "hash123",
                 "description": "Session deleted",
-                "retention_date": datetime.now(timezone.utc)
+                "retention_date": datetime.now(timezone.utc),
             }
         ]
 
         mock_result = MagicMock()
         mock_result.data = None
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()
@@ -712,14 +789,19 @@ class TestBulkCreateAuditLogs:
                 "previous_hash": "hash789",
                 "description": "Report published",
                 "status_code": 200,
-                "category": "reporting"
+                "category": "reporting",
             }
         ]
 
         mock_result = MagicMock()
         mock_result.data = [{"id": str(uuid.uuid4())}]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.audit_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations."
+                "audit_operations.get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_table = MagicMock()
             mock_insert = MagicMock()

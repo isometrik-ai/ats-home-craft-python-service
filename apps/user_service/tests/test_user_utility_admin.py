@@ -1,34 +1,37 @@
-# pylint: disable=all
+"""Tests functions in user_utility_admin.py module."""
+# pylint: disable=too-many-lines
+
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
-from fastapi import HTTPException, status
-from supabase_auth.errors import AuthApiError
+from fastapi import HTTPException
+from httpx import HTTPError, HTTPStatusError
 from postgrest import APIError
-from httpx import HTTPError, HTTPStatusError, RequestError, TimeoutException
+from supabase_auth.errors import AuthApiError
 
-from apps.user_service.app.schemas.users import CreateUserRequest
 from apps.user_service.app.dependencies.common_utils import UserContext
+from apps.user_service.app.schemas.users import CreateUserRequest
 from libs.shared_db.supabase_db.admin_operations.user import (
     ban_the_user,
-    unban_the_user,
     delete_auth_user,
-    update_email_of_user
+    unban_the_user,
+    update_email_of_user,
 )
 from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
-    update_supabase_user_email,
-    generate_magic_link,
     create_admin_update_email_content,
+    generate_magic_link,
+    invite_user_with_email,
+    login_user,
+    refresh_session,
+    reset_the_password_email,
     send_admin_update_email,
     sign_up_supabase_user,
-    login_user,
-    invite_user_with_email,
-    reset_the_password_email,
     update_password_with_token,
-    refresh_session
+    update_supabase_user_email,
 )
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
+
 
 class TestUpdateSupabaseUserEmail:
     """Test cases for update_supabase_user_email function."""
@@ -43,18 +46,39 @@ class TestUpdateSupabaseUserEmail:
         mock_user_info = {
             "user_id": user_id,
             "full_name": "Test User",
-            "email": "old@example.com"
+            "email": "old@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_user_profile_by_id",
-                   AsyncMock(return_value=mock_user_info)), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.update_email_of_user",
-                   AsyncMock(return_value={"success": True})), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.update_user_email",
-                   AsyncMock(return_value=True)), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.send_admin_update_email",
-                   return_value=True):
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.get_user_profile_by_id"
+                ),
+                AsyncMock(return_value=mock_user_info),
+            ),
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.update_email_of_user"
+                ),
+                AsyncMock(return_value={"success": True}),
+            ),
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.update_user_email"
+                ),
+                AsyncMock(return_value=True),
+            ),
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.send_admin_update_email"
+                ),
+                return_value=True,
+            ),
+        ):
             # Should not raise any exception
             await update_supabase_user_email(user_id, org_id, new_email)
 
@@ -65,9 +89,10 @@ class TestUpdateSupabaseUserEmail:
         org_id = str(uuid.uuid4())
         new_email = "new@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_user_profile_by_id",
-                   AsyncMock(return_value=None)):
-
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_user_profile_by_id",
+            AsyncMock(return_value=None),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await update_supabase_user_email(user_id, org_id, new_email)
 
@@ -84,14 +109,25 @@ class TestUpdateSupabaseUserEmail:
         mock_user_info = {
             "user_id": user_id,
             "full_name": "Test User",
-            "email": "old@example.com"
+            "email": "old@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_user_profile_by_id",
-                   AsyncMock(return_value=mock_user_info)), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.update_email_of_user",
-                   AsyncMock(return_value=None)):
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.get_user_profile_by_id"
+                ),
+                AsyncMock(return_value=mock_user_info),
+            ),
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.update_email_of_user"
+                ),
+                AsyncMock(return_value=None),
+            ),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await update_supabase_user_email(user_id, org_id, new_email)
 
@@ -108,16 +144,32 @@ class TestUpdateSupabaseUserEmail:
         mock_user_info = {
             "user_id": user_id,
             "full_name": "Test User",
-            "email": "old@example.com"
+            "email": "old@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_user_profile_by_id",
-                   AsyncMock(return_value=mock_user_info)), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.update_email_of_user",
-                   AsyncMock(return_value={"success": True})), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.update_user_email",
-                   AsyncMock(return_value=None)):
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.get_user_profile_by_id"
+                ),
+                AsyncMock(return_value=mock_user_info),
+            ),
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.update_email_of_user"
+                ),
+                AsyncMock(return_value={"success": True}),
+            ),
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.update_user_email"
+                ),
+                AsyncMock(return_value=None),
+            ),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await update_supabase_user_email(user_id, org_id, new_email)
 
@@ -131,9 +183,13 @@ class TestUpdateSupabaseUserEmail:
         org_id = str(uuid.uuid4())
         new_email = "new@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_user_profile_by_id",
-                   side_effect=Exception("Database error")):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_user_profile_by_id"
+            ),
+            side_effect=Exception("Database error"),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await update_supabase_user_email(user_id, org_id, new_email)
 
@@ -150,19 +206,42 @@ class TestUpdateSupabaseUserEmail:
         mock_user_info = {
             "user_id": user_id,
             "full_name": "Test User",
-            "email": "old@example.com"
+            "email": "old@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_user_profile_by_id",
-                   AsyncMock(return_value=mock_user_info)), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.update_email_of_user",
-                   AsyncMock(return_value={"success": True})), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.update_user_email",
-                   AsyncMock(return_value=True)), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.send_admin_update_email",
-                   AsyncMock(return_value=False)), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.logger") as mock_logger:
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.get_user_profile_by_id"
+                ),
+                AsyncMock(return_value=mock_user_info),
+            ),
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.update_email_of_user"
+                ),
+                AsyncMock(return_value={"success": True}),
+            ),
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.update_user_email"
+                ),
+                AsyncMock(return_value=True),
+            ),
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.send_admin_update_email"
+                ),
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user_utility_admin.logger"
+            ) as mock_logger,
+        ):
             # Should not raise exception, but should log warning
             await update_supabase_user_email(user_id, org_id, new_email)
 
@@ -183,9 +262,19 @@ class TestGenerateMagicLink:
         mock_response = MagicMock()
         mock_response.properties.action_link = magic_link_url
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(admin=MagicMock(generate_link=MagicMock(return_value=mock_response)))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(
+                        admin=MagicMock(generate_link=MagicMock(return_value=mock_response))
+                    )
+                )
+            ),
+        ):
             result = await generate_magic_link(email)
             assert result == magic_link_url
 
@@ -197,9 +286,19 @@ class TestGenerateMagicLink:
         mock_response = MagicMock()
         mock_response.properties = None
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(admin=MagicMock(generate_link=MagicMock(return_value=mock_response)))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(
+                        admin=MagicMock(generate_link=MagicMock(return_value=mock_response))
+                    )
+                )
+            ),
+        ):
             result = await generate_magic_link(email)
             assert result is None
 
@@ -211,9 +310,19 @@ class TestGenerateMagicLink:
         mock_response = MagicMock()
         mock_response.properties.action_link = None
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(admin=MagicMock(generate_link=MagicMock(return_value=mock_response)))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(
+                        admin=MagicMock(generate_link=MagicMock(return_value=mock_response))
+                    )
+                )
+            ),
+        ):
             result = await generate_magic_link(email)
             assert result is None
 
@@ -222,9 +331,13 @@ class TestGenerateMagicLink:
         """Test magic link generation with ValueError."""
         email = "test@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(side_effect=ValueError("Invalid email"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=ValueError("Invalid email")),
+        ):
             result = await generate_magic_link(email)
             assert result is None
 
@@ -233,9 +346,13 @@ class TestGenerateMagicLink:
         """Test magic link generation with AttributeError."""
         email = "test@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(side_effect=AttributeError("No attribute"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=AttributeError("No attribute")),
+        ):
             result = await generate_magic_link(email)
             assert result is None
 
@@ -244,24 +361,26 @@ class TestGenerateMagicLink:
         """Test magic link generation with general exception."""
         email = "test@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(side_effect=Exception("Unexpected error"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=Exception("Unexpected error")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await generate_magic_link(email)
 
             assert exc_info.value.status_code == 500
             assert "Failed to generate magic link" in exc_info.value.detail
 
+
 class TestCreateAdminUpdateEmailContent:
     """Test cases for create_admin_update_email_content function."""
 
     def test_create_admin_update_email_content_success(self):
         """Test successful email content creation."""
-        user = {
-            "full_name": "John Doe",
-            "email": "john@example.com"
-        }
+        user = {"full_name": "John Doe", "email": "john@example.com"}
         magic_link = "https://example.com/magic-link"
 
         subject, html_message = create_admin_update_email_content(user, magic_link)
@@ -273,10 +392,7 @@ class TestCreateAdminUpdateEmailContent:
 
     def test_create_admin_update_email_content_empty_name(self):
         """Test email content creation with empty full name."""
-        user = {
-            "full_name": "",
-            "email": "john@example.com"
-        }
+        user = {"full_name": "", "email": "john@example.com"}
         magic_link = "https://example.com/magic-link"
 
         subject, html_message = create_admin_update_email_content(user, magic_link)
@@ -284,6 +400,7 @@ class TestCreateAdminUpdateEmailContent:
         assert subject == "Your Email Has Been Updated - XQtiv"
         assert magic_link in html_message
         assert "Hello ," in html_message  # Empty name should result in empty greeting
+
 
 class TestSendAdminUpdateEmail:
     """Test cases for send_admin_update_email function."""
@@ -294,14 +411,22 @@ class TestSendAdminUpdateEmail:
         user = {
             "id": str(uuid.uuid4()),
             "full_name": "John Doe",
-            "email": "john@example.com"
+            "email": "john@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
-                   AsyncMock(return_value="https://example.com/magic-link")), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.send_email",
-                   return_value=True):
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.generate_magic_link"
+                ),
+                AsyncMock(return_value="https://example.com/magic-link"),
+            ),
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user_utility_admin.send_email",
+                return_value=True,
+            ),
+        ):
             result = await send_admin_update_email(user)
             assert result is True
 
@@ -311,12 +436,13 @@ class TestSendAdminUpdateEmail:
         user = {
             "id": str(uuid.uuid4()),
             "full_name": "John Doe",
-            "email": "john@example.com"
+            "email": "john@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
-                   AsyncMock(return_value=None)):
-
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
+            AsyncMock(return_value=None),
+        ):
             result = await send_admin_update_email(user)
             assert result is False
 
@@ -326,14 +452,22 @@ class TestSendAdminUpdateEmail:
         user = {
             "id": str(uuid.uuid4()),
             "full_name": "John Doe",
-            "email": "john@example.com"
+            "email": "john@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
-                   AsyncMock(return_value="https://example.com/magic-link")), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.send_email",
-                   return_value=False):
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.generate_magic_link"
+                ),
+                AsyncMock(return_value="https://example.com/magic-link"),
+            ),
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user_utility_admin.send_email",
+                return_value=False,
+            ),
+        ):
             result = await send_admin_update_email(user)
             assert result is False
 
@@ -343,12 +477,13 @@ class TestSendAdminUpdateEmail:
         user = {
             "id": str(uuid.uuid4()),
             "full_name": "John Doe",
-            "email": "john@example.com"
+            "email": "john@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
-                   AsyncMock(side_effect=ValueError("Invalid email"))):
-
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
+            AsyncMock(side_effect=ValueError("Invalid email")),
+        ):
             result = await send_admin_update_email(user)
             assert result is False
 
@@ -358,12 +493,13 @@ class TestSendAdminUpdateEmail:
         user = {
             "id": str(uuid.uuid4()),
             "full_name": "John Doe",
-            "email": "john@example.com"
+            "email": "john@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
-                   AsyncMock(side_effect=AttributeError("No attribute"))):
-
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
+            AsyncMock(side_effect=AttributeError("No attribute")),
+        ):
             result = await send_admin_update_email(user)
             assert result is False
 
@@ -373,17 +509,19 @@ class TestSendAdminUpdateEmail:
         user = {
             "id": str(uuid.uuid4()),
             "full_name": "John Doe",
-            "email": "john@example.com"
+            "email": "john@example.com",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
-                   AsyncMock(side_effect=Exception("Unexpected error"))):
-
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user_utility_admin.generate_magic_link",
+            AsyncMock(side_effect=Exception("Unexpected error")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await send_admin_update_email(user)
 
             assert exc_info.value.status_code == 500
             assert "Failed to send admin update email" in exc_info.value.detail
+
 
 class TestSignUpSupabaseUser:
     """Test cases for sign_up_supabase_user function."""
@@ -405,9 +543,17 @@ class TestSignUpSupabaseUser:
         mock_response.session = MagicMock()
         mock_response.session.access_token = "test-token"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_up=AsyncMock(return_value=mock_response))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(sign_up=AsyncMock(return_value=mock_response))
+                )
+            ),
+        ):
             result = await sign_up_supabase_user(body)
             assert result.user.id == user_id
             assert result.session.access_token == "test-token"
@@ -426,9 +572,17 @@ class TestSignUpSupabaseUser:
         mock_response = MagicMock()
         mock_response.user = None
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_up=AsyncMock(return_value=mock_response))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(sign_up=AsyncMock(return_value=mock_response))
+                )
+            ),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await sign_up_supabase_user(body)
 
@@ -447,9 +601,13 @@ class TestSignUpSupabaseUser:
         body.phone = None
         body.timezone = "UTC"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(side_effect=AuthApiError("already registered", 409, "USER_ALREADY_EXISTS"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=AuthApiError("already registered", 409, "USER_ALREADY_EXISTS")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await sign_up_supabase_user(body)
 
@@ -471,9 +629,13 @@ class TestSignUpSupabaseUser:
         mock_supabase = MagicMock()
         mock_supabase.auth.sign_up = AsyncMock(side_effect=ConnectionError("Connection failed"))
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await sign_up_supabase_user(body)
 
@@ -496,9 +658,13 @@ class TestSignUpSupabaseUser:
         mock_supabase = MagicMock()
         mock_supabase.auth.sign_up = AsyncMock(side_effect=Exception("Unexpected database error"))
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await sign_up_supabase_user(body)
 
@@ -520,9 +686,13 @@ class TestSignUpSupabaseUser:
         mock_supabase = MagicMock()
         mock_supabase.auth.sign_up = AsyncMock(side_effect=ValueError("Invalid input data"))
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await sign_up_supabase_user(body)
 
@@ -542,11 +712,17 @@ class TestSignUpSupabaseUser:
         body.timezone = "UTC"
 
         mock_supabase = MagicMock()
-        mock_supabase.auth.sign_up = AsyncMock(side_effect=AuthApiError("Invalid request", 400, "INVALID_REQUEST"))
+        mock_supabase.auth.sign_up = AsyncMock(
+            side_effect=AuthApiError("Invalid request", 400, "INVALID_REQUEST")
+        )
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=mock_supabase)):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(return_value=mock_supabase),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await sign_up_supabase_user(body)
 
@@ -566,10 +742,20 @@ class TestLoginUser:
 
         mock_result = {"access_token": "token123", "user": {"id": "user123"}}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_in_with_password=AsyncMock(return_value=mock_result))))), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.log_exception"):
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.get_supabase_admin_client"
+                ),
+                AsyncMock(
+                    return_value=MagicMock(
+                        auth=MagicMock(sign_in_with_password=AsyncMock(return_value=mock_result))
+                    )
+                ),
+            ),
+            patch(("libs.shared_db.supabase_db.admin_operations.user_utility_admin.log_exception")),
+        ):
             result = await login_user(email, password)
             assert result == mock_result
 
@@ -579,10 +765,24 @@ class TestLoginUser:
         email = "test@example.com"
         password = "wrongpassword"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=Exception("Invalid credentials")))))), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.log_exception"):
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.get_supabase_admin_client"
+                ),
+                AsyncMock(
+                    return_value=MagicMock(
+                        auth=MagicMock(
+                            sign_in_with_password=AsyncMock(
+                                side_effect=Exception("Invalid credentials")
+                            )
+                        )
+                    )
+                ),
+            ),
+            patch(("libs.shared_db.supabase_db.admin_operations.user_utility_admin.log_exception")),
+        ):
             with pytest.raises(Exception) as exc_info:
                 await login_user(email, password)
 
@@ -598,9 +798,17 @@ class TestLoginUser:
         auth_error.status = 400
         auth_error.message = "Email not confirmed"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=auth_error))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=auth_error))
+                )
+            ),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await login_user(email, password)
 
@@ -617,9 +825,17 @@ class TestLoginUser:
         auth_error.status = 400
         auth_error.message = "Invalid login credentials"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=auth_error))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=auth_error))
+                )
+            ),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await login_user(email, password)
 
@@ -636,14 +852,23 @@ class TestLoginUser:
         auth_error.status = 403
         auth_error.message = "Account suspended"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=auth_error))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(sign_in_with_password=AsyncMock(side_effect=auth_error))
+                )
+            ),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await login_user(email, password)
 
             assert exc_info.value.status_code == 403
             assert "Account suspended" in exc_info.value.detail
+
 
 class TestInviteUserWithEmail:
     """Test cases for invite_user_with_email function."""
@@ -656,22 +881,32 @@ class TestInviteUserWithEmail:
             full_name="Test User",
             phone="1234567890",
             timezone="UTC",
-            role_id=str(uuid.uuid4())
+            role_id=str(uuid.uuid4()),
         )
         user_context = UserContext(
             user_id=str(uuid.uuid4()),
             organization_id=str(uuid.uuid4()),
             email="admin@example.com",
-            user_type="organization_member"
+            user_type="organization_member",
         )
         user_id = str(uuid.uuid4())
 
         mock_response = MagicMock()
         mock_response.user.id = user_id
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(admin=MagicMock(invite_user_by_email=AsyncMock(return_value=mock_response)))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(
+                        admin=MagicMock(invite_user_by_email=AsyncMock(return_value=mock_response))
+                    )
+                )
+            ),
+        ):
             result = await invite_user_with_email(body, user_context)
             assert result == user_id
 
@@ -683,18 +918,22 @@ class TestInviteUserWithEmail:
             full_name="Test User",
             phone="1234567890",
             timezone="UTC",
-            role_id=str(uuid.uuid4())
+            role_id=str(uuid.uuid4()),
         )
         user_context = UserContext(
             user_id=str(uuid.uuid4()),
             organization_id=str(uuid.uuid4()),
             email="admin@example.com",
-            user_type="organization_member"
+            user_type="organization_member",
         )
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(side_effect=Exception("user already exists"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=Exception("user already exists")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await invite_user_with_email(body, user_context)
 
@@ -709,23 +948,28 @@ class TestInviteUserWithEmail:
             full_name="Test User",
             phone="1234567890",
             timezone="UTC",
-            role_id=str(uuid.uuid4())
+            role_id=str(uuid.uuid4()),
         )
         user_context = UserContext(
             user_id=str(uuid.uuid4()),
             organization_id=str(uuid.uuid4()),
             email="admin@example.com",
-            user_type="organization_member"
+            user_type="organization_member",
         )
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(side_effect=Exception("General error"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=Exception("General error")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await invite_user_with_email(body, user_context)
 
             assert exc_info.value.status_code == 409
             assert "General error" in exc_info.value.detail
+
 
 class TestResetThePasswordEmail:
     """Test cases for reset_the_password_email function."""
@@ -736,9 +980,17 @@ class TestResetThePasswordEmail:
         email = "test@example.com"
         mock_response = {"success": True}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(reset_password_email=AsyncMock(return_value=mock_response))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(reset_password_email=AsyncMock(return_value=mock_response))
+                )
+            ),
+        ):
             result = await reset_the_password_email(email)
             assert result == mock_response
 
@@ -747,9 +999,13 @@ class TestResetThePasswordEmail:
         """Test password reset email with AttributeError."""
         email = "test@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
-                   AsyncMock(side_effect=AttributeError("No attribute"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=AttributeError("No attribute")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await reset_the_password_email(email)
 
@@ -761,9 +1017,13 @@ class TestResetThePasswordEmail:
         """Test password reset email with ValueError."""
         email = "invalid-email"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
-                   AsyncMock(side_effect=ValueError("Invalid email"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=ValueError("Invalid email")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await reset_the_password_email(email)
 
@@ -775,28 +1035,43 @@ class TestResetThePasswordEmail:
         """Test password reset email with AuthApiError."""
         email = "test@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
-                   AsyncMock(side_effect=AuthApiError("Auth service error", 502, "AUTH_SERVICE_ERROR"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=AuthApiError("Auth service error", 502, "AUTH_SERVICE_ERROR")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await reset_the_password_email(email)
 
             assert exc_info.value.status_code == 502
-            assert "Failed to send password reset email due to authentication service error" in exc_info.value.detail
+            assert (
+                "Failed to send password reset email due to authentication service error"
+                in exc_info.value.detail
+            )
 
     @pytest.mark.asyncio
     async def test_reset_the_password_email_general_exception(self):
         """Test password reset email with general exception."""
         email = "test@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_fresh_supabase_admin_client",
-                   AsyncMock(side_effect=Exception("Unexpected error"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_fresh_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=Exception("Unexpected error")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await reset_the_password_email(email)
 
             assert exc_info.value.status_code == 500
-            assert "Unexpected error occurred while sending password reset email" in exc_info.value.detail
+            assert (
+                "Unexpected error occurred while sending password reset email"
+                in exc_info.value.detail
+            )
+
 
 class TestUpdatePasswordWithToken:
     """Test cases for update_password_with_token function."""
@@ -808,9 +1083,19 @@ class TestUpdatePasswordWithToken:
         new_password = "newpassword123"
         mock_response = {"success": True}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(admin=MagicMock(update_user_by_id=AsyncMock(return_value=mock_response)))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(
+                        admin=MagicMock(update_user_by_id=AsyncMock(return_value=mock_response))
+                    )
+                )
+            ),
+        ):
             result = await update_password_with_token(token, new_password)
             assert result == mock_response
 
@@ -820,14 +1105,21 @@ class TestUpdatePasswordWithToken:
         token = "token123"
         new_password = "newpassword123"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(side_effect=Exception("Update failed"))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(side_effect=Exception("Update failed")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await update_password_with_token(token, new_password)
 
             assert exc_info.value.status_code == 500
-            assert "Unexpected error occurred while updating password with token" in exc_info.value.detail
+            assert (
+                "Unexpected error occurred while updating password with token"
+                in exc_info.value.detail
+            )
 
 
 class TestRefreshSession:
@@ -840,14 +1132,22 @@ class TestRefreshSession:
         mock_response = {
             "session": {
                 "access_token": "new_access_token",
-                "refresh_token": "new_refresh_token"
+                "refresh_token": "new_refresh_token",
             },
-            "user": {"id": "user123"}
+            "user": {"id": "user123"},
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(refresh_session=AsyncMock(return_value=mock_response))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(refresh_session=AsyncMock(return_value=mock_response))
+                )
+            ),
+        ):
             result = await refresh_session(refresh_token)
             assert result == mock_response
 
@@ -860,9 +1160,17 @@ class TestRefreshSession:
         auth_error.status = 400
         auth_error.message = "Invalid refresh token"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(refresh_session=AsyncMock(side_effect=auth_error))))):
-
+        with patch(
+            (
+                "libs.shared_db.supabase_db.admin_operations."
+                "user_utility_admin.get_supabase_admin_client"
+            ),
+            AsyncMock(
+                return_value=MagicMock(
+                    auth=MagicMock(refresh_session=AsyncMock(side_effect=auth_error))
+                )
+            ),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await refresh_session(refresh_token)
 
@@ -875,10 +1183,26 @@ class TestRefreshSession:
         """Test refresh session with general exception - covers lines 459-464."""
         refresh_token = "refresh_token_123"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.get_supabase_admin_client",
-                   AsyncMock(return_value=MagicMock(auth=MagicMock(refresh_session=AsyncMock(side_effect=Exception("Database connection error")))))), \
-             patch("libs.shared_db.supabase_db.admin_operations.user_utility_admin.logger") as mock_logger:
-
+        with (
+            patch(
+                (
+                    "libs.shared_db.supabase_db.admin_operations."
+                    "user_utility_admin.get_supabase_admin_client"
+                ),
+                AsyncMock(
+                    return_value=MagicMock(
+                        auth=MagicMock(
+                            refresh_session=AsyncMock(
+                                side_effect=Exception("Database connection error")
+                            )
+                        )
+                    )
+                ),
+            ),
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user_utility_admin.logger"
+            ) as mock_logger,
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await refresh_session(refresh_token)
 
@@ -894,9 +1218,10 @@ class TestLogException:
 
     def test_log_exception(self):
         """Test log_exception function."""
-        with patch("libs.shared_utils.common_query.sys.exc_info") as mock_exc_info, \
-             patch("libs.shared_utils.common_query.logger") as mock_logger:
-
+        with (
+            patch("libs.shared_utils.common_query.sys.exc_info") as mock_exc_info,
+            patch("libs.shared_utils.common_query.logger") as mock_logger,
+        ):
             # Create mock traceback
             mock_tb = MagicMock()
             mock_tb.tb_frame.f_code.co_filename = "/test/path/file.py"
@@ -904,6 +1229,7 @@ class TestLogException:
             mock_exc_info.return_value = (ValueError, ValueError("test error"), mock_tb)
 
             from libs.shared_utils.common_query import log_exception
+
             log_exception()
 
             mock_logger.error.assert_called_once()
@@ -911,6 +1237,7 @@ class TestLogException:
             assert "Error:" in call_args[0]
             assert "File:" in call_args[0]
             assert "Line:" in call_args[0]
+
 
 class TestUserAdminOperations:
     """Test cases for user admin operations."""
@@ -922,7 +1249,10 @@ class TestUserAdminOperations:
         mock_response = MagicMock()
         mock_response.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_response)
             mock_get_client.return_value = mock_supabase
@@ -938,9 +1268,14 @@ class TestUserAdminOperations:
         """Test user ban with API error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=APIError({"message": "API Error", "code": "23505"}))
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(
+                side_effect=APIError({"message": "API Error", "code": "23505"})
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(APIError):
@@ -951,9 +1286,14 @@ class TestUserAdminOperations:
         """Test user ban with network error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=HTTPError("Network Error"))
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(
+                side_effect=HTTPError("Network Error")
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(HTTPError):
@@ -964,9 +1304,14 @@ class TestUserAdminOperations:
         """Test user ban with validation error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=ValueError("Invalid user ID"))
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(
+                side_effect=ValueError("Invalid user ID")
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(ValueError):
@@ -979,7 +1324,10 @@ class TestUserAdminOperations:
         mock_response = MagicMock()
         mock_response.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_response)
             mock_get_client.return_value = mock_supabase
@@ -995,9 +1343,14 @@ class TestUserAdminOperations:
         """Test user unban with API error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=APIError({"message": "API Error", "code": "23505"}))
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(
+                side_effect=APIError({"message": "API Error", "code": "23505"})
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(APIError):
@@ -1008,9 +1361,14 @@ class TestUserAdminOperations:
         """Test user unban with network error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=HTTPError("Network Error"))
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(
+                side_effect=HTTPError("Network Error")
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(HTTPError):
@@ -1021,9 +1379,14 @@ class TestUserAdminOperations:
         """Test user unban with validation error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=ValueError("Invalid user ID"))
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(
+                side_effect=ValueError("Invalid user ID")
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(ValueError):
@@ -1034,7 +1397,10 @@ class TestUserAdminOperations:
         """Test successful auth user deletion."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.delete_user = AsyncMock(return_value=MagicMock())
             mock_get_client.return_value = mock_supabase
@@ -1048,9 +1414,14 @@ class TestUserAdminOperations:
         """Test auth user deletion with API error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=AuthApiError("User not found", status=404, code="user_not_found"))
+            mock_supabase.auth.admin.delete_user = AsyncMock(
+                side_effect=AuthApiError("User not found", status=404, code="user_not_found")
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(AuthApiError):
@@ -1061,7 +1432,10 @@ class TestUserAdminOperations:
         """Test auth user deletion with network error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=HTTPError("Network Error"))
             mock_get_client.return_value = mock_supabase
@@ -1074,9 +1448,14 @@ class TestUserAdminOperations:
         """Test auth user deletion with validation error."""
         user_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=ValueError("Invalid user ID"))
+            mock_supabase.auth.admin.delete_user = AsyncMock(
+                side_effect=ValueError("Invalid user ID")
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(ValueError):
@@ -1090,7 +1469,10 @@ class TestUserAdminOperations:
         mock_response = MagicMock()
         mock_response.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_response)
             mock_get_client.return_value = mock_supabase
@@ -1107,9 +1489,14 @@ class TestUserAdminOperations:
         user_id = str(uuid.uuid4())
         new_email = "new@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=APIError({"message": "API Error", "code": "23505"}))
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(
+                side_effect=APIError({"message": "API Error", "code": "23505"})
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(APIError):
@@ -1121,9 +1508,14 @@ class TestUserAdminOperations:
         user_id = str(uuid.uuid4())
         new_email = "new@example.com"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=HTTPError("Network Error"))
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(
+                side_effect=HTTPError("Network Error")
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(HTTPError):
@@ -1135,9 +1527,14 @@ class TestUserAdminOperations:
         user_id = str(uuid.uuid4())
         new_email = "invalid-email"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=ValueError("Invalid email"))
+            mock_supabase.auth.admin.update_user_by_id = MagicMock(
+                side_effect=ValueError("Invalid email")
+            )
             mock_get_client.return_value = mock_supabase
 
             with pytest.raises(ValueError):
@@ -1180,7 +1577,7 @@ class TestEmailUtils:
                 "test@example.com",
                 "Test Subject",
                 "Test message",
-                html="<h1>Test HTML</h1>"
+                html="<h1>Test HTML</h1>",
             )
 
             assert result is True
@@ -1203,8 +1600,9 @@ class TestEmailUtils:
 
     def test_send_email_network_error(self):
         """Test email sending with network error."""
-        from libs.shared_utils.email_utils import send_email
         import httpx
+
+        from libs.shared_utils.email_utils import send_email
 
         with patch("libs.shared_utils.email_utils.httpx.post") as mock_post:
             mock_post.side_effect = httpx.HTTPError("Network error")
@@ -1215,8 +1613,9 @@ class TestEmailUtils:
 
     def test_send_email_timeout_error(self):
         """Test email sending with timeout error."""
-        from libs.shared_utils.email_utils import send_email
         import httpx
+
+        from libs.shared_utils.email_utils import send_email
 
         with patch("libs.shared_utils.email_utils.httpx.post") as mock_post:
             mock_post.side_effect = httpx.TimeoutException("Request timeout")
@@ -1227,8 +1626,9 @@ class TestEmailUtils:
 
     def test_send_email_connection_error(self):
         """Test email sending with connection error."""
-        from libs.shared_utils.email_utils import send_email
         import httpx
+
+        from libs.shared_utils.email_utils import send_email
 
         with patch("libs.shared_utils.email_utils.httpx.post") as mock_post:
             mock_post.side_effect = httpx.ConnectError("Connection failed")
@@ -1239,8 +1639,9 @@ class TestEmailUtils:
 
     def test_send_email_http_error(self):
         """Test email sending with HTTP error."""
-        from libs.shared_utils.email_utils import send_email
         import httpx
+
+        from libs.shared_utils.email_utils import send_email
 
         with patch("libs.shared_utils.email_utils.httpx.post") as mock_post:
             mock_post.side_effect = httpx.HTTPError("HTTP error")
@@ -1272,8 +1673,7 @@ class TestEmailUtils:
 
     def test_send_email_url_verification(self):
         """Test that correct URL is used for email sending."""
-        from libs.shared_utils.email_utils import send_email
-        from libs.shared_utils.email_utils import SUPABASE_URL
+        from libs.shared_utils.email_utils import SUPABASE_URL, send_email
 
         with patch("libs.shared_utils.email_utils.httpx.post") as mock_post:
             mock_response = MagicMock()
@@ -1335,7 +1735,12 @@ class TestEmailUtils:
             mock_response.text = "Email sent successfully"
             mock_post.return_value = mock_response
 
-            send_email("test@example.com", "Test Subject", "Test message", html="<p>HTML content</p>")
+            send_email(
+                "test@example.com",
+                "Test Subject",
+                "Test message",
+                html="<p>HTML content</p>",
+            )
 
             call_args = mock_post.call_args
             payload = call_args[1]["json"]
@@ -1357,7 +1762,7 @@ class TestEmailUtils:
                 "test@example.com",
                 "Test Subject",
                 "Test message",
-                from_name="Test Sender"
+                from_name="Test Sender",
             )
 
             assert result is True
@@ -1365,6 +1770,7 @@ class TestEmailUtils:
             payload = call_args[1]["json"]
             assert "from_name" in payload
             assert payload["from_name"] == "Test Sender"
+
 
 class TestSendPasswordResetConfirmationEmail:
     """Test cases for send_password_reset_confirmation_email function."""
@@ -1376,9 +1782,10 @@ class TestSendPasswordResetConfirmationEmail:
         email = "test@example.com"
         user_name = "Test User"
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email, \
-             patch("libs.shared_utils.email_utils.logger") as mock_logger:
-
+        with (
+            patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email,
+            patch("libs.shared_utils.email_utils.logger") as mock_logger,
+        ):
             result = send_password_reset_confirmation_email(email, user_name)
 
             assert result is True
@@ -1388,11 +1795,16 @@ class TestSendPasswordResetConfirmationEmail:
             call_args = mock_send_email.call_args
             assert call_args[0][0] == email  # email
             assert call_args[0][1] == "Password Changed Successfully"  # subject
-            assert "password for your House of App AI account was successfully updated" in call_args[0][2]  # message
+            assert (
+                "password for your House of App AI account was successfully updated"
+                in call_args[0][2]
+            )  # message
             assert "Password Changed" in call_args[0][3]  # html_message
 
             # Verify success logging - covers line 195
-            mock_logger.info.assert_called_with("Password reset confirmation email sent successfully to %s", email)
+            mock_logger.info.assert_called_with(
+                "Password reset confirmation email sent successfully to %s", email
+            )
 
     def test_send_password_reset_confirmation_email_failure(self):
         """Test password reset confirmation email failure - covers line 198."""
@@ -1401,43 +1813,55 @@ class TestSendPasswordResetConfirmationEmail:
         email = "test@example.com"
         user_name = "Test User"
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=False) as mock_send_email, \
-             patch("libs.shared_utils.email_utils.logger") as mock_logger:
-
+        with (
+            patch(
+                "libs.shared_utils.email_utils.send_email", return_value=False
+            ) as mock_send_email,
+            patch("libs.shared_utils.email_utils.logger") as mock_logger,
+        ):
             result = send_password_reset_confirmation_email(email, user_name)
 
             assert result is False
             mock_send_email.assert_called_once()
 
             # Verify error logging - covers line 198
-            mock_logger.error.assert_called_with("Failed to send password reset confirmation email to %s", email)
+            mock_logger.error.assert_called_with(
+                "Failed to send password reset confirmation email to %s", email
+            )
 
-    def test_send_password_reset_confirmation_email_exception(self):
+    def test_send_pwd_reset_conf_email_exception(self):
         """Test password reset confirmation email with exception - covers lines 201-203."""
         from libs.shared_utils.email_utils import send_password_reset_confirmation_email
 
         email = "test@example.com"
         user_name = "Test User"
 
-        with patch("libs.shared_utils.email_utils.send_email", side_effect=Exception("SMTP Error")) as mock_send_email, \
-             patch("libs.shared_utils.email_utils.logger") as mock_logger:
-
+        with (
+            patch(
+                "libs.shared_utils.email_utils.send_email",
+                side_effect=Exception("SMTP Error"),
+            ) as mock_send_email,
+            patch("libs.shared_utils.email_utils.logger") as mock_logger,
+        ):
             result = send_password_reset_confirmation_email(email, user_name)
 
             assert result is False
             mock_send_email.assert_called_once()
 
             # Verify exception logging - covers lines 202-203
-            mock_logger.error.assert_called_with("Error sending password reset confirmation email: %s", "SMTP Error")
+            mock_logger.error.assert_called_with(
+                "Error sending password reset confirmation email: %s", "SMTP Error"
+            )
 
-    def test_send_password_reset_confirmation_email_without_user_name(self):
+    def test_send_pwd_reset_conf_email_no_user_name(self):
         """Test password reset confirmation email without user name."""
         from libs.shared_utils.email_utils import send_password_reset_confirmation_email
 
         email = "test@example.com"
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
             result = send_password_reset_confirmation_email(email)
 
             assert result is True
@@ -1450,15 +1874,16 @@ class TestSendPasswordResetConfirmationEmail:
             assert "Hello User," in message_content
             assert "Hello User," in html_content
 
-    def test_send_password_reset_confirmation_email_content_validation(self):
+    def test_send_pwd_reset_conf_email_content_validation(self):
         """Test password reset confirmation email content validation."""
         from libs.shared_utils.email_utils import send_password_reset_confirmation_email
 
         email = "test@example.com"
         user_name = "John Doe"
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
             result = send_password_reset_confirmation_email(email, user_name)
 
             assert result is True
@@ -1498,11 +1923,18 @@ class TestSendOrganizationInvitationEmail:
         role_name = "member"
         expires_at = "2024-12-31T23:59:59+00:00"  # ISO format with timezone
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email, \
-             patch("libs.shared_utils.email_utils.logger") as mock_logger:
-
+        with (
+            patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email,
+            patch("libs.shared_utils.email_utils.logger") as mock_logger,
+        ):
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+                email,
+                organization_name,
+                inviter_name,
+                "Invitee Name",
+                invite_url,
+                role_name,
+                expires_at,
             )
 
             assert result is True
@@ -1518,7 +1950,9 @@ class TestSendOrganizationInvitationEmail:
             assert organization_name in call_args[0][3]  # html_message
 
             # Verify success logging
-            mock_logger.info.assert_called_with("Organization invitation email sent successfully to %s", email)
+            mock_logger.info.assert_called_with(
+                "Organization invitation email sent successfully to %s", email
+            )
 
     def test_send_organization_invitation_email_failure(self):
         """Test organization invitation email sending failure."""
@@ -1531,18 +1965,29 @@ class TestSendOrganizationInvitationEmail:
         role_name = "admin"
         expires_at = "2024-12-31 23:59:59"
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=False) as mock_send_email, \
-             patch("libs.shared_utils.email_utils.logger") as mock_logger:
-
+        with (
+            patch(
+                "libs.shared_utils.email_utils.send_email", return_value=False
+            ) as mock_send_email,
+            patch("libs.shared_utils.email_utils.logger") as mock_logger,
+        ):
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+                email,
+                organization_name,
+                inviter_name,
+                "Invitee Name",
+                invite_url,
+                role_name,
+                expires_at,
             )
 
             assert result is False
             mock_send_email.assert_called_once()
 
             # Verify error logging
-            mock_logger.error.assert_called_with("Failed to send organization invitation email to %s", email)
+            mock_logger.error.assert_called_with(
+                "Failed to send organization invitation email to %s", email
+            )
 
     def test_send_organization_invitation_email_exception(self):
         """Test organization invitation email sending with exception."""
@@ -1555,20 +2000,32 @@ class TestSendOrganizationInvitationEmail:
         role_name = "owner"
         expires_at = "2024-12-31 23:59:59"
 
-        with patch("libs.shared_utils.email_utils.send_email", side_effect=Exception("SMTP Error")) as mock_send_email, \
-             patch("libs.shared_utils.email_utils.logger") as mock_logger:
-
+        with (
+            patch(
+                "libs.shared_utils.email_utils.send_email",
+                side_effect=Exception("SMTP Error"),
+            ) as mock_send_email,
+            patch("libs.shared_utils.email_utils.logger") as mock_logger,
+        ):
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+                email,
+                organization_name,
+                inviter_name,
+                "Invitee Name",
+                invite_url,
+                role_name,
+                expires_at,
             )
 
             assert result is False
             mock_send_email.assert_called_once()
 
             # Verify exception logging
-            mock_logger.error.assert_called_with("Error sending organization invitation email: %s", "SMTP Error")
+            mock_logger.error.assert_called_with(
+                "Error sending organization invitation email: %s", "SMTP Error"
+            )
 
-    def test_send_organization_invitation_email_content_validation(self):
+    def test_send_org_invite_email_content_validation(self):
         """Test organization invitation email content validation."""
         from libs.shared_utils.email_utils import send_organization_invitation_email
 
@@ -1579,10 +2036,17 @@ class TestSendOrganizationInvitationEmail:
         role_name = "manager"
         expires_at = "2024-06-15T18:30:00+00:00"  # ISO format with timezone
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+                email,
+                organization_name,
+                inviter_name,
+                "Invitee Name",
+                invite_url,
+                role_name,
+                expires_at,
             )
 
             assert result is True
@@ -1618,7 +2082,7 @@ class TestSendOrganizationInvitationEmail:
             assert "Accept Invitation" in html_message
             assert "This invitation will expire" in html_message
 
-    def test_send_organization_invitation_email_with_timezone(self):
+    def test_send_org_invite_email_with_timezone(self):
         """Test organization invitation email with non-UTC timezone."""
         from libs.shared_utils.email_utils import send_organization_invitation_email
 
@@ -1629,9 +2093,17 @@ class TestSendOrganizationInvitationEmail:
         role_name = "member"
         expires_at = "2024-12-31T23:59:59+05:30"  # Non-UTC timezone
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+                email,
+                organization_name,
+                inviter_name,
+                "Invitee Name",
+                invite_url,
+                role_name,
+                expires_at,
             )
 
             assert result is True
@@ -1639,7 +2111,7 @@ class TestSendOrganizationInvitationEmail:
             # Should contain formatted date
             assert "December" in call_args[0][2] or "2024" in call_args[0][2]
 
-    def test_send_organization_invitation_email_with_naive_datetime(self):
+    def test_send_org_invite_email_naive_datetime(self):
         """Test organization invitation email with naive datetime (no timezone)."""
         from libs.shared_utils.email_utils import send_organization_invitation_email
 
@@ -1650,9 +2122,17 @@ class TestSendOrganizationInvitationEmail:
         role_name = "member"
         expires_at = "2024-12-31T23:59:59"  # Naive datetime (no timezone)
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+                email,
+                organization_name,
+                inviter_name,
+                "Invitee Name",
+                invite_url,
+                role_name,
+                expires_at,
             )
 
             assert result is True
@@ -1660,7 +2140,7 @@ class TestSendOrganizationInvitationEmail:
             # Should contain formatted date
             assert "December" in call_args[0][2] or "2024" in call_args[0][2]
 
-    def test_send_organization_invitation_email_with_invalid_date(self):
+    def test_send_org_invite_email_invalid_date(self):
         """Test organization invitation email with invalid date format."""
         from libs.shared_utils.email_utils import send_organization_invitation_email
 
@@ -1671,10 +2151,18 @@ class TestSendOrganizationInvitationEmail:
         role_name = "member"
         expires_at = "invalid-date-format"  # Invalid date
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email, \
-             patch("libs.shared_utils.email_utils.logger") as mock_logger:
+        with (
+            patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email,
+            patch("libs.shared_utils.email_utils.logger") as mock_logger,
+        ):
             result = send_organization_invitation_email(
-                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+                email,
+                organization_name,
+                inviter_name,
+                "Invitee Name",
+                invite_url,
+                role_name,
+                expires_at,
             )
 
             assert result is True
@@ -1684,7 +2172,7 @@ class TestSendOrganizationInvitationEmail:
             # Should log warning
             mock_logger.warning.assert_called()
 
-    def test_send_organization_invitation_email_html_structure(self):
+    def test_send_org_invite_email_html_structure(self):
         """Test organization invitation email HTML structure."""
         from libs.shared_utils.email_utils import send_organization_invitation_email
 
@@ -1695,10 +2183,17 @@ class TestSendOrganizationInvitationEmail:
         role_name = "member"
         expires_at = "2024-12-31"
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
             send_organization_invitation_email(
-                email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+                email,
+                organization_name,
+                inviter_name,
+                "Invitee Name",
+                invite_url,
+                role_name,
+                expires_at,
             )
 
             call_args = mock_send_email.call_args
@@ -1709,14 +2204,14 @@ class TestSendOrganizationInvitationEmail:
             assert "<html>" in html_message
             assert "<head>" in html_message
             assert "<body>" in html_message
-            assert "class=\"container\"" in html_message
-            assert "class=\"header\"" in html_message
-            assert "class=\"content\"" in html_message
-            assert "class=\"button\"" in html_message
-            assert "class=\"highlight\"" in html_message
-            assert "class=\"footer\"" in html_message
+            assert 'class="container"' in html_message
+            assert 'class="header"' in html_message
+            assert 'class="content"' in html_message
+            assert 'class="button"' in html_message
+            assert 'class="highlight"' in html_message
+            assert 'class="footer"' in html_message
 
-    def test_send_organization_invitation_email_different_roles(self):
+    def test_send_org_invite_email_different_roles(self):
         """Test organization invitation email with different role types."""
         from libs.shared_utils.email_utils import send_organization_invitation_email
 
@@ -1729,10 +2224,17 @@ class TestSendOrganizationInvitationEmail:
         roles = ["owner", "admin", "member", "viewer", "editor"]
 
         for role_name in roles:
-            with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-
+            with patch(
+                "libs.shared_utils.email_utils.send_email", return_value=True
+            ) as mock_send_email:
                 result = send_organization_invitation_email(
-                    email, organization_name, inviter_name, "Invitee Name", invite_url, role_name, expires_at
+                    email,
+                    organization_name,
+                    inviter_name,
+                    "Invitee Name",
+                    invite_url,
+                    role_name,
+                    expires_at,
                 )
 
                 assert result is True
@@ -1753,11 +2255,10 @@ class TestSendWelcomeEmail:
         """Test successful welcome email sending."""
         from libs.shared_utils.email_utils import send_welcome_email
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-            result = send_welcome_email(
-                email="test@example.com",
-                first_name="John"
-            )
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
+            result = send_welcome_email(email="test@example.com", first_name="John")
 
             assert result is True
             mock_send_email.assert_called_once()
@@ -1772,7 +2273,9 @@ class TestSendWelcomeEmail:
         """Test welcome email with custom parameters."""
         from libs.shared_utils.email_utils import send_welcome_email
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
             result = send_welcome_email(
                 email="test@example.com",
                 first_name="Jane",
@@ -1781,7 +2284,7 @@ class TestSendWelcomeEmail:
                 support_email="custom@support.com",
                 company_address="456 Custom St",
                 privacy_policy_url="https://custom.com/privacy",
-                terms_url="https://custom.com/terms"
+                terms_url="https://custom.com/terms",
             )
 
             assert result is True
@@ -1796,11 +2299,10 @@ class TestSendWelcomeEmail:
         """Test welcome email sending failure."""
         from libs.shared_utils.email_utils import send_welcome_email
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=False) as mock_send_email:
-            result = send_welcome_email(
-                email="test@example.com",
-                first_name="John"
-            )
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=False
+        ) as mock_send_email:
+            result = send_welcome_email(email="test@example.com", first_name="John")
 
             assert result is False
             mock_send_email.assert_called_once()
@@ -1809,24 +2311,24 @@ class TestSendWelcomeEmail:
         """Test welcome email sending with exception."""
         from libs.shared_utils.email_utils import send_welcome_email
 
-        with patch("libs.shared_utils.email_utils.send_email", side_effect=Exception("Email service error")):
-            result = send_welcome_email(
-                email="test@example.com",
-                first_name="John"
-            )
+        with patch(
+            "libs.shared_utils.email_utils.send_email",
+            side_effect=Exception("Email service error"),
+        ):
+            result = send_welcome_email(email="test@example.com", first_name="John")
 
             assert result is False
 
     def test_send_welcome_email_content_validation(self):
         """Test welcome email content validation."""
-        from libs.shared_utils.email_utils import send_welcome_email
         from datetime import datetime
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-            send_welcome_email(
-                email="test@example.com",
-                first_name="Alice"
-            )
+        from libs.shared_utils.email_utils import send_welcome_email
+
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
+            send_welcome_email(email="test@example.com", first_name="Alice")
 
             call_args = mock_send_email.call_args
             message = call_args[0][2]  # Plain text message
@@ -1850,11 +2352,10 @@ class TestSendWelcomeEmail:
         """Test welcome email HTML structure."""
         from libs.shared_utils.email_utils import send_welcome_email
 
-        with patch("libs.shared_utils.email_utils.send_email", return_value=True) as mock_send_email:
-            send_welcome_email(
-                email="test@example.com",
-                first_name="Bob"
-            )
+        with patch(
+            "libs.shared_utils.email_utils.send_email", return_value=True
+        ) as mock_send_email:
+            send_welcome_email(email="test@example.com", first_name="Bob")
 
             call_args = mock_send_email.call_args
             html_message = call_args[0][3]
@@ -1865,7 +2366,7 @@ class TestSendWelcomeEmail:
             assert "<head>" in html_message
             assert "<body" in html_message
             assert "<table" in html_message
-            assert "role=\"presentation\"" in html_message
+            assert 'role="presentation"' in html_message
             assert "mobile-responsive" in html_message.lower() or "@media" in html_message
 
 
@@ -1880,17 +2381,23 @@ class TestUpdateMetadataOfUser:
             "first_name": "John",
             "last_name": "Doe",
             "phone": "+1234567890",
-            "timezone": "UTC"
+            "timezone": "UTC",
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client",
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.user = {"id": user_id, "email": "test@example.com"}
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_metadata_of_user,
+            )
+
             result = await update_metadata_of_user(user_id, metadata)
 
             assert result is True
@@ -1905,12 +2412,18 @@ class TestUpdateMetadataOfUser:
         metadata = {"first_name": "John"}
         api_error = APIError({"message": "Invalid user ID"})
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client",
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=api_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_metadata_of_user,
+            )
+
             with pytest.raises(APIError):
                 await update_metadata_of_user(user_id, metadata)
 
@@ -1921,12 +2434,18 @@ class TestUpdateMetadataOfUser:
         metadata = {"first_name": "John"}
         network_error = HTTPError("Connection failed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client",
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=network_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_metadata_of_user,
+            )
+
             with pytest.raises(HTTPError):
                 await update_metadata_of_user(user_id, metadata)
 
@@ -1937,12 +2456,18 @@ class TestUpdateMetadataOfUser:
         metadata = {"first_name": "John"}
         validation_error = ValueError("Invalid metadata format")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client",
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = MagicMock(side_effect=validation_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_metadata_of_user
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_metadata_of_user,
+            )
+
             with pytest.raises(ValueError):
                 await update_metadata_of_user(user_id, metadata)
 
@@ -1951,7 +2476,9 @@ class TestUpdatePasswordWithLinkIdentity:
     """Test cases for update_password_with_link_identity function."""
 
     @pytest.mark.asyncio
-    async def test_update_password_with_link_identity_success_existing_email_provider(self):
+    async def test_update_pwd_link_existing_email(
+        self,
+    ):
         """Test password update when user already has email provider."""
         user_id = str(uuid.uuid4())
         password = "new_password123"
@@ -1964,13 +2491,18 @@ class TestUpdatePasswordWithLinkIdentity:
         mock_update_result = MagicMock()
         mock_update_result.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client"
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_update_result)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_password_with_link_identity
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_password_with_link_identity,
+            )
+
             result = await update_password_with_link_identity(user_id, password)
 
             assert result is True
@@ -1980,7 +2512,7 @@ class TestUpdatePasswordWithLinkIdentity:
             )
 
     @pytest.mark.asyncio
-    async def test_update_password_with_link_identity_success_oauth_user(self):
+    async def test_update_pwd_link_identity_success_oauth_user(self):
         """Test adding email/password identity to OAuth user."""
         user_id = str(uuid.uuid4())
         password = "new_password123"
@@ -1993,13 +2525,18 @@ class TestUpdatePasswordWithLinkIdentity:
         mock_update_result = MagicMock()
         mock_update_result.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client"
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_update_result)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_password_with_link_identity
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_password_with_link_identity,
+            )
+
             result = await update_password_with_link_identity(user_id, password)
 
             assert result is True
@@ -2008,30 +2545,31 @@ class TestUpdatePasswordWithLinkIdentity:
             # Verify the call includes both password and updated providers
             expected_call_args = {
                 "password": password,
-                "app_metadata": {
-                    "providers": ["google", "email"]
-                },
-                "user_metadata": {
-                    "first_name": "John"
-                }
+                "app_metadata": {"providers": ["google", "email"]},
+                "user_metadata": {"first_name": "John"},
             }
             mock_supabase.auth.admin.update_user_by_id.assert_called_once_with(
                 user_id, expected_call_args
             )
 
     @pytest.mark.asyncio
-    async def test_update_password_with_link_identity_auth_api_error(self):
+    async def test_update_pwd_link_identity_auth_api_error(self):
         """Test password update with AuthApiError."""
         user_id = str(uuid.uuid4())
         password = "new_password123"
         auth_error = AuthApiError("Invalid user", status=400, code="invalid_user")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client"
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=auth_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_password_with_link_identity
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_password_with_link_identity,
+            )
+
             with pytest.raises(AuthApiError):
                 await update_password_with_link_identity(user_id, password)
 
@@ -2047,34 +2585,44 @@ class TestUpdatePasswordWithLinkIdentity:
         mock_user_data.user.email = "test@example.com"
         mock_user_data.user.user_metadata = {}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client"
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(side_effect=api_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_password_with_link_identity
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_password_with_link_identity,
+            )
+
             with pytest.raises(APIError):
                 await update_password_with_link_identity(user_id, password)
 
     @pytest.mark.asyncio
-    async def test_update_password_with_link_identity_network_error(self):
+    async def test_update_pwd_link_identity_network_error(self):
         """Test password update with network error."""
         user_id = str(uuid.uuid4())
         password = "new_password123"
         network_error = HTTPError("Connection failed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client"
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=network_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_password_with_link_identity
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_password_with_link_identity,
+            )
+
             with pytest.raises(HTTPError):
                 await update_password_with_link_identity(user_id, password)
 
     @pytest.mark.asyncio
-    async def test_update_password_with_link_identity_validation_error(self):
+    async def test_update_pwd_link_identity_validation_error(self):
         """Test password update with validation error."""
         user_id = str(uuid.uuid4())
         password = "new_password123"
@@ -2085,13 +2633,18 @@ class TestUpdatePasswordWithLinkIdentity:
         mock_user_data.user.email = "test@example.com"
         mock_user_data.user.user_metadata = {}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client"
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(side_effect=validation_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_password_with_link_identity
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_password_with_link_identity,
+            )
+
             with pytest.raises(ValueError):
                 await update_password_with_link_identity(user_id, password)
 
@@ -2107,15 +2660,19 @@ class TestGetUserById:
             "id": user_id,
             "email": "test@example.com",
             "user_metadata": {"first_name": "John"},
-            "app_metadata": {"providers": ["email"]}
+            "app_metadata": {"providers": ["email"]},
         }
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
+
             result = await get_user_by_id(user_id)
 
             assert result == mock_user_data
@@ -2127,12 +2684,16 @@ class TestGetUserById:
         user_id = str(uuid.uuid4())
         auth_error = AuthApiError("User not found", status=404, code="user_not_found")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=auth_error)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
+
             with pytest.raises(AuthApiError):
                 await get_user_by_id(user_id)
 
@@ -2142,12 +2703,16 @@ class TestGetUserById:
         user_id = str(uuid.uuid4())
         network_error = HTTPError("Connection failed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=network_error)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
+
             with pytest.raises(HTTPError):
                 await get_user_by_id(user_id)
 
@@ -2157,39 +2722,52 @@ class TestGetUserById:
         user_id = str(uuid.uuid4())
         validation_error = ValueError("Invalid user ID format")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=validation_error)
             mock_get_client.return_value = mock_supabase
 
             from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
+
             with pytest.raises(ValueError):
                 await get_user_by_id(user_id)
 
     @pytest.mark.asyncio
     async def test_get_user_by_id_auth_api_error_retry_success(self):
-        """Test get_user_by_id with AuthApiError that retries and succeeds - covers retry logic lines 225-231."""
+        """Test get_user_by_id with AuthApiError that retries and succeeds."""
         user_id = str(uuid.uuid4())
         mock_user_data = MagicMock()
         mock_user_data.user = {"id": user_id}
 
-        from supabase_auth.errors import AuthApiError
-
         # First call fails with "User not allowed", second succeeds
         auth_error = AuthApiError("User not allowed", status=403, code="user_not_allowed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client, \
-             patch("asyncio.sleep", AsyncMock()):  # Mock sleep to speed up test
+        with (
+            patch(
+                ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+                AsyncMock(),
+            ) as mock_get_client,
+            patch("asyncio.sleep", AsyncMock()),
+        ):  # Mock sleep to speed up test
             mock_supabase = MagicMock()
-            mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=[auth_error, mock_user_data])
+            mock_supabase.auth.admin.get_user_by_id = AsyncMock(
+                side_effect=[auth_error, mock_user_data]
+            )
             mock_get_client.return_value = mock_supabase
 
             # Import cache to patch it
             from libs.shared_db.supabase_db.db import _cache
+
             original_cache_value = _cache._supabase_admin_client
 
             try:
-                from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
+                from libs.shared_db.supabase_db.admin_operations.user import (
+                    get_user_by_id,
+                )
+
                 result = await get_user_by_id(user_id)
 
                 assert result == mock_user_data
@@ -2202,26 +2780,33 @@ class TestGetUserById:
 
     @pytest.mark.asyncio
     async def test_get_user_by_id_auth_api_error_retry_exhausted(self):
-        """Test get_user_by_id with AuthApiError that exhausts retries - covers retry logic lines 225-231."""
+        """Test get_user_by_id with AuthApiError that exhausts retries"""
         user_id = str(uuid.uuid4())
-
-        from supabase_auth.errors import AuthApiError
 
         # Both attempts fail with "User not allowed"
         auth_error = AuthApiError("User not allowed", status=403, code="user_not_allowed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client, \
-             patch("asyncio.sleep", AsyncMock()):  # Mock sleep to speed up test
+        with (
+            patch(
+                ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+                AsyncMock(),
+            ) as mock_get_client,
+            patch("asyncio.sleep", AsyncMock()),
+        ):  # Mock sleep to speed up test
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(side_effect=auth_error)
             mock_get_client.return_value = mock_supabase
 
             # Import cache to patch it
             from libs.shared_db.supabase_db.db import _cache
+
             original_cache_value = _cache._supabase_admin_client
 
             try:
-                from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
+                from libs.shared_db.supabase_db.admin_operations.user import (
+                    get_user_by_id,
+                )
+
                 with pytest.raises(AuthApiError):
                     await get_user_by_id(user_id)
 
@@ -2236,8 +2821,8 @@ class TestUpdatePhoneOfUser:
     """Test cases for update_phone_of_user function."""
 
     @pytest.mark.asyncio
-    async def test_update_phone_of_user_success_with_existing_metadata(self):
-        """Test successful phone update with existing metadata - covers lines 122-141."""
+    async def test_update_phone_user_success_existing_metadata(self):
+        """Test successful phone update with existing metadata."""
         user_id = str(uuid.uuid4())
         phone = "+1234567890"
 
@@ -2248,13 +2833,24 @@ class TestUpdatePhoneOfUser:
         mock_result = MagicMock()
         mock_result.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client, \
-             patch("libs.shared_db.supabase_db.admin_operations.user.get_user_by_id", AsyncMock(return_value=mock_user_data)):
+        with (
+            patch(
+                ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+                AsyncMock(),
+            ) as mock_get_client,
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user.get_user_by_id",
+                AsyncMock(return_value=mock_user_data),
+            ),
+        ):
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_phone_of_user
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_phone_of_user,
+            )
+
             result = await update_phone_of_user(user_id, phone)
 
             assert result is True
@@ -2265,8 +2861,8 @@ class TestUpdatePhoneOfUser:
             assert call_args[1]["user_metadata"]["first_name"] == "John"
 
     @pytest.mark.asyncio
-    async def test_update_phone_of_user_success_no_existing_metadata(self):
-        """Test successful phone update with no existing metadata - covers lines 130-134."""
+    async def test_update_phone_user_success_no_metadata(self):
+        """Test successful phone update with no existing metadata."""
         user_id = str(uuid.uuid4())
         phone = "+1234567890"
 
@@ -2277,13 +2873,24 @@ class TestUpdatePhoneOfUser:
         mock_result = MagicMock()
         mock_result.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client, \
-             patch("libs.shared_db.supabase_db.admin_operations.user.get_user_by_id", AsyncMock(return_value=mock_user_data)):
+        with (
+            patch(
+                ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+                AsyncMock(),
+            ) as mock_get_client,
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user.get_user_by_id",
+                AsyncMock(return_value=mock_user_data),
+            ),
+        ):
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_phone_of_user
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_phone_of_user,
+            )
+
             result = await update_phone_of_user(user_id, phone)
 
             assert result is True
@@ -2294,7 +2901,7 @@ class TestUpdatePhoneOfUser:
 
     @pytest.mark.asyncio
     async def test_update_phone_of_user_success_empty_metadata(self):
-        """Test successful phone update with empty metadata dict - covers lines 133-134."""
+        """Test successful phone update with empty metadata dict."""
         user_id = str(uuid.uuid4())
         phone = "+1234567890"
 
@@ -2305,13 +2912,24 @@ class TestUpdatePhoneOfUser:
         mock_result = MagicMock()
         mock_result.user = {"id": user_id}
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client, \
-             patch("libs.shared_db.supabase_db.admin_operations.user.get_user_by_id", AsyncMock(return_value=mock_user_data)):
+        with (
+            patch(
+                ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+                AsyncMock(),
+            ) as mock_get_client,
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user.get_user_by_id",
+                AsyncMock(return_value=mock_user_data),
+            ),
+        ):
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_phone_of_user
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_phone_of_user,
+            )
+
             result = await update_phone_of_user(user_id, phone)
 
             assert result is True
@@ -2324,9 +2942,20 @@ class TestUpdatePhoneOfUser:
         user_id = str(uuid.uuid4())
         phone = "+1234567890"
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()), \
-             patch("libs.shared_db.supabase_db.admin_operations.user.get_user_by_id", AsyncMock(return_value=None)):
-            from libs.shared_db.supabase_db.admin_operations.user import update_phone_of_user
+        with (
+            patch(
+                ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+                AsyncMock(),
+            ),
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user.get_user_by_id",
+                AsyncMock(return_value=None),
+            ),
+        ):
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_phone_of_user,
+            )
+
             with pytest.raises(ValueError, match="User not found"):
                 await update_phone_of_user(user_id, phone)
 
@@ -2335,7 +2964,7 @@ class TestUpdatePasswordWithLinkIdentityErrorHandling:
     """Test cases for error handling in update_password_with_link_identity function."""
 
     @pytest.mark.asyncio
-    async def test_update_password_with_link_identity_user_not_allowed_error(self):
+    async def test_update_pwd_link_identity_user_not_allowed(self):
         """Test password update with 'user not allowed' AuthApiError - covers lines 199-203."""
         user_id = str(uuid.uuid4())
         password = "new_password123"
@@ -2345,17 +2974,21 @@ class TestUpdatePasswordWithLinkIdentityErrorHandling:
         mock_user_data.user.email = "test@example.com"
         mock_user_data.user.user_metadata = {}
 
-        from supabase_auth.errors import AuthApiError
-        auth_error = AuthApiError("User not allowed to change password", status=403, code="user_not_allowed")
+        auth_error = AuthApiError(
+            "User not allowed to change password", status=403, code="user_not_allowed"
+        )
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client") as mock_get_client:
+        with patch(
+            "libs.shared_db.supabase_db.admin_operations.user.get_fresh_supabase_admin_client"
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.get_user_by_id = AsyncMock(return_value=mock_user_data)
             mock_supabase.auth.admin.update_user_by_id = AsyncMock(side_effect=auth_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import update_password_with_link_identity
-            from fastapi import HTTPException
+            from libs.shared_db.supabase_db.admin_operations.user import (
+                update_password_with_link_identity,
+            )
 
             with pytest.raises(HTTPException) as exc_info:
                 await update_password_with_link_identity(user_id, password)
@@ -2374,12 +3007,14 @@ class TestDeleteAuthUserErrorHandling:
         http_status_error = HTTPStatusError("User not found", request=None, response=MagicMock())
         http_status_error.response.status_code = 404
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client", AsyncMock()) as mock_get_client:
+        with patch(
+            ("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"),
+            AsyncMock(),
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=http_status_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
             with pytest.raises(HTTPException) as exc_info:
                 await delete_auth_user(user_id)
 
@@ -2392,14 +3027,18 @@ class TestDeleteAuthUserErrorHandling:
         user_id = str(uuid.uuid4())
         auth_error = AuthApiError("User not allowed", status=403, code="user_not_allowed")
 
-        with patch("libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client") as mock_get_client, \
-             patch("libs.shared_db.supabase_db.admin_operations.user.log_exception") as mock_log_exception:
-
+        with (
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user.get_supabase_admin_client"
+            ) as mock_get_client,
+            patch(
+                "libs.shared_db.supabase_db.admin_operations.user.log_exception"
+            ) as mock_log_exception,
+        ):
             mock_supabase = MagicMock()
             mock_supabase.auth.admin.delete_user = AsyncMock(side_effect=auth_error)
             mock_get_client.return_value = mock_supabase
 
-            from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
             with pytest.raises(AuthApiError):
                 await delete_auth_user(user_id)
 

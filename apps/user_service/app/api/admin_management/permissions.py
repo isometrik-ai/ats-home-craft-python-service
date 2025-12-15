@@ -1,35 +1,12 @@
-"""
-Permissions Management API Module
-
+"""Permissions Management API Module
 This module provides CRUD operations for permission management.
 All endpoints include proper authentication, validation, and database operations.
-
 """
 
-import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, status, Depends, Request
-from pydantic import BaseModel
-
-# Logger import
-from apps.user_service.app.dependencies.logger import get_logger
-
-# Utility imports
-from apps.user_service.app.dependencies.common_utils import (
-    validate_uuid_format,
-    handle_api_exceptions,
-    format_permissions_data
-)
-
-# Schema imports
-from apps.user_service.app.schemas.admin_access_management import (
-    PermissionsResponse,
-    CreatePermissionRequest,
-)
-
-
-from apps.user_service.app.dependencies.common_utils import check_permissions
+from fastapi import APIRouter, Depends, Path, Request
+from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 
@@ -38,26 +15,37 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 
-# Local imports
-from libs.shared_utils.common_query import (
-    SETTINGS_ROLES_MANAGE,
-    SETTINGS_SYSTEM_MANAGE
+# Utility imports
+from apps.user_service.app.dependencies.common_utils import (
+    check_permissions,
+    format_permissions_data,
+    handle_api_exceptions,
+)
+
+# Logger import
+from apps.user_service.app.dependencies.logger import get_logger
+
+# Schema imports
+from apps.user_service.app.schemas.admin_access_management import (
+    CreatePermissionRequest,
+)
+
+# Database operations imports
+from libs.shared_db.postgres_db.user_service_operations.permission_operations import (
+    create_new_permission,
+    delete_permission,
+    get_all_permissions,
+    get_permission_details_by_id,
 )
 from libs.shared_middleware.jwt_auth import (
     get_user_from_auth,
 )
-# Database operations imports
-from libs.shared_db.postgres_db.user_service_operations.permission_operations import (
-    get_permission_details_by_id,
-    get_all_permissions,
-    create_new_permission,
-    delete_permission,
-)
 
-# Import DatabaseOperationError for manual error handling
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
-    DatabaseOperationError
-)
+# Local imports
+from libs.shared_utils.common_query import SETTINGS_ROLES_MANAGE, SETTINGS_SYSTEM_MANAGE
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.response_factory import success_response
+from libs.shared_utils.status_codes import CustomStatusCode
 
 # Create router for permissions endpoints
 router = APIRouter(prefix="/permissions", tags=["Permissions Management"])
@@ -65,191 +53,115 @@ router = APIRouter(prefix="/permissions", tags=["Permissions Management"])
 # Initialize logger for permissions module
 logger = get_logger("permissions-api")
 
-# Authentication description for API documentation
-AUTH_DESCRIPTION = "Bearer token required for authentication"
-PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE = "Permissions retrieved successfully"
-
-
-class PermissionResponse(BaseModel):
-    """Response model for permission operations"""
-
-    message: str
-    status: str = "success"
-
 
 @handle_api_exceptions("get permissions")
-@router.get("", response_model=PermissionsResponse, status_code=status.HTTP_200_OK)
+@router.get(
+    "",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get all permissions for the current organization",
+    summary="Get all permissions for the current organization",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Permissions retrieved successfully"},
+        http_status.HTTP_204_NO_CONTENT: {"description": "No permissions found"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
 @limiter.limit("100/minute")
-# @audit_api_call(
-#     action_type="READ",
-#     data_classification="general",
-#     compliance_tags=["access_control", "soc2_audit"],
-#     table_name="permissions",
-#     category="PERMISSION",
-# )
 async def get_permissions(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth)
+    current_user: dict = Depends(get_user_from_auth),
 ):
-    """
-    Get all permissions for the current organization (Optimized & Truly Async)
-
-    This endpoint retrieves all permissions available in the organization.
-    Uses truly async database operations for best performance and scalability.
-
-    Performance Features:
-    - JWT authentication
-    - Async database operations (non-blocking)
-    - Connection pooling
-    - Efficient queries with proper indexing
-
-    Args:
-        request (Request): The FastAPI request object
-        current_user (dict): Decoded JWT token containing user information
-
-    Returns:
-        PermissionsResponse: List of permissions with id, name,
-          code, category, description, and created_at
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Set audit context for permissions listing
-    request.state.audit_table = "permissions"
-    request.state.audit_description = "Retrieved all permissions for organization"
-    request.state.audit_risk_level = "low"
+    """Get all permissions for the current organization"""
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(
-        current_user=current_user, permission_codes=SETTINGS_ROLES_MANAGE,
-        action_description="get permissions"
+        current_user=current_user,
+        permission_codes=SETTINGS_ROLES_MANAGE,
     )
 
-    try:
-        permissions_data = await get_all_permissions(user_context.organization_id)
-    except DatabaseOperationError as e:
-        logger.error(
-            "Database error retrieving permissions - Request ID: %s, Error: %s",
-            request_id, str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error during get permissions: {str(e)}",
-        ) from e
+    permissions_data = await get_all_permissions(organization_id=user_context.organization_id)
 
     if not permissions_data:
-        logger.warning("No permissions found - Request ID: %s, ",request_id)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No permissions found",
+        return success_response(
+            request=request,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_204_NO_CONTENT,
         )
 
     # Format permissions data efficiently
     permissions = format_permissions_data(permissions_data)
 
-
-    # Set audit data for successful retrieval
-    request.state.raw_audit_new_data = {
-        "organization_id": user_context.organization_id,
-        "permissions_count": len(permissions),
-        "permission_ids": [str(perm["id"]) for perm in permissions_data],
-        "permission_categories": list(
-            {perm["category"] for perm in permissions_data if perm["category"]}
-        ),
-    }
-
-
-    return PermissionsResponse(
-        message=PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE,
-        permissions=permissions,
+    return success_response(
+        request=request,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=permissions,
     )
 
 
 @handle_api_exceptions("get permission by ID")
 @router.get(
     "/{permission_id}",
-    response_model=PermissionsResponse,
-    status_code=status.HTTP_200_OK,
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get permission by ID",
+    summary="Get permission by ID",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Permission retrieved successfully"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Permission not found"},
+    },
 )
 @limiter.limit("100/minute")
-# @audit_api_call(
-#     action_type="READ",
-#     data_classification="confidential",
-#     compliance_tags=["access_control", "soc2_audit", "audit_required"],
-#     table_name="permissions",
-#     category="PERMISSION",
-# )
 async def get_permission_by_id(
     request: Request,
-    permission_id: str,
-    current_user: dict = Depends(get_user_from_auth)
+    permission_id: str = Path(..., description="The ID of the permission to retrieve"),
+    current_user: dict = Depends(get_user_from_auth),
 ):
-    """
-    Get permission by ID
-
-    Args:
-        permission_id (string): The ID of the permission to retrieve
-
-    Returns:
-        PermissionResponse: Success message indicating API is working
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Set audit context for permission retrieval
-    request.state.audit_requested_id = permission_id
-    request.state.audit_table = "permissions"
-    request.state.audit_description = f"Retrieved permission by ID: {permission_id}"
-    request.state.audit_risk_level = "low"
-
-    # Validate role_id format using utility function
-    validate_uuid_format(permission_id, "permission ID")
-
-    # Extract and validate user context from JWT token
+    """Get permission by ID"""
     user_context = await check_permissions(
-        current_user=current_user, permission_codes=SETTINGS_ROLES_MANAGE,
-        action_description="get permission by ID"
+        current_user=current_user,
+        permission_codes=SETTINGS_ROLES_MANAGE,
     )
 
-    try:
-        permission = await get_permission_details_by_id(
-            permission_id, user_context.organization_id
-        )
-    except DatabaseOperationError as e:
-        logger.error(
-            "Database error retrieving permission - Request ID: %s, Error: %s",
-            request_id, str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error during get permission by ID: {str(e)}",
-        ) from e
+    permission = await get_permission_details_by_id(
+        permission_id=permission_id, organization_id=user_context.organization_id
+    )
 
     if not permission:
-        logger.warning("Permission not found - Request ID: %s, ",request_id)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Permission not found",
+        raise NotFoundException(
+            message_key="permissions.errors.not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
         )
 
     permissions = format_permissions_data([permission])
 
-    # Set audit data for successful retrieval
-    request.state.raw_audit_new_data = {
-        "permission_id": permission_id,
-        "permission_name": permission["name"],
-        "permission_code": permission["code"],
-        "permission_category": permission["category"],
-        "organization_id": user_context.organization_id,
-    }
-
-    return PermissionsResponse(
-        message=PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE,
-        permissions=permissions,
+    return success_response(
+        request=request,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=permissions,
     )
 
 
 @handle_api_exceptions("create permission")
 @router.post(
-    "", response_model=PermissionsResponse, status_code=status.HTTP_201_CREATED
+    "",
+    response_model=None,
+    status_code=http_status.HTTP_201_CREATED,
+    description="Create a new permission",
+    summary="Create a new permission",
+    responses={
+        http_status.HTTP_201_CREATED: {"description": "Permission created successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -260,19 +172,15 @@ async def get_permission_by_id(
     category="PERMISSION",
 )
 async def create_permission(
-    permission_data: CreatePermissionRequest,
     request: Request,
-    current_user: dict = Depends(get_user_from_auth)
+    permission_data: CreatePermissionRequest,
+    current_user: dict = Depends(get_user_from_auth),
 ):
-    """
-    Create a new permission
+    """Create a new permission
 
     Returns:
         PermissionResponse: Success message indicating API is working
     """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
     # Set audit context for permission creation
     request.state.audit_table = "permissions"
     request.state.audit_description = (
@@ -282,8 +190,8 @@ async def create_permission(
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(
-        current_user=current_user, permission_codes=SETTINGS_SYSTEM_MANAGE,
-        action_description="create permission"
+        current_user=current_user,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
     )
 
     request.state.audit_user_context = {
@@ -292,31 +200,15 @@ async def create_permission(
         "organization_id": user_context.organization_id,
     }
 
-    try:
-        permission = await create_new_permission(
-            permission_data=permission_data,
-            organization_id=user_context.organization_id
-        )
-    except DatabaseOperationError as e:
-        logger.error(
-            "Database error creating permission - Request ID: %s, Error: %s",
-            request_id, str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error during create permission: {str(e)}",
-        ) from e
-
+    permission = await create_new_permission(
+        permission_data=permission_data,
+        organization_id=user_context.organization_id,
+    )
 
     if not permission:
-        logger.warning("Failed to create permission - Request ID: %s, ",request_id)
-        logger.warning(
-                "Permission Name: %s, Permission Code: %s, ",
-                permission_data.name,permission_data.code
-            )
-        logger.warning("Organization ID: %s, ",user_context.organization_id)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to create permission",
+        raise ValidationException(
+            message_key="permissions.errors.creation_failed",
+            custom_code=CustomStatusCode.INVALID_DATA,
         )
 
     permissions = format_permissions_data([permission])
@@ -329,21 +221,31 @@ async def create_permission(
         "permission_category": permission["category"],
         "permission_description": permission["description"],
         "organization_id": user_context.organization_id,
-        "created_at": (
-            permission["created_at"] if permission["created_at"] else None
-        ),
+        "created_at": (permission["created_at"] if permission["created_at"] else None),
     }
-
-
-    return PermissionsResponse(
-        message=PERMISSIONS_RETRIEVED_SUCCESSFULLY_MESSAGE,
-        permissions=permissions,
+    return success_response(
+        request=request,
+        message_key="permissions.success.creation_successful",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=permissions,
     )
 
 
 @router.delete(
     "/{permission_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Delete a permission by ID",
+    summary="Delete a permission by ID",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Permission deleted successfully"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Permission not found"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -354,21 +256,11 @@ async def create_permission(
     category="PERMISSION",
 )
 async def delete_permission_by_id(
-    request: Request, permission_id: uuid.UUID,
-    current_user: dict = Depends(get_user_from_auth)
+    request: Request,
+    permission_id: str = Path(..., description="The ID of the permission to delete"),
+    current_user: dict = Depends(get_user_from_auth),
 ):
-    """
-    Delete a permission
-
-    Args:
-        permission_id (int): The ID of the permission to delete
-
-    Returns:
-        PermissionResponse: Success message indicating API is working
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
+    """Delete a permission by ID"""
     # Set audit context for permission deletion
     request.state.audit_requested_id = str(permission_id)
     request.state.audit_table = "permissions"
@@ -377,8 +269,8 @@ async def delete_permission_by_id(
 
     # Extract and validate user context from JWT token
     user_context = await check_permissions(
-        current_user=current_user, permission_codes=SETTINGS_SYSTEM_MANAGE,
-        action_description="delete permission"
+        current_user=current_user,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
     )
 
     request.state.audit_user_context = {
@@ -389,10 +281,9 @@ async def delete_permission_by_id(
 
     permission = await get_permission_details_by_id(permission_id, user_context.organization_id)
     if not permission:
-        logger.warning("Permission not found - Request ID: %s, ",request_id)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Permission not found",
+        raise NotFoundException(
+            message_key="permissions.errors.not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
         )
 
     # Set audit data for deletion (placeholder since this endpoint is not fully implemented)
@@ -410,10 +301,14 @@ async def delete_permission_by_id(
 
     result = await delete_permission(permission_id, user_context.organization_id)
     if not result:
-        logger.warning("Failed to delete permission - Request ID: %s, ",request_id)
-        logger.warning("Permission ID: %s, ",permission_id)
-        logger.warning("Organization ID: %s, ",user_context.organization_id)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to delete permission",
+        raise ValidationException(
+            message_key="permissions.errors.deletion_failed",
+            custom_code=CustomStatusCode.INVALID_DATA,
         )
+
+    return success_response(
+        request=request,
+        message_key="permissions.success.deletion_successful",
+        custom_code=CustomStatusCode.DELETED,
+        status_code=http_status.HTTP_200_OK,
+    )

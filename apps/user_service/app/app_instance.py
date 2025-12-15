@@ -1,5 +1,4 @@
-"""
-app_instance.py
+"""App instance module.
 
 This module initializes and configures the FastAPI
 application instance with rate limiting capabilities using SlowAPI.
@@ -21,8 +20,7 @@ This module should be imported and used to create the FastAPI
 application instance with rate limiting enabled.
 """
 
-# ruff: noqa
-from libs.shared_utils.fastapi_app import create_fastapi_app
 from apps.user_service.app.lifespan import lifespan
+from libs.shared_utils.fastapi_app import create_fastapi_app
 
 app, limiter = create_fastapi_app(lifespan=lifespan)

@@ -1,24 +1,27 @@
-# pylint: disable=all
+"""Test cases for role operations module."""
+
+# pylint: disable=too-many-public-methods
+
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from libs.shared_db.postgres_db.user_service_operations.role_operations import (
-    create_role,
-    get_role_by_id,
-    update_role,
-    delete_role,
-    check_role_exists,
-    get_roles_list,
-    get_roles_count,
     assign_permissions_to_role,
-    remove_permissions_from_role,
-    remove_all_permissions_from_role,
-    get_role_permissions,
     check_permissions_exist,
+    check_role_exists,
     check_role_name_unique,
-    check_role_usage
+    check_role_usage,
+    create_role,
+    delete_role,
+    get_role_by_id,
+    get_role_permissions,
+    get_roles_count,
+    get_roles_list,
+    remove_all_permissions_from_role,
+    remove_permissions_from_role,
+    update_role,
 )
 
 
@@ -44,14 +47,21 @@ class TestRoleOperations:
             "organization_id": organization_id,
             "is_default": is_default,
             "created_at": "2024-01-01T00:00:00Z",
-            "updated_at": "2024-01-01T00:00:00Z"
+            "updated_at": "2024-01-01T00:00:00Z",
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_created_role]
-            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await create_role(name, description, organization_id, is_default)
@@ -74,14 +84,21 @@ class TestRoleOperations:
             "organization_id": organization_id,
             "is_default": is_default,
             "created_at": "2024-01-01T00:00:00Z",
-            "updated_at": "2024-01-01T00:00:00Z"
+            "updated_at": "2024-01-01T00:00:00Z",
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_created_role]
-            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await create_role(name, description, organization_id, is_default)
@@ -96,11 +113,18 @@ class TestRoleOperations:
         description = "Test role description"
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await create_role(name, description, organization_id)
@@ -120,14 +144,21 @@ class TestRoleOperations:
             "organization_id": organization_id,
             "is_default": False,
             "created_at": "2024-01-01T00:00:00Z",
-            "updated_at": "2024-01-01T00:00:00Z"
+            "updated_at": "2024-01-01T00:00:00Z",
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_role]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await get_role_by_id(role_id, organization_id)
@@ -141,11 +172,18 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await get_role_by_id(role_id, organization_id)
@@ -157,10 +195,7 @@ class TestRoleOperations:
         """Test successful role update."""
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
-        update_data = {
-            "name": "Updated Role",
-            "description": "Updated description"
-        }
+        update_data = {"name": "Updated Role", "description": "Updated description"}
 
         mock_updated_role = {
             "id": role_id,
@@ -169,14 +204,21 @@ class TestRoleOperations:
             "organization_id": organization_id,
             "is_default": False,
             "created_at": "2024-01-01T00:00:00Z",
-            "updated_at": "2024-01-01T00:00:00Z"
+            "updated_at": "2024-01-01T00:00:00Z",
         }
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [mock_updated_role]
-            mock_supabase.table.return_value.update.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.update.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await update_role(role_id, organization_id, update_data)
@@ -190,11 +232,18 @@ class TestRoleOperations:
         organization_id = str(uuid.uuid4())
         update_data = {"name": "Updated Role"}
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.update.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.update.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await update_role(role_id, organization_id, update_data)
@@ -207,11 +256,18 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": "deleted_id"}]
-            mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.delete.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await delete_role(role_id, organization_id)
@@ -224,11 +280,18 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.delete.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await delete_role(role_id, organization_id)
@@ -241,11 +304,18 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": "role_id"}]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await check_role_exists(role_id, organization_id)
@@ -258,11 +328,18 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await check_role_exists(role_id, organization_id)
@@ -282,7 +359,7 @@ class TestRoleOperations:
                 "organization_id": organization_id,
                 "is_default": True,
                 "created_at": "2024-01-01T00:00:00Z",
-                "updated_at": "2024-01-01T00:00:00Z"
+                "updated_at": "2024-01-01T00:00:00Z",
             },
             {
                 "id": str(uuid.uuid4()),
@@ -291,11 +368,16 @@ class TestRoleOperations:
                 "organization_id": organization_id,
                 "is_default": False,
                 "created_at": "2024-01-02T00:00:00Z",
-                "updated_at": "2024-01-02T00:00:00Z"
-            }
+                "updated_at": "2024-01-02T00:00:00Z",
+            },
         ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
 
             # Mock the main roles query
@@ -314,14 +396,10 @@ class TestRoleOperations:
             mock_permission_result2 = MagicMock()
             mock_permission_result2.data = [{"permissions": {"category": "admin"}}]
 
-            # Set up side_effect to return different results for different calls
-            mock_supabase.table.return_value.select.return_value.eq.return_value.neq.return_value.order.return_value.range.return_value.execute = AsyncMock(return_value=mock_roles_result)
-
             # Mock the user count calls
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute = AsyncMock(side_effect=[mock_user_count_result1, mock_user_count_result2])
-
-            # Mock the permission calls
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(side_effect=[mock_permission_result1, mock_permission_result2])
+            (
+                mock_supabase.table.return_value.select.return_value.eq.return_value.execute
+            ) = AsyncMock(side_effect=[mock_user_count_result1, mock_user_count_result2])
 
             mock_get_client.return_value = mock_supabase
 
@@ -347,11 +425,16 @@ class TestRoleOperations:
                 "organization_id": organization_id,
                 "is_default": True,
                 "created_at": "2024-01-01T00:00:00Z",
-                "updated_at": "2024-01-01T00:00:00Z"
+                "updated_at": "2024-01-01T00:00:00Z",
             }
         ]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
 
             # Mock the main roles query
@@ -366,11 +449,6 @@ class TestRoleOperations:
             mock_permission_result = MagicMock()
             mock_permission_result.data = [{"permissions": {"category": "users"}}]
 
-            # Set up side_effect to return different results for different calls
-            mock_supabase.table.return_value.select.return_value.eq.return_value.neq.return_value.ilike.return_value.order.return_value.range.return_value.execute = AsyncMock(return_value=mock_roles_result)
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_user_count_result)
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_permission_result)
-
             mock_get_client.return_value = mock_supabase
 
             result = await get_roles_list(organization_id, search=search, limit=20, offset=0)
@@ -384,11 +462,15 @@ class TestRoleOperations:
         """Test roles list retrieval when no roles found."""
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.neq.return_value.order.return_value.range.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await get_roles_list(organization_id)
@@ -400,11 +482,15 @@ class TestRoleOperations:
         """Test successful roles count retrieval."""
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.count = 15
-            mock_supabase.table.return_value.select.return_value.eq.return_value.neq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await get_roles_count(organization_id)
@@ -417,11 +503,15 @@ class TestRoleOperations:
         organization_id = str(uuid.uuid4())
         search = "admin"
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.count = 3
-            mock_supabase.table.return_value.select.return_value.eq.return_value.neq.return_value.ilike.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await get_roles_count(organization_id, search=search)
@@ -433,11 +523,15 @@ class TestRoleOperations:
         """Test roles count retrieval when count is None."""
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.count = None
-            mock_supabase.table.return_value.select.return_value.eq.return_value.neq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await get_roles_count(organization_id)
@@ -455,7 +549,12 @@ class TestRoleOperations:
         organization_id = str(uuid.uuid4())
         permission_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
 
             # Mock the remove_all_permissions_from_role call
@@ -467,8 +566,12 @@ class TestRoleOperations:
             mock_insert_result.data = [{"id": "assigned_id1"}, {"id": "assigned_id2"}]
 
             # Set up side_effect to return different results for different calls
-            mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_remove_result)
-            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_insert_result)
+            mock_supabase.table.return_value.delete.return_value.execute = AsyncMock(
+                return_value=mock_remove_result
+            )
+            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(
+                return_value=mock_insert_result
+            )
 
             mock_get_client.return_value = mock_supabase
 
@@ -483,7 +586,12 @@ class TestRoleOperations:
         organization_id = str(uuid.uuid4())
         permission_ids = [str(uuid.uuid4())]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
 
             # Mock the remove_all_permissions_from_role call
@@ -495,8 +603,12 @@ class TestRoleOperations:
             mock_insert_result.data = []
 
             # Set up side_effect to return different results for different calls
-            mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_remove_result)
-            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(return_value=mock_insert_result)
+            mock_supabase.table.return_value.delete.return_value.execute = AsyncMock(
+                return_value=mock_remove_result
+            )
+            mock_supabase.table.return_value.insert.return_value.execute = AsyncMock(
+                return_value=mock_insert_result
+            )
 
             mock_get_client.return_value = mock_supabase
 
@@ -511,11 +623,15 @@ class TestRoleOperations:
         organization_id = str(uuid.uuid4())
         permission_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": "removed_id1"}, {"id": "removed_id2"}]
-            mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.in_.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await remove_permissions_from_role(role_id, organization_id, permission_ids)
@@ -529,11 +645,15 @@ class TestRoleOperations:
         organization_id = str(uuid.uuid4())
         permission_ids = [str(uuid.uuid4())]
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.in_.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await remove_permissions_from_role(role_id, organization_id, permission_ids)
@@ -546,11 +666,18 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": "removed_id1"}, {"id": "removed_id2"}]
-            mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.delete.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await remove_all_permissions_from_role(role_id, organization_id)
@@ -558,16 +685,23 @@ class TestRoleOperations:
             assert result is True
 
     @pytest.mark.asyncio
-    async def test_remove_all_permissions_from_role_no_data_returned(self):
+    async def test_remove_all_perms_from_role_no_data(self):
         """Test removal of all permissions when no data is returned."""
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.delete.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await remove_all_permissions_from_role(role_id, organization_id)
@@ -583,14 +717,21 @@ class TestRoleOperations:
         permission_id1 = str(uuid.uuid4())
         permission_id2 = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [
                 {"permission_id": permission_id1},
-                {"permission_id": permission_id2}
+                {"permission_id": permission_id2},
             ]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await get_role_permissions(role_id, organization_id)
@@ -605,11 +746,18 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            (mock_supabase.table.return_value.select.return_value.execute) = AsyncMock(
+                return_value=mock_result
+            )
             mock_get_client.return_value = mock_supabase
 
             result = await get_role_permissions(role_id, organization_id)
@@ -622,14 +770,15 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
-            mock_result.data = [
-                {"permission_id": None},
-                {"permission_id": "perm1"}
-            ]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
+            mock_result.data = [{"permission_id": None}, {"permission_id": "perm1"}]
             mock_get_client.return_value = mock_supabase
 
             result = await get_role_permissions(role_id, organization_id)
@@ -648,11 +797,15 @@ class TestRoleOperations:
         permission_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.count = 2  # Should match the length of permission_ids
-            mock_supabase.table.return_value.select.return_value.in_.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await check_permissions_exist(permission_ids, organization_id)
@@ -665,11 +818,15 @@ class TestRoleOperations:
         permission_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.in_.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await check_permissions_exist(permission_ids, organization_id)
@@ -682,11 +839,15 @@ class TestRoleOperations:
         permission_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": "perm1"}]  # Only one permission exists
-            mock_supabase.table.return_value.select.return_value.in_.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await check_permissions_exist(permission_ids, organization_id)
@@ -700,11 +861,15 @@ class TestRoleOperations:
         organization_id = str(uuid.uuid4())
         exclude_role_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.neq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await check_role_name_unique(name, organization_id, exclude_role_id)
@@ -718,11 +883,15 @@ class TestRoleOperations:
         organization_id = str(uuid.uuid4())
         exclude_role_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = [{"id": "existing_role_id"}]
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.neq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await check_role_name_unique(name, organization_id, exclude_role_id)
@@ -735,11 +904,15 @@ class TestRoleOperations:
         name = "Test Role"
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.data = []
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await check_role_name_unique(name, organization_id)
@@ -752,11 +925,15 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.count = 5
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await check_role_usage(role_id, organization_id)
@@ -769,11 +946,15 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.count = None
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await check_role_usage(role_id, organization_id)
@@ -786,11 +967,15 @@ class TestRoleOperations:
         role_id = str(uuid.uuid4())
         organization_id = str(uuid.uuid4())
 
-        with patch("libs.shared_db.postgres_db.user_service_operations.role_operations.get_supabase_admin_client") as mock_get_client:
+        with patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.role_operations."
+                "get_supabase_admin_client"
+            )
+        ) as mock_get_client:
             mock_supabase = MagicMock()
             mock_result = MagicMock()
             mock_result.count = 0
-            mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute = AsyncMock(return_value=mock_result)
             mock_get_client.return_value = mock_supabase
 
             result = await check_role_usage(role_id, organization_id)

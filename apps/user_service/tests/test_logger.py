@@ -1,7 +1,4 @@
-# pylint: disable=all
-
-"""
-Test module for logger functionality.
+"""Test module for logger functionality.
 
 This module contains comprehensive tests for all logging components
 defined in apps.user_service.app.dependencies.logger.
@@ -11,25 +8,25 @@ Date: 2024-12-19
 Last Updated: 2024-12-19
 """
 
-import logging
 import json
+import logging
 import os
 import sys
-from unittest.mock import patch
 from datetime import datetime
+from unittest.mock import patch
 
 from apps.user_service.app.dependencies.logger import (
-    RequestIdFilter,
+    IST_TIMEZONE,
     CustomJSONFormatter,
     CustomTextFormatter,
-    setup_logging,
+    RequestIdFilter,
+    app_logger,
     get_logger,
-    set_request_id,
     get_request_id,
     log_with_context,
-    app_logger,
     request_id_var,
-    IST_TIMEZONE,
+    set_request_id,
+    setup_logging,
 )
 
 
@@ -49,7 +46,7 @@ class TestRequestIdFilter:
             lineno=0,
             msg="Test message",
             args=(),
-            exc_info=None
+            exc_info=None,
         )
 
         result = filter_instance.filter(record)
@@ -70,7 +67,7 @@ class TestRequestIdFilter:
             lineno=0,
             msg="Test message",
             args=(),
-            exc_info=None
+            exc_info=None,
         )
 
         result = filter_instance.filter(record)
@@ -92,7 +89,7 @@ class TestCustomJSONFormatter:
             lineno=42,
             msg="Test message",
             args=(),
-            exc_info=None
+            exc_info=None,
         )
         record.request_id = "test-request-123"
 
@@ -122,7 +119,7 @@ class TestCustomJSONFormatter:
                 lineno=42,
                 msg="Test message with exception",
                 args=(),
-                exc_info=sys.exc_info()
+                exc_info=sys.exc_info(),
             )
             record.request_id = "test-request-123"
 
@@ -144,7 +141,7 @@ class TestCustomJSONFormatter:
             lineno=42,
             msg="Test message",
             args=(),
-            exc_info=None
+            exc_info=None,
         )
         record.request_id = "test-request-123"
         record.extra_fields = {"user_id": "user123", "action": "login"}
@@ -167,7 +164,7 @@ class TestCustomJSONFormatter:
             lineno=42,
             msg="Test message",
             args=(),
-            exc_info=None
+            exc_info=None,
         )
         record.request_id = "test-request-123"
 
@@ -193,7 +190,7 @@ class TestCustomTextFormatter:
             lineno=42,
             msg="Test message",
             args=(),
-            exc_info=None
+            exc_info=None,
         )
         record.request_id = "test-request-123"
 
@@ -218,7 +215,7 @@ class TestCustomTextFormatter:
                 lineno=42,
                 msg="Test message with exception",
                 args=(),
-                exc_info=sys.exc_info()
+                exc_info=sys.exc_info(),
             )
             record.request_id = "test-request-123"
 
@@ -238,7 +235,7 @@ class TestCustomTextFormatter:
             lineno=42,
             msg="Test message",
             args=(),
-            exc_info=None
+            exc_info=None,
         )
         # Don't set request_id to test default behavior
 
@@ -265,9 +262,7 @@ class TestSetupLogging:
     def test_setup_logging_custom_parameters(self):
         """Test setup_logging with custom parameters."""
         logger = setup_logging(
-            log_level="DEBUG",
-            environment="production",
-            service_name="test-service"
+            log_level="DEBUG", environment="production", service_name="test-service"
         )
 
         assert logger.name == "test-service"
@@ -423,7 +418,7 @@ class TestContextLogging:
         """Test basic log_with_context functionality."""
         logger = logging.getLogger("test.logger")
 
-        with patch.object(logger, 'info') as mock_info:
+        with patch.object(logger, "info") as mock_info:
             log_with_context(logger, "INFO", "Test message")
 
             # Should call the logger method directly when no extra fields
@@ -434,7 +429,7 @@ class TestContextLogging:
         logger = logging.getLogger("test.logger")
         extra_fields = {"user_id": "user123", "action": "login"}
 
-        with patch.object(logger, 'handle') as mock_handle:
+        with patch.object(logger, "handle") as mock_handle:
             log_with_context(logger, "INFO", "Test message", extra_fields=extra_fields)
 
             mock_handle.assert_called_once()
@@ -445,20 +440,26 @@ class TestContextLogging:
         """Test log_with_context with kwargs - covers lines 220-221."""
         logger = logging.getLogger("test.logger")
 
-        with patch.object(logger, 'handle') as mock_handle:
+        with patch.object(logger, "handle") as mock_handle:
             log_with_context(logger, "INFO", "Test message", user_id="user123", action="login")
 
             mock_handle.assert_called_once()
             call_args = mock_handle.call_args[0][0]
             assert call_args.extra_fields == {"user_id": "user123", "action": "login"}
 
-    def test_log_with_context_with_both_extra_fields_and_kwargs(self):
+    def test_log_context_extra_and_kwargs(self):
         """Test log_with_context with both extra_fields and kwargs - covers lines 216-221."""
         logger = logging.getLogger("test.logger")
         extra_fields = {"user_id": "user123"}
 
-        with patch.object(logger, 'handle') as mock_handle:
-            log_with_context(logger, "INFO", "Test message", extra_fields=extra_fields, action="login")
+        with patch.object(logger, "handle") as mock_handle:
+            log_with_context(
+                logger,
+                "INFO",
+                "Test message",
+                extra_fields=extra_fields,
+                action="login",
+            )
 
             mock_handle.assert_called_once()
             call_args = mock_handle.call_args[0][0]
@@ -468,7 +469,7 @@ class TestContextLogging:
         """Test log_with_context without extra data - covers lines 236-237."""
         logger = logging.getLogger("test.logger")
 
-        with patch.object(logger, 'info') as mock_info:
+        with patch.object(logger, "info") as mock_info:
             log_with_context(logger, "INFO", "Test message")
 
             # Should call the logger method directly
@@ -481,8 +482,13 @@ class TestContextLogging:
         levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
         for level in levels:
-            with patch.object(logger, 'handle') as mock_handle:
-                log_with_context(logger, level, f"Test {level} message", extra_fields={"level": level})
+            with patch.object(logger, "handle") as mock_handle:
+                log_with_context(
+                    logger,
+                    level,
+                    f"Test {level} message",
+                    extra_fields={"level": level},
+                )
 
                 mock_handle.assert_called_once()
                 call_args = mock_handle.call_args[0][0]
@@ -492,7 +498,7 @@ class TestContextLogging:
         """Test log_with_context with empty extra_fields."""
         logger = logging.getLogger("test.logger")
 
-        with patch.object(logger, 'info') as mock_info:
+        with patch.object(logger, "info") as mock_info:
             log_with_context(logger, "INFO", "Test message", extra_fields={})
 
             # Should call the logger method directly since no extra data
@@ -502,7 +508,7 @@ class TestContextLogging:
         """Test log_with_context with None extra_fields."""
         logger = logging.getLogger("test.logger")
 
-        with patch.object(logger, 'info') as mock_info:
+        with patch.object(logger, "info") as mock_info:
             log_with_context(logger, "INFO", "Test message", extra_fields=None)
 
             # Should call the logger method directly since no extra data
@@ -527,7 +533,7 @@ class TestIntegration:
         logger = get_logger("integration.test")
 
         # Test basic logging - mock the info method instead of emit
-        with patch.object(logger, 'info') as mock_info:
+        with patch.object(logger, "info") as mock_info:
             logger.info("Integration test message")
             mock_info.assert_called_once_with("Integration test message")
 
@@ -539,13 +545,13 @@ class TestIntegration:
         logger = get_logger("context.test")
 
         # Test context logging
-        with patch.object(logger, 'handle') as mock_handle:
+        with patch.object(logger, "handle") as mock_handle:
             log_with_context(
                 logger,
                 "INFO",
                 "Context test message",
                 extra_fields={"test": "data"},
-                user_id="test_user"
+                user_id="test_user",
             )
 
             mock_handle.assert_called_once()
@@ -558,7 +564,7 @@ class TestIntegration:
         logger = setup_logging(environment="production", service_name="test-integration")
 
         # Test JSON formatting
-        with patch.object(logger.handlers[0], 'stream') as mock_stream:
+        with patch.object(logger.handlers[0], "stream") as mock_stream:
             logger.info("Integration test message")
 
             # Verify that JSON was written to stream
@@ -580,14 +586,14 @@ class TestIntegration:
             lineno=0,
             msg="Test",
             args=(),
-            exc_info=None
+            exc_info=None,
         )
 
         result = formatter.format(record)
         log_data = json.loads(result)
 
         # Verify timestamp is in IST format
-        timestamp = datetime.fromisoformat(log_data["timestamp"].replace('Z', '+00:00'))
+        timestamp = datetime.fromisoformat(log_data["timestamp"].replace("Z", "+00:00"))
         assert timestamp.tzinfo == IST_TIMEZONE
 
     def test_error_logging_scenario(self):
@@ -597,13 +603,13 @@ class TestIntegration:
         try:
             raise ValueError("Test error for logging")
         except ValueError:
-            with patch.object(logger, 'handle') as mock_handle:
+            with patch.object(logger, "handle") as mock_handle:
                 log_with_context(
                     logger,
                     "ERROR",
                     "An error occurred",
                     extra_fields={"error_type": "ValueError"},
-                    exc_info=sys.exc_info()
+                    exc_info=sys.exc_info(),
                 )
 
                 mock_handle.assert_called_once()
@@ -622,7 +628,7 @@ class TestEdgeCases:
 
         special_message = "Test message with special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?"
 
-        with patch.object(logger, 'info') as mock_info:
+        with patch.object(logger, "info") as mock_info:
             log_with_context(logger, "INFO", special_message)
 
             mock_info.assert_called_once_with(special_message)
@@ -633,7 +639,7 @@ class TestEdgeCases:
 
         unicode_message = "Test message with unicode: 🚀 测试 日本語 العربية"
 
-        with patch.object(logger, 'info') as mock_info:
+        with patch.object(logger, "info") as mock_info:
             log_with_context(logger, "INFO", unicode_message)
 
             mock_info.assert_called_once_with(unicode_message)
@@ -644,8 +650,13 @@ class TestEdgeCases:
 
         large_extra_fields = {f"key_{i}": f"value_{i}" for i in range(100)}
 
-        with patch.object(logger, 'handle') as mock_handle:
-            log_with_context(logger, "INFO", "Large extra fields test", extra_fields=large_extra_fields)
+        with patch.object(logger, "handle") as mock_handle:
+            log_with_context(
+                logger,
+                "INFO",
+                "Large extra fields test",
+                extra_fields=large_extra_fields,
+            )
 
             mock_handle.assert_called_once()
             call_args = mock_handle.call_args[0][0]
@@ -657,7 +668,7 @@ class TestEdgeCases:
 
         extra_fields = {"none_value": None, "empty_string": "", "zero": 0}
 
-        with patch.object(logger, 'handle') as mock_handle:
+        with patch.object(logger, "handle") as mock_handle:
             log_with_context(logger, "INFO", "None values test", extra_fields=extra_fields)
 
             mock_handle.assert_called_once()
@@ -674,10 +685,10 @@ class TestEdgeCases:
             "list": [1, 2, 3],
             "dict": {"nested": {"value": "test"}},
             "tuple": (1, 2, 3),
-            "set": {1, 2, 3}
+            "set": {1, 2, 3},
         }
 
-        with patch.object(logger, 'handle') as mock_handle:
+        with patch.object(logger, "handle") as mock_handle:
             log_with_context(logger, "INFO", "Complex data test", extra_fields=complex_data)
 
             mock_handle.assert_called_once()

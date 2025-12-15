@@ -1,30 +1,21 @@
-# pylint: disable=invalid-name,E0213
-"""
-User Schemas Module
+"""User Schemas Module.
 
 This module contains all Pydantic models and schemas related to user management.
 These schemas are used for request/response validation and API documentation.
-
-Author: AI Assistant
-Date: 2024-12-19
-Last Updated: 2024-12-19
 """
 
 import datetime
-from typing import List, Optional
 from enum import Enum
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from apps.user_service.app.schemas.common import PaginationBase, SimpleResponse
-from apps.user_service.app.schemas import ResponseModel, validate_path_field
 
 class UserStatus(str, Enum):
     """Enumeration for user account status"""
 
-    active = "active"
-    invited = "invited"
-    suspended = "suspended"
+    ACTIVE = "active"
+    INVITED = "invited"
+    SUSPENDED = "suspended"
 
 
 class RoleInfo(BaseModel):
@@ -75,13 +66,9 @@ class PermissionInfo(BaseModel):
     """
 
     permission_id: str = Field(..., description="Unique identifier for the permission")
-    permission_name: str = Field(
-        ..., description="Human-readable name of the permission"
-    )
+    permission_name: str = Field(..., description="Human-readable name of the permission")
     permission_code: str = Field(..., description="Unique code for the permission")
-    category: Optional[str] = Field(
-        None, description="Category grouping for the permission"
-    )
+    category: str | None = Field(None, description="Category grouping for the permission")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -94,19 +81,19 @@ class PermissionInfo(BaseModel):
         }
     )
 
+
 class VerificationPreference(BaseModel):
     """Model for verification preference settings"""
-    two_fa_enabled: bool = Field(..., description="Whether 2FA verification is enabled or disabled", alias="enabled")
-    verification_method: str = Field(..., description="Type of verification: PHONE or EMAIL", alias="type")
+
+    two_fa_enabled: bool = Field(
+        False,
+        description="Whether 2FA verification is enabled or disabled",
+    )
+    verification_method: str = Field(None, description="Type of verification: PHONE or EMAIL")
 
     model_config = ConfigDict(
         populate_by_name=True,  # Allow both field name and alias
-        json_schema_extra={
-            "example": {
-                "two_fa_enabled": True,
-                "verification_method": "PHONE"
-            }
-        }
+        json_schema_extra={"example": {"two_fa_enabled": True, "verification_method": "PHONE"}},
     )
 
 
@@ -115,8 +102,12 @@ class Indentites(BaseModel):
 
     provider: str = Field(..., description="Provider of the indentite")
     provider_id: str = Field(..., description="Data of the indentite")
-    created_at: datetime.datetime = Field(..., description="ISO timestamp when the indentite was created")
-    updated_at: datetime.datetime = Field(..., description="ISO timestamp when the indentite was updated")
+    created_at: datetime.datetime = Field(
+        ..., description="ISO timestamp when the indentite was created"
+    )
+    updated_at: datetime.datetime = Field(
+        ..., description="ISO timestamp when the indentite was updated"
+    )
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -128,6 +119,7 @@ class Indentites(BaseModel):
             }
         }
     )
+
 
 class UserProfileData(BaseModel):
     """Model for complete user profile data
@@ -155,43 +147,37 @@ class UserProfileData(BaseModel):
 
     user_id: str = Field(..., description="Unique identifier for the user")
     email: str = Field(..., description="User's email address")
-    full_name: Optional[str] = Field(None, description="full name of the user")
-    first_name: Optional[str] = Field(None, description="User's first name")
-    last_name: Optional[str] = Field(None, description="User's last name")
-    avatar_url: Optional[str] = Field(None, description="URL to user's profile picture")
-    phone: Optional[str] = Field(None, description="User's phone number")
+    full_name: str | None = Field(None, description="full name of the user")
+    first_name: str | None = Field(None, description="User's first name")
+    last_name: str | None = Field(None, description="User's last name")
+    avatar_url: str | None = Field(None, description="URL to user's profile picture")
+    phone: str | None = Field(None, description="User's phone number")
     timezone: str = Field(default="UTC", description="User's timezone setting")
-    salutation: Optional[str] = Field(None, description="User's salutation")
+    salutation: str | None = Field(None, description="User's salutation")
     status: str = Field(..., description="User's membership status in organization")
-    joined_at: Optional[str] = Field(
-        None, description="ISO timestamp when user joined organization"
-    )
-    last_active_at: Optional[str] = Field(
-        None, description="ISO timestamp of last activity"
-    )
-    organization_id: str = Field(
-        ..., description="ID of the organization user belongs to"
-    )
+    joined_at: str | None = Field(None, description="ISO timestamp when user joined organization")
+    last_active_at: str | None = Field(None, description="ISO timestamp of last activity")
+    organization_id: str = Field(..., description="ID of the organization user belongs to")
     # user_type: str = Field(
     #     ..., description="Type of user (organization_member, client, candidate)"
     # )
-    role: Optional[RoleInfoWithDescription] = Field(
+    role: RoleInfoWithDescription | None = Field(
         None,
         description="User's assigned role information (only for organization_member)",
     )
-    permissions: List[PermissionInfo] = Field(
+    permissions: list[PermissionInfo] = Field(
         default_factory=list,
         description="List of all user permissions (only for organization_member)",
     )
-    candidate_data: Optional[dict] = Field(
+    candidate_data: dict | None = Field(
         None,
         description="Detailed candidate profile data (only for candidate user type)",
     )
-    identities: Optional[List[Indentites]] = Field(
+    identities: list[Indentites] | None = Field(
         None,
         description="List of all user identities (only for organization_member)",
     )
-    verification_preference: Optional[VerificationPreference] = Field(
+    verification_preference: VerificationPreference | None = Field(
         None,
         description="Verification preference settings (enabled/disabled and type: PHONE or EMAIL)",
     )
@@ -236,47 +222,11 @@ class UserProfileData(BaseModel):
                 ],
                 "verification_preference": {
                     "two_fa_enabled": True,
-                    "verification_method": "PHONE"
+                    "verification_method": "PHONE",
                 },
             }
         }
     )
-
-
-
-class UserProfileResponse(ResponseModel):
-    """Response model for user profile operations
-
-    This is the standard response wrapper for user profile endpoints.
-
-    Attributes:
-        message (str): Response message describing the operation result
-        data (Optional[UserProfileData]): User profile data if successful
-    """
-
-    data: UserProfileData = Field(
-        ..., description="User profile data if successful"
-    )
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "message": "User profile retrieved successfully",
-                "data": {
-                    "user_id": "550e8400-e29b-41d4-a716-446655440000",
-                    "email": "doe@example.com",
-                    "full_name": "John Doe",
-                    "timezone": "UTC",
-                    "status": "active",
-                }
-            }
-        }
-    )
-
-
-
-class UserResponse(SimpleResponse):
-    """Response model for basic User operations."""
 
 
 class UpdateUserEmailRequest(BaseModel):
@@ -287,7 +237,6 @@ class UpdateUserEmailRequest(BaseModel):
     """
 
     email: EmailStr = Field(..., description="User's New Updated email address")
-
 
 
 class CreateUserRequest(BaseModel):
@@ -303,17 +252,11 @@ class CreateUserRequest(BaseModel):
     """
 
     email: EmailStr = Field(..., description="User's New email address")
-    full_name: str = Field(
-        ..., min_length=2, max_length=255, description="User's full name"
-    )
-    phone: Optional[str] = Field(None, description="User's phone number")
-    timezone: Optional[str] = Field(
-        default="UTC", description="User's timezone preference"
-    )
+    full_name: str = Field(..., min_length=2, max_length=255, description="User's full name")
+    phone: str | None = Field(None, description="User's phone number")
+    timezone: str | None = Field(default="UTC", description="User's timezone preference")
     role_id: str = Field(..., description="ID of the role to assign to the user")
-    organization_id: Optional[str] = Field(
-        None, description="ID of the organization to add user to"
-    )
+    organization_id: str | None = Field(None, description="ID of the organization to add user to")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -342,24 +285,21 @@ class UpdateUserRequest(BaseModel):
         role_id (Optional[str]): Updated role assignment
     """
 
-    full_name: Optional[str] = Field(
+    full_name: str | None = Field(
         None, min_length=2, max_length=255, description="Updated full name"
     )
-    first_name: Optional[str] = Field(None, description="Updated first name")
-    last_name: Optional[str] = Field(None, description="Updated last name")
-    phone: Optional[str] = Field(None, description="Updated phone number")
-    timezone: Optional[str] = Field(None, description="Updated timezone preference")
-    avatar_url: Optional[str] = Field(None, description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')")
-    role_id: Optional[str] = Field(None, description="Updated role assignment")
-    status: Optional[UserStatus] = Field(
+    first_name: str | None = Field(None, description="Updated first name")
+    last_name: str | None = Field(None, description="Updated last name")
+    phone: str | None = Field(None, description="Updated phone number")
+    timezone: str | None = Field(None, description="Updated timezone preference")
+    avatar_url: str | None = Field(
+        None,
+        description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')",
+    )
+    role_id: str | None = Field(None, description="Updated role assignment")
+    status: UserStatus | None = Field(
         None, description="User status: active, invited, or suspended"
     )
-
-    @field_validator("avatar_url")
-    @classmethod
-    def validate_avatar_url(cls, v):
-        """Validate avatar_url is a valid path if provided (no URLs or base64 allowed)"""
-        return validate_path_field(v, "avatar_url")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -374,45 +314,11 @@ class UpdateUserRequest(BaseModel):
     )
 
 
-class UpdateUserResponse(ResponseModel):
-    """Response model for user update operations
-
-    Attributes:
-        message (str): Response message
-        data (Optional[UserProfileData]): Updated user profile data
-    """
-
-    data: Optional[UserProfileData] = Field(
-        None, description="Updated user profile data"
-    )
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "message": "User updated successfully",
-                "data": None,
-            }
-        }
-    )
-
-
 class BanRequest(BaseModel):
     """Request model for banning a user."""
 
-    duration: Optional[str] = Field(None, description="7d")
-    reason: Optional[str] = Field(None, description="Reason for banning the users")
-
-
-
-class BanResponse(ResponseModel):
-    """Response model after banning a user."""
-
-    reason: str
-
-
-class UnbanResponse(ResponseModel):
-    """Response model after unbanning a user."""
-
+    duration: str | None = Field(None, description="7d")
+    reason: str | None = Field(None, description="Reason for banning the users")
 
 
 class UserListItem(BaseModel):
@@ -432,19 +338,15 @@ class UserListItem(BaseModel):
 
     user_id: str = Field(..., description="Unique identifier for the user")
     email: str = Field(..., description="email address of the user")
-    first_name: Optional[str] = Field(None, description="Updated first name")
-    last_name: Optional[str] = Field(None, description="Updated last name")
-    salutation: Optional[str] = Field(None, description="Updated salutation")
-    phone: Optional[str] = Field(None, description="Updated phone number")
+    first_name: str | None = Field(None, description="Updated first name")
+    last_name: str | None = Field(None, description="Updated last name")
+    salutation: str | None = Field(None, description="Updated salutation")
+    phone: str | None = Field(None, description="Updated phone number")
     # role_name: str = Field(..., description="Name of user's assigned role")
     status: str = Field(..., description="User's membership status")
     joined_at: str = Field(..., description="ISO timestamp when user joined")
-    last_active_at: Optional[str] = Field(
-        None, description="ISO timestamp of last activity"
-    )
-    permissions_count: int = Field(
-        0, description="Number of permissions assigned to the user"
-    )
+    last_active_at: str | None = Field(None, description="ISO timestamp of last activity")
+    permissions_count: int = Field(0, description="Number of permissions assigned to the user")
     role_id: str = Field(..., description="ID of the role assigned to the user")
 
     model_config = ConfigDict(
@@ -464,19 +366,23 @@ class UserListItem(BaseModel):
     )
 
 
-class UserListResponse(PaginationBase, ResponseModel):
+class UserListResponse(BaseModel):
     """Response model for user list operations
 
     Attributes:
         message (str): Response message
-        data (List[UserListItem]): List of users
+        data (list[UserListItem]): List of users
         total_count (int): Total number of users
         page (int): Current page number
         page_size (int): Number of items per page
     """
 
-    data: List[UserListItem] = Field(..., description="List of users")
+    data: list[UserListItem] = Field(..., description="List of users")
     total_count: int = Field(..., description="Total number of users")
+    message: str = Field(..., description="Response message describing the operation result")
+    page: int = Field(..., description="Current page number")
+    page_size: int = Field(..., description="Number of items per page")
+    total_pages: int = Field(..., description="Total number of pages")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -486,6 +392,53 @@ class UserListResponse(PaginationBase, ResponseModel):
                 "total_count": 0,
                 "page": 1,
                 "page_size": 20,
+                "total_pages": 0,
             }
         }
     )
+
+
+class UpdateUserProfileRequest(BaseModel):
+    """Request model for updating user profile information.
+
+    Only these fields can be updated:
+    - first_name: Updated first name
+    - last_name: Updated last name
+    - salutation: Updated salutation (Mr., Mrs., Ms., Dr., Prof., Adv.)
+    - timezone: Updated timezone preference
+    - avatar_url: Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')
+    - two_fa_enabled: Enable or disable verification preference
+    - verification_method: Type of verification preference (PHONE or EMAIL, defaults to EMAIL)
+
+    full_name will be automatically calculated from first_name + last_name.
+    """
+
+    first_name: str | None = Field(None, description="Updated first name")
+    last_name: str | None = Field(None, description="Updated last name")
+    salutation: str | None = Field(None, description="Salutation for the user")
+    timezone: str | None = Field(None, description="Updated timezone preference")
+    avatar_url: str | None = Field(
+        None,
+        description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')",
+    )
+    two_fa_enabled: bool | None = Field(
+        None, description="Enable or disable verification preference"
+    )
+    verification_method: str | None = Field(
+        "EMAIL",
+        description="Type of verification preference: PHONE or EMAIL (defaults to EMAIL)",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "first_name": "John",
+                "last_name": "Doe",
+                "salutation": "Mr.",
+                "timezone": "America/New_York",
+                "avatar_url": "house-of-apps-legal-ai/user-id/avatar.jpg",
+                "two_fa_enabled": True,
+                "verification_method": "EMAIL",
+            }
+        }
+    }

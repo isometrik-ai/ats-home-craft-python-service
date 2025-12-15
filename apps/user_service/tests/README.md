@@ -10,6 +10,7 @@ PYTHONPATH=.. python -m pytest -v --tb=short
 ```
 
 ## Files
+
 - conftest.py: global patches for operations to use an in-memory Supabase mock and ensure a running event loop.
 - test_roles_api.py: roles list/get/create/update.
 - test_users_api.py: users list/get/invite/update.

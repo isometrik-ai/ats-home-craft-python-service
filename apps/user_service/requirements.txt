@@ -46,3 +46,6 @@ pgvector==0.2.4
 # AWS S3/Cloudflare R2 support
 boto3==1.35.0
 botocore>=1.35.0
+
+# Pre-commit
+pre-commit>=4.5.0

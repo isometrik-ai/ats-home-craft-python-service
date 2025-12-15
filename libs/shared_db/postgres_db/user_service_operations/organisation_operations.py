@@ -1,50 +1,49 @@
-"""
-Organisation Database Operations Module
+"""Organisation Database Operations Module
 
 This module contains all organisation-related database operations.
 All SQL queries for organisation management should be centralized here.
 """
-from datetime import datetime, timedelta, timezone
+
 import uuid
-from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Any
+
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.auth import PlanType
-from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id, update_metadata_of_user
-from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import (
-    handle_database_errors, create_error_messages
-)
-from libs.shared_utils.isometrik_service import (
-    is_isometrik_enabled,
-    create_isometrik_user,
-)
 from libs import NOW_CONSTANT
-from fastapi import HTTPException
+from libs.shared_db.supabase_db.admin_operations.user import (
+    get_user_by_id,
+    update_metadata_of_user,
+)
+from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
+from libs.shared_utils.http_exceptions import ServiceUnavailableException
+from libs.shared_utils.isometrik_service import (
+    create_isometrik_user,
+    is_isometrik_enabled,
+)
+from libs.shared_utils.status_codes import CustomStatusCode
 
-# Initialize logger
 logger = get_logger("organisation_operations")
 
-
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
 
 async def _get_supabase_client():
     """Get Supabase admin client."""
     return await get_supabase_admin_client()
 
-def _has_result_data(result) -> bool:
+
+def _has_result_data(result: Any) -> bool:
     """Check if result has data."""
     return len(result.data) > 0 if result.data else False
 
-def _get_result_data(result, default=None):
+
+def _get_result_data(result: Any, default: Any = None) -> Any:
     """Get result data with default fallback."""
     return result.data if result.data else (default or [])
 
 
-def _serialize_value(value):
+def _serialize_value(value: Any) -> Any:
     """Convert enums and pydantic models into JSON-serializable primitives."""
     if value is None:
         return None
@@ -58,27 +57,33 @@ def _serialize_value(value):
         return {k: _serialize_value(v) for k, v in value.items()}
     return value
 
-def _apply_search_filter(query, search: str, fields: List[str]):
+
+def _apply_search_filter(query: Any, search: str, fields: list[str]) -> Any:
     """Apply search filter to query."""
     if not search:
         return query
 
     search_conditions = [f"{field}.ilike.%{search}%" for field in fields]
-    return query.or_(','.join(search_conditions))
+    return query.or_(",".join(search_conditions))
 
-def _apply_pagination(query, limit: int, offset: int):
+
+def _apply_pagination(query: Any, limit: int, offset: int) -> Any:
     """Apply pagination to query."""
     return query.order("created_at", desc=True).range(offset, offset + limit - 1)
+
 
 # ============================================================================
 # ORGANISATION CRUD OPERATIONS
 # ============================================================================
 
-@handle_database_errors(
-    "create_new_organisation",
-    custom_messages=create_error_messages("create_new_organisation", "creating"))
-async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a new organisation."""
+
+async def create_new_organisation(organisation_data: dict[str, Any]) -> dict[str, Any]:
+    """Create a new organisation.
+    Args:
+        organisation_data: Organisation data
+    Returns:
+        dict containing the new organisation
+    """
     supabase = await get_supabase_admin_client()
 
     org_record = {
@@ -93,8 +98,8 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "description": organisation_data.get("description"),
         "referral_source": organisation_data.get("referral_source"),
         "created_at": NOW_CONSTANT,
-        "updated_at":NOW_CONSTANT,
-        "created_by_id":organisation_data.get("user_id")
+        "updated_at": NOW_CONSTANT,
+        "created_by_id": organisation_data.get("user_id"),
     }
 
     settings = {}
@@ -114,12 +119,8 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
     )
     settings["need_help_importing_data"] = organisation_data.get("need_help_importing_data", None)
     settings["need_migration_assistance"] = organisation_data.get("need_migration_assistance", None)
-    settings["compliance_security"] = _serialize_value(
-        organisation_data.get("compliance_security")
-    )
-    settings["enterprise_features"] = _serialize_value(
-        organisation_data.get("enterprise_features")
-    )
+    settings["compliance_security"] = _serialize_value(organisation_data.get("compliance_security"))
+    settings["enterprise_features"] = _serialize_value(organisation_data.get("enterprise_features"))
 
     settings["isometrik_application_details"] = _serialize_value(
         organisation_data.get("isometrik_application_details")
@@ -128,13 +129,13 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
     org_record["settings"] = settings
 
     subscription_dict = {
-        'start_date' : datetime.now(timezone.utc).isoformat(),
-        'end_date' : (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
-        'plan_type' : PlanType.TRIAL,
-        'max_users' : 5,
+        "start_date": datetime.now(timezone.utc).isoformat(),
+        "end_date": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+        "plan_type": PlanType.TRIAL,
+        "max_users": 5,
     }
 
-    org_record['subscription'] = subscription_dict
+    org_record["subscription"] = subscription_dict
 
     table = supabase.table("organizations")
     # Use returning: 'minimal' to avoid SELECT permission requirements
@@ -157,20 +158,18 @@ async def create_new_organisation(organisation_data: Dict[str, Any]) -> Dict[str
         "subscription": organisation_data.get("subscription"),
         "created_at": NOW_CONSTANT,
         "updated_at": NOW_CONSTANT,
-        "created_by_id": organisation_data.get("user_id")
+        "created_by_id": organisation_data.get("user_id"),
     }
 
 
-@handle_database_errors(
-    "get_organisation_details_by_id",
-    custom_messages=create_error_messages("get_organisation_details_by_id", "getting"))
-async def get_organisation_details_by_id(organization_id: str) -> Optional[Dict[str, Any]]:
+async def get_organisation_details_by_id(
+    organization_id: str,
+) -> dict[str, Any] | None:
     """Get organisation details by ID with member_count, mimicking SQL query builder.
-
-    Mirrors build_organisation_detail_query() from organisation_utils.py:
-    - Returns core organisation fields
-    - Counts active members (status = 'active') as member_count
-    - Does not return the embedded members array
+    Args:
+        organization_id: Organization ID
+    Returns:
+        dict containing the organisation details or None if not found
     """
     supabase = await get_supabase_admin_client()
 
@@ -202,28 +201,37 @@ async def get_organisation_details_by_id(organization_id: str) -> Optional[Dict[
     return org
 
 
-@handle_database_errors(
-    "update_organisation_details",
-    custom_messages=create_error_messages("update_organisation_details", "updating"))
 async def update_organisation_details(
-    organisation_id: str,
-    organisation_data: dict[str,Any],
-    update_data: Dict[str, Any]
-) -> Dict[str, Any]:
+    organisation_id: str, organisation_data: dict[str, Any], update_data: dict[str, Any]
+) -> dict[str, Any]:
     """Update organisation information, mimicking _build_organization_update_query logic.
 
     This function mimics the logic from _build_organization_update_query() in organisation.py
     to ensure consistent parameter handling and filtering across the codebase.
+    Args:
+        organisation_id: Organisation ID
+        organisation_data: Organisation data
+        update_data: Update data
+    Returns:
+        dict containing the updated organisation
     """
+    # pylint: disable=too-many-branches, too-complex
     supabase = await get_supabase_admin_client()
 
     # 1️⃣ Collect only keys the client actually sent(mimicking exclude_unset=True,exclude_none=True)
     payload = {k: v for k, v in update_data.items() if v is not None}
 
     settings_fields = [
-        "address", "primary_practice_areas", "secondary_practice_areas", "specializations",
-        "preferred_integration", "need_help_importing_data", "need_migration_assistance",
-        "compliance_security", "enterprise_features"]
+        "address",
+        "primary_practice_areas",
+        "secondary_practice_areas",
+        "specializations",
+        "preferred_integration",
+        "need_help_importing_data",
+        "need_migration_assistance",
+        "compliance_security",
+        "enterprise_features",
+    ]
 
     if any(field in settings_fields for field in payload.keys()):
         # payload["settings"] = {}
@@ -234,7 +242,7 @@ async def update_organisation_details(
             temp_var["address"] = payload.get("address")
             payload.pop("address")
 
-        temp_practice_areas = temp_var.get("practice_areas",None)
+        temp_practice_areas = temp_var.get("practice_areas", None)
         if temp_practice_areas is not None:
             if payload.get("primary_practice_areas") is not None:
                 temp_practice_areas["primary"] = payload.get("primary_practice_areas")
@@ -246,7 +254,11 @@ async def update_organisation_details(
                 temp_practice_areas["specializations"] = payload.get("specializations")
                 payload.pop("specializations")
         else:
-            temp_practice_areas = {"primary":None,"secondary":None,"specializations":None}
+            temp_practice_areas = {
+                "primary": None,
+                "secondary": None,
+                "specializations": None,
+            }
             if payload.get("primary_practice_areas") is not None:
                 temp_practice_areas["primary"] = payload.get("primary_practice_areas")
                 payload.pop("primary_practice_areas")
@@ -295,26 +307,28 @@ async def update_organisation_details(
     return {}
 
 
-@handle_database_errors(
-    "delete_organisation",
-    custom_messages=create_error_messages("delete_organisation", "deleting"))
 async def delete_organisation(organisation_id: str) -> bool:
-    """Delete organisation."""
+    """Delete organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        bool: True if organisation was deleted successfully, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    result = await table.delete().eq(
-        "id", organisation_id
-    ).execute()
+    result = await table.delete().eq("id", organisation_id).execute()
 
     return _has_result_data(result)
 
 
-@handle_database_errors(
-    "check_organisation_exists",
-    custom_messages=create_error_messages("check_organisation_exists", "checking"))
 async def check_organisation_exists(organisation_id: str) -> bool:
-    """Check if organisation exists."""
+    """Check if organisation exists.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        bool: True if organisation exists, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
@@ -324,19 +338,21 @@ async def check_organisation_exists(organisation_id: str) -> bool:
 
     return _has_result_data(result)
 
-# ============================================================================
-# ORGANISATION LISTING AND SEARCH
-# ============================================================================
 
-@handle_database_errors(
-    "get_list_of_organisations",
-    custom_messages=create_error_messages("get_list_of_organisations", "getting"))
-async def get_list_of_organisations(search: Optional[str] = None, status: Optional[str] = None,
-                               limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+async def get_list_of_organisations(
+    search: str | None = None,
+    status: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
     """Get paginated list of organisations with optional search and filtering.
-
-    This function mimics the logic from build_organisations_filter_query() in organisation_utils.py
-    to ensure consistent parameter handling and filtering across the codebase.
+    Args:
+        search: Search query
+        status: Status
+        limit: Limit
+        offset: Offset
+    Returns:
+        list of organisations
     """
     supabase = await _get_supabase_client()
 
@@ -371,14 +387,13 @@ async def get_list_of_organisations(search: Optional[str] = None, status: Option
     return organisations
 
 
-@handle_database_errors(
-    "get_organisations_count",
-    custom_messages=create_error_messages("get_organisations_count", "getting"))
-async def get_organisations_count(search: Optional[str], status: Optional[str]) -> int:
+async def get_organisations_count(search: str | None, status: str | None) -> int:
     """Get total count of organisations matching search criteria.
-
-    This function mimics the logic from build_organisations_count_query() in organisation_utils.py
-    to ensure consistent parameter handling and filtering across the codebase.
+    Args:
+        search: Search query
+        status: Status
+    Returns:
+        int: Total count of organisations
     """
     supabase = await _get_supabase_client()
 
@@ -402,23 +417,14 @@ async def get_organisations_count(search: Optional[str], status: Optional[str]) 
 # ORGANISATION VALIDATION OPERATIONS
 # ============================================================================
 
-@handle_database_errors(
-    "check_organisation_slug_unique",
-    custom_messages=create_error_messages("check_organisation_slug_unique", "checking"))
-async def check_organisation_slug_unique(slug: str, exclude_org_id: Optional[str] = None) -> bool:
-    """
-    Check if organisation slug is unique.
 
+async def check_organisation_slug_unique(slug: str, exclude_org_id: str | None = None) -> bool:
+    """Check if organisation slug is unique.
     Args:
-        slug (str): Organisation slug to check
-        exclude_org_id (Optional[str]): Organisation ID to exclude from check (for updates)
-
-    Raises:
-        HTTPException: 409 for slug conflicts
-
-    Usage:
-        await check_organisation_slug_unique(body.slug)
-        await check_organisation_slug_unique(body.slug, exclude_org_id=org_id)
+        slug: Slug
+        exclude_org_id: Organisation ID to exclude
+    Returns:
+        bool: True if organisation slug is unique, False otherwise
     """
     supabase = await get_supabase_admin_client()
 
@@ -433,11 +439,14 @@ async def check_organisation_slug_unique(slug: str, exclude_org_id: Optional[str
     return len(result.data) == 0 if result.data else True
 
 
-@handle_database_errors(
-    "check_organisation_name_unique",
-    custom_messages=create_error_messages("check_organisation_name_unique", "checking"))
-async def check_organisation_name_unique(name: str, exclude_org_id: Optional[str] = None) -> bool:
-    """Check if organisation name is unique."""
+async def check_organisation_name_unique(name: str, exclude_org_id: str | None = None) -> bool:
+    """Check if organisation name is unique.
+    Args:
+        name: Name
+        exclude_org_id: Organisation ID to exclude
+    Returns:
+        bool: True if organisation name is unique, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
@@ -455,12 +464,19 @@ async def check_organisation_name_unique(name: str, exclude_org_id: Optional[str
 # ORGANISATION MEMBER OPERATIONS
 # ============================================================================
 
-@handle_database_errors(
-    "get_organisation_members",
-    custom_messages=create_error_messages("get_organisation_members", "getting"))
-async def get_organisation_members(organisation_id: str, search: Optional[str] = None,
-                                 limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
-    """Get members of an organisation."""
+
+async def get_organisation_members(
+    organisation_id: str, search: str | None = None, limit: int = 20, offset: int = 0
+) -> list[dict[str, Any]]:
+    """Get members of an organisation.
+    Args:
+        organisation_id: Organisation ID
+        search: Search query
+        limit: Limit
+        offset: Offset
+    Returns:
+        list of members
+    """
     supabase = await get_supabase_admin_client()
 
     # Build the query with filters
@@ -474,39 +490,34 @@ async def get_organisation_members(organisation_id: str, search: Optional[str] =
     # Apply search filter
     if search:
         query = query.or_(
-            f"email.ilike.%{search}%,"
-            f"full_name.ilike.%{search}%,"
-            f"phone.ilike.%{search}%"
+            f"email.ilike.%{search}%,full_name.ilike.%{search}%,phone.ilike.%{search}%"
         )
 
     # Apply pagination and ordering
-    query = query.order("created_at", desc=True).range(
-        offset, offset + limit - 1
-    )
+    query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
     result = await query.execute()
 
     return _get_result_data(result)
 
 
-@handle_database_errors(
-    "get_organisation_members_count",
-    custom_messages=create_error_messages("get_organisation_members_count", "getting"))
-async def get_organisation_members_count(organisation_id: str, search: Optional[str] = None) -> int:
-    """Get count of organisation members."""
+async def get_organisation_members_count(organisation_id: str, search: str | None = None) -> int:
+    """Get count of organisation members.
+    Args:
+        organisation_id: Organisation ID
+        search: Search query
+    Returns:
+        int: Total count of organisation members
+    """
     supabase = await get_supabase_admin_client()
 
     # Build the count query with filters
     table = supabase.table("organization_members")
-    query = table.select("id", count="exact").eq(
-        "organization_id", organisation_id
-    )
+    query = table.select("id", count="exact").eq("organization_id", organisation_id)
 
     # Apply search filter
     if search:
         query = query.or_(
-            f"email.ilike.%{search}%,"
-            f"full_name.ilike.%{search}%,"
-            f"phone.ilike.%{search}%"
+            f"email.ilike.%{search}%,full_name.ilike.%{search}%,phone.ilike.%{search}%"
         )
 
     result = await query.execute()
@@ -514,15 +525,19 @@ async def get_organisation_members_count(organisation_id: str, search: Optional[
     return result.count if result.count is not None else 0
 
 
-@handle_database_errors(
-    "add_member_to_organisation",
-    custom_messages=create_error_messages("add_member_to_organisation", "adding"))
 async def add_member_to_organisation(
     organization_id: str,
-    member_data: Dict[str, Any],
-    isometrik_credentials: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Add a member to organisation."""
+    member_data: dict[str, Any],
+    isometrik_credentials: dict[str, Any],
+) -> dict[str, Any]:
+    """Add a member to an organisation.
+    Args:
+        organization_id: Organization ID
+        member_data: Member data
+        isometrik_credentials: Isometrik credentials
+    Returns:
+        dict containing the new member
+    """
     supabase = await get_supabase_admin_client()
 
     isometrik_user_id = None
@@ -535,15 +550,18 @@ async def add_member_to_organisation(
             isometrik_credentials=isometrik_credentials,
             organization_id=organization_id,
             role=member_data.get("role", "owner"),
-            avatar_url=member_data.get("logo_url", None)
+            avatar_url=member_data.get("logo_url", None),
         )
         if isometrik_response:
             isometrik_user_id = isometrik_response.get("userId", None)
             if not isometrik_user_id:
-                raise HTTPException(status_code=400, detail="Failed to create Isometrik user")
-    
+                raise ServiceUnavailableException(
+                    message_key="errors.failed_to_create_isometrik_user",
+                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+                )
+
     if isometrik_user_id:
-        member_data["isometrik_user_id"] = isometrik_user_id       
+        member_data["isometrik_user_id"] = isometrik_user_id
 
     member_record = {
         "user_id": member_data["user_id"],
@@ -554,32 +572,35 @@ async def add_member_to_organisation(
         "organization_id": organization_id,
         "created_at": NOW_CONSTANT,
         "updated_at": NOW_CONSTANT,
-        "joined_at": NOW_CONSTANT
+        "joined_at": NOW_CONSTANT,
     }
 
     data = await get_user_by_id(member_data["user_id"])
-    member_record["first_name"] =data.user.user_metadata.get("first_name",member_data["first_name"])
-    member_record["last_name"] = data.user.user_metadata.get("last_name",member_data["last_name"])
-    member_record["phone"] = data.user.user_metadata.get("phone",member_data["phone"])
-    member_record["timezone"] = data.user.user_metadata.get("timezone",member_data["timezone"])
-    member_record["salutation"] = data.user.user_metadata.get("salutation",None)
+    member_record["first_name"] = data.user.user_metadata.get(
+        "first_name", member_data["first_name"]
+    )
+    member_record["last_name"] = data.user.user_metadata.get("last_name", member_data["last_name"])
+    member_record["phone"] = data.user.user_metadata.get("phone", member_data["phone"])
+    member_record["timezone"] = data.user.user_metadata.get("timezone", member_data["timezone"])
+    member_record["salutation"] = data.user.user_metadata.get("salutation", None)
 
     table = supabase.table("organization_members")
     query = table.insert(member_record)
     result = await query.execute()
 
-    await update_metadata_of_user(member_data["user_id"],{
-        "organization_id": organization_id
-    })
+    await update_metadata_of_user(member_data["user_id"], {"organization_id": organization_id})
 
     return _has_result_data(result)
 
 
-@handle_database_errors(
-    "remove_member_from_organisation",
-    custom_messages=create_error_messages("remove_member_from_organisation", "removing"))
 async def remove_member_from_organisation(organisation_id: str, user_id: str) -> bool:
-    """Remove a member from organisation."""
+    """Remove a member from organisation.
+    Args:
+        organisation_id: Organisation ID
+        user_id: User ID
+    Returns:
+        bool: True if member was removed successfully, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organization_members")
@@ -589,18 +610,23 @@ async def remove_member_from_organisation(organisation_id: str, user_id: str) ->
     return _has_result_data(result)
 
 
-@handle_database_errors(
-    "update_member_role",
-    custom_messages=create_error_messages("update_member_role", "updating"))
 async def update_member_role(organisation_id: str, user_id: str, role_id: str) -> bool:
-    """Update member's role in organisation."""
+    """Update member's role in organisation.
+    Args:
+        organisation_id: Organisation ID
+        user_id: User ID
+        role_id: Role ID
+    Returns:
+        bool: True if member's role was updated successfully, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organization_members")
-    query = table.update({
-        "role_id": role_id,
-        "updated_at": NOW_CONSTANT
-    }).eq("user_id", user_id).eq("organization_id", organisation_id)
+    query = (
+        table.update({"role_id": role_id, "updated_at": NOW_CONSTANT})
+        .eq("user_id", user_id)
+        .eq("organization_id", organisation_id)
+    )
     result = await query.execute()
 
     return _has_result_data(result)
@@ -610,11 +636,14 @@ async def update_member_role(organisation_id: str, user_id: str, role_id: str) -
 # ORGANISATION SETTINGS OPERATIONS
 # ============================================================================
 
-@handle_database_errors(
-    "get_organisation_settings",
-    custom_messages=create_error_messages("get_organisation_settings", "getting"))
-async def get_organisation_settings(organisation_id: str) -> Dict[str, Any]:
-    """Get organisation settings."""
+
+async def get_organisation_settings(organisation_id: str) -> dict[str, Any]:
+    """Get organisation settings.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the organisation settings
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
@@ -626,28 +655,32 @@ async def get_organisation_settings(organisation_id: str) -> Dict[str, Any]:
     return {}
 
 
-@handle_database_errors(
-    "update_organisation_settings",
-    custom_messages=create_error_messages("update_organisation_settings", "updating"))
-async def update_organisation_settings(organisation_id: str, settings: Dict[str, Any]) -> bool:
-    """Update organisation settings."""
+async def update_organisation_settings(organisation_id: str, settings: dict[str, Any]) -> bool:
+    """Update organisation settings.
+    Args:
+        organisation_id: Organisation ID
+        settings: Settings
+    Returns:
+        bool: True if organisation settings were updated successfully, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({
-        "settings": settings,
-        "updated_at": NOW_CONSTANT
-    }).eq("id", organisation_id)
+    query = table.update({"settings": settings, "updated_at": NOW_CONSTANT}).eq(
+        "id", organisation_id
+    )
     result = await query.execute()
 
     return _has_result_data(result)
 
 
-@handle_database_errors(
-    "get_organisation_preferences",
-    custom_messages=create_error_messages("get_organisation_preferences", "getting"))
-async def get_organisation_preferences(organisation_id: str) -> Dict[str, Any]:
-    """Get organisation preferences."""
+async def get_organisation_preferences(organisation_id: str) -> dict[str, Any]:
+    """Get organisation preferences.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the organisation preferences
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
@@ -659,31 +692,39 @@ async def get_organisation_preferences(organisation_id: str) -> Dict[str, Any]:
     return {}
 
 
-@handle_database_errors(
-    "update_organisation_preferences",
-    custom_messages=create_error_messages("update_organisation_preferences", "updating"))
-async def update_organisation_preferences(organisation_id: str,preferences: Dict[str, Any]) -> bool:
-    """Update organisation preferences."""
+async def update_organisation_preferences(
+    organisation_id: str, preferences: dict[str, Any]
+) -> bool:
+    """Update organisation preferences.
+    Args:
+        organisation_id: Organisation ID
+        preferences: Preferences
+    Returns:
+        bool: True if organisation preferences were updated successfully, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({
-        "preferences": preferences,
-        "updated_at": NOW_CONSTANT
-    }).eq("id", organisation_id)
+    query = table.update({"preferences": preferences, "updated_at": NOW_CONSTANT}).eq(
+        "id", organisation_id
+    )
     result = await query.execute()
 
     return _has_result_data(result)
+
 
 # ============================================================================
 # ORGANISATION STATISTICS OPERATIONS
 # ============================================================================
 
-@handle_database_errors(
-    "get_organisation_statistics",
-    custom_messages=create_error_messages("get_organisation_statistics", "getting"))
-async def get_organisation_statistics(organisation_id: str) -> Dict[str, Any]:
-    """Get statistics for an organisation."""
+
+async def get_organisation_statistics(organisation_id: str) -> dict[str, Any]:
+    """Get statistics for an organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the organisation statistics
+    """
     supabase = await get_supabase_admin_client()
 
     # Get member count
@@ -702,9 +743,9 @@ async def get_organisation_statistics(organisation_id: str) -> Dict[str, Any]:
 
     # Get permission count
     permissions_table = supabase.table("permissions")
-    permissions_query = permissions_table.select(
-        "id", count="exact"
-        ).eq("organization_id", organisation_id)
+    permissions_query = permissions_table.select("id", count="exact").eq(
+        "organization_id", organisation_id
+    )
     permissions_result = await permissions_query.execute()
 
     permission_count = permissions_result.count if permissions_result.count is not None else 0
@@ -712,15 +753,17 @@ async def get_organisation_statistics(organisation_id: str) -> Dict[str, Any]:
     return {
         "member_count": member_count,
         "role_count": role_count,
-        "permission_count": permission_count
+        "permission_count": permission_count,
     }
 
 
-@handle_database_errors(
-    "get_organisation_member_stats",
-    custom_messages=create_error_messages("get_organisation_member_stats", "getting"))
-async def get_organisation_member_stats(organisation_id: str) -> Dict[str, Any]:
-    """Get member statistics for an organisation."""
+async def get_organisation_member_stats(organisation_id: str) -> dict[str, Any]:
+    """Get member statistics for an organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the organisation member statistics
+    """
     supabase = await get_supabase_admin_client()
 
     # Get total members
@@ -731,19 +774,21 @@ async def get_organisation_member_stats(organisation_id: str) -> Dict[str, Any]:
     total_members = total_result.count if total_result.count is not None else 0
 
     # Get active members
-    active_query = members_table.select(
-        "id", count="exact").eq(
-        "organization_id", organisation_id).eq(
-        "status", "active")
+    active_query = (
+        members_table.select("id", count="exact")
+        .eq("organization_id", organisation_id)
+        .eq("status", "active")
+    )
     active_result = await active_query.execute()
 
     active_members = active_result.count if active_result.count is not None else 0
 
     # Get banned members
-    banned_query = members_table.select(
-        "id", count="exact").eq(
-        "organization_id", organisation_id).eq(
-        "status", "banned")
+    banned_query = (
+        members_table.select("id", count="exact")
+        .eq("organization_id", organisation_id)
+        .eq("status", "banned")
+    )
     banned_result = await banned_query.execute()
 
     banned_members = banned_result.count if banned_result.count is not None else 0
@@ -751,23 +796,27 @@ async def get_organisation_member_stats(organisation_id: str) -> Dict[str, Any]:
     return {
         "total_members": total_members,
         "active_members": active_members,
-        "banned_members": banned_members
+        "banned_members": banned_members,
     }
 
 
-@handle_database_errors(
-    "get_organisation_activity_stats",
-    custom_messages=create_error_messages("get_organisation_activity_stats", "getting"))
-async def get_organisation_activity_stats(organisation_id: str) -> Dict[str, Any]:
-    """Get activity statistics for an organisation."""
+async def get_organisation_activity_stats(organisation_id: str) -> dict[str, Any]:
+    """Get activity statistics for an organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the organisation activity statistics
+    """
     supabase = await get_supabase_admin_client()
 
     # Get recent activity (last 30 days)
     thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
 
     table = supabase.table("organization_members")
-    query = table.select("id", count="exact").eq("organization_id", organisation_id).gte(
-        "last_active_at", thirty_days_ago
+    query = (
+        table.select("id", count="exact")
+        .eq("organization_id", organisation_id)
+        .gte("last_active_at", thirty_days_ago)
     )
     recent_activity_result = await query.execute()
 
@@ -776,20 +825,21 @@ async def get_organisation_activity_stats(organisation_id: str) -> Dict[str, Any
     else:
         recent_activity = 0
 
-    return {
-        "recent_activity_count": recent_activity,
-        "period_days": 30
-    }
+    return {"recent_activity_count": recent_activity, "period_days": 30}
+
 
 # ============================================================================
 # ORGANISATION BULK OPERATIONS
 # ============================================================================
 
-@handle_database_errors(
-    "bulk_delete_organisations",
-    custom_messages=create_error_messages("bulk_delete_organisations", "bulk deleting"))
-async def bulk_delete_organisations(organisation_ids: List[str]) -> int:
-    """Bulk delete multiple organisations."""
+
+async def bulk_delete_organisations(organisation_ids: list[str]) -> int:
+    """Bulk delete multiple organisations.
+    Args:
+        organisation_ids: List of organisation IDs
+    Returns:
+        int: Number of organisations deleted
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
@@ -799,31 +849,35 @@ async def bulk_delete_organisations(organisation_ids: List[str]) -> int:
     return len(result.data) if result.data else 0
 
 
-@handle_database_errors(
-    "bulk_add_members",
-    custom_messages=create_error_messages("bulk_add_members", "bulk adding"))
 async def bulk_add_members(
-    organisation_id: str,
-    members_data: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
-    """Bulk add multiple members to organisation."""
+    organisation_id: str, members_data: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Bulk add multiple members to organisation.
+    Args:
+        organisation_id: Organisation ID
+        members_data: List of member data
+    Returns:
+        list of members
+    """
     supabase = await get_supabase_admin_client()
 
     # Prepare member records
     member_records = []
     for member_data in members_data:
-        member_records.append({
-            "user_id": member_data["user_id"],
-            "email": member_data["email"],
-            "full_name": member_data["full_name"],
-            "phone": member_data.get("phone"),
-            "timezone": member_data.get("timezone", "UTC"),
-            "role_id": member_data.get("role_id"),
-            "status": member_data.get("status", "active"),
-            "organization_id": organisation_id,
-            "created_at": NOW_CONSTANT,
-            "updated_at": NOW_CONSTANT
-        })
+        member_records.append(
+            {
+                "user_id": member_data["user_id"],
+                "email": member_data["email"],
+                "full_name": member_data["full_name"],
+                "phone": member_data.get("phone"),
+                "timezone": member_data.get("timezone", "UTC"),
+                "role_id": member_data.get("role_id"),
+                "status": member_data.get("status", "active"),
+                "organization_id": organisation_id,
+                "created_at": NOW_CONSTANT,
+                "updated_at": NOW_CONSTANT,
+            }
+        )
 
     table = supabase.table("organization_members")
     query = table.insert(member_records)
@@ -831,29 +885,36 @@ async def bulk_add_members(
 
     return _has_result_data(result)
 
+
 # ============================================================================
 # ORGANISATION PERMISSIONS OPERATIONS
 # ============================================================================
 
-@handle_database_errors(
-    "create_default_permissions_for_organisation",
-    custom_messages=create_error_messages("create_default_permissions_for_organisation","creating")
-)
-async def create_default_permissions_for_organisation(organisation_id: str) -> List[str]:
-    """Create default permissions for new organisation and return permission IDs."""
+
+async def create_default_permissions_for_organisation(
+    organisation_id: str,
+) -> list[str]:
+    """Create default permissions for new organisation and return permission IDs.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        list of permission IDs
+    """
     supabase = await get_supabase_admin_client()
 
     # Prepare permission records for bulk insert
     permission_records = []
     for code, name, description, category in DEFAULT_PERMISSIONS:
-        permission_records.append({
-            "organization_id": organisation_id,
-            "code": code,
-            "name": name,
-            "description": description,
-            "category": category,
-            "created_at": NOW_CONSTANT
-        })
+        permission_records.append(
+            {
+                "organization_id": organisation_id,
+                "code": code,
+                "name": name,
+                "description": description,
+                "category": category,
+                "created_at": NOW_CONSTANT,
+            }
+        )
 
     # Insert permissions with conflict handling
     table = supabase.table("permissions")
@@ -865,11 +926,13 @@ async def create_default_permissions_for_organisation(organisation_id: str) -> L
     return []
 
 
-@handle_database_errors(
-    "create_super_admin_role",
-    custom_messages=create_error_messages("create_super_admin_role", "creating"))
-async def create_super_admin_role(organisation_id: str) -> Dict[str, Any]:
-    """Create super admin role for organisation."""
+async def create_super_admin_role(organisation_id: str) -> dict[str, Any]:
+    """Create super admin role for organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the super admin role
+    """
     supabase = await get_supabase_admin_client()
 
     role_id = str(uuid.uuid4())
@@ -880,7 +943,7 @@ async def create_super_admin_role(organisation_id: str) -> Dict[str, Any]:
         "organization_id": organisation_id,
         "is_default": True,
         "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT
+        "updated_at": NOW_CONSTANT,
     }
 
     table = supabase.table("roles")
@@ -896,15 +959,18 @@ async def create_super_admin_role(organisation_id: str) -> Dict[str, Any]:
         "organization_id": role_record["organization_id"],
         "is_default": role_record["is_default"],
         "created_at": role_record["created_at"],
-        "updated_at": role_record["updated_at"]
+        "updated_at": role_record["updated_at"],
     }
 
 
-@handle_database_errors(
-    "assign_all_permissions_to_role",
-    custom_messages=create_error_messages("assign_all_permissions_to_role", "assigning"))
 async def assign_all_permissions_to_role(role_id: str, organisation_id: str) -> bool:
-    """Assign all permissions to a role."""
+    """Assign all permissions to a role.
+    Args:
+        role_id: Role ID
+        organisation_id: Organisation ID
+    Returns:
+        bool: True if permissions were assigned successfully, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     # First, get all permissions for the organisation
@@ -919,49 +985,54 @@ async def assign_all_permissions_to_role(role_id: str, organisation_id: str) -> 
     # Prepare role-permission assignments
     role_permission_records = []
     for permission in permissions_result.data:
-        role_permission_records.append({
-            "organization_id": organisation_id,
-            "role_id": role_id,
-            "permission_id": permission["id"],
-            "created_at": NOW_CONSTANT
-        })
+        role_permission_records.append(
+            {
+                "organization_id": organisation_id,
+                "role_id": role_id,
+                "permission_id": permission["id"],
+                "created_at": NOW_CONSTANT,
+            }
+        )
 
     # Insert role-permission assignments with conflict handling
     role_permissions_table = supabase.table("role_permissions")
     upsert_query = role_permissions_table.upsert(
-        role_permission_records,
-        on_conflict="organization_id,role_id,permission_id"
+        role_permission_records, on_conflict="organization_id,role_id,permission_id"
     )
     result = await upsert_query.execute()
 
     return _has_result_data(result)
 
 
-@handle_database_errors(
-    "get_organisation_permissions",
-    custom_messages=create_error_messages("get_organisation_permissions", "getting"))
-async def get_organisation_permissions(organisation_id: str) -> List[Dict[str, Any]]:
-    """Get all permissions for an organisation."""
+async def get_organisation_permissions(organisation_id: str) -> list[dict[str, Any]]:
+    """Get all permissions for an organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        list of permissions
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("permissions")
-    select_query = table.select(
-        "id, name, code, category, description, created_at, updated_at"
-    )
+    select_query = table.select("id, name, code, category, description, created_at, updated_at")
     query = select_query.eq("organization_id", organisation_id)
     result = await query.execute()
 
     return _get_result_data(result)
 
+
 # ============================================================================
 # ORGANISATION CLEANUP OPERATIONS
 # ============================================================================
 
-@handle_database_errors(
-    "cleanup_organisation_data",
-    custom_messages=create_error_messages("cleanup_organisation_data", "cleaning up"))
-async def cleanup_organisation_data(organisation_id: str) -> Dict[str, int]:
-    """Clean up all data associated with an organisation."""
+
+async def cleanup_organisation_data(organisation_id: str) -> dict[str, int]:
+    """Clean up all data associated with an organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the number of members, roles, and permissions deleted
+    """
     supabase = await get_supabase_admin_client()
 
     # Delete organization members
@@ -988,46 +1059,56 @@ async def cleanup_organisation_data(organisation_id: str) -> Dict[str, int]:
     return {
         "members_deleted": members_deleted,
         "roles_deleted": roles_deleted,
-        "permissions_deleted": permissions_deleted
+        "permissions_deleted": permissions_deleted,
     }
 
-@handle_database_errors(
-    "archive_organisation",
-    custom_messages=create_error_messages("archive_organisation", "archiving"))
+
 async def archive_organisation(organisation_id: str) -> bool:
-    """Archive an organisation (soft delete)."""
+    """Archive an organisation (soft delete).
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        bool: True if organisation was archived successfully, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({"status": "archived","updated_at": NOW_CONSTANT
-    }).eq("id", organisation_id)
+    query = table.update({"status": "archived", "updated_at": NOW_CONSTANT}).eq(
+        "id", organisation_id
+    )
     result = await query.execute()
 
     return _has_result_data(result)
 
-@handle_database_errors(
-    "restore_organisation",
-    custom_messages=create_error_messages("restore_organisation", "restoring"))
+
 async def restore_organisation(organisation_id: str) -> bool:
-    """Restore an archived organisation."""
+    """Restore an archived organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        bool: True if organisation was restored successfully, False otherwise
+    """
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({"status": "active","updated_at": NOW_CONSTANT
-        }).eq("id", organisation_id)
+    query = table.update({"status": "active", "updated_at": NOW_CONSTANT}).eq("id", organisation_id)
     result = await query.execute()
 
     return _has_result_data(result)
+
 
 # ============================================================================
 # ORGANISATION MONITORING OPERATIONS
 # ============================================================================
 
-@handle_database_errors(
-    "get_organisation_health_status",
-    custom_messages=create_error_messages("get_organisation_health_status", "getting"))
-async def get_organisation_health_status(organisation_id: str) -> Dict[str, Any]:
-    """Get health status of an organisation."""
+
+async def get_organisation_health_status(organisation_id: str) -> dict[str, Any]:
+    """Get health status of an organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the organisation health status
+    """
     supabase = await get_supabase_admin_client()
 
     # Get organization status
@@ -1048,14 +1129,17 @@ async def get_organisation_health_status(organisation_id: str) -> Dict[str, Any]
         "status": org_data.get("status"),
         "healthy": is_active,
         "created_at": org_data.get("created_at"),
-        "updated_at": org_data.get("updated_at")
+        "updated_at": org_data.get("updated_at"),
     }
 
-@handle_database_errors(
-    "get_organisation_usage_stats",
-    custom_messages=create_error_messages("get_organisation_usage_stats", "getting"))
-async def get_organisation_usage_stats(organisation_id: str) -> Dict[str, Any]:
-    """Get usage statistics for an organisation."""
+
+async def get_organisation_usage_stats(organisation_id: str) -> dict[str, Any]:
+    """Get usage statistics for an organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the organisation usage statistics
+    """
     supabase = await get_supabase_admin_client()
 
     # Get member count
@@ -1081,14 +1165,17 @@ async def get_organisation_usage_stats(organisation_id: str) -> Dict[str, Any]:
     return {
         "member_count": member_count,
         "role_count": role_count,
-        "usage_percentage": min(100, (member_count / 100) * 100)  # Assuming 100 is max
+        "usage_percentage": min(100, (member_count / 100) * 100),  # Assuming 100 is max
     }
 
-@handle_database_errors(
-    "get_organisation_compliance_status",
-    custom_messages=create_error_messages("get_organisation_compliance_status", "getting"))
-async def get_organisation_compliance_status(organisation_id: str) -> Dict[str, Any]:
-    """Get compliance status for an organisation."""
+
+async def get_organisation_compliance_status(organisation_id: str) -> dict[str, Any]:
+    """Get compliance status for an organisation.
+    Args:
+        organisation_id: Organisation ID
+    Returns:
+        dict containing the organisation compliance status
+    """
     supabase = await get_supabase_admin_client()
 
     # Get organization status
@@ -1108,5 +1195,5 @@ async def get_organisation_compliance_status(organisation_id: str) -> Dict[str, 
     return {
         "compliant": is_active,
         "status": org_data.get("status"),
-        "created_at": org_data.get("created_at")
+        "created_at": org_data.get("created_at"),
     }

@@ -1,68 +1,23 @@
-# pylint: disable=all
-
 """Comprehensive tests for JWT authentication middleware and utilities.
 
 This module tests all the functions in libs/shared_middleware/jwt_auth.py
 to achieve high coverage for the authentication system.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi import Request, HTTPException, status
+
+import pytest
+from fastapi import HTTPException, Request, status
 from starlette.responses import Response
 
 from libs.shared_middleware.jwt_auth import (
-    raise_auth_error,
-    raise_forbidden_error,
-    raise_internal_error,
-    extract_user_data,
-    setup_audit_context,
+    JWTAuthMiddleware,
     check_user_access_async,
+    extract_user_data,
     get_user_from_auth,
     get_user_from_token,
-    JWTAuthMiddleware,
+    setup_audit_context,
 )
-
-
-class TestErrorHandlers:
-    """Test error handler functions."""
-
-    def test_raise_auth_error(self):
-        """Test raise_auth_error function."""
-        request = MagicMock(spec=Request)
-        request.state = MagicMock()
-
-        with pytest.raises(HTTPException) as exc_info:
-            raise_auth_error(request, "Test description", "Test detail")
-
-        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
-        assert exc_info.value.detail == "Test detail"
-        assert exc_info.value.headers == {"WWW-Authenticate": "Bearer"}
-        assert request.state.audit_description == "Test description"
-
-    def test_raise_forbidden_error(self):
-        """Test raise_forbidden_error function."""
-        request = MagicMock(spec=Request)
-        request.state = MagicMock()
-
-        with pytest.raises(HTTPException) as exc_info:
-            raise_forbidden_error(request, "Test description", "Test detail")
-
-        assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
-        assert exc_info.value.detail == "Test detail"
-        assert request.state.audit_description == "Test description"
-
-    def test_raise_internal_error(self):
-        """Test raise_internal_error function."""
-        request = MagicMock(spec=Request)
-        request.state = MagicMock()
-
-        with pytest.raises(HTTPException) as exc_info:
-            raise_internal_error(request, "Test description", "Test detail")
-
-        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-        assert exc_info.value.detail == "Test detail"
-        assert request.state.audit_description == "Test description"
 
 
 class TestHelperFunctions:
@@ -74,7 +29,7 @@ class TestHelperFunctions:
             "sub": "user123",
             "email": "test@example.com",
             "user_metadata": {"organization_id": "org123"},
-            "session_id": "session123"
+            "session_id": "session123",
         }
 
         user_id, organization_id, user_email, session_id = extract_user_data(user)
@@ -108,7 +63,7 @@ class TestHelperFunctions:
         """Test extract_user_data with partial user data."""
         user = {
             "sub": "user123",
-            "email": "test@example.com"
+            "email": "test@example.com",
             # Missing user_metadata and session_id
         }
 
@@ -124,9 +79,7 @@ class TestHelperFunctions:
         request = MagicMock(spec=Request)
         request.state = MagicMock()
 
-        setup_audit_context(
-            request, "user123", "test@example.com", "org123", "session123"
-        )
+        setup_audit_context(request, "user123", "test@example.com", "org123", "session123")
 
         assert request.state.audit_risk_level == "high"
         assert request.state.audit_description == "Authentication or authorization failure"
@@ -135,7 +88,7 @@ class TestHelperFunctions:
             "user_email": "test@example.com",
             "user_role": "unknown",
             "organization_id": "org123",
-            "session_id": "session123"
+            "session_id": "session123",
         }
 
 
@@ -145,7 +98,7 @@ class TestCheckUserAccessAsync:
     @pytest.mark.asyncio
     async def test_check_user_access_async_success(self):
         """Test successful permission check."""
-        with patch('libs.shared_middleware.jwt_auth.get_supabase_client') as mock_get_client:
+        with patch("libs.shared_middleware.jwt_auth.get_supabase_client") as mock_get_client:
             mock_supabase = AsyncMock()
             mock_response = MagicMock()
             mock_response.data = True
@@ -155,9 +108,7 @@ class TestCheckUserAccessAsync:
             mock_supabase.rpc = MagicMock(return_value=mock_rpc_result)
             mock_get_client.return_value = mock_supabase
 
-            result = await check_user_access_async(
-                ["USERS_READ"], "user123", "org123"
-            )
+            result = await check_user_access_async(["USERS_READ"], "user123", "org123")
 
             assert result is True
             mock_supabase.rpc.assert_called_once_with(
@@ -166,13 +117,13 @@ class TestCheckUserAccessAsync:
                     "user_id": "user123",
                     "organization_id": "org123",
                     "permission_code": ["USERS_READ"],
-                }
+                },
             )
 
     @pytest.mark.asyncio
     async def test_check_user_access_async_with_none_data(self):
         """Test permission check with None response data."""
-        with patch('libs.shared_middleware.jwt_auth.get_supabase_client') as mock_get_client:
+        with patch("libs.shared_middleware.jwt_auth.get_supabase_client") as mock_get_client:
             mock_supabase = AsyncMock()
             mock_response = MagicMock()
             mock_response.data = None
@@ -182,22 +133,18 @@ class TestCheckUserAccessAsync:
             mock_supabase.rpc = MagicMock(return_value=mock_rpc_result)
             mock_get_client.return_value = mock_supabase
 
-            result = await check_user_access_async(
-                ["USERS_READ"], "user123", "org123"
-            )
+            result = await check_user_access_async(["USERS_READ"], "user123", "org123")
 
             assert result is False
 
     @pytest.mark.asyncio
     async def test_check_user_access_async_exception(self):
         """Test permission check with exception."""
-        with patch('libs.shared_middleware.jwt_auth.get_supabase_client') as mock_get_client:
+        with patch("libs.shared_middleware.jwt_auth.get_supabase_client") as mock_get_client:
             mock_get_client.side_effect = Exception("Database error")
 
             with pytest.raises(HTTPException) as exc_info:
-                await check_user_access_async(
-                    ["USERS_READ"], "user123", "org123"
-                )
+                await check_user_access_async(["USERS_READ"], "user123", "org123")
 
             assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
             assert exc_info.value.detail == "Failed to check permission"
@@ -213,8 +160,11 @@ class TestGetUserFromAuth:
         request.state.user = {
             "sub": "user123",
             "email": "test@example.com",
-            "user_metadata": {"type": "organization_member", "organization_id": "org123"},
-            "session_id": "session123"
+            "user_metadata": {
+                "type": "organization_member",
+                "organization_id": "org123",
+            },
+            "session_id": "session123",
         }
 
         result = get_user_from_auth(request)
@@ -235,7 +185,10 @@ class TestGetUserFromAuth:
         assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
         assert exc_info.value.detail == "Not authenticated"
         assert request.state.audit_risk_level == "high"
-        assert request.state.audit_description == "User not authenticated (missing token or invalid token)"
+        assert (
+            request.state.audit_description
+            == "User not authenticated (missing token or invalid token)"
+        )
 
 
 class TestGetUserFromToken:
@@ -243,11 +196,11 @@ class TestGetUserFromToken:
 
     def test_get_user_from_token_success(self):
         """Test successful token decoding."""
-        with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
+        with patch("libs.shared_middleware.jwt_auth.jwt.decode") as mock_decode:
             mock_payload = {
                 "sub": "user123",
                 "email": "test@example.com",
-                "aud": "authenticated"
+                "aud": "authenticated",
             }
             mock_decode.return_value = mock_payload
 
@@ -263,8 +216,9 @@ class TestGetUserFromToken:
 
     def test_get_user_from_token_expired(self):
         """Test token decoding with expired token."""
-        with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
+        with patch("libs.shared_middleware.jwt_auth.jwt.decode") as mock_decode:
             from jwt import ExpiredSignatureError
+
             mock_decode.side_effect = ExpiredSignatureError("Token expired")
 
             with pytest.raises(HTTPException) as exc_info:
@@ -275,8 +229,9 @@ class TestGetUserFromToken:
 
     def test_get_user_from_token_invalid(self):
         """Test token decoding with invalid token."""
-        with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
+        with patch("libs.shared_middleware.jwt_auth.jwt.decode") as mock_decode:
             from jwt import InvalidTokenError
+
             mock_decode.side_effect = InvalidTokenError("Invalid token")
 
             with pytest.raises(HTTPException) as exc_info:
@@ -333,7 +288,7 @@ class TestJWTAuthMiddleware:
     @pytest.mark.asyncio
     async def test_dispatch_valid_token(self):
         """Test dispatch with valid JWT token."""
-        with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
+        with patch("libs.shared_middleware.jwt_auth.jwt.decode") as mock_decode:
             app = MagicMock()
             middleware = JWTAuthMiddleware(app)
 
@@ -344,7 +299,7 @@ class TestJWTAuthMiddleware:
             mock_payload = {
                 "sub": "user123",
                 "email": "test@example.com",
-                "aud": "authenticated"
+                "aud": "authenticated",
             }
             mock_decode.return_value = mock_payload
 
@@ -360,8 +315,9 @@ class TestJWTAuthMiddleware:
     @pytest.mark.asyncio
     async def test_dispatch_expired_token(self):
         """Test dispatch with expired JWT token."""
-        with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
+        with patch("libs.shared_middleware.jwt_auth.jwt.decode") as mock_decode:
             from jwt import ExpiredSignatureError
+
             app = MagicMock()
             middleware = JWTAuthMiddleware(app)
 
@@ -382,8 +338,9 @@ class TestJWTAuthMiddleware:
     @pytest.mark.asyncio
     async def test_dispatch_invalid_token(self):
         """Test dispatch with invalid JWT token."""
-        with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
+        with patch("libs.shared_middleware.jwt_auth.jwt.decode") as mock_decode:
             from jwt import InvalidTokenError
+
             app = MagicMock()
             middleware = JWTAuthMiddleware(app)
 
@@ -408,7 +365,7 @@ class TestJWTIntegration:
     @pytest.mark.asyncio
     async def test_full_auth_flow_with_middleware(self):
         """Test complete authentication flow with middleware."""
-        with patch('libs.shared_middleware.jwt_auth.jwt.decode') as mock_decode:
+        with patch("libs.shared_middleware.jwt_auth.jwt.decode") as mock_decode:
             app = MagicMock()
             middleware = JWTAuthMiddleware(app)
 
@@ -421,7 +378,7 @@ class TestJWTIntegration:
                 "sub": "user123",
                 "email": "test@example.com",
                 "user_metadata": {"organization_id": "org123"},
-                "session_id": "session123"
+                "session_id": "session123",
             }
             mock_decode.return_value = mock_payload
 
@@ -439,12 +396,14 @@ class TestJWTIntegration:
 
             assert result == mock_payload
             assert request.state.audit_risk_level == "low"
-            assert request.state.audit_description == "Successfully authenticated and authorized user"
+            assert (
+                request.state.audit_description == "Successfully authenticated and authorized user"
+            )
 
     @pytest.mark.asyncio
     async def test_permission_check_integration(self):
         """Test permission checking integration."""
-        with patch('libs.shared_middleware.jwt_auth.get_supabase_client') as mock_get_client:
+        with patch("libs.shared_middleware.jwt_auth.get_supabase_client") as mock_get_client:
             mock_supabase = AsyncMock()
             mock_response = MagicMock()
             mock_response.data = True
@@ -466,5 +425,5 @@ class TestJWTIntegration:
                     "user_id": "user123",
                     "organization_id": "org123",
                     "permission_code": ["USERS_READ", "ROLES_READ"],
-                }
+                },
             )

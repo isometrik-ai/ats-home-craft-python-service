@@ -1,70 +1,64 @@
-"""
-Organisation Management API Module
+"""Organisation Management API Module.
 
 This module provides CRUD operations for organisation management.
 All endpoints include proper authentication, validation, and database operations.
-
 """
 
 import uuid
-from typing import Optional
-from dataclasses import dataclass
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status, Depends, Body, Query, Request
-
-# Logger import
-from apps.user_service.app.dependencies.logger import get_logger
+from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 
+# Audit logging import
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
+
 # Local imports - app dependencies and schemas
 from apps.user_service.app.dependencies.common_utils import (
-    extract_user_context,
-    require_permission,
-    handle_api_exceptions,
-    validate_pagination_params,
-    validate_uuid_format,
     check_permissions,
+    extract_user_context,
+    handle_api_exceptions,
+    require_permission,
 )
 
-# Audit logging import
-from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
-    audit_api_call,
-)
-
+# Logger import
+from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.dependencies.organisation_utils import (
-    validate_organisation_status,
-    validate_organisation_name_filter,
-    build_organisation_filter_message,
-    create_organisation_with_super_admin
+    create_organisation_with_super_admin,
 )
+from apps.user_service.app.schemas.auth import AccountType
 
 # Schema imports
 from apps.user_service.app.schemas.organisations import (
+    CreateOrganisationWithUserResponse,
+    NewOrganisationBody,
+    OrganisationDetailResponse,
     OrganisationInfo,
     OrganisationListResponse,
     OrganisationResponse,
-    OrganisationDetailResponse,
-    CreateOrganisationWithUserResponse,
     OrganizationAdminUpdate,
-    NewOrganisationBody
 )
-from apps.user_service.app.schemas.auth import CompanyData, AccountType
 
-# Third-party imports
-from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import log_exception
-from libs.shared_middleware.jwt_auth import get_user_from_auth
-# from libs.shared_db.supabase_db.admin_operations.user import delete_auth_user
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
-    get_list_of_organisations,
-    get_organisations_count,
-    get_organisation_details_by_id,
-    update_organisation_details,
     check_organisation_slug_unique,
-    delete_organisation
+    delete_organisation,
+    get_list_of_organisations,
+    get_organisation_details_by_id,
+    get_organisations_count,
+    update_organisation_details,
 )
+from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+)
+from libs.shared_utils.response_factory import list_response, success_response
+from libs.shared_utils.status_codes import CustomStatusCode
 
 # Create router for organisation endpoints
 router = APIRouter(prefix="/organisation", tags=["Organisation Management"])
@@ -72,47 +66,9 @@ router = APIRouter(prefix="/organisation", tags=["Organisation Management"])
 # Initialize logger for organisation module
 logger = get_logger("organisation-api")
 
-# Authentication description for API documentation
-AUTH_DESCRIPTION = "Bearer token required for authentication"
-ORGANISATION_NOT_FOUND_MESSAGE = "Organisation not found"
-
-
-@dataclass
-class OrganisationQueryParams:
-    """Query parameters for organisation listing and filtering."""
-
-    page: int = 1
-    page_size: int = 20
-    name: Optional[str] = None
-    org_status: Optional[str] = None
-
-
-def get_organisation_query_params(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    name: Optional[str] = Query(None),
-    org_status: Optional[str] = Query(None),
-) -> OrganisationQueryParams:
-    """
-    Dependency function to extract and validate organisation query parameters.
-
-    Args:
-        page: Page number for pagination
-        page_size: Number of items per page
-        name: Filter by organization name
-        org_status: Filter by organization status
-
-    Returns:
-        OrganisationQueryParams: Validated query parameters
-    """
-    return OrganisationQueryParams(
-        page=page, page_size=page_size, name=name, org_status=org_status
-    )
-
 
 def _create_organisation_info(org_data: dict) -> OrganisationInfo:
-    """
-    Create OrganisationInfo object from database row.
+    """Create OrganisationInfo object from database row.
 
     Args:
         org_data (dict): Organisation data from database
@@ -131,57 +87,31 @@ def _create_organisation_info(org_data: dict) -> OrganisationInfo:
         created_at=org_data["created_at"],
         updated_at=org_data["updated_at"],
         member_count=org_data["member_count"],
-        address=org_data["settings"].get("address",None),
-        preferred_integration=org_data["settings"].get("preferred_integration",None),
-        need_help_importing_data=org_data["settings"].get("need_help_importing_data",None),
-        need_migration_assistance=org_data["settings"].get("need_migration_assistance",None),
-        compliance_security=org_data["settings"].get("compliance_security",None),
-        enterprise_features=org_data["settings"].get("enterprise_features",None),
-        team_setup=org_data["settings"].get("team_setup",None),
+        address=org_data["settings"].get("address", None),
+        preferred_integration=org_data["settings"].get("preferred_integration", None),
+        need_help_importing_data=org_data["settings"].get("need_help_importing_data", None),
+        need_migration_assistance=org_data["settings"].get("need_migration_assistance", None),
+        compliance_security=org_data["settings"].get("compliance_security", None),
+        enterprise_features=org_data["settings"].get("enterprise_features", None),
+        team_setup=org_data["settings"].get("team_setup", None),
         description=org_data["description"],
         company_size=org_data["company_size"],
-        subscription=org_data["subscription"]
+        subscription=org_data["subscription"],
     )
-    if org_data["settings"].get("practice_areas",None):
+    if org_data["settings"].get("practice_areas", None):
         prac_area = org_data["settings"].get("practice_areas")
-        result.primary_practice_areas=prac_area.get("primary",None)
-        result.secondary_practice_areas=prac_area.get("secondary",None)
-        result.specializations=prac_area.get("specializations",None)
+        result.primary_practice_areas = prac_area.get("primary", None)
+        result.secondary_practice_areas = prac_area.get("secondary", None)
+        result.specializations = prac_area.get("specializations", None)
     else:
-        result.primary_practice_areas=None
-        result.secondary_practice_areas=None
-        result.specializations=None
+        result.primary_practice_areas = None
+        result.secondary_practice_areas = None
+        result.specializations = None
     return result
 
 
-def _process_organisations_data(organizations_data, count_result: dict | int) -> tuple:
-    """
-    Process organisations data and count result.
-
-    Args:
-        organizations_data: Raw organization data from database
-        count_result: Count query result
-
-    Returns:
-        tuple: (organizations_list, total_count)
-    """
-    organizations = [_create_organisation_info(org) for org in organizations_data]
-    if isinstance(count_result, dict):
-        total_count = count_result["total_count"]
-    elif isinstance(count_result, int):
-        total_count = count_result
-    else:
-        total_count = 0
-    return organizations, total_count
-
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
-
-
 def _generate_organization_slug(name: str, account_type: str) -> str:
-    """
-    Generate organization slug from name and account type.
+    """Generate organization slug from name and account type.
 
     Args:
         name (str): Organization name
@@ -203,172 +133,69 @@ def _generate_organization_slug(name: str, account_type: str) -> str:
     return f"{prefix}-{clean_name3}"
 
 
-def _determine_organization_name(acc_type: AccountType, company_data: CompanyData) -> str:
-    """
-    Determine organization name based on account type.
-
-    Args:
-        acc_type (AccountType): Account type
-        company_data (CompanyData): Company data
-
-    Returns:
-        str: Organization name
-    """
-    if acc_type == AccountType.PERSONAL:
-        return f"{company_data.first_name} {company_data.last_name}"
-    return (
-        company_data.company_name
-        if company_data
-        else "Unknown Company"
-    )
-
-
-def _validate_and_process_query_params(query_params: OrganisationQueryParams):
-    """
-    Validate and process query parameters for organisation listing.
-
-    Args:
-        query_params: Query parameters to validate
-
-    Returns:
-        tuple: (page, page_size, offset, validated_name, validated_status)
-    """
-    # Validate pagination parameters
-    page, page_size, offset = validate_pagination_params(
-        query_params.page, query_params.page_size
-    )
-
-    # Validate filter parameters
-    validated_status = None
-    if query_params.org_status:
-        validate_organisation_status(query_params.org_status)
-        validated_status = query_params.org_status
-
-    validated_name = None
-    if query_params.name:
-        validated_name = validate_organisation_name_filter(query_params.name)
-
-    return page, page_size, offset, validated_name, validated_status
-
-
-async def _execute_organisation_queries(name, org_status, page_size, offset):
-    """
-    Execute organisation queries and return processed results.
-
-    Args:
-        name: Name filter
-        org_status: Status filter
-        page_size: Items per page
-        offset: Query offset
-
-    Returns:
-        tuple: (organizations, total_count)
-    """
-    # Execute queries using database operations
-    organizations_data = await get_list_of_organisations(
-        search=name, status=org_status, limit=page_size, offset=offset
-    )
-    total_count = await get_organisations_count(
-        search=name, status=org_status
-    )
-
-    # Process results
-    return _process_organisations_data(organizations_data, {"total_count": total_count})
-
-
-async def _process_organisation_list_request(
-    user_context, query_params: OrganisationQueryParams
-):
-    """
-    Process the complete organisation list request.
-
-    Args:
-        user_context: User context from JWT
-        query_params: Query parameters
-
-    Returns:
-        tuple: (organizations, total_count, page, page_size, message)
-    """
-    # Check permissions
-    await require_permission(
-        permission_code="organization.appscrip.manage",
-        user_context=user_context,
-        action_description="access organization list",
-    )
-
-    # Validate and process query parameters
-    page, page_size, offset, validated_name, validated_status = (
-        _validate_and_process_query_params(query_params)
-    )
-
-    # Execute queries and get results
-    organizations, total_count = await _execute_organisation_queries(
-        validated_name, validated_status, page_size, offset
-    )
-
-    # Build response message
-    message = build_organisation_filter_message(
-        name=validated_name,
-        org_status=validated_status,
-        page=page,
-        page_size=page_size,
-    )
-
-    return organizations, total_count, page, page_size, message
-
-
 @handle_api_exceptions("get organisations list")
 @router.get(
     "/list",
     response_model=OrganisationListResponse,
-    status_code=status.HTTP_200_OK
+    status_code=http_status.HTTP_200_OK,
+    description="Get list of all organisations in the system",
+    summary="Get list of all organisations in the system",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Organisations list retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def get_organisations_list(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
-    query_params: OrganisationQueryParams = Depends(get_organisation_query_params),
+    page: int = Query(1, ge=1, description="The page number for pagination"),
+    page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
+    name: str | None = Query(None, description="The name of the organisation"),
+    org_status: str | None = Query(None, description="The status of the organisation"),
 ):
-    """
-    Get list of all organizations in the system (Requires: organization.appscrip.manage)
-
-    This endpoint retrieves all organizations in the system including:
-    - Organization basic information (name, slug, domain, logo, etc.)
-    - Plan type and status information
-
-    Args:
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-        query_params (OrganisationQueryParams): Query parameters for filtering and pagination
-
-    Filter Features:
-    - Name filtering: Case-insensitive partial match on organization name
-    - Status filtering: Exact match on organization status (active, suspended, trial)
-    - Filters are combined with AND logic
-    - Proper validation and sanitization of filter inputs
-
-    Returns:
-        OrganisationListResponse: List of organizations with pagination info
-    """
-    # # Generate request ID for tracking
-    # request_id = str(uuid.uuid4())
-
-    # Extract user context
+    """Get list of all organisations in the system (Requires: settings_management.edit)"""
     user_context = await extract_user_context(current_user)
-
-    # Process the request
-    organizations, total_count, page, page_size, message = (
-        await _process_organisation_list_request(user_context, query_params)
+    # Check permissions
+    await require_permission(
+        permission_code="organization.appscrip.manage",
+        user_context=user_context,
     )
 
+    # Execute queries using database operations
+    organizations_data = await get_list_of_organisations(
+        search=name,
+        status=org_status,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
 
-    return OrganisationListResponse(
-        message=message,
-        data=organizations,
-        total_count=total_count,
+    organizations = []
+    total_count = 0
+    if not organizations_data:
+        message_key = "success.no_data"
+        custom_code = CustomStatusCode.NO_CONTENT
+    else:
+        message_key = "success.retrieved"
+        custom_code = CustomStatusCode.SUCCESS
+        organizations = [_create_organisation_info(org) for org in organizations_data]
+        total_count = await get_organisations_count(search=name, status=org_status)
+
+    return list_response(
+        request=request,
+        items=organizations,
+        total=total_count,
+        message_key=message_key,
         page=page,
         page_size=page_size,
+        status_code=http_status.HTTP_200_OK,
+        custom_code=custom_code,
     )
 
 
@@ -376,55 +203,56 @@ async def get_organisations_list(
 @router.get(
     "/{organisation_id}",
     response_model=OrganisationDetailResponse,
-    status_code=status.HTTP_200_OK,
+    description="Get organisation by ID",
+    summary="Get organisation by ID",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        http_status.HTTP_200_OK: {
+            "model": OrganisationDetailResponse,
+            "description": "Organisation retrieved successfully",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def get_organisation_by_id(
-    organisation_id: str,
     request: Request,
-    current_user: dict = Depends(get_user_from_auth)
+    organisation_id: UUID = Path(..., description="The UUID of the organisation to get"),
+    current_user: dict = Depends(get_user_from_auth),
 ):
-    """
-    Get organization by ID with complete details (Requires: organization.appscrip.manage)
-
-    Args:
-        organisation_id (str): The UUID of the organisation to retrieve
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-
-    Returns:
-        OrganisationDetailResponse: Detailed organization information
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
-    # Validate organization ID format using utility function
-    validate_uuid_format(organisation_id, "organization ID")
+    """Get organisation by ID with complete details (Requires: settings_management.edit)"""
 
     # Extract and validate user context from JWT token
-    # Check permission using utility function
+    # Check permissions
     await check_permissions(
-        current_user, SETTINGS_SYSTEM_MANAGE,"access organization details", organisation_id)
+        current_user=current_user,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
+        organization_id=organisation_id,
+    )
 
     # Get organization details using database operations
     organization_data = await get_organisation_details_by_id(organisation_id)
 
-    # Check if organization exists
-    if not organization_data:
-        logger.warning("Organization not found - Request ID: %s, ",request_id)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ORGANISATION_NOT_FOUND_MESSAGE,
-        )
+    if organization_data:
+        message_key = "success.retrieved"
+        custom_code = CustomStatusCode.SUCCESS
+        data = _create_organisation_info(organization_data)
+    else:
+        message_key = "success.no_data"
+        custom_code = CustomStatusCode.NO_CONTENT
+        data = {}
 
-    # Create organization info object using helper function
-    org_info = _create_organisation_info(organization_data)
-
-
-    return OrganisationDetailResponse(
-        message="Organization retrieved successfully",
-        data=org_info,
+    return success_response(
+        request=request,
+        message_key=message_key,
+        custom_code=custom_code,
+        status_code=http_status.HTTP_200_OK,
+        data=data,
     )
 
 
@@ -432,7 +260,21 @@ async def get_organisation_by_id(
 @router.post(
     "/",
     response_model=CreateOrganisationWithUserResponse,
-    status_code=status.HTTP_201_CREATED,
+    description="Create a new organisation",
+    summary="Create a new organisation",
+    status_code=http_status.HTTP_201_CREATED,
+    responses={
+        http_status.HTTP_201_CREATED: {
+            "model": CreateOrganisationWithUserResponse,
+            "description": "Organisation created successfully",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -447,32 +289,15 @@ async def get_organisation_by_id(
     table_name="organizations",
     category="ORGANIZATION",
 )
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def create_organisation(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     body: NewOrganisationBody = Body(...),
 ):
+    """Create a new organisation with initial Super Admin user.
+
+    Requires: settings_management.edit
     """
-    Create a new organisation with initial Super Admin user (Requires: organization.appscrip.manage)
-
-    This endpoint creates a complete organization setup including:
-    1. User signup with Supabase Auth
-    2. Organization creation in database
-    3. Super Admin role and permissions setup (including organization.appscrip.manage)
-    4. Organization member creation with role assignment
-
-    Args:
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-        body (CreateOrganisationWithUserRequest): Organization and user creation data
-
-    Returns:
-        CreateOrganisationWithUserResponse: Success response with organization and user data
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
     # Set audit context for organization creation
     request.state.audit_table = "organizations"
     request.state.audit_description = f"Created new organization: {body.company_data.company_name}"
@@ -482,89 +307,75 @@ async def create_organisation(
     user_context = await extract_user_context(current_user)
 
     if user_context.user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User ID is required"
+        raise ForbiddenException(
+            message_key="organisations.errors.forbidden",
+            custom_code=CustomStatusCode.FORBIDDEN,
         )
-
     if user_context.organization_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User already belongs to an organization"
+        raise ConflictException(
+            message_key="organisations.errors.conflict",
+            custom_code=CustomStatusCode.CONFLICT,
         )
 
     # Generate organization details
     organization_id = str(uuid.uuid4())
-    organization_name = _determine_organization_name(AccountType.BUSINESS, body.company_data)
+    organization_name = body.company_data.company_name
     slug = _generate_organization_slug(organization_name, AccountType.BUSINESS.value)
 
     # Validate slug uniqueness
-    result = await check_organisation_slug_unique(slug)
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Organisation slug already exists"
+    is_slug_unique = await check_organisation_slug_unique(slug)
+    if not is_slug_unique:
+        raise ConflictException(
+            message_key="organisations.errors.slug_conflict",
+            custom_code=CustomStatusCode.CONFLICT,
         )
 
     # Create organization using database operations
-    try:
-        # Create organization
-        org_data = {
-            "organization_id": organization_id,
-            "slug": slug,
-            "name": body.company_data.company_name,
-            "domain": body.company_data.company_website,
-            "industry": body.company_data.industry,
-            "company_size": body.company_data.company_size,
-            "description": body.company_data.description,
-            "referral_source": body.company_data.referral_source,
-            "logo_url": body.company_data.logo_url,
-            "status": "active",
-            "user_id": user_context.user_id,
-            "email": user_context.email,
-            "address": body.company_data.address,
-            "primary_practice_areas": body.company_data.primary_practice_areas,
-            "secondary_practice_areas": body.company_data.secondary_practice_areas,
-            "specializations": body.company_data.specializations,
-            "preferred_integration": body.company_data.preferred_integration,
-            "need_help_importing_data": body.company_data.need_help_importing_data,
-            "need_migration_assistance": body.company_data.need_migration_assistance,
-            "compliance_security": body.company_data.compliance_security,
-            "enterprise_features": body.company_data.enterprise_features,
-            "team_setup": body.company_data.team_setup
-        }
-        if body.user_data is not None:
-            for key, value in body.user_data.model_dump().items():
-                org_data[key] = value
-        await create_organisation_with_super_admin(org_data)
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": organization_id,
-        }
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 409 Conflict for duplicate slug)
-        raise
-    except (ConnectionError, TimeoutError, ValueError) as db_error:
-        log_exception()
-        logger.error("Database transaction failed - Request ID: %s, ",request_id)
-        logger.error("Error: %s",str(db_error))
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create organization",
-        ) from db_error
-
-
-    return CreateOrganisationWithUserResponse(
-        message="Organisation and user created successfully",
+    org_data = {
+        "organization_id": organization_id,
+        "slug": slug,
+        "name": body.company_data.company_name,
+        "domain": body.company_data.company_website,
+        "industry": body.company_data.industry,
+        "company_size": body.company_data.company_size,
+        "description": body.company_data.description,
+        "referral_source": body.company_data.referral_source,
+        "logo_url": body.company_data.logo_url,
+        "status": "active",
+        "user_id": user_context.user_id,
+        "email": user_context.email,
+        "address": body.company_data.address,
+        "primary_practice_areas": body.company_data.primary_practice_areas,
+        "secondary_practice_areas": body.company_data.secondary_practice_areas,
+        "specializations": body.company_data.specializations,
+        "preferred_integration": body.company_data.preferred_integration,
+        "need_help_importing_data": body.company_data.need_help_importing_data,
+        "need_migration_assistance": body.company_data.need_migration_assistance,
+        "compliance_security": body.company_data.compliance_security,
+        "enterprise_features": body.company_data.enterprise_features,
+        "team_setup": body.company_data.team_setup,
+    }
+    if body.user_data is not None:
+        for key, value in body.user_data.model_dump().items():
+            org_data[key] = value
+    await create_organisation_with_super_admin(org_data)
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": organization_id,
+    }
+    return success_response(
+        request=request,
+        message_key="organisations.success.organisation_created",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
         data={
             "organization_id": organization_id,
             "user_id": user_context.user_id,
             "organization_name": organization_name,
             "user_email": user_context.email,
             "role_name": "admin",
-            "slug": slug
+            "slug": slug,
         },
     )
 
@@ -573,7 +384,21 @@ async def create_organisation(
 @router.put(
     "/{organisation_id}",
     response_model=OrganisationResponse,
-    status_code=status.HTTP_200_OK,
+    description="Update an existing organisation",
+    summary="Update an existing organisation",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        http_status.HTTP_200_OK: {
+            "model": OrganisationResponse,
+            "description": "Organisation updated successfully",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -588,41 +413,26 @@ async def create_organisation(
     table_name="organizations",
     category="ORGANIZATION",
 )
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def update_organisation(
-    organisation_id: str,
     request: Request,
+    organisation_id: UUID = Path(..., description="The UUID of the organisation to update"),
     current_user: dict = Depends(get_user_from_auth),
     body: OrganizationAdminUpdate = Body(...),
 ):
-    """
-    Update an existing organisation
-
-    Args:
-        organisation_id (str): The UUID of the organisation to update
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
-        body (OrganizationAdminUpdate): Organization update data
-
-    Returns:
-        OrganisationResponse: Success message indicating API is working
-    """
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())
-
+    """Update an existing organisation (Requires: settings_management.edit)"""
     # Set audit context for organization update
     request.state.audit_table = "organizations"
     request.state.audit_requested_id = organisation_id
     request.state.audit_description = f"Updated organization: {organisation_id}"
     request.state.audit_risk_level = "medium"
 
-    # Validate organization ID format using utility function
-    validate_uuid_format(organisation_id, "organisation ID")
-
     # Extract and validate user context from JWT token
-    # Check permission using utility function
+    # Check permissions
     user_context = await check_permissions(
-        current_user, SETTINGS_SYSTEM_MANAGE,"update organization", organisation_id)
+        current_user=current_user,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
+        organization_id=organisation_id,
+    )
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
@@ -634,22 +444,27 @@ async def update_organisation(
     organization_data = await get_organisation_details_by_id(organisation_id)
 
     if not organization_data:
-        logger.warning("Organization not found for update - Request ID: %s, ",request_id)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ORGANISATION_NOT_FOUND_MESSAGE,
+        raise NotFoundException(
+            message_key="organisations.errors.not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
         )
 
     # Update organization using database operations
     update_data = body.model_dump(exclude_unset=True, exclude_none=True)
     await update_organisation_details(organisation_id, organization_data, update_data)
 
-
     request.state.audit_new_values = update_data
 
-    return OrganisationResponse(
-        message="Update organisation successfully",
-        status="success",
+    return success_response(
+        request=request,
+        message_key="organisations.success.organisation_updated",
+        custom_code=CustomStatusCode.UPDATED,
+        status_code=http_status.HTTP_200_OK,
+        data={
+            "organization_id": organisation_id,
+            "organization_name": organization_data["name"],
+            "slug": organization_data["slug"],
+        },
     )
 
 
@@ -657,7 +472,21 @@ async def update_organisation(
 @router.delete(
     "/{organisation_id}",
     response_model=OrganisationResponse,
-    status_code=status.HTTP_200_OK,
+    description="Delete an existing organisation",
+    summary="Delete an existing organisation",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        http_status.HTTP_200_OK: {
+            "model": OrganisationResponse,
+            "description": "Organisation deleted successfully",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
 )
 @limiter.limit("100/minute")
 @audit_api_call(
@@ -672,67 +501,43 @@ async def update_organisation(
     table_name="organizations",
     category="ORGANIZATION",
 )
-# pylint: disable=unused-argument  # Required by @limiter.limit
 async def delete_organisation_by_id(
-    organisation_id: str,
     request: Request,
-    current_user: dict = Depends(get_user_from_auth)
+    organisation_id: UUID = Path(..., description="The UUID of the organisation to delete"),
+    current_user: dict = Depends(get_user_from_auth),
 ):
-    """
-    Delete an organisation
+    """Delete an existing organisation (Requires: settings_management.edit)"""
+    request.state.audit_table = "organizations"
+    request.state.audit_requested_id = organisation_id
+    request.state.audit_description = f"Deleted organization: {organisation_id}"
+    request.state.audit_risk_level = "high"
 
-    Args:
-        organisation_id (str): The UUID of the organisation to delete
-        request (Request): FastAPI request object for rate limiting
-        current_user (dict): Decoded JWT token containing user information
+    user_context = await extract_user_context(current_user)
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id or organisation_id,
+    }
 
-    Returns:
-        OrganisationResponse: Success message indicating API is working
-    """
-    try:
-        # # Generate request ID for tracking
-        # request_id = str(uuid.uuid4())
+    current_user["user_metadata"]["organization_id"] = organisation_id
 
-        # Set audit context for organization deletion
-        request.state.audit_table = "organizations"
-        request.state.audit_requested_id = organisation_id
-        request.state.audit_description = f"Deleted organization: {organisation_id}"
-        request.state.audit_risk_level = "high"
+    # Check permissions
+    await check_permissions(
+        current_user=current_user,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
+        organization_id=organisation_id,
+    )
 
-        user_context = await extract_user_context(current_user)
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id or organisation_id,
-        }
-
-        # Validate organization ID format using utility function
-        validate_uuid_format(organisation_id, "organisation ID")
-
-        current_user['user_metadata']['organization_id'] = organisation_id
-
-        # Extract and validate user context from JWT token
-        # Check permission using utility function
-        await check_permissions(
-            current_user, SETTINGS_SYSTEM_MANAGE,"delete organization", organisation_id)
-
-        result = await delete_organisation(organisation_id)
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=ORGANISATION_NOT_FOUND_MESSAGE,
-            )
-
-        return OrganisationResponse(
-            message=f"Delete organisation {organisation_id} API is working",
-            status="success",
+    result = await delete_organisation(organisation_id)
+    if not result:
+        raise NotFoundException(
+            message_key="organisations.errors.not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
         )
-    except HTTPException as http_error:
-        raise http_error
-    except Exception as db_error:
-        log_exception()
-        logger.error("Error: %s",str(db_error))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete organization",
-        ) from db_error
+
+    return success_response(
+        request=request,
+        message_key="organisations.success.organisation_deleted",
+        custom_code=CustomStatusCode.DELETED,
+        status_code=http_status.HTTP_200_OK,
+    )

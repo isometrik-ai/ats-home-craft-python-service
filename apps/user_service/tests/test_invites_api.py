@@ -1,43 +1,77 @@
-# pylint: disable=all
+"""Test cases for invites API module."""
+
+import uuid
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import uuid
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, patch, MagicMock
-from fastapi.testclient import TestClient
 from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+
 from apps.user_service.app.api.invites import router as invites_router
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_db.postgres_db.user_service_operations.exception_handling import DatabaseOperationError
+
 
 # Global patches to prevent real permission checking
 @pytest.fixture(autouse=True)
 def mock_permission_system():
     """Mock the entire permission system to prevent real database calls."""
-    with patch("apps.user_service.app.dependencies.common_utils.check_user_access_async", return_value=True), \
-         patch("apps.user_service.app.dependencies.common_utils.extract_user_context", new_callable=AsyncMock) as mock_extract, \
-         patch("apps.user_service.app.dependencies.common_utils.require_permission", new_callable=AsyncMock) as mock_require, \
-         patch("apps.user_service.app.dependencies.common_utils.check_permissions", new_callable=AsyncMock) as mock_check_permissions, \
-         patch("apps.user_service.app.api.invites.check_permissions", new_callable=AsyncMock) as mock_invites_check_permissions, \
-         patch("apps.user_service.app.api.invites.require_permission", new_callable=AsyncMock) as mock_invites_require_permission, \
-         patch("apps.user_service.app.dependencies.invite_utils.validate_organization_access", return_value=True) as mock_validate_org_access, \
-         patch("apps.user_service.app.api.invites.validate_organization_access", return_value=True) as mock_invites_validate_org_access, \
-         patch("apps.user_service.app.dependencies.invite_utils.build_invite_list_item") as mock_build_invite_list_item, \
-         patch("apps.user_service.app.api.invites.build_invite_list_item") as mock_invites_build_invite_list_item, \
-         patch("apps.user_service.app.api.invites.BASE_URL", "https://example.com"):
-
+    with (
+        patch(
+            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            return_value=True,
+        ),
+        patch(
+            "apps.user_service.app.dependencies.common_utils.extract_user_context",
+            new_callable=AsyncMock,
+        ) as mock_extract,
+        patch(
+            "apps.user_service.app.dependencies.common_utils.require_permission",
+            new_callable=AsyncMock,
+        ) as mock_require,
+        patch(
+            "apps.user_service.app.dependencies.common_utils.check_permissions",
+            new_callable=AsyncMock,
+        ) as mock_check_permissions,
+        patch(
+            "apps.user_service.app.api.invites.check_permissions",
+            new_callable=AsyncMock,
+        ) as mock_invites_check_permissions,
+        patch(
+            "apps.user_service.app.api.invites.require_permission",
+            new_callable=AsyncMock,
+        ) as mock_invites_require_permission,
+        patch(
+            "apps.user_service.app.dependencies.invite_utils.validate_organization_access",
+            return_value=True,
+        ),
+        patch(
+            "apps.user_service.app.api.invites.validate_organization_access",
+            return_value=True,
+        ),
+        patch(
+            "apps.user_service.app.dependencies.invite_utils.build_invite_list_item"
+        ) as mock_build_invite_list_item,
+        patch(
+            "apps.user_service.app.api.invites.build_invite_list_item"
+        ) as mock_invites_build_invite_list_item,
+        patch("apps.user_service.app.api.invites.BASE_URL", "https://example.com"),
+    ):
         # Configure the mocks
         from apps.user_service.app.dependencies.common_utils import UserContext
+
         mock_user_context = UserContext(
             organization_id="550e8400-e29b-41d4-a716-446655440001",
             user_id="550e8400-e29b-41d4-a716-446655440000",
             email="test@example.com",
-            user_type="organization_member"
+            user_type="organization_member",
         )
 
         mock_extract.return_value = mock_user_context
         mock_require.return_value = None  # No exception means permission granted
-        mock_check_permissions.return_value = mock_user_context  # Return user context for permission checks
+        mock_check_permissions.return_value = (
+            mock_user_context  # Return user context for permission checks
+        )
         mock_invites_check_permissions.return_value = mock_user_context  # Patch in invites module
         mock_invites_require_permission.return_value = None  # Patch in invites module
 
@@ -51,8 +85,9 @@ def mock_permission_system():
                 "invited_by": invite_data.get("invited_by"),
                 "expires_at": invite_data.get("expires_at"),
                 "created_at": invite_data.get("created_at"),
-                "updated_at": invite_data.get("updated_at")
+                "updated_at": invite_data.get("updated_at"),
             }
+
         mock_build_invite_list_item.side_effect = mock_build_invite_list_item_func
         mock_invites_build_invite_list_item.side_effect = mock_build_invite_list_item_func
 
@@ -62,8 +97,12 @@ def mock_permission_system():
 @pytest.fixture
 def app():
     """Create FastAPI app with invites router for testing."""
-    from apps.user_service.app.dependencies.common_utils import check_user_access_async, check_permissions, extract_user_context, require_permission
-    from types import SimpleNamespace
+    from apps.user_service.app.dependencies.common_utils import (
+        check_permissions,
+        check_user_access_async,
+        extract_user_context,
+        require_permission,
+    )
 
     app = FastAPI()
     app.include_router(invites_router, prefix="/v1")
@@ -75,24 +114,25 @@ def app():
             "user_id": "550e8400-e29b-41d4-a716-446655440000",
             "organization_id": "550e8400-e29b-41d4-a716-446655440001",
             "email": "test@example.com",
-            "user_metadata": {"organization_id": "550e8400-e29b-41d4-a716-446655440001"}
+            "user_metadata": {"organization_id": "550e8400-e29b-41d4-a716-446655440001"},
         }
 
-    async def mock_extract_user_context(current_user):
+    async def mock_extract_user_context():
         from apps.user_service.app.dependencies.common_utils import UserContext
+
         return UserContext(
             organization_id="550e8400-e29b-41d4-a716-446655440001",
             user_id="550e8400-e29b-41d4-a716-446655440000",
             email="test@example.com",
-            user_type="organization_member"
+            user_type="organization_member",
         )
 
-    async def mock_require_permission(permission_code, user_context, action_description=None, organization_id=None):
+    async def mock_require_permission():
         # Always allow for testing
         pass
 
-    async def mock_check_permissions(current_user, permission_codes, action_description=None, organization_id=None):
-        return await mock_extract_user_context(current_user)
+    async def mock_check_permissions():
+        return await mock_extract_user_context()
 
     app.dependency_overrides[get_user_from_auth] = mock_get_user_from_auth
     app.dependency_overrides[check_user_access_async] = lambda *a, **k: True
@@ -122,7 +162,7 @@ def mock_invite_data():
         "token_hash": "abc123xyz456",
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat()
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -137,13 +177,14 @@ def mock_organization_data():
         "max_users": 50,
         "member_count": 5,
         "plan_type": "premium",
-        "status": "active"
+        "status": "active",
     }
 
 
 # ============================================================================
 # ACCEPT INVITATION TESTS
 # ============================================================================
+
 
 class TestAcceptInvitation:
     """Test cases for POST /invite/set-password endpoint."""
@@ -156,15 +197,46 @@ class TestAcceptInvitation:
         mock_invite_data["email"] = "test@example.com"
         mock_invite_data["metadata"] = {"first_name": "Test", "last_name": "User"}
 
-        with patch("libs.shared_db.supabase_db.db.get_supabase_admin_client") as mock_get_client, \
-             patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value={"settings": {"isometrik_application_details": {"projectId": "test", "keysetId": "test"}}})), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.sign_up_supabase_user", AsyncMock(return_value=MagicMock(user=MagicMock(id=str(uuid.uuid4()))))), \
-             patch("apps.user_service.app.api.invites.add_user_to_organization", AsyncMock(return_value=True)), \
-             patch("apps.user_service.app.api.invites.update_invite_status", AsyncMock(return_value=True)):
-
+        with (
+            patch("libs.shared_db.supabase_db.db.get_supabase_admin_client"),
+            patch(
+                "apps.user_service.app.api.invites.get_invite_by_token",
+                AsyncMock(return_value=mock_invite_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(
+                    return_value={
+                        "settings": {
+                            "isometrik_application_details": {
+                                "projectId": "test",
+                                "keysetId": "test",
+                            }
+                        }
+                    }
+                ),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.sign_up_supabase_user",
+                AsyncMock(return_value=MagicMock(user=MagicMock(id=str(uuid.uuid4())))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.add_user_to_organization",
+                AsyncMock(return_value=True),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.update_invite_status",
+                AsyncMock(return_value=True),
+            ),
+        ):
             response = client.post("/v1/invite/set-password", json=request_data)
 
             assert response.status_code == 202
@@ -176,7 +248,10 @@ class TestAcceptInvitation:
         """Test invitation acceptance with invalid token."""
         request_data = {"token": "invalid-token", "password": "StrongPass123!"}
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=None)):
+        with patch(
+            "apps.user_service.app.api.invites.get_invite_by_token",
+            AsyncMock(return_value=None),
+        ):
             response = client.post("/v1/invite/set-password", json=request_data)
 
             assert response.status_code == 404
@@ -189,9 +264,16 @@ class TestAcceptInvitation:
         # Update mock data to match the current user's email
         mock_invite_data["email"] = "test@example.com"
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=True)):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_invite_by_token",
+                AsyncMock(return_value=mock_invite_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=True),
+            ),
+        ):
             response = client.post("/v1/invite/set-password", json=request_data)
 
             assert response.status_code == 409
@@ -204,9 +286,29 @@ class TestAcceptInvitation:
         # Set invitation email to different email
         mock_invite_data["email"] = "different@example.com"
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value={"settings": {"isometrik_application_details": {"projectId": "test", "keysetId": "test"}}})):
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_invite_by_token",
+                AsyncMock(return_value=mock_invite_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(
+                    return_value={
+                        "settings": {
+                            "isometrik_application_details": {
+                                "projectId": "test",
+                                "keysetId": "test",
+                            }
+                        }
+                    }
+                ),
+            ),
+        ):
             response = client.post("/v1/invite/set-password", json=request_data)
 
             # Note: The endpoint no longer checks email mismatch, so this test may need adjustment
@@ -221,11 +323,33 @@ class TestAcceptInvitation:
         mock_invite_data["email"] = "test@example.com"
         mock_invite_data["metadata"] = {"first_name": "Test", "last_name": "User"}
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_token", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value={"settings": {"isometrik_application_details": {"projectId": "test", "keysetId": "test"}}})), \
-             patch("apps.user_service.app.api.invites.sign_up_supabase_user", AsyncMock(side_effect=Exception("Database error"))):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_invite_by_token",
+                AsyncMock(return_value=mock_invite_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(
+                    return_value={
+                        "settings": {
+                            "isometrik_application_details": {
+                                "projectId": "test",
+                                "keysetId": "test",
+                            }
+                        }
+                    }
+                ),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.sign_up_supabase_user",
+                AsyncMock(side_effect=Exception("Database error")),
+            ),
+        ):
             response = client.post("/v1/invite/set-password", json=request_data)
 
             assert response.status_code == 500
@@ -235,6 +359,7 @@ class TestAcceptInvitation:
 # ============================================================================
 # CREATE INVITATION TESTS
 # ============================================================================
+
 
 class TestCreateInvitation:
     """Test cases for POST /invite/{organization_id} endpoint."""
@@ -246,25 +371,50 @@ class TestCreateInvitation:
             "email": "newuser@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "New",
-            "last_name": "User"
+            "last_name": "User",
         }
 
         mock_created_invite = {
             "id": str(uuid.uuid4()),
             "token_hash": "abc123xyz456",
             "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
-            "role_id": str(uuid.uuid4())
+            "role_id": str(uuid.uuid4()),
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value=mock_created_invite)), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_existing_invite",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.create_organization_invite",
+                AsyncMock(return_value=mock_created_invite),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_user_by_id",
+                AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.send_organization_invitation_email",
+                return_value=True,
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             assert response.status_code == 201
@@ -280,7 +430,7 @@ class TestCreateInvitation:
             "email": "newuser@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "New",
-            "last_name": "User"
+            "last_name": "User",
         }
 
         response = client.post(f"/v1/invite/{invalid_org_id}", json=request_data)
@@ -294,28 +444,43 @@ class TestCreateInvitation:
             "email": "newuser@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "New",
-            "last_name": "User"
+            "last_name": "User",
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=None)):
+        with patch(
+            "apps.user_service.app.api.invites.get_organisation_details_by_id",
+            AsyncMock(return_value=None),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             assert response.status_code == 404
             assert "Organization not found" in response.json()["detail"]
 
-    def test_create_invitation_organization_capacity_exceeded(self, client, mock_organization_data):
+    def test_create_invite_org_capacity_exceeded(self, client, mock_organization_data):
         """Test invitation creation when organization capacity is exceeded."""
         organization_id = str(uuid.uuid4())
         request_data = {
             "email": "newuser@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "New",
-            "last_name": "User"
+            "last_name": "User",
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(side_effect=HTTPException(status_code=400, detail="Organization has reached maximum user capacity of 10 users"))):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(
+                    side_effect=HTTPException(
+                        status_code=400,
+                        detail="Organization has reached maximum user capacity of 10 users",
+                    )
+                ),
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             assert response.status_code == 400
@@ -328,13 +493,23 @@ class TestCreateInvitation:
             "email": "existing@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "Existing",
-            "last_name": "User"
+            "last_name": "User",
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=True)):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=True),
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             assert response.status_code == 409
@@ -347,14 +522,27 @@ class TestCreateInvitation:
             "email": "pending@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "Pending",
-            "last_name": "User"
+            "last_name": "User",
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=True)):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_existing_invite",
+                AsyncMock(return_value=True),
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             assert response.status_code == 409
@@ -367,7 +555,7 @@ class TestCreateInvitation:
             "email": "invalid-email",
             "role_id": str(uuid.uuid4()),
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
         response = client.post(f"/v1/invite/{organization_id}", json=request_data)
@@ -381,7 +569,7 @@ class TestCreateInvitation:
             "email": "newuser@example.com",
             "role_id": "invalid-uuid",
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
         response = client.post(f"/v1/invite/{organization_id}", json=request_data)
@@ -396,37 +584,82 @@ class TestCreateInvitation:
             "email": "newuser@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value={"id": str(uuid.uuid4()), "token_hash": "abc", "expires_at": "2024-12-31"})), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_existing_invite",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.create_organization_invite",
+                AsyncMock(
+                    return_value={
+                        "id": str(uuid.uuid4()),
+                        "token_hash": "abc",
+                        "expires_at": "2024-12-31",
+                    }
+                ),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_user_by_id",
+                AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.send_organization_invitation_email",
+                return_value=True,
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             # Should succeed as expires_in_days is no longer validated
             assert response.status_code == 201
 
     def test_create_invitation_database_error(self, client, mock_organization_data):
+        """Test invitation creation when database error occurs."""
         organization_id = str(uuid.uuid4())
         request_data = {
             "email": "newuser@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "New",
-            "last_name": "User"
+            "last_name": "User",
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(side_effect=DatabaseOperationError("Database error"))):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_existing_invite",
+                AsyncMock(return_value=False),
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             assert response.status_code == 500
@@ -437,6 +670,7 @@ class TestCreateInvitation:
 # GET ORGANIZATION INVITATIONS TESTS
 # ============================================================================
 
+
 class TestGetOrganizationInvitations:
     """Test cases for GET /invite/{organization_id} endpoint."""
 
@@ -445,9 +679,16 @@ class TestGetOrganizationInvitations:
         organization_id = str(uuid.uuid4())
         mock_invitations = [mock_invite_data]
 
-        with patch("apps.user_service.app.api.invites.get_organization_invites", AsyncMock(return_value=mock_invitations)), \
-             patch("apps.user_service.app.api.invites.get_organization_invites_count", AsyncMock(return_value=1)):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organization_invites",
+                AsyncMock(return_value=mock_invitations),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organization_invites_count",
+                AsyncMock(return_value=1),
+            ),
+        ):
             response = client.get(f"/v1/invite/{organization_id}")
 
             assert response.status_code == 200
@@ -461,9 +702,16 @@ class TestGetOrganizationInvitations:
         organization_id = str(uuid.uuid4())
         mock_invitations = [mock_invite_data]
 
-        with patch("apps.user_service.app.api.invites.get_organization_invites", AsyncMock(return_value=mock_invitations)), \
-             patch("apps.user_service.app.api.invites.get_organization_invites_count", AsyncMock(return_value=1)):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organization_invites",
+                AsyncMock(return_value=mock_invitations),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organization_invites_count",
+                AsyncMock(return_value=1),
+            ),
+        ):
             response = client.get(f"/v1/invite/{organization_id}?page=1&page_size=10")
 
             assert response.status_code == 200
@@ -475,9 +723,16 @@ class TestGetOrganizationInvitations:
         """Test retrieval when no invitations exist."""
         organization_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.get_organization_invites", AsyncMock(return_value=[])), \
-             patch("apps.user_service.app.api.invites.get_organization_invites_count", AsyncMock(return_value=0)):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organization_invites",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organization_invites_count",
+                AsyncMock(return_value=0),
+            ),
+        ):
             response = client.get(f"/v1/invite/{organization_id}")
 
             assert response.status_code == 200
@@ -485,7 +740,7 @@ class TestGetOrganizationInvitations:
             assert data["total_count"] == 0
             assert len(data["data"]) == 0
 
-    def test_get_organization_invitations_invalid_organization_id(self, client):
+    def test_get_org_invites_invalid_org_id(self, client):
         """Test retrieval with invalid organization ID."""
         invalid_org_id = "invalid-uuid"
 
@@ -498,6 +753,7 @@ class TestGetOrganizationInvitations:
 # RESEND INVITATION TESTS
 # ============================================================================
 
+
 class TestResendInvitation:
     """Test cases for PUT /invite/resend/{invite_id} endpoint."""
 
@@ -507,14 +763,34 @@ class TestResendInvitation:
 
         # Update mock data to match the current user's email
         mock_invite_data["email"] = "test@example.com"
-        mock_invite_data["metadata"] = {"first_name": "Test", "last_name": "User", "salutation": None}
+        mock_invite_data["metadata"] = {
+            "first_name": "Test",
+            "last_name": "User",
+            "salutation": None,
+        }
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_invite_by_id",
+                AsyncMock(return_value=mock_invite_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_user_by_id",
+                AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.send_organization_invitation_email",
+                return_value=True,
+            ),
+        ):
             response = client.put(f"/v1/invite/resend/{invite_id}")
 
             assert response.status_code == 200
@@ -526,7 +802,10 @@ class TestResendInvitation:
         """Test resend invitation when invitation doesn't exist."""
         invite_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=None)):
+        with patch(
+            "apps.user_service.app.api.invites.get_invite_by_id",
+            AsyncMock(return_value=None),
+        ):
             response = client.put(f"/v1/invite/resend/{invite_id}")
 
             assert response.status_code == 404
@@ -540,20 +819,42 @@ class TestResendInvitation:
 
         assert response.status_code == 400
 
-    def test_resend_invitation_email_failure(self, client, mock_invite_data, mock_organization_data):
+    def test_resend_invitation_email_failure(
+        self, client, mock_invite_data, mock_organization_data
+    ):
         """Test resend invitation when email sending fails."""
         invite_id = str(uuid.uuid4())
 
         # Update mock data to match the current user's email
         mock_invite_data["email"] = "test@example.com"
-        mock_invite_data["metadata"] = {"first_name": "Test", "last_name": "User", "salutation": None}
+        mock_invite_data["metadata"] = {
+            "first_name": "Test",
+            "last_name": "User",
+            "salutation": None,
+        }
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=False):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_invite_by_id",
+                AsyncMock(return_value=mock_invite_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_user_by_id",
+                AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.send_organization_invitation_email",
+                return_value=False,
+            ),
+        ):
             response = client.put(f"/v1/invite/resend/{invite_id}")
 
             # Should still return success even if email fails
@@ -561,20 +862,42 @@ class TestResendInvitation:
             data = response.json()
             assert data["success"] is True
 
-    def test_resend_invitation_database_error(self, client, mock_invite_data, mock_organization_data):
+    def test_resend_invitation_database_error(
+        self, client, mock_invite_data, mock_organization_data
+    ):
         """Test resend invitation with database error."""
         invite_id = str(uuid.uuid4())
 
         # Update mock data to match the current user's email
         mock_invite_data["email"] = "test@example.com"
-        mock_invite_data["metadata"] = {"first_name": "Test", "last_name": "User", "salutation": None}
+        mock_invite_data["metadata"] = {
+            "first_name": "Test",
+            "last_name": "User",
+            "salutation": None,
+        }
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", side_effect=Exception("Email service error")):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_invite_by_id",
+                AsyncMock(return_value=mock_invite_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_user_by_id",
+                AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.send_organization_invitation_email",
+                side_effect=Exception("Email service error"),
+            ),
+        ):
             response = client.put(f"/v1/invite/resend/{invite_id}")
 
             assert response.status_code == 500
@@ -584,6 +907,7 @@ class TestResendInvitation:
 # ============================================================================
 # DELETE INVITATION TESTS
 # ============================================================================
+
 
 class TestDeleteInvitation:
     """Test cases for DELETE /invite/{invite_id} endpoint."""
@@ -595,9 +919,16 @@ class TestDeleteInvitation:
         # Update mock data to match the current user's email
         mock_invite_data["email"] = "test@example.com"
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.delete_invite", AsyncMock(return_value=True)):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_invite_by_id",
+                AsyncMock(return_value=mock_invite_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.delete_invite",
+                AsyncMock(return_value=True),
+            ),
+        ):
             response = client.delete(f"/v1/invite/{invite_id}")
 
             assert response.status_code == 204
@@ -606,7 +937,10 @@ class TestDeleteInvitation:
         """Test delete invitation when invitation doesn't exist."""
         invite_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=None)):
+        with patch(
+            "apps.user_service.app.api.invites.get_invite_by_id",
+            AsyncMock(return_value=None),
+        ):
             response = client.delete(f"/v1/invite/{invite_id}")
 
             assert response.status_code == 404
@@ -627,9 +961,10 @@ class TestDeleteInvitation:
         # Update mock data to match the current user's email
         mock_invite_data["email"] = "test@example.com"
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.delete_invite", AsyncMock(side_effect=DatabaseOperationError("Database error"))):
-
+        with patch(
+            "apps.user_service.app.api.invites.get_invite_by_id",
+            AsyncMock(return_value=mock_invite_data),
+        ):
             response = client.delete(f"/v1/invite/{invite_id}")
 
             assert response.status_code == 500
@@ -642,9 +977,16 @@ class TestDeleteInvitation:
         # Update mock data to match the current user's email
         mock_invite_data["email"] = "test@example.com"
 
-        with patch("apps.user_service.app.api.invites.get_invite_by_id", AsyncMock(return_value=mock_invite_data)), \
-             patch("apps.user_service.app.api.invites.delete_invite", AsyncMock(return_value=False)):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_invite_by_id",
+                AsyncMock(return_value=mock_invite_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.delete_invite",
+                AsyncMock(return_value=False),
+            ),
+        ):
             response = client.delete(f"/v1/invite/{invite_id}")
 
             assert response.status_code == 404
@@ -654,6 +996,7 @@ class TestDeleteInvitation:
 # ============================================================================
 # VALIDATION AND ERROR SCENARIOS TESTS
 # ============================================================================
+
 
 class TestInviteValidation:
     """Test cases for invitation validation scenarios."""
@@ -665,7 +1008,7 @@ class TestInviteValidation:
             "email": "not-an-email",
             "role_id": str(uuid.uuid4()),
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
         response = client.post(f"/v1/invite/{organization_id}", json=request_data)
@@ -679,7 +1022,7 @@ class TestInviteValidation:
             "email": "user@example.com",
             "role_id": "invalid-uuid",  # Invalid UUID format
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
         response = client.post(f"/v1/invite/{organization_id}", json=request_data)
@@ -695,17 +1038,49 @@ class TestInviteValidation:
             "email": "user@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value={"id": str(uuid.uuid4()), "token_hash": "abc", "expires_at": "2024-12-31"})), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_existing_invite",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.create_organization_invite",
+                AsyncMock(
+                    return_value={
+                        "id": str(uuid.uuid4()),
+                        "token_hash": "abc",
+                        "expires_at": "2024-12-31",
+                    }
+                ),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_user_by_id",
+                AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.send_organization_invitation_email",
+                return_value=True,
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
             # Should succeed as expires_in_days is no longer validated
             assert response.status_code == 201
@@ -718,7 +1093,7 @@ class TestInviteValidation:
         request_data = {
             "role_id": str(uuid.uuid4()),
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
         response = client.post(f"/v1/invite/{organization_id}", json=request_data)
@@ -732,17 +1107,49 @@ class TestInviteValidation:
             "email": "user@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value={"id": str(uuid.uuid4()), "token_hash": "abc", "expires_at": "2024-12-31"})), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_existing_invite",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.create_organization_invite",
+                AsyncMock(
+                    return_value={
+                        "id": str(uuid.uuid4()),
+                        "token_hash": "abc",
+                        "expires_at": "2024-12-31",
+                    }
+                ),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_user_by_id",
+                AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.send_organization_invitation_email",
+                return_value=True,
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             # Should succeed as expires_in_days is no longer validated
@@ -752,6 +1159,7 @@ class TestInviteValidation:
 # ============================================================================
 # PERMISSION AND ACCESS CONTROL TESTS
 # ============================================================================
+
 
 class TestInvitePermissions:
     """Test cases for invitation permission and access control."""
@@ -763,10 +1171,13 @@ class TestInvitePermissions:
             "email": "user@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
-        with patch("apps.user_service.app.api.invites.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
+        with patch(
+            "apps.user_service.app.api.invites.check_permissions",
+            AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied")),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             assert response.status_code == 403
@@ -775,7 +1186,10 @@ class TestInvitePermissions:
         """Test get invitations with insufficient permissions."""
         organization_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
+        with patch(
+            "apps.user_service.app.api.invites.check_permissions",
+            AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied")),
+        ):
             response = client.get(f"/v1/invite/{organization_id}")
 
             assert response.status_code == 403
@@ -784,7 +1198,10 @@ class TestInvitePermissions:
         """Test resend invitation with insufficient permissions."""
         invite_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
+        with patch(
+            "apps.user_service.app.api.invites.check_permissions",
+            AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied")),
+        ):
             response = client.put(f"/v1/invite/resend/{invite_id}")
 
             assert response.status_code == 403
@@ -794,7 +1211,10 @@ class TestInvitePermissions:
         # Revoke endpoint has been removed, use delete instead
         invite_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
+        with patch(
+            "apps.user_service.app.api.invites.check_permissions",
+            AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied")),
+        ):
             response = client.delete(f"/v1/invite/{invite_id}")
 
             assert response.status_code == 403
@@ -803,7 +1223,10 @@ class TestInvitePermissions:
         """Test delete invitation with insufficient permissions."""
         invite_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.check_permissions", AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied"))):
+        with patch(
+            "apps.user_service.app.api.invites.check_permissions",
+            AsyncMock(side_effect=HTTPException(status_code=403, detail="Permission denied")),
+        ):
             response = client.delete(f"/v1/invite/{invite_id}")
 
             assert response.status_code == 403
@@ -812,6 +1235,7 @@ class TestInvitePermissions:
 # ============================================================================
 # EDGE CASES AND BOUNDARY TESTS
 # ============================================================================
+
 
 class TestInviteEdgeCases:
     """Test cases for edge cases and boundary conditions."""
@@ -823,24 +1247,49 @@ class TestInviteEdgeCases:
             "email": "user@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
         mock_created_invite = {
             "id": str(uuid.uuid4()),
             "token_hash": "abc123xyz456",
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value=mock_created_invite)), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_existing_invite",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.create_organization_invite",
+                AsyncMock(return_value=mock_created_invite),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_user_by_id",
+                AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.send_organization_invitation_email",
+                return_value=True,
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             assert response.status_code == 201
@@ -852,24 +1301,49 @@ class TestInviteEdgeCases:
             "email": "user@example.com",
             "role_id": str(uuid.uuid4()),
             "first_name": "Test",
-            "last_name": "User"
+            "last_name": "User",
         }
 
         mock_created_invite = {
             "id": str(uuid.uuid4()),
             "token_hash": "abc123xyz456",
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
         }
 
-        with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-             patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-             patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
-             patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value=mock_created_invite)), \
-             patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": "member"})), \
-             patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-             patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                AsyncMock(return_value=mock_organization_data),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_organization_capacity",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_user_membership",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.check_existing_invite",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.create_organization_invite",
+                AsyncMock(return_value=mock_created_invite),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_role_by_id",
+                AsyncMock(return_value={"name": "member"}),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_user_by_id",
+                AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.send_organization_invitation_email",
+                return_value=True,
+            ),
+        ):
             response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
             assert response.status_code == 201
@@ -878,9 +1352,16 @@ class TestInviteEdgeCases:
         """Test get invitations with maximum allowed page size."""
         organization_id = str(uuid.uuid4())
 
-        with patch("apps.user_service.app.api.invites.get_organization_invites", AsyncMock(return_value=[])), \
-             patch("apps.user_service.app.api.invites.get_organization_invites_count", AsyncMock(return_value=0)):
-
+        with (
+            patch(
+                "apps.user_service.app.api.invites.get_organization_invites",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "apps.user_service.app.api.invites.get_organization_invites_count",
+                AsyncMock(return_value=0),
+            ),
+        ):
             response = client.get(f"/v1/invite/{organization_id}?page_size=100")
 
             assert response.status_code == 200
@@ -901,7 +1382,7 @@ class TestInviteEdgeCases:
         mock_created_invite = {
             "id": str(uuid.uuid4()),
             "token_hash": "abc123xyz456",
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
         }
 
         for role in valid_roles:
@@ -909,18 +1390,43 @@ class TestInviteEdgeCases:
                 "email": f"user_{role}@example.com",
                 "role_id": str(uuid.uuid4()),
                 "first_name": "Test",
-                "last_name": "User"
+                "last_name": "User",
             }
 
-            with patch("apps.user_service.app.api.invites.get_organisation_details_by_id", AsyncMock(return_value=mock_organization_data)), \
-                 patch("apps.user_service.app.api.invites.check_organization_capacity", AsyncMock(return_value=None)), \
-                 patch("apps.user_service.app.api.invites.check_user_membership", AsyncMock(return_value=False)), \
-                 patch("apps.user_service.app.api.invites.check_existing_invite", AsyncMock(return_value=False)), \
-                 patch("apps.user_service.app.api.invites.create_organization_invite", AsyncMock(return_value=mock_created_invite)), \
-                 patch("apps.user_service.app.api.invites.get_role_by_id", AsyncMock(return_value={"name": role})), \
-                 patch("apps.user_service.app.api.invites.get_user_by_id", AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={})))), \
-                 patch("apps.user_service.app.api.invites.send_organization_invitation_email", return_value=True):
-
+            with (
+                patch(
+                    "apps.user_service.app.api.invites.get_organisation_details_by_id",
+                    AsyncMock(return_value=mock_organization_data),
+                ),
+                patch(
+                    "apps.user_service.app.api.invites.check_organization_capacity",
+                    AsyncMock(return_value=None),
+                ),
+                patch(
+                    "apps.user_service.app.api.invites.check_user_membership",
+                    AsyncMock(return_value=False),
+                ),
+                patch(
+                    "apps.user_service.app.api.invites.check_existing_invite",
+                    AsyncMock(return_value=False),
+                ),
+                patch(
+                    "apps.user_service.app.api.invites.create_organization_invite",
+                    AsyncMock(return_value=mock_created_invite),
+                ),
+                patch(
+                    "apps.user_service.app.api.invites.get_role_by_id",
+                    AsyncMock(return_value={"name": role}),
+                ),
+                patch(
+                    "apps.user_service.app.api.invites.get_user_by_id",
+                    AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
+                ),
+                patch(
+                    "apps.user_service.app.api.invites.send_organization_invitation_email",
+                    return_value=True,
+                ),
+            ):
                 response = client.post(f"/v1/invite/{organization_id}", json=request_data)
 
                 assert response.status_code == 201

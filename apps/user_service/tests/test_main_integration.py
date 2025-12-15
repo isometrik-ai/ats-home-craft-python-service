@@ -1,26 +1,39 @@
-# pylint: disable=all
+"""Async integration tests for main application components.
 
-"""
-Async integration tests for main application components.
 Tests main.py, routes.py, and auth.py endpoints with proper AsyncMock usage.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+
 
 @pytest.fixture
 def main_app_client():
     """Test client for the main application with minimal mocking"""
-    with patch('ddtrace.patch_all'), \
-         patch('dotenv.load_dotenv'), \
-         patch('apps.user_service.app.dependencies.logger.setup_logging') as mock_logger, \
-         patch('jwt.decode') as mock_jwt_decode, \
-         patch('apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id') as mock_get_user, \
-         patch('libs.shared_db.postgres_db.user_service_operations.user_operations.get_user_profile_by_id') as mock_get_user_ops, \
-         patch('libs.shared_db.postgres_db.user_service_operations.user_operations.get_auth_user_by_email') as mock_get_auth_user, \
-         patch('libs.shared_middleware.jwt_auth.check_user_access_async') as mock_check_access:
-
+    with (
+        patch("ddtrace.patch_all"),
+        patch("dotenv.load_dotenv"),
+        patch("apps.user_service.app.dependencies.logger.setup_logging") as mock_logger,
+        patch("jwt.decode") as mock_jwt_decode,
+        patch(
+            "apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id"
+        ) as mock_get_user,
+        patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.user_operations."
+                "get_user_profile_by_id"
+            )
+        ) as mock_get_user_ops,
+        patch(
+            (
+                "libs.shared_db.postgres_db.user_service_operations.user_operations."
+                "get_auth_user_by_email"
+            )
+        ) as mock_get_auth_user,
+        patch("libs.shared_middleware.jwt_auth.check_user_access_async") as mock_check_access,
+    ):
         # Mock logger
         mock_logger.return_value = MagicMock()
 
@@ -28,49 +41,54 @@ def main_app_client():
         mock_jwt_decode.return_value = {
             "sub": "test-user-id",
             "email": "test@example.com",
-            "user_metadata": {"organization_id": "test-org-id"}
+            "user_metadata": {"organization_id": "test-org-id"},
         }
 
         # Mock user profile functions
         mock_get_user.return_value = {
             "user_id": "test-user-id",
             "email": "test@example.com",
-            "organization_id": "test-org-id"
+            "organization_id": "test-org-id",
         }
         mock_get_user_ops.return_value = {
             "user_id": "test-user-id",
             "email": "test@example.com",
-            "organization_id": "test-org-id"
+            "organization_id": "test-org-id",
         }
         mock_get_auth_user.return_value = {
             "id": "test-user-id",
             "email": "test@example.com",
-            "user_metadata": {"organization_id": "test-org-id"}
+            "user_metadata": {"organization_id": "test-org-id"},
         }
         mock_check_access.return_value = True
 
         # Import after mocking to avoid real dependencies
         from apps.user_service.app.main import app
+
         with TestClient(app) as client:
             yield client
+
 
 @pytest.fixture
 def async_main_app_client():
     """Async test client for the main application"""
-    with patch('ddtrace.patch_all'), \
-         patch('dotenv.load_dotenv'), \
-         patch('apps.user_service.app.dependencies.logger.setup_logging') as mock_logger, \
-         patch('libs.shared_middleware.jwt_auth.get_user_from_token') as mock_get_user:
-
+    with (
+        patch("ddtrace.patch_all"),
+        patch("dotenv.load_dotenv"),
+        patch("apps.user_service.app.dependencies.logger.setup_logging") as mock_logger,
+        patch("libs.shared_middleware.jwt_auth.get_user_from_token") as mock_get_user,
+    ):
         mock_logger.return_value = MagicMock()
         mock_get_user.return_value = {
             "user_id": "test-user-id",
             "email": "test@example.com",
-            "organization_id": "test-org-id"
+            "organization_id": "test-org-id",
         }
 
         from apps.user_service.app.main import app
+
         return app
+
 
 def test_health_endpoint(main_app_client):
     """Test the health check endpoint - covers main.py"""
@@ -80,13 +98,15 @@ def test_health_endpoint(main_app_client):
     assert data["status"] == "healthy"
     assert data["version"] == "1.0.0"
 
+
 def test_api_status_endpoint():
     """Test API status endpoint - covers routes.py"""
     # Test the function directly to avoid JWT middleware issues
-    from apps.user_service.app.api.routes import api_status
-
     # Test the async function directly
     import asyncio
+
+    from apps.user_service.app.api.routes import api_status
+
     result = asyncio.run(api_status())
 
     assert result["status"] == "success"
@@ -94,8 +114,9 @@ def test_api_status_endpoint():
     assert "available_endpoints" in result
     assert "/admin/organisation" in result["available_endpoints"]
 
+
 @pytest.mark.asyncio
-async def test_health_endpoint_async(async_main_app_client):
+async def test_health_endpoint_async():
     """Test the health check endpoint asynchronously - covers main.py"""
     from apps.user_service.app.main import health_check
 
@@ -104,8 +125,9 @@ async def test_health_endpoint_async(async_main_app_client):
     assert result.status == "healthy"
     assert result.version == "1.0.0"
 
+
 @pytest.mark.asyncio
-async def test_api_status_endpoint_async(async_main_app_client):
+async def test_api_status_endpoint_async():
     """Test API status endpoint asynchronously - covers routes.py"""
     from apps.user_service.app.api.routes import api_status
 
@@ -115,38 +137,46 @@ async def test_api_status_endpoint_async(async_main_app_client):
     assert "API routes are active" in result["message"]
     assert "available_endpoints" in result
 
+
 def test_application_metadata():
     """Test application metadata is set correctly - covers main.py"""
-    with patch('ddtrace.patch_all'), \
-         patch('dotenv.load_dotenv'), \
-         patch('apps.user_service.app.dependencies.logger.setup_logging') as mock_logger:
-
+    with (
+        patch("ddtrace.patch_all"),
+        patch("dotenv.load_dotenv"),
+        patch("apps.user_service.app.dependencies.logger.setup_logging") as mock_logger,
+    ):
         mock_logger.return_value = MagicMock()
 
         from apps.user_service.app.main import app
+
         assert app.title == "House Of Apps AI"
         assert app.description == "API For House Of Apps AI"
         assert app.version == "1.0.0"
 
+
 def test_cors_middleware_setup():
     """Test CORS middleware is properly configured - covers main.py"""
-    with patch('ddtrace.patch_all'), \
-         patch('dotenv.load_dotenv'), \
-         patch('apps.user_service.app.dependencies.logger.setup_logging') as mock_logger:
-
+    with (
+        patch("ddtrace.patch_all"),
+        patch("dotenv.load_dotenv"),
+        patch("apps.user_service.app.dependencies.logger.setup_logging") as mock_logger,
+    ):
         mock_logger.return_value = MagicMock()
 
         from apps.user_service.app.main import app
+
         # Check that CORS middleware is added by checking middleware classes
         middleware_classes = [middleware.cls.__name__ for middleware in app.user_middleware]
-        assert 'CORSMiddleware' in middleware_classes
+        assert "CORSMiddleware" in middleware_classes
+
 
 def test_health_response_model():
     """Test HealthResponse model - covers main.py"""
-    with patch('ddtrace.patch_all'), \
-         patch('dotenv.load_dotenv'), \
-         patch('apps.user_service.app.dependencies.logger.setup_logging') as mock_logger:
-
+    with (
+        patch("ddtrace.patch_all"),
+        patch("dotenv.load_dotenv"),
+        patch("apps.user_service.app.dependencies.logger.setup_logging") as mock_logger,
+    ):
         mock_logger.return_value = MagicMock()
 
         from apps.user_service.app.main import HealthResponse
@@ -160,6 +190,7 @@ def test_health_response_model():
         health_custom = HealthResponse(status="custom", version="2.0.0")
         assert health_custom.status == "custom"
         assert health_custom.version == "2.0.0"
+
 
 def test_routes_include_all_sub_routers():
     """Test that all sub-routers are properly included - covers routes.py"""
@@ -175,10 +206,13 @@ def test_routes_include_all_sub_routers():
     admin_routes = [path for path in route_paths if "/admin" in path]
     assert len(admin_routes) > 0
 
+
 def test_router_prefix():
     """Test router prefix configuration - covers routes.py"""
     from apps.user_service.app.api.routes import router
+
     assert router.prefix == "/v1/admin"
+
 
 @pytest.mark.asyncio
 async def test_application_startup_async():
@@ -197,13 +231,15 @@ async def test_application_startup_async():
     v1_routes = [route.path for route in app.routes if route.path.startswith("/v1")]
     assert len(v1_routes) > 0, "No /v1 routes found"
 
+
 @pytest.mark.asyncio
 async def test_middleware_configuration_async():
     """Test middleware configuration asynchronously - covers main.py"""
-    with patch('ddtrace.patch_all'), \
-         patch('dotenv.load_dotenv'), \
-         patch('apps.user_service.app.dependencies.logger.setup_logging') as mock_logger:
-
+    with (
+        patch("ddtrace.patch_all"),
+        patch("dotenv.load_dotenv"),
+        patch("apps.user_service.app.dependencies.logger.setup_logging") as mock_logger,
+    ):
         mock_logger.return_value = MagicMock()
 
         from apps.user_service.app.main import app
@@ -212,17 +248,19 @@ async def test_middleware_configuration_async():
         middleware_classes = [middleware.cls.__name__ for middleware in app.user_middleware]
 
         # Should have CORS, JWT, and other middleware
-        expected_middleware = ['CORSMiddleware', 'JWTAuthMiddleware']
+        expected_middleware = ["CORSMiddleware", "JWTAuthMiddleware"]
         for middleware_name in expected_middleware:
             assert middleware_name in middleware_classes
+
 
 @pytest.mark.asyncio
 async def test_exception_handlers_async():
     """Test exception handlers are properly configured - covers main.py"""
-    with patch('ddtrace.patch_all'), \
-         patch('dotenv.load_dotenv'), \
-         patch('apps.user_service.app.dependencies.logger.setup_logging') as mock_logger:
-
+    with (
+        patch("ddtrace.patch_all"),
+        patch("dotenv.load_dotenv"),
+        patch("apps.user_service.app.dependencies.logger.setup_logging") as mock_logger,
+    ):
         mock_logger.return_value = MagicMock()
 
         from apps.user_service.app.main import app
@@ -234,17 +272,19 @@ async def test_exception_handlers_async():
         exception_types = list(app.exception_handlers.keys())
         assert Exception in exception_types
 
+
 @pytest.mark.asyncio
 async def test_rate_limit_exceeded_handler():
     """Test rate limit exceeded handler - covers fastapi_app.py"""
-    from slowapi.errors import RateLimitExceeded
     from fastapi import HTTPException, status
+    from slowapi.errors import RateLimitExceeded
 
     # Import the app to get access to the exception handler
-    with patch('ddtrace.patch_all'), \
-         patch('dotenv.load_dotenv'), \
-         patch('apps.user_service.app.dependencies.logger.setup_logging') as mock_logger:
-
+    with (
+        patch("ddtrace.patch_all"),
+        patch("dotenv.load_dotenv"),
+        patch("apps.user_service.app.dependencies.logger.setup_logging") as mock_logger,
+    ):
         mock_logger.return_value = MagicMock()
 
         from apps.user_service.app.main import app
