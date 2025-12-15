@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from apps.user_service.app.dependencies.audit_logs.audit_logger import audit_logger
 from apps.user_service.app.dependencies.logger import app_logger
+from libs.shared_db.drivers.asyncpg_client import close_pool, get_pool
 
 
 @asynccontextmanager
@@ -24,7 +25,14 @@ async def lifespan(app: FastAPI):
     audit_logger.start_processing()
     app_logger.info("Audit logger processing started successfully")
 
-    yield
+    # Initialize DB pool
+    await get_pool()
+    app_logger.info("Database pool initialized successfully")
 
-    # Shutdown (if needed)
-    app_logger.info("Shutting down user service application")
+    try:
+        yield
+    finally:
+        # Shutdown (if needed)
+        app_logger.info("Shutting down user service application")
+        await close_pool()
+        app_logger.info("Database pool closed successfully")
