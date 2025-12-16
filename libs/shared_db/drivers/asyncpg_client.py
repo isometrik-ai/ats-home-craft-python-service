@@ -44,7 +44,7 @@ def _build_dsn() -> str:
 
     host = os.getenv("DB_HOST", "localhost")
     port = os.getenv("DB_PORT", "5432")
-    name = os.getenv("DB_NAME", "")
+    name = os.getenv("DB_DATABASE", "")
     user = os.getenv("DB_USER", "")
     password = os.getenv("DB_PASSWORD", "")
 
@@ -89,27 +89,28 @@ async def get_pool() -> asyncpg.Pool:
 
     Config (env):
         DATABASE_URL (preferred) or DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD
-        DB_MIN_POOL (default 1)
-        DB_MAX_POOL (default 10)
-        DB_COMMAND_TIMEOUT (seconds, default 30)
+        DB_MIN_POOL (default 5)
+        DB_MAX_POOL (default 15)
+        DB_COMMAND_TIMEOUT (seconds, default 10.0)
         DB_STATEMENT_TIMEOUT_MS (optional, milliseconds)
         DB_SSL_MODE (disable/require/verify-full)
         DB_SSL_ROOT_CERT (path, used when verify-full)
         DB_ACQUIRE_MAX_RETRY (default 3)
         DB_ACQUIRE_BASE_DELAY (seconds, default 1.0)
-        DB_ACQUIRE_TIMEOUT (seconds, optional)
-        DB_MAX_IDLE_TIME (seconds, optional)
+        DB_ACQUIRE_TIMEOUT (seconds, default 10.0)
+        DB_MAX_IDLE_TIME (seconds, default 300.0)
     """
     pool = _pool_holder["pool"]
     if pool is not None:
         return pool
 
     dsn = _build_dsn()
-    min_size = int(os.getenv("DB_MIN_POOL", "1"))
-    max_size = int(os.getenv("DB_MAX_POOL", "10"))
-    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "30"))
+    # Defaults align with .env (see DB_MIN_POOL, DB_MAX_POOL, etc.)
+    min_size = int(os.getenv("DB_MIN_POOL", "5"))
+    max_size = int(os.getenv("DB_MAX_POOL", "15"))
+    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "10.0"))
     ssl_context = _make_ssl_context()
-    max_idle = float(os.getenv("DB_MAX_IDLE_TIME", "300.00"))
+    max_idle = float(os.getenv("DB_MAX_IDLE_TIME", "300.0"))
 
     statement_timeout_env = os.getenv("DB_STATEMENT_TIMEOUT_MS")
     statement_timeout_ms = int(statement_timeout_env) if statement_timeout_env is not None else None
@@ -146,7 +147,7 @@ class AcquireConnection:
     async def __aenter__(self) -> asyncpg.Connection:
         max_attempts = int(os.getenv("DB_ACQUIRE_MAX_RETRY", "3"))
         base_delay = float(os.getenv("DB_ACQUIRE_BASE_DELAY", "1.0"))
-        acquire_timeout_env = os.getenv("DB_ACQUIRE_TIMEOUT")
+        acquire_timeout_env = os.getenv("DB_ACQUIRE_TIMEOUT", "10.0")
         acquire_timeout = float(acquire_timeout_env) if acquire_timeout_env else None
 
         last_exc: Exception | None = None

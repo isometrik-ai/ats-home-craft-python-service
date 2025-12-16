@@ -8,8 +8,8 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any
 
-from apps.user_service.app.dependencies.invite_utils import hash_token
 from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.utils.invite_utils import hash_token
 from libs import NOW_CONSTANT
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     create_new_user,

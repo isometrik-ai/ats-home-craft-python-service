@@ -12,11 +12,11 @@ from fastapi.testclient import TestClient
 from apps.user_service.app.api.admin_management.users.users import (
     router as users_router,
 )
-from apps.user_service.app.dependencies.common_utils import (
+from apps.user_service.app.schemas.users import UserListItem
+from apps.user_service.app.utils.common_utils import (
     UserContext,
     check_user_access_async,
 )
-from apps.user_service.app.schemas.users import UserListItem
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 
 
@@ -828,7 +828,7 @@ def test_ban_user_self_ban(client):
             mock_check_permissions_async,
         ),
         patch(
-            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            "apps.user_service.app.utils.common_utils.check_user_access_async",
             lambda *a, **k: True,
         ),
     ):
@@ -989,7 +989,7 @@ def test_unban_user_self_unban(client):
             mock_check_permissions_async,
         ),
         patch(
-            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            "apps.user_service.app.utils.common_utils.check_user_access_async",
             lambda *a, **k: True,
         ),
     ):

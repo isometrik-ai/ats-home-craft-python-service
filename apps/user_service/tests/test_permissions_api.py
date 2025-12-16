@@ -21,7 +21,7 @@ def app():
     from apps.user_service.app.api.admin_management.permissions import (
         router as permissions_router,
     )
-    from apps.user_service.app.dependencies.common_utils import check_permissions
+    from apps.user_service.app.utils.common_utils import check_permissions
     from libs.shared_middleware.jwt_auth import get_user_from_auth
 
     app = FastAPI()

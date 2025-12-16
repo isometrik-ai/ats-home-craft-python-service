@@ -6,14 +6,14 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-from apps.user_service.app.dependencies.common_utils import (
+from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.schemas.admin_access_management import SessionItem
+from apps.user_service.app.schemas.auth import SessionFilter
+from apps.user_service.app.utils.common_utils import (
     check_permissions,
     extract_user_context,
     format_iso_datetime,
 )
-from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.schemas.admin_access_management import SessionItem
-from apps.user_service.app.schemas.auth import SessionFilter
 from libs.shared_db.postgres_db.user_service_operations.session_operations import (
     get_org_sessions_with_count,
     get_sessions_with_count,

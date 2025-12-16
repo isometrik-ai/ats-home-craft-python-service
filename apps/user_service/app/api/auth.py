@@ -29,9 +29,6 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 
-# Internal utility imports
-from apps.user_service.app.dependencies.common_utils import handle_api_exceptions
-
 # Logger import
 from apps.user_service.app.dependencies.logger import get_logger
 
@@ -57,6 +54,9 @@ from apps.user_service.app.schemas.verification_codes import (
     VerificationType,
     VerifyVerificationCodeRequest,
 )
+
+# Internal utility imports
+from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_auth_user_by_email,
     get_organization_member_status_by_email,

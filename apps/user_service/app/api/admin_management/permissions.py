@@ -15,19 +15,19 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 
-# Utility imports
-from apps.user_service.app.dependencies.common_utils import (
-    check_permissions,
-    format_permissions_data,
-    handle_api_exceptions,
-)
-
 # Logger import
 from apps.user_service.app.dependencies.logger import get_logger
 
 # Schema imports
 from apps.user_service.app.schemas.admin_access_management import (
     CreatePermissionRequest,
+)
+
+# Utility imports
+from apps.user_service.app.utils.common_utils import (
+    check_permissions,
+    format_permissions_data,
+    handle_api_exceptions,
 )
 
 # Database operations imports

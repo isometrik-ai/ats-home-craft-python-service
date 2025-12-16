@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException, status
 
-from apps.user_service.app.dependencies.common_utils import (
+from apps.user_service.app.schemas.admin_access_management import PermissionItem
+from apps.user_service.app.utils.common_utils import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     ORG_STATUSES,
@@ -27,7 +28,6 @@ from apps.user_service.app.dependencies.common_utils import (
     set_audit_old_data_from_user,
     validate_uuid_format,
 )
-from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_utils.common_query import USER_NOT_FOUND_MESSAGE
 
 
@@ -227,7 +227,7 @@ class TestExtractUserContext:
         }
 
         with patch(
-            "apps.user_service.app.dependencies.common_utils.get_user_by_id",
+            "apps.user_service.app.utils.common_utils.get_user_by_id",
             AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
         ):
             result = await extract_user_context(current_user)
@@ -266,7 +266,7 @@ class TestExtractUserContext:
         current_user = {"sub": "user123", "email": "test@example.com"}
 
         with patch(
-            "apps.user_service.app.dependencies.common_utils.get_user_by_id",
+            "apps.user_service.app.utils.common_utils.get_user_by_id",
             AsyncMock(return_value=MagicMock(user=MagicMock(user_metadata={}))),
         ):
             result = await extract_user_context(current_user)
@@ -301,7 +301,7 @@ class TestRequirePermission:
 
         with (
             patch(
-                "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+                "apps.user_service.app.utils.common_utils.check_user_access_async",
                 AsyncMock(return_value=True),
             ) as mock_check,
             patch("time.time", side_effect=[1000.0, 1000.1]),
@@ -323,7 +323,7 @@ class TestRequirePermission:
 
         with (
             patch(
-                "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+                "apps.user_service.app.utils.common_utils.check_user_access_async",
                 AsyncMock(return_value=True),
             ) as mock_check,
             patch("time.time", side_effect=[1000.0, 1000.1]),
@@ -345,7 +345,7 @@ class TestRequirePermission:
 
         with (
             patch(
-                "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+                "apps.user_service.app.utils.common_utils.check_user_access_async",
                 AsyncMock(return_value=False),
             ),
             patch("time.time", side_effect=[1000.0, 1000.1, 1000.2]),
@@ -365,7 +365,7 @@ class TestRequirePermission:
 
         with (
             patch(
-                "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+                "apps.user_service.app.utils.common_utils.check_user_access_async",
                 AsyncMock(return_value=True),
             ) as mock_check,
             patch("builtins.print") as mock_print,
@@ -384,7 +384,7 @@ class TestRequirePermission:
         )
 
         with patch(
-            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            "apps.user_service.app.utils.common_utils.check_user_access_async",
             AsyncMock(return_value=True),
         ) as mock_check:
             await require_permission("users.manage", user_context, "manage users")
@@ -409,12 +409,8 @@ class TestCheckPermissions:
         }
 
         with (
-            patch(
-                "apps.user_service.app.dependencies.common_utils.extract_user_context"
-            ) as mock_extract,
-            patch(
-                "apps.user_service.app.dependencies.common_utils.require_permission"
-            ) as mock_require,
+            patch("apps.user_service.app.utils.common_utils.extract_user_context") as mock_extract,
+            patch("apps.user_service.app.utils.common_utils.require_permission") as mock_require,
         ):
             mock_user_context = UserContext("user123", "test@example.com", "org123")
             mock_extract.return_value = mock_user_context
@@ -439,12 +435,8 @@ class TestCheckPermissions:
         }
 
         with (
-            patch(
-                "apps.user_service.app.dependencies.common_utils.extract_user_context"
-            ) as mock_extract,
-            patch(
-                "apps.user_service.app.dependencies.common_utils.require_permission"
-            ) as mock_require,
+            patch("apps.user_service.app.utils.common_utils.extract_user_context") as mock_extract,
+            patch("apps.user_service.app.utils.common_utils.require_permission") as mock_require,
         ):
             mock_user_context = UserContext("user123", "test@example.com", "org123")
             mock_extract.return_value = mock_user_context
@@ -468,12 +460,8 @@ class TestCheckPermissions:
         }
 
         with (
-            patch(
-                "apps.user_service.app.dependencies.common_utils.extract_user_context"
-            ) as mock_extract,
-            patch(
-                "apps.user_service.app.dependencies.common_utils.require_permission"
-            ) as mock_require,
+            patch("apps.user_service.app.utils.common_utils.extract_user_context") as mock_extract,
+            patch("apps.user_service.app.utils.common_utils.require_permission") as mock_require,
         ):
             mock_user_context = UserContext("user123", "test@example.com", "org123")
             mock_extract.return_value = mock_user_context
@@ -718,7 +706,7 @@ class TestGetUserInOrganization:
         }
 
         with patch(
-            "apps.user_service.app.dependencies.common_utils.get_user_profile_by_id",
+            "apps.user_service.app.utils.common_utils.get_user_profile_by_id",
             AsyncMock(return_value=user_data),
         ) as mock_get_profile:
             result = await get_user_in_organization("user123", "org123")
@@ -730,7 +718,7 @@ class TestGetUserInOrganization:
     async def test_get_user_in_organization_user_not_found(self):
         """Test user not found in organization."""
         with patch(
-            "apps.user_service.app.dependencies.common_utils.get_user_profile_by_id",
+            "apps.user_service.app.utils.common_utils.get_user_profile_by_id",
             AsyncMock(return_value=None),
         ) as mock_get_profile:
             with pytest.raises(HTTPException) as exc_info:
@@ -744,7 +732,7 @@ class TestGetUserInOrganization:
     async def test_get_user_in_organization_empty_user_data(self):
         """Test empty user data returned."""
         with patch(
-            "apps.user_service.app.dependencies.common_utils.get_user_profile_by_id",
+            "apps.user_service.app.utils.common_utils.get_user_profile_by_id",
             AsyncMock(return_value={}),
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -911,7 +899,7 @@ class TestIntegration:
         }
 
         with patch(
-            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            "apps.user_service.app.utils.common_utils.check_user_access_async",
             AsyncMock(return_value=True),
         ) as mock_check:
             # Test the complete workflow
@@ -933,7 +921,7 @@ class TestIntegration:
         }
 
         with patch(
-            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            "apps.user_service.app.utils.common_utils.check_user_access_async",
             AsyncMock(return_value=True),
         ) as mock_check:
             result = await check_permissions(current_user, "users.manage", "manage users")

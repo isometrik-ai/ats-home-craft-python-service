@@ -5,10 +5,10 @@ All Supabase Auth admin API operations for user management should be centralized
 
 from fastapi import HTTPException, status
 
-from apps.user_service.app.dependencies.common_utils import UserContext
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.schemas.users import CreateUserRequest
+from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_user_profile_by_id,
     update_user_email,

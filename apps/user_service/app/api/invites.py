@@ -14,20 +14,8 @@ from apps.user_service.app.app_instance import limiter
 # Audit logging import
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 
-# Local imports - app dependencies and schemas
-from apps.user_service.app.dependencies.common_utils import (
-    check_permissions,
-    handle_api_exceptions,
-    validate_uuid_format,
-)
-from apps.user_service.app.dependencies.invite_utils import build_invite_list_item
-
 # Logger import
 from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.dependencies.organisation_utils import (
-    validate_organization_subscription,
-)
-from apps.user_service.app.dependencies.user_utils import build_full_name
 from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
@@ -36,6 +24,18 @@ from apps.user_service.app.schemas.invites import (
     InviteListResponse,
     InviteResponse,
 )
+
+# Local imports - app dependencies and schemas
+from apps.user_service.app.utils.common_utils import (
+    check_permissions,
+    handle_api_exceptions,
+    validate_uuid_format,
+)
+from apps.user_service.app.utils.invite_utils import build_invite_list_item
+from apps.user_service.app.utils.organisation_utils import (
+    validate_organization_subscription,
+)
+from apps.user_service.app.utils.user_utils import build_full_name
 
 # Database operations imports
 from libs.shared_db.postgres_db.user_service_operations.invite_operations import (

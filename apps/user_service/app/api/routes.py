@@ -19,6 +19,7 @@ from apps.user_service.app.api.audit_logs.audit_logs import router as audit_logs
 from apps.user_service.app.api.auth import router as auth_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
+from apps.user_service.app.api.teams import router as teams_router
 from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
 )
@@ -35,6 +36,7 @@ router.include_router(audit_logs_router)
 router.include_router(invites_router)
 router.include_router(presigned_url_router)
 router.include_router(verification_codes_router)
+router.include_router(teams_router)
 
 
 @router.get("/status")

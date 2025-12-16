@@ -11,11 +11,11 @@ from fastapi import APIRouter, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-from apps.user_service.app.dependencies.common_utils import handle_api_exceptions
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.presigned_url import (
     PresignedUrlResponse,
 )
+from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_utils.http_exceptions import InternalServerErrorException
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode

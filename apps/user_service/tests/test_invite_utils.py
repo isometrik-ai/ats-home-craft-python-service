@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timedelta
 
-from apps.user_service.app.dependencies.invite_utils import (
+from apps.user_service.app.utils.invite_utils import (
     build_invite_list_item,
     hash_token,
 )

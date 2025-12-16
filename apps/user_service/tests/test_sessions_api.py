@@ -16,11 +16,11 @@ from fastapi.testclient import TestClient
 from apps.user_service.app.api.admin_management.sessions.sessions import (
     router as sessions_router,
 )
-from apps.user_service.app.dependencies.common_utils import (
+from apps.user_service.app.schemas.auth import SessionFilter
+from apps.user_service.app.utils.common_utils import (
     UserContext,
     check_user_access_async,
 )
-from apps.user_service.app.schemas.auth import SessionFilter
 from libs.shared_db.postgres_db.user_service_operations.session_operations import (
     check_session_exists,
     create_session,

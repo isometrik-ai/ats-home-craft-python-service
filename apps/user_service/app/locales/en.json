@@ -1,6 +1,20 @@
 {
   "errors": {},
   "success": {},
+  "teams": {
+    "errors": {
+      "team_not_found": "The team you are trying to access does not exist.",
+      "team_name_exists": "A team with this name already exists in the organization.",
+      "invalid_member_ids": "One or more provided member IDs are invalid for this organization."
+    },
+    "success": {
+      "team_created": "Team created successfully.",
+      "teams_retrieved": "Teams retrieved successfully.",
+      "team_retrieved": "Team retrieved successfully.",
+      "team_updated": "Team updated successfully.",
+      "team_deleted": "Team deleted successfully."
+    }
+  },
   "invitations": {
     "errors": {
       "invitation_not_found": "The invitation you are trying to access does not exist.",
@@ -92,6 +106,7 @@
   },
   "permissions": {
     "errors": {
+      "permission_not_found": "The permission you are trying to access does not exist.",
       "creation_failed": "Failed to create permission",
       "deletion_failed": "Failed to delete permission"
     },

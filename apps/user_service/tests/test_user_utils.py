@@ -7,8 +7,8 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from apps.user_service.app.dependencies.user_utils import create_user_profile_data
 from apps.user_service.app.schemas.users import PermissionInfo, RoleInfoWithDescription
+from apps.user_service.app.utils.user_utils import create_user_profile_data
 
 
 class TestCreateUserProfileData:
@@ -92,7 +92,7 @@ class TestCreateUserProfileData:
             },
         }
 
-        with patch("apps.user_service.app.dependencies.user_utils.logger") as mock_logger:
+        with patch("apps.user_service.app.utils.user_utils.logger") as mock_logger:
             result = create_user_profile_data(user_profile)
 
             # Should log warning and set verification_preference to None

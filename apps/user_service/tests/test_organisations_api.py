@@ -130,7 +130,7 @@ def app():
     from apps.user_service.app.api.admin_management.organisation import (
         router as org_router,
     )
-    from apps.user_service.app.dependencies.common_utils import (
+    from apps.user_service.app.utils.common_utils import (
         check_permissions,
         check_user_access_async,
     )

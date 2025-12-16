@@ -10,8 +10,8 @@ from httpx import HTTPError, HTTPStatusError
 from postgrest import APIError
 from supabase_auth.errors import AuthApiError
 
-from apps.user_service.app.dependencies.common_utils import UserContext
 from apps.user_service.app.schemas.users import CreateUserRequest
+from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_db.supabase_db.admin_operations.user import (
     ban_the_user,
     delete_auth_user,

@@ -15,16 +15,6 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (  # a
     audit_api_call,
 )
 
-# Utility imports
-from apps.user_service.app.dependencies.common_utils import (
-    check_permissions,
-    format_iso_datetime,
-    format_permissions_data,
-    handle_api_exceptions,
-    safe_json_loads,
-    validate_uuid_format,
-)
-
 # Logger import
 from apps.user_service.app.dependencies.logger import get_logger
 
@@ -38,6 +28,16 @@ from apps.user_service.app.schemas.admin_access_management import (
     RolesResponse,
     UpdateRoleRequest,
     UpdateRoleResponse,
+)
+
+# Utility imports
+from apps.user_service.app.utils.common_utils import (
+    check_permissions,
+    format_iso_datetime,
+    format_permissions_data,
+    handle_api_exceptions,
+    safe_json_loads,
+    validate_uuid_format,
 )
 from libs.shared_db.postgres_db.user_service_operations.permission_operations import (
     get_permission_details_by_id,
