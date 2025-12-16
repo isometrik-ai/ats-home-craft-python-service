@@ -24,7 +24,7 @@ from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
 )
 
-router = APIRouter(prefix="/v1/admin")
+router = APIRouter(prefix="/v1")
 
 router.include_router(auth_router)
 router.include_router(organisation_router)
@@ -46,14 +46,14 @@ async def api_status():
         "message": "API routes are active",
         "status": "success",
         "available_endpoints": [
-            "/admin/organisation",
-            "/admin/users",
-            "/admin/roles",
-            "/admin/sessions",
-            "/admin/permissions",
-            "/admin/role-permissions",
-            "/admin/audit-logs",
-            "/admin/invite",
+            "/organisation",
+            "/users",
+            "/roles",
+            "/sessions",
+            "/permissions",
+            "/role-permissions",
+            "/audit-logs",
+            "/invite",
             "/embedding",
             "/clients",
         ],

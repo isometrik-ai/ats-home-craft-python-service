@@ -213,3 +213,67 @@ class TeamDetailResponse(BaseModel):
             }
         }
     )
+
+
+# ============================================================================
+# DATABASE INPUT MODELS
+# ============================================================================
+class TeamDbIn(BaseModel):
+    """Input model for creating a new team in database"""
+
+    organization_id: str = Field(..., description="Organization UUID")
+    name: str = Field(..., min_length=1, max_length=255, description="Team name")
+    description: str | None = Field(None, max_length=1000, description="Team description")
+    created_by: str = Field(..., description="User ID creating the team")
+    member_ids: list[str] | None = Field(None, description="Initial team member IDs")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "organization_id": "550e8400-e29b-41d4-a716-446655440000",
+                "name": EXAMPLE_TEAM_NAME,
+                "description": EXAMPLE_TEAM_DESCRIPTION,
+                "created_by": "550e8400-e29b-41d4-a716-446655440001",
+                "member_ids": ["550e8400-e29b-41d4-a716-446655440002"],
+            }
+        }
+    )
+
+
+class TeamDbUpdate(BaseModel):
+    """Input model for updating an existing team in database"""
+
+    team_id: str = Field(..., description="Team UUID to update")
+    organization_id: str = Field(..., description="Organization UUID")
+    added_by: str = Field(..., description="User ID making the changes")
+    name: str | None = Field(None, min_length=1, max_length=255, description="Updated team name")
+    description: str | None = Field(None, max_length=1000, description="Updated team description")
+    members_to_add: list[str] | None = Field(None, description="Member IDs to add to team")
+    members_to_remove: list[str] | None = Field(None, description="Member IDs to remove from team")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "team_id": "550e8400-e29b-41d4-a716-446655440000",
+                "organization_id": "550e8400-e29b-41d4-a716-446655440000",
+                "added_by": "550e8400-e29b-41d4-a716-446655440001",
+                "name": "Updated Team Name",
+                "description": "Updated description",
+                "members_to_add": ["550e8400-e29b-41d4-a716-446655440002"],
+                "members_to_remove": ["550e8400-e29b-41d4-a716-446655440003"],
+            }
+        }
+    )
+
+
+class TeamDbDelete(BaseModel):
+    """Input model for deleting a team in database"""
+
+    team_id: str = Field(..., description="Team UUID to delete")
+    organization_id: str = Field(..., description="Organization UUID")
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "team_id": "550e8400-e29b-41d4-a716-446655440000",
+                "organization_id": "550e8400-e29b-41d4-a716-446655440000",
+            }
+        }
+    )

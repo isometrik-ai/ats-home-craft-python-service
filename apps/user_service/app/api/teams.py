@@ -5,7 +5,8 @@ All endpoints include proper authentication, validation, and database operations
 """
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request, status
+from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.business.team_service import TeamService
@@ -50,15 +51,17 @@ logger = get_logger("teams-api")
     description="Create a new team",
     summary="Create a new team",
     response_model=None,
-    status_code=status.HTTP_201_CREATED,
+    status_code=http_status.HTTP_201_CREATED,
     responses={
-        status.HTTP_201_CREATED: {"model": None, "description": "Team created successfully"},
-        status.HTTP_400_BAD_REQUEST: {"description": "Invalid request body or data"},
-        status.HTTP_403_FORBIDDEN: {"description": "User does not have permission to create team"},
-        status.HTTP_409_CONFLICT: {"description": "Team name already exists"},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
-        status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
-        status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_201_CREATED: {"model": None, "description": "Team created successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Invalid request body or data"},
+        http_status.HTTP_403_FORBIDDEN: {
+            "description": "User does not have permission to create team"
+        },
+        http_status.HTTP_409_CONFLICT: {"description": "Team name already exists"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
     },
 )
 @limiter.limit("20/minute")
@@ -121,6 +124,13 @@ async def create_team_endpoint(
     team_service = TeamService(db_connection=db_connection, user_context=user_context)
     await team_service.create_team(body)
 
+    return success_response(
+        request=request,
+        message_key="teams.success.team_created",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+    )
+
 
 @handle_api_exceptions("list teams")
 @router.get(
@@ -128,16 +138,20 @@ async def create_team_endpoint(
     description="List all teams with pagination",
     summary="Get paginated list of teams",
     response_model=TeamsListResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     responses={
-        status.HTTP_200_OK: {
-            "model": TeamsListResponse,
-            "description": "Teams retrieved successfully",
+        http_status.HTTP_200_OK: {
+            "model": TeamDetailResponse,
+            "description": "Team details retrieved successfully",
         },
-        status.HTTP_400_BAD_REQUEST: {"description": "Invalid pagination parameters"},
-        status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
-        status.HTTP_403_FORBIDDEN: {"description": "User does not have permission to view teams"},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Invalid team ID format"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_403_FORBIDDEN: {
+            "description": "User does not have permission to view this team"
+        },
+        http_status.HTTP_404_NOT_FOUND: {"description": "Team not found"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
     },
 )
 @limiter.limit("100/minute")
@@ -179,6 +193,15 @@ async def list_teams_endpoint(
     result: TeamsListResponse = await team_service.list_teams(
         page=page, page_size=page_size, search=search
     )
+
+    if not result.data:
+        return success_response(
+            request=request,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_204_NO_CONTENT,
+        )
+
     return list_response(
         request=request,
         items=result.data,
@@ -187,7 +210,7 @@ async def list_teams_endpoint(
         page_size=page_size,
         message_key="teams.success.teams_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
-        status_code=status.HTTP_200_OK,
+        status_code=http_status.HTTP_200_OK,
     )
 
 
@@ -197,20 +220,20 @@ async def list_teams_endpoint(
     description="Get detailed information for a specific team",
     summary="Retrieve team details including members",
     response_model=TeamDetailResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     responses={
-        status.HTTP_200_OK: {
+        http_status.HTTP_200_OK: {
             "model": TeamDetailResponse,
             "description": "Team details retrieved successfully",
         },
-        status.HTTP_400_BAD_REQUEST: {"description": "Invalid team ID format"},
-        status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
-        status.HTTP_403_FORBIDDEN: {
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Invalid team ID format"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_403_FORBIDDEN: {
             "description": "User does not have permission to view this team"
         },
-        status.HTTP_404_NOT_FOUND: {"description": "Team not found"},
-        status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Team not found"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
     },
 )
 @limiter.limit("100/minute")
@@ -255,7 +278,7 @@ async def get_team_detail_endpoint(
         request=request,
         message_key="teams.success.team_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
-        status_code=status.HTTP_200_OK,
+        status_code=http_status.HTTP_200_OK,
         data=result.data,
     )
 
@@ -266,17 +289,17 @@ async def get_team_detail_endpoint(
     description="Delete a team",
     summary="Delete a team (soft delete)",
     response_model=None,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     responses={
-        status.HTTP_200_OK: {"description": "Team deleted successfully"},
-        status.HTTP_400_BAD_REQUEST: {"description": "Invalid team ID format"},
-        status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
-        status.HTTP_403_FORBIDDEN: {
+        http_status.HTTP_200_OK: {"description": "Team deleted successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Invalid team ID format"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_403_FORBIDDEN: {
             "description": "User does not have permission to delete this team"
         },
-        status.HTTP_404_NOT_FOUND: {"description": "Team not found"},
-        status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Team not found"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
     },
 )
 @limiter.limit("20/minute")
@@ -306,7 +329,7 @@ async def delete_team(
 
     Args:
         request: FastAPI request object
-        db_connection: postgresql database connection
+        db_connection: PostgreSQL database connection
         current_user: Decoded JWT token containing user information
         team_id: UUID of the team to delete
 
@@ -345,7 +368,7 @@ async def delete_team(
         request=request,
         message_key="teams.success.team_deleted",
         custom_code=CustomStatusCode.DELETED,
-        status_code=status.HTTP_200_OK,  # Using HTTP_200_OK alias for consistency
+        status_code=http_status.HTTP_200_OK,  # Using HTTP_200_OK alias for consistency
     )
 
 
@@ -355,18 +378,18 @@ async def delete_team(
     description="Update team information and members",
     summary="Update a team",
     response_model=None,
-    status_code=status.HTTP_200_OK,
+    status_code=http_status.HTTP_200_OK,
     responses={
-        status.HTTP_200_OK: {"model": None, "description": "Team updated successfully"},
-        status.HTTP_400_BAD_REQUEST: {"description": "Invalid team ID format or invalid data"},
-        status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
-        status.HTTP_403_FORBIDDEN: {
+        http_status.HTTP_200_OK: {"model": None, "description": "Team updated successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Invalid team ID format or invalid data"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_403_FORBIDDEN: {
             "description": "User does not have permission to update this team"
         },
-        status.HTTP_404_NOT_FOUND: {"description": "Team not found"},
-        status.HTTP_409_CONFLICT: {"description": "Team name already exists"},
-        status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Team not found"},
+        http_status.HTTP_409_CONFLICT: {"description": "Team name already exists"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
     },
 )
 @limiter.limit("20/minute")
@@ -426,3 +449,10 @@ async def update_team_endpoint(
     # Create service with user context and delegate to service
     team_service = TeamService(db_connection=db_connection, user_context=user_context)
     await team_service.update_team(team_id, body)
+
+    return success_response(
+        request=request,
+        message_key="teams.success.team_updated",
+        custom_code=CustomStatusCode.UPDATED,
+        status_code=http_status.HTTP_200_OK,
+    )

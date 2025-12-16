@@ -8,7 +8,12 @@ transaction handling and efficient batch operations.
 import asyncpg
 
 from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.schemas.teams import TeamRoles
+from apps.user_service.app.schemas.teams import (
+    TeamDbDelete,
+    TeamDbIn,
+    TeamDbUpdate,
+    TeamRoles,
+)
 from libs import DATETIME_NOW_CONSTANT
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -31,25 +36,17 @@ class TeamRepository:
         self.db_connection = db_connection
 
     # CREATE OPERATIONS
-    async def create_team(
-        self,
-        organization_id: str,
-        name: str,
-        description: str | None,
-        created_by: str,
-        member_ids: list[str] | None = None,
-    ) -> None:
+    async def create_team(self, team_input: TeamDbIn) -> str:
         """Create a new team with optional members in a single transaction.
 
         This function creates a team record and optionally adds members to it.
         All operations are atomic within the provided transaction.
 
         Args:
-            organization_id: Organization UUID
-            name: Team name (must be unique within organization)
-            description: Team description (optional)
-            created_by: User ID who created the team
-            member_ids: List of member user IDs to add to the team (optional)
+            team_input: Validated team creation data
+
+        Returns:
+            str: The created team ID
         """
         # Insert team record
         team_query = """
@@ -63,10 +60,10 @@ class TeamRepository:
 
         team_record = await self.db_connection.fetchrow(
             team_query,
-            organization_id,
-            name,
-            description,
-            created_by,
+            team_input.organization_id,
+            team_input.name,
+            team_input.description,
+            team_input.created_by,
             DATETIME_NOW_CONSTANT,
             DATETIME_NOW_CONSTANT,
         )
@@ -74,14 +71,18 @@ class TeamRepository:
         team_id = team_record["id"]
 
         # Add members if provided
-        if member_ids:
+        if team_input.member_ids:
             await self._insert_team_members(
-                team_id=team_id, member_ids=member_ids, added_by=created_by
+                team_id=team_id, member_ids=team_input.member_ids, added_by=team_input.created_by
             )
 
             logger.info(
-                "Successfully added %s members to team - Team ID: %s", len(member_ids), team_id
+                "Successfully added %s members to team - Team ID: %s",
+                len(team_input.member_ids),
+                team_id,
             )
+
+        return team_id
 
     async def _insert_team_members(
         self,
@@ -138,24 +139,22 @@ class TeamRepository:
         self,
         organization_id: str,
         search: str | None = None,
-        alias: str = "t",
     ) -> tuple[str, list[object]]:
         """Build WHERE clause and parameters for team queries.
 
         Args:
             organization_id: Organization UUID to filter by
             search: Optional search term for team name
-            alias: Table alias to use in the query (default: "t")
 
         Returns:
             Tuple containing (where_clause, params) for use in SQL query
         """
-        conditions = [f"{alias}.organization_id = $1", f"{alias}.deleted_at IS NULL"]
+        conditions = ["t.organization_id = $1", "t.deleted_at IS NULL"]
         params = [organization_id]
 
         if search and search.strip():
             params.append(f"%{search.strip()}%")
-            conditions.append(f"{alias}.name ILIKE ${len(params)}")
+            conditions.append(f"t.name ILIKE ${len(params)}")
 
         where_clause = "WHERE " + " AND ".join(conditions)
         return where_clause, params
@@ -396,26 +395,11 @@ class TeamRepository:
         return count == len(unique_user_ids)
 
     # UPDATE OPERATIONS
-    async def update_team(
-        self,
-        team_id: str,
-        organization_id: str,
-        added_by: str,
-        name: str | None = None,
-        description: str | None = None,
-        members_to_add: list[str] | None = None,
-        members_to_remove: list[str] | None = None,
-    ) -> None:
+    async def update_team(self, team_input: TeamDbUpdate) -> None:
         """Update team fields and members in a single transaction.
 
         Args:
-            team_id: UUID of the team to update
-            organization_id: Organization UUID (for scoping)
-            added_by: User ID who is performing the update
-            name: Optional new team name
-            description: Optional new team description
-            members_to_add: Optional list of user IDs to add
-            members_to_remove: Optional list of user IDs to remove
+            team_input: Validated team update data
 
         Raises:
             HTTPException: 404 if team not found
@@ -424,13 +408,13 @@ class TeamRepository:
         params = []
 
         fields_to_update = {}
-        if name is not None:
-            fields_to_update["name"] = name
-        if description is not None:
-            fields_to_update["description"] = description
+        if team_input.name is not None:
+            fields_to_update["name"] = team_input.name
+        if team_input.description is not None:
+            fields_to_update["description"] = team_input.description
 
         # Always update updated_at if any changes will happen
-        if fields_to_update or members_to_add or members_to_remove:
+        if fields_to_update or team_input.members_to_add or team_input.members_to_remove:
             fields_to_update["updated_at"] = DATETIME_NOW_CONSTANT
 
         # Execute team update if there are field changes
@@ -439,7 +423,7 @@ class TeamRepository:
                 f"{field} = ${i + 1}" for i, field in enumerate(fields_to_update)
             )
             params = list(fields_to_update.values())
-            params.extend([team_id, organization_id])
+            params.extend([team_input.team_id, team_input.organization_id])
 
             update_query = f"""
                 UPDATE teams
@@ -458,27 +442,30 @@ class TeamRepository:
                 )
 
         # Add new members
-        if members_to_add:
+        if team_input.members_to_add:
             await self._insert_team_members(
-                team_id=team_id, member_ids=members_to_add, added_by=added_by
+                team_id=team_input.team_id,
+                member_ids=team_input.members_to_add,
+                added_by=team_input.added_by,
             )
 
         # Remove members
-        if members_to_remove:
+        if team_input.members_to_remove:
             delete_query = """
                 DELETE FROM team_members
                 WHERE team_id = $1
                   AND user_id = ANY($2::uuid[])
             """
-            await self.db_connection.execute(delete_query, team_id, members_to_remove)
+            await self.db_connection.execute(
+                delete_query, team_input.team_id, team_input.members_to_remove
+            )
 
     # DELETE OPERATIONS
-    async def delete_team_and_members(self, team_id: str, organization_id: str) -> None:
+    async def delete_team_and_members(self, team_input: TeamDbDelete) -> None:
         """Hard-delete members and soft-delete team in a single transaction.
 
         Args:
-            team_id: ID of the team to delete
-            organization_id: ID of the organization
+            team_input: Validated team deletion data
         """
         # Soft delete team
         soft_delete_query = """
@@ -491,7 +478,7 @@ class TeamRepository:
         """
 
         updated_team = await self.db_connection.fetchrow(
-            soft_delete_query, DATETIME_NOW_CONSTANT, team_id, organization_id
+            soft_delete_query, DATETIME_NOW_CONSTANT, team_input.team_id, team_input.organization_id
         )
 
         # If team does not exist or is already deleted
@@ -506,5 +493,5 @@ class TeamRepository:
             DELETE FROM team_members
             WHERE team_id = $1
         """
-        await self.db_connection.execute(delete_members_query, team_id)
-        logger.info("Soft-deleted team %s successfully", team_id)
+        await self.db_connection.execute(delete_members_query, team_input.team_id)
+        logger.info("Soft-deleted team %s successfully", team_input.team_id)

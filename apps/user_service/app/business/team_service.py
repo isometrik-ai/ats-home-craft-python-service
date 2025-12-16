@@ -2,9 +2,12 @@
 
 import asyncpg
 
-from apps.user_service.app.db.repositories.team_repository import TeamRepository
+from apps.user_service.app.db.repositories import TeamRepository
 from apps.user_service.app.schemas.teams import (
     CreateTeamRequest,
+    TeamDbDelete,
+    TeamDbIn,
+    TeamDbUpdate,
     TeamDetailItem,
     TeamDetailResponse,
     TeamItem,
@@ -91,13 +94,14 @@ class TeamService:
             member_ids = list(unique_member_ids)
 
         # Create team
-        await self.team_repository.create_team(
+        db_in = TeamDbIn(
             organization_id=self.user_context.organization_id,
             name=request.name,
             description=request.description,
             created_by=self.user_context.user_id,
             member_ids=member_ids,
         )
+        await self.team_repository.create_team(db_in)
 
     async def list_teams(
         self,
@@ -237,7 +241,7 @@ class TeamService:
             await self._validate_team_name(request.name, team_id=team_id)
 
         # Update team
-        await self.team_repository.update_team(
+        update_input = TeamDbUpdate(
             team_id=team_id,
             organization_id=self.user_context.organization_id,
             name=request.name,
@@ -246,6 +250,7 @@ class TeamService:
             members_to_remove=members_to_remove,
             added_by=self.user_context.user_id,
         )
+        await self.team_repository.update_team(update_input)
 
     async def delete_team(
         self,
@@ -260,10 +265,11 @@ class TeamService:
             HTTPException: 404 if team not found
         """
 
-        await self.team_repository.delete_team_and_members(
+        delete_input = TeamDbDelete(
             team_id=team_id,
             organization_id=self.user_context.organization_id,
         )
+        await self.team_repository.delete_team_and_members(delete_input)
 
     async def _validate_team_name(
         self,

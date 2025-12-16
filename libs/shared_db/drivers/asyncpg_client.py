@@ -89,9 +89,9 @@ async def get_pool() -> asyncpg.Pool:
 
     Config (env):
         DATABASE_URL (preferred) or DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD
-        DB_MIN_POOL (default 5)
-        DB_MAX_POOL (default 15)
-        DB_COMMAND_TIMEOUT (seconds, default 10.0)
+        DB_MIN_POOL (default 1)
+        DB_MAX_POOL (default 10)
+        DB_COMMAND_TIMEOUT (seconds, default 30.0)
         DB_STATEMENT_TIMEOUT_MS (optional, milliseconds)
         DB_SSL_MODE (disable/require/verify-full)
         DB_SSL_ROOT_CERT (path, used when verify-full)
@@ -106,9 +106,9 @@ async def get_pool() -> asyncpg.Pool:
 
     dsn = _build_dsn()
     # Defaults align with .env (see DB_MIN_POOL, DB_MAX_POOL, etc.)
-    min_size = int(os.getenv("DB_MIN_POOL", "5"))
-    max_size = int(os.getenv("DB_MAX_POOL", "15"))
-    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "10.0"))
+    min_size = int(os.getenv("DB_MIN_POOL", "1"))
+    max_size = int(os.getenv("DB_MAX_POOL", "10"))
+    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "30.0"))
     ssl_context = _make_ssl_context()
     max_idle = float(os.getenv("DB_MAX_IDLE_TIME", "300.0"))
 
