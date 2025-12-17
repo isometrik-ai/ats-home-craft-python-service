@@ -8,15 +8,15 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-from apps.user_service.app.dependencies.common_utils import (
+from apps.user_service.app.schemas.audit_logs import (
+    AuditLogDetailItem,
+    AuditLogItem,
+)
+from apps.user_service.app.utils.common_utils import (
     check_permissions,
     format_iso_datetime,
     handle_api_exceptions,
     safe_json_loads,
-)
-from apps.user_service.app.schemas.audit_logs import (
-    AuditLogDetailItem,
-    AuditLogItem,
 )
 from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
     AuditLogFilter,

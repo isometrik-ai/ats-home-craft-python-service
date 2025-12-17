@@ -28,7 +28,22 @@ def log_exception():
 # """
 
 # Permission code constants (to avoid duplication)
+
+TEAMS_MANAGEMENT_CREATE = "teams_management.create"
+TEAMS_MANAGEMENT_VIEW = "teams_management.view"
+TEAMS_MANAGEMENT_DELETE = "teams_management.delete"
+TEAMS_MANAGEMENT_EDIT = "teams_management.edit"
+
+ROLES_MANAGEMENT_CREATE = "roles_management.create"
+ROLES_MANAGEMENT_VIEW = "roles_management.view"
 ROLES_MANAGEMENT_EDIT = "roles_management.edit"
+ROLES_MANAGEMENT_DELETE = "roles_management.delete"
+
+PERMISSIONS_MANAGEMENT_CREATE = "permissions_management.create"
+PERMISSIONS_MANAGEMENT_VIEW = "permissions_management.view"
+PERMISSIONS_MANAGEMENT_EDIT = "permissions_management.edit"
+PERMISSIONS_MANAGEMENT_DELETE = "permissions_management.delete"
+
 
 DEFAULT_PERMISSIONS = [
     # User Management
@@ -199,6 +214,31 @@ DEFAULT_PERMISSIONS = [
         "Manage Billing",
         "Access billing and subscription",
         "settings",
+    ),
+    # Permissions Management
+    (
+        "permissions_management.view",
+        "View Permissions",
+        "View permissions list and details",
+        "permissions",
+    ),
+    (
+        "permissions_management.create",
+        "Create Permissions",
+        "create new permissions",
+        "permissions",
+    ),
+    (
+        "permissions_management.edit",
+        "Edit Permissions",
+        "Modify permission information",
+        "permissions",
+    ),
+    (
+        "permissions_management.delete",
+        "Delete Permissions",
+        "Remove permissions",
+        "permissions",
     ),
 ]
 

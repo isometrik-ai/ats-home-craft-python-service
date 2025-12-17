@@ -18,19 +18,19 @@ def mock_permission_system():
     """Mock the entire permission system to prevent real database calls."""
     with (
         patch(
-            "apps.user_service.app.dependencies.common_utils.check_user_access_async",
+            "apps.user_service.app.utils.common_utils.check_user_access_async",
             return_value=True,
         ),
         patch(
-            "apps.user_service.app.dependencies.common_utils.extract_user_context",
+            "apps.user_service.app.utils.common_utils.extract_user_context",
             new_callable=AsyncMock,
         ) as mock_extract,
         patch(
-            "apps.user_service.app.dependencies.common_utils.require_permission",
+            "apps.user_service.app.utils.common_utils.require_permission",
             new_callable=AsyncMock,
         ) as mock_require,
         patch(
-            "apps.user_service.app.dependencies.common_utils.check_permissions",
+            "apps.user_service.app.utils.common_utils.check_permissions",
             new_callable=AsyncMock,
         ) as mock_check_permissions,
         patch(
@@ -42,7 +42,7 @@ def mock_permission_system():
             new_callable=AsyncMock,
         ) as mock_invites_require_permission,
         patch(
-            "apps.user_service.app.dependencies.invite_utils.validate_organization_access",
+            "apps.user_service.app.utils.invite_utils.validate_organization_access",
             return_value=True,
         ),
         patch(
@@ -50,7 +50,7 @@ def mock_permission_system():
             return_value=True,
         ),
         patch(
-            "apps.user_service.app.dependencies.invite_utils.build_invite_list_item"
+            "apps.user_service.app.utils.invite_utils.build_invite_list_item"
         ) as mock_build_invite_list_item,
         patch(
             "apps.user_service.app.api.invites.build_invite_list_item"
@@ -58,7 +58,7 @@ def mock_permission_system():
         patch("apps.user_service.app.api.invites.BASE_URL", "https://example.com"),
     ):
         # Configure the mocks
-        from apps.user_service.app.dependencies.common_utils import UserContext
+        from apps.user_service.app.utils.common_utils import UserContext
 
         mock_user_context = UserContext(
             organization_id="550e8400-e29b-41d4-a716-446655440001",
@@ -97,7 +97,7 @@ def mock_permission_system():
 @pytest.fixture
 def app():
     """Create FastAPI app with invites router for testing."""
-    from apps.user_service.app.dependencies.common_utils import (
+    from apps.user_service.app.utils.common_utils import (
         check_permissions,
         check_user_access_async,
         extract_user_context,
@@ -118,7 +118,7 @@ def app():
         }
 
     async def mock_extract_user_context():
-        from apps.user_service.app.dependencies.common_utils import UserContext
+        from apps.user_service.app.utils.common_utils import UserContext
 
         return UserContext(
             organization_id="550e8400-e29b-41d4-a716-446655440001",

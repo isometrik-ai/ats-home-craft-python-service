@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException, status
 from postgrest import APIError
 
-from apps.user_service.app.dependencies.organisation_utils import (
+from apps.user_service.app.utils.organisation_utils import (
     create_organisation_with_super_admin,
     validate_organisation_status,
     validate_organization_subscription,
@@ -78,32 +78,26 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(return_value=mock_org_result),
             ) as mock_create_org,
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role"),
+                ("apps.user_service.app.utils.organisation_utils.create_super_admin_role"),
                 AsyncMock(return_value=mock_role_result),
             ) as mock_create_role,
             patch(
                 (
-                    "apps.user_service.app.dependencies.organisation_utils."
+                    "apps.user_service.app.utils.organisation_utils."
                     "create_default_permissions_for_organisation"
                 ),
                 AsyncMock(return_value=mock_permissions),
             ) as mock_create_perms,
             patch(
-                (
-                    "apps.user_service.app.dependencies.organisation_utils."
-                    "assign_all_permissions_to_role"
-                ),
+                ("apps.user_service.app.utils.organisation_utils.assign_all_permissions_to_role"),
                 AsyncMock(return_value=True),
             ) as mock_assign_perms,
             patch(
-                (
-                    "apps.user_service.app.dependencies.organisation_utils."
-                    "add_member_to_organisation"
-                ),
+                ("apps.user_service.app.utils.organisation_utils.add_member_to_organisation"),
                 AsyncMock(return_value=mock_member_result),
             ) as mock_add_member,
         ):
@@ -169,32 +163,26 @@ class TestCreateOrganisationWithSuperAdmin:
                 AsyncMock(return_value=isometrik_response),
             ) as mock_isometrik_create,
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(return_value=mock_org_result),
             ) as mock_create_org,
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role"),
+                ("apps.user_service.app.utils.organisation_utils.create_super_admin_role"),
                 AsyncMock(return_value=mock_role_result),
             ) as mock_create_role,
             patch(
                 (
-                    "apps.user_service.app.dependencies.organisation_utils."
+                    "apps.user_service.app.utils.organisation_utils."
                     "create_default_permissions_for_organisation"
                 ),
                 AsyncMock(return_value=mock_permissions),
             ) as mock_create_perms,
             patch(
-                (
-                    "apps.user_service.app.dependencies.organisation_utils."
-                    "assign_all_permissions_to_role"
-                ),
+                ("apps.user_service.app.utils.organisation_utils.assign_all_permissions_to_role"),
                 AsyncMock(return_value=True),
             ) as mock_assign_perms,
             patch(
-                (
-                    "apps.user_service.app.dependencies.organisation_utils."
-                    "add_member_to_organisation"
-                ),
+                ("apps.user_service.app.utils.organisation_utils.add_member_to_organisation"),
                 AsyncMock(return_value=mock_member_result),
             ) as mock_add_member,
         ):
@@ -312,32 +300,26 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(return_value=mock_org_result),
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role"),
+                ("apps.user_service.app.utils.organisation_utils.create_super_admin_role"),
                 AsyncMock(return_value=mock_role_result),
             ),
             patch(
                 (
-                    "apps.user_service.app.dependencies.organisation_utils."
+                    "apps.user_service.app.utils.organisation_utils."
                     "create_default_permissions_for_organisation"
                 ),
                 AsyncMock(return_value=mock_permissions),
             ),
             patch(
-                (
-                    "apps.user_service.app.dependencies.organisation_utils."
-                    "assign_all_permissions_to_role"
-                ),
+                ("apps.user_service.app.utils.organisation_utils.assign_all_permissions_to_role"),
                 AsyncMock(return_value=True),
             ),
             patch(
-                (
-                    "apps.user_service.app.dependencies.organisation_utils."
-                    "add_member_to_organisation"
-                ),
+                ("apps.user_service.app.utils.organisation_utils.add_member_to_organisation"),
                 AsyncMock(return_value=mock_member_result),
             ) as mock_add_member,
         ):
@@ -383,11 +365,11 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(side_effect=db_error),
             ),
             patch(
-                "apps.user_service.app.dependencies.organisation_utils.log_exception"
+                "apps.user_service.app.utils.organisation_utils.log_exception"
             ) as mock_log_exception,
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -420,11 +402,11 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(side_effect=db_error),
             ),
             patch(
-                "apps.user_service.app.dependencies.organisation_utils.log_exception"
+                "apps.user_service.app.utils.organisation_utils.log_exception"
             ) as mock_log_exception,
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -458,15 +440,15 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(return_value=mock_org_result),
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role"),
+                ("apps.user_service.app.utils.organisation_utils.create_super_admin_role"),
                 AsyncMock(side_effect=role_error),
             ),
             patch(
-                "apps.user_service.app.dependencies.organisation_utils.log_exception"
+                "apps.user_service.app.utils.organisation_utils.log_exception"
             ) as mock_log_exception,
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -501,22 +483,22 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(return_value=mock_org_result),
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role"),
+                ("apps.user_service.app.utils.organisation_utils.create_super_admin_role"),
                 AsyncMock(return_value=mock_role_result),
             ),
             patch(
                 (
-                    "apps.user_service.app.dependencies.organisation_utils."
+                    "apps.user_service.app.utils.organisation_utils."
                     "create_default_permissions_for_organisation"
                 ),
                 AsyncMock(side_effect=permissions_error),
             ),
             patch(
-                "apps.user_service.app.dependencies.organisation_utils.log_exception"
+                "apps.user_service.app.utils.organisation_utils.log_exception"
             ) as mock_log_exception,
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -552,36 +534,30 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(return_value=mock_org_result),
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role"),
+                ("apps.user_service.app.utils.organisation_utils.create_super_admin_role"),
                 AsyncMock(return_value=mock_role_result),
             ),
             patch(
                 (
-                    "apps.user_service.app.dependencies.organisation_utils."
+                    "apps.user_service.app.utils.organisation_utils."
                     "create_default_permissions_for_organisation"
                 ),
                 AsyncMock(return_value=mock_permissions),
             ),
             patch(
-                (
-                    "apps.user_service.app.dependencies.organisation_utils."
-                    "assign_all_permissions_to_role"
-                ),
+                ("apps.user_service.app.utils.organisation_utils.assign_all_permissions_to_role"),
                 AsyncMock(return_value=True),
             ),
             patch(
-                (
-                    "apps.user_service.app.dependencies.organisation_utils."
-                    "add_member_to_organisation"
-                ),
+                ("apps.user_service.app.utils.organisation_utils.add_member_to_organisation"),
                 AsyncMock(side_effect=member_error),
             ),
             patch(
-                "apps.user_service.app.dependencies.organisation_utils.log_exception"
+                "apps.user_service.app.utils.organisation_utils.log_exception"
             ) as mock_log_exception,
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -618,11 +594,11 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(side_effect=api_error),
             ),
             patch(
-                "apps.user_service.app.dependencies.organisation_utils.log_exception"
+                "apps.user_service.app.utils.organisation_utils.log_exception"
             ) as mock_log_exception,
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -648,11 +624,11 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(return_value=None),
             ),
             patch(
-                "apps.user_service.app.dependencies.organisation_utils.log_exception"
+                "apps.user_service.app.utils.organisation_utils.log_exception"
             ) as mock_log_exception,
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -684,15 +660,15 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(return_value=None),
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role"),
+                ("apps.user_service.app.utils.organisation_utils.create_super_admin_role"),
                 AsyncMock(side_effect=api_error),
             ),
             patch(
-                "apps.user_service.app.dependencies.organisation_utils.log_exception"
+                "apps.user_service.app.utils.organisation_utils.log_exception"
             ) as mock_log_exception,
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -717,29 +693,26 @@ class TestCreateOrganisationWithSuperAdmin:
                 return_value=False,
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_new_organisation"),
+                ("apps.user_service.app.utils.organisation_utils.create_new_organisation"),
                 AsyncMock(return_value=None),
             ),
             patch(
-                ("apps.user_service.app.dependencies.organisation_utils.create_super_admin_role"),
+                ("apps.user_service.app.utils.organisation_utils.create_super_admin_role"),
                 AsyncMock(return_value={"id": str(uuid.uuid4())}),
             ),
             patch(
                 (
-                    "apps.user_service.app.dependencies.organisation_utils."
+                    "apps.user_service.app.utils.organisation_utils."
                     "create_default_permissions_for_organisation"
                 ),
                 AsyncMock(return_value=None),
             ),
             patch(
-                (
-                    "apps.user_service.app.dependencies.organisation_utils."
-                    "assign_all_permissions_to_role"
-                ),
+                ("apps.user_service.app.utils.organisation_utils.assign_all_permissions_to_role"),
                 AsyncMock(return_value=None),
             ),
             patch(
-                "apps.user_service.app.dependencies.organisation_utils.log_exception"
+                "apps.user_service.app.utils.organisation_utils.log_exception"
             ) as mock_log_exception,
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -770,7 +743,7 @@ class TestValidateOrganizationSubscription:
             "subscription": _build_subscription(max_users=10),
         }
         with patch(
-            "apps.user_service.app.dependencies.organisation_utils.get_organisation_members_count",
+            "apps.user_service.app.utils.organisation_utils.get_organisation_members_count",
             AsyncMock(return_value=5),
         ):
             # Should not raise exception when within limit
@@ -787,7 +760,7 @@ class TestValidateOrganizationSubscription:
             "subscription": _build_subscription(max_users=10),
         }
         with patch(
-            "apps.user_service.app.dependencies.organisation_utils.get_organisation_members_count",
+            "apps.user_service.app.utils.organisation_utils.get_organisation_members_count",
             AsyncMock(return_value=10),
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -803,7 +776,7 @@ class TestValidateOrganizationSubscription:
             "subscription": _build_subscription(max_users=10),
         }
         with patch(
-            "apps.user_service.app.dependencies.organisation_utils.get_organisation_members_count",
+            "apps.user_service.app.utils.organisation_utils.get_organisation_members_count",
             AsyncMock(return_value=15),
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -819,7 +792,7 @@ class TestValidateOrganizationSubscription:
             "subscription": _build_subscription(max_users=0),
         }
         with patch(
-            "apps.user_service.app.dependencies.organisation_utils.get_organisation_members_count",
+            "apps.user_service.app.utils.organisation_utils.get_organisation_members_count",
             AsyncMock(return_value=0),
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -835,7 +808,7 @@ class TestValidateOrganizationSubscription:
             "subscription": {},
         }
         with patch(
-            "apps.user_service.app.dependencies.organisation_utils.get_organisation_members_count",
+            "apps.user_service.app.utils.organisation_utils.get_organisation_members_count",
             AsyncMock(return_value=0),
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -866,7 +839,7 @@ class TestValidateOrganizationSubscription:
             "subscription": _build_subscription(max_users=5, days_until_expiry=-1),
         }
         with patch(
-            "apps.user_service.app.dependencies.organisation_utils.get_organisation_members_count",
+            "apps.user_service.app.utils.organisation_utils.get_organisation_members_count",
             AsyncMock(return_value=1),
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -897,7 +870,7 @@ class TestValidateOrganizationSubscription:
             },
         }
         with patch(
-            "apps.user_service.app.dependencies.organisation_utils.get_organisation_members_count",
+            "apps.user_service.app.utils.organisation_utils.get_organisation_members_count",
             AsyncMock(return_value=1),
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -913,7 +886,7 @@ class TestValidateOrganizationSubscription:
             "subscription": _build_subscription(),
         }
         with patch(
-            "apps.user_service.app.dependencies.organisation_utils.get_organisation_members_count",
+            "apps.user_service.app.utils.organisation_utils.get_organisation_members_count",
             AsyncMock(side_effect=RuntimeError("boom")),
         ):
             with pytest.raises(HTTPException) as exc_info:

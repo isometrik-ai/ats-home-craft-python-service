@@ -15,9 +15,10 @@ Organisation-Specific Operations Covered:
 from datetime import datetime, timezone
 from typing import Any
 
-# Local imports
-from apps.user_service.app.dependencies.common_utils import ORG_STATUSES
 from apps.user_service.app.dependencies.logger import get_logger
+
+# Local imports
+from apps.user_service.app.utils.common_utils import ORG_STATUSES
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
     add_member_to_organisation,
     assign_all_permissions_to_role,

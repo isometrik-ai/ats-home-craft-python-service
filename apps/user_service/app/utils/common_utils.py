@@ -92,17 +92,19 @@ def format_permissions_data(
     Returns:
         list[PermissionItem]: Formatted permissions data
     """
-    return [
-        PermissionItem(
-            id=permission["id"],
-            name=permission["name"],
-            code=permission["code"],
-            category=permission["category"],
-            description=permission["description"],
-            created_at=format_iso_datetime(permission["created_at"]) or "",
-        )
-        for permission in permissions_data
-    ]
+    if permissions_data:
+        return [
+            PermissionItem(
+                id=str(permission["id"]),
+                name=permission["name"],
+                code=permission["code"],
+                category=permission["category"],
+                description=permission["description"],
+                created_at=format_iso_datetime(permission["created_at"]) or "",
+            )
+            for permission in permissions_data
+        ]
+    return []
 
 
 # ============================================================================

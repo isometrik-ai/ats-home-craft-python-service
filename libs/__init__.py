@@ -4,4 +4,5 @@ All constants should be centralized here.
 """
 
 # Define now constant
+
 NOW_CONSTANT = "now()"

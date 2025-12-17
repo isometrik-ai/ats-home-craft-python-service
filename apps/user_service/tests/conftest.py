@@ -118,7 +118,7 @@ def patch_operations_to_use_mock_supabase():
         # Import Supabase admin operations where real admin client is used by common_utils
         import libs.shared_db.supabase_db.admin_operations.user as supa_admin_user
         import libs.shared_db.supabase_db.db as supa_db
-        from apps.user_service.app.dependencies import common_utils
+        from apps.user_service.app.utils import common_utils
     except Exception:
         return
 

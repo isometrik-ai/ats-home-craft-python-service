@@ -21,7 +21,6 @@ from apps.user_service.app.app_instance import limiter
 
 # Utility imports
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
-from apps.user_service.app.dependencies.common_utils import handle_api_exceptions
 from apps.user_service.app.dependencies.logger import get_logger
 
 # Schema imports
@@ -33,6 +32,7 @@ from apps.user_service.app.schemas.verification_codes import (
     VerifyVerificationCodeRequest,
     VerifyVerificationCodeResponse,
 )
+from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_auth_user_by_email,
 )

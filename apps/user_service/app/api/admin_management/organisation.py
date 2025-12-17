@@ -15,19 +15,8 @@ from apps.user_service.app.app_instance import limiter
 # Audit logging import
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 
-# Local imports - app dependencies and schemas
-from apps.user_service.app.dependencies.common_utils import (
-    check_permissions,
-    extract_user_context,
-    handle_api_exceptions,
-    require_permission,
-)
-
 # Logger import
 from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.dependencies.organisation_utils import (
-    create_organisation_with_super_admin,
-)
 from apps.user_service.app.schemas.auth import AccountType
 
 # Schema imports
@@ -39,6 +28,17 @@ from apps.user_service.app.schemas.organisations import (
     OrganisationListResponse,
     OrganisationResponse,
     OrganizationAdminUpdate,
+)
+
+# Local imports - app dependencies and schemas
+from apps.user_service.app.utils.common_utils import (
+    check_permissions,
+    extract_user_context,
+    handle_api_exceptions,
+    require_permission,
+)
+from apps.user_service.app.utils.organisation_utils import (
+    create_organisation_with_super_admin,
 )
 
 # Database operations imports

@@ -1328,7 +1328,7 @@ class TestAuditLogsAPI:
         from apps.user_service.app.api.audit_logs.audit_logs import (
             router as audit_router,
         )
-        from apps.user_service.app.dependencies.common_utils import (
+        from apps.user_service.app.utils.common_utils import (
             check_user_access_async,
         )
         from libs.shared_middleware.jwt_auth import get_user_from_auth

@@ -10,15 +10,7 @@ from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
-from apps.user_service.app.dependencies.common_utils import (
-    check_permissions,
-    extract_user_context,
-    get_user_in_organization,
-    handle_api_exceptions,
-    set_audit_old_data_from_user,
-)
 from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.dependencies.user_utils import create_user_profile_data
 from apps.user_service.app.schemas.users import (
     PermissionInfo,
     RoleInfoWithDescription,
@@ -26,6 +18,14 @@ from apps.user_service.app.schemas.users import (
     UpdateUserProfileRequest,
     UserListResponse,
 )
+from apps.user_service.app.utils.common_utils import (
+    check_permissions,
+    extract_user_context,
+    get_user_in_organization,
+    handle_api_exceptions,
+    set_audit_old_data_from_user,
+)
+from apps.user_service.app.utils.user_utils import create_user_profile_data
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_user_permissions,
     get_user_profile_by_id,

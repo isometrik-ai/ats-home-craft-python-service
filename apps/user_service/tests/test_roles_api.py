@@ -18,7 +18,7 @@ def app():
     from fastapi import FastAPI
 
     from apps.user_service.app.api.admin_management.roles import router as roles_router
-    from apps.user_service.app.dependencies.common_utils import (
+    from apps.user_service.app.utils.common_utils import (
         UserContext,
         check_permissions,
         check_user_access_async,
@@ -822,7 +822,7 @@ class TestPermissionDenied:
         from apps.user_service.app.api.admin_management.roles import (
             router as roles_router,
         )
-        from apps.user_service.app.dependencies.common_utils import (
+        from apps.user_service.app.utils.common_utils import (
             check_user_access_async,
         )
         from libs.shared_middleware.jwt_auth import get_user_from_auth
