@@ -14,7 +14,6 @@ from apps.user_service.app.schemas.teams import (
     TeamDbUpdate,
     TeamRoles,
 )
-from libs import DATETIME_NOW_CONSTANT
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -54,7 +53,7 @@ class TeamRepository:
                 organization_id, name, description, created_by,
                 created_at, updated_at, deleted_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, NULL)
+            VALUES ($1, $2, $3, $4, NOW(), NOW(), NULL)
             RETURNING id
         """
 
@@ -64,8 +63,6 @@ class TeamRepository:
             team_input.name,
             team_input.description,
             team_input.created_by,
-            DATETIME_NOW_CONSTANT,
-            DATETIME_NOW_CONSTANT,
         )
 
         team_id = team_record["id"]
@@ -105,7 +102,6 @@ class TeamRepository:
 
         # Perform a single batch insert using UNNEST
         count = len(member_ids)
-        now = DATETIME_NOW_CONSTANT
 
         insert_query = """
             INSERT INTO team_members (team_id, user_id, role, added_by, added_at)
@@ -114,14 +110,13 @@ class TeamRepository:
                 t.user_id,
                 t.role,
                 t.added_by,
-                t.added_at
+                NOW()
             FROM UNNEST(
                 $1::uuid[],
                 $2::uuid[],
                 $3::text[],
-                $4::uuid[],
-                $5::timestamptz[]
-            ) AS t(team_id, user_id, role, added_by, added_at)
+                $4::uuid[]
+            ) AS t(team_id, user_id, role, added_by)
             ON CONFLICT (team_id, user_id) DO NOTHING;
         """
 
@@ -131,7 +126,6 @@ class TeamRepository:
             member_ids,
             [TeamRoles.MEMBER] * count,
             [added_by] * count,
-            [now] * count,
         )
 
     # READ OPERATIONS
@@ -413,17 +407,29 @@ class TeamRepository:
         if team_input.description is not None:
             fields_to_update["description"] = team_input.description
 
-        # Always update updated_at if any changes will happen
-        if fields_to_update or team_input.members_to_add or team_input.members_to_remove:
-            fields_to_update["updated_at"] = DATETIME_NOW_CONSTANT
+        # Check if we need to update the team (either fields or members)
+        needs_update = bool(
+            fields_to_update or team_input.members_to_add or team_input.members_to_remove
+        )
 
         # Execute team update if there are field changes
-        if fields_to_update:
-            set_clause = ", ".join(
-                f"{field} = ${i + 1}" for i, field in enumerate(fields_to_update)
-            )
-            params = list(fields_to_update.values())
+        if needs_update:
+            set_clauses = []
+            params = []
+
+            # Add regular fields to update
+            for field, value in fields_to_update.items():
+                set_clauses.append(f"{field} = ${len(params) + 1}")
+                params.append(value)
+
+            # Always update updated_at if there are any changes
+            set_clauses.append("updated_at = NOW()")
+
+            # Add team_id and organization_id to params
             params.extend([team_input.team_id, team_input.organization_id])
+
+            # Build the final SET clause
+            set_clause = ", ".join(set_clauses)
 
             update_query = f"""
                 UPDATE teams
@@ -470,15 +476,15 @@ class TeamRepository:
         # Soft delete team
         soft_delete_query = """
             UPDATE teams
-            SET deleted_at = $1, updated_at = $1
-            WHERE id = $2
-                AND organization_id = $3
+            SET deleted_at = NOW(), updated_at = NOW()
+            WHERE id = $1
+                AND organization_id = $2
                 AND deleted_at IS NULL
             RETURNING id
         """
 
         updated_team = await self.db_connection.fetchrow(
-            soft_delete_query, DATETIME_NOW_CONSTANT, team_input.team_id, team_input.organization_id
+            soft_delete_query, team_input.team_id, team_input.organization_id
         )
 
         # If team does not exist or is already deleted

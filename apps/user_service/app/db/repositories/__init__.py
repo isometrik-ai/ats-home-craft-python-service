@@ -4,6 +4,7 @@ Repositories provide a clean interface for database operations and encapsulate
 SQL queries and data access logic.
 Available Repositories:
     TeamRepository: Handles all team-related database operations
+    PermissionsRepository: Handles all permission related database operations
 Usage:
     from apps.user_service.app.db.repositories import TeamRepository
 
@@ -11,6 +12,7 @@ Usage:
     teams = await repo.get_teams_list(organization_id)
 """
 
+from .permission_repository import PermissionsRepository
 from .team_repository import TeamRepository
 
-__all__ = ["TeamRepository"]
+__all__ = ["TeamRepository", "PermissionsRepository"]
