@@ -10,9 +10,6 @@ from fastapi import APIRouter, Depends, Path, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-
-# Audit logging import
-from apps.user_service.app.business.permission_service import PermissionsService
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
@@ -27,6 +24,9 @@ from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import (
     CreatePermissionRequest,
 )
+
+# Audit logging import
+from apps.user_service.app.services.permission_service import PermissionsService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,

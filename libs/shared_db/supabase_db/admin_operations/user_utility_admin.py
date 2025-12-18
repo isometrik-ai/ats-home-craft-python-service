@@ -345,8 +345,8 @@ async def invite_user_with_email(body: CreateUserRequest, user_context: UserCont
         ) from e
 
 
-async def reset_the_password_email(email: str):
-    """Reset password email using Supabase Auth Admin API
+async def send_password_reset_email(email: str):
+    """Send password reset email using Supabase Auth Admin API
     Args:
         email: User's email address
     Returns:

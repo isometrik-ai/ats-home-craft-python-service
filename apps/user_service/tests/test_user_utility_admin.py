@@ -24,8 +24,8 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     invite_user_with_email,
     login_user,
     refresh_session,
-    reset_the_password_email,
     send_admin_update_email,
+    send_password_reset_email,
     sign_up_supabase_user,
     update_password_with_token,
     update_supabase_user_email,
@@ -971,11 +971,11 @@ class TestInviteUserWithEmail:
             assert "General error" in exc_info.value.detail
 
 
-class TestResetThePasswordEmail:
-    """Test cases for reset_the_password_email function."""
+class TestSendPasswordResetEmail:
+    """Test cases for send_password_reset_email function."""
 
     @pytest.mark.asyncio
-    async def test_reset_the_password_email_success(self):
+    async def test_send_password_reset_email_success(self):
         """Test successful password reset email."""
         email = "test@example.com"
         mock_response = {"success": True}
@@ -991,11 +991,11 @@ class TestResetThePasswordEmail:
                 )
             ),
         ):
-            result = await reset_the_password_email(email)
+            result = await send_password_reset_email(email)
             assert result == mock_response
 
     @pytest.mark.asyncio
-    async def test_reset_the_password_email_attribute_error(self):
+    async def test_send_password_reset_email_attribute_error(self):
         """Test password reset email with AttributeError."""
         email = "test@example.com"
 
@@ -1007,13 +1007,13 @@ class TestResetThePasswordEmail:
             AsyncMock(side_effect=AttributeError("No attribute")),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await reset_the_password_email(email)
+                await send_password_reset_email(email)
 
             assert exc_info.value.status_code == 500
             assert "Internal error while sending password reset email" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_reset_the_password_email_value_error(self):
+    async def test_send_password_reset_email_value_error(self):
         """Test password reset email with ValueError."""
         email = "invalid-email"
 
@@ -1025,13 +1025,13 @@ class TestResetThePasswordEmail:
             AsyncMock(side_effect=ValueError("Invalid email")),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await reset_the_password_email(email)
+                await send_password_reset_email(email)
 
             assert exc_info.value.status_code == 400
             assert "Invalid email address provided" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_reset_the_password_email_auth_api_error(self):
+    async def test_send_password_reset_email_auth_api_error(self):
         """Test password reset email with AuthApiError."""
         email = "test@example.com"
 
@@ -1043,7 +1043,7 @@ class TestResetThePasswordEmail:
             AsyncMock(side_effect=AuthApiError("Auth service error", 502, "AUTH_SERVICE_ERROR")),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await reset_the_password_email(email)
+                await send_password_reset_email(email)
 
             assert exc_info.value.status_code == 502
             assert (
@@ -1052,7 +1052,7 @@ class TestResetThePasswordEmail:
             )
 
     @pytest.mark.asyncio
-    async def test_reset_the_password_email_general_exception(self):
+    async def test_send_password_reset_email_general_exception(self):
         """Test password reset email with general exception."""
         email = "test@example.com"
 
@@ -1064,7 +1064,7 @@ class TestResetThePasswordEmail:
             AsyncMock(side_effect=Exception("Unexpected error")),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await reset_the_password_email(email)
+                await send_password_reset_email(email)
 
             assert exc_info.value.status_code == 500
             assert (

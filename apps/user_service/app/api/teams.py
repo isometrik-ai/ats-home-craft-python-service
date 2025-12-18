@@ -9,7 +9,6 @@ from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-from apps.user_service.app.business.team_service import TeamService
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.logger import get_logger
@@ -21,6 +20,7 @@ from apps.user_service.app.schemas.teams import (
     TeamsListResponse,
     UpdateTeamRequest,
 )
+from apps.user_service.app.services.team_service import TeamService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,

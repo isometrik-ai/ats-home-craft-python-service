@@ -745,7 +745,7 @@ def test_forgot_password_endpoint_success(auth_client):
             "apps.user_service.app.api.auth.get_auth_user_by_email",
             AsyncMock(return_value={"id": "user-id"}),
         ),
-        patch("apps.user_service.app.api.auth.reset_the_password_email", AsyncMock()),
+        patch("apps.user_service.app.api.auth.send_password_reset_email", AsyncMock()),
     ):
         response = auth_client.post("/auth/forgot-password", json=forgot_data)
         assert response.status_code == 200
@@ -766,7 +766,7 @@ async def test_forgot_password_endpoint_success_async(_async_auth_client):
             "apps.user_service.app.api.auth.get_auth_user_by_email",
             AsyncMock(return_value={"id": "user-id"}),
         ),
-        patch("apps.user_service.app.api.auth.reset_the_password_email", AsyncMock()),
+        patch("apps.user_service.app.api.auth.send_password_reset_email", AsyncMock()),
     ):
         mock_request = MagicMock(spec=Request)
         result = await forgot_password(request=mock_request, data=forgot_data)
@@ -1691,7 +1691,7 @@ def test_forgot_password_exception_handling(auth_client):
             AsyncMock(return_value={"id": "user-id"}),
         ),
         patch(
-            "apps.user_service.app.api.auth.reset_the_password_email",
+            "apps.user_service.app.api.auth.send_password_reset_email",
             AsyncMock(side_effect=Exception("Email service error")),
         ),
     ):
