@@ -12,6 +12,7 @@ Last Updated: 2024-12-19
 import json
 import os
 import re
+import time
 from typing import Any
 
 # Third-party imports
@@ -33,6 +34,7 @@ from apps.user_service.app.schemas.auth import (
     Check2FAStatusResponse,
     ForgotPasswordResponse,
     PasswordResponse,
+    RefreshSessionResponse,
     SignupRequest,
     UserInfo,
     VerifyEmailResponse,
@@ -76,6 +78,8 @@ from libs.shared_utils.http_exceptions import (
     ForbiddenException,
     InternalServerErrorException,
     NotFoundException,
+    ServiceUnavailableException,
+    TooManyRequestsException,
     UnauthorizedException,
     ValidationException,
 )
@@ -573,7 +577,9 @@ class AuthService:
             ),
         )
 
-    async def refresh_session(self, access_token: str, refresh_token: str) -> AuthResponse:
+    async def refresh_session(
+        self, access_token: str, refresh_token: str
+    ) -> RefreshSessionResponse:
         """Refresh user session.
 
         Args:
@@ -581,27 +587,33 @@ class AuthService:
             refresh_token: Refresh token
 
         Returns:
-            AuthResponse: New access token and user information
+            RefreshSessionResponse: Token information with refresh status
 
         Raises:
-            BadRequestException: If token is not expired
-            UnauthorizedException: If access token is invalid or refresh token fails
+            UnauthorizedException: If access token is invalid, refresh token is invalid/expired,
+                or tokens don't belong to same user
+            ServiceUnavailableException: If authentication service is unavailable or
+                encounters server errors
+            TooManyRequestsException: If rate limit is exceeded
         """
+        # Decode access token to extract user ID (without expiration check)
         try:
-            jwt.decode(
+            decoded_access_token = jwt.decode(
                 access_token,
                 os.getenv("SUPABASE_JWT_SECRET"),
                 algorithms=["HS256"],
                 audience="authenticated",
+                options={"verify_exp": False},
             )
+            access_token_user_id = decoded_access_token.get("sub")
 
-            raise BadRequestException(
-                message_key="auth.errors.token_not_expired",
-                custom_code=CustomStatusCode.BAD_REQUEST,
-            )
-        except jwt.ExpiredSignatureError:
-            # Token is expired, proceed with refresh
-            pass
+            # Check if token is expired (required for refresh)
+            exp = decoded_access_token.get("exp")
+            if exp and exp > int(time.time()):
+                # Token is not expired, return token_refreshed=False
+                return RefreshSessionResponse(
+                    token_refreshed=False,
+                )
         except jwt.InvalidTokenError as exc:
             # Invalid access token, raise error
             raise UnauthorizedException(
@@ -611,29 +623,70 @@ class AuthService:
 
         try:
             res = await refresh_user_session(refresh_token)
+        except AuthApiError as auth_error:
+            # Handle specific Supabase Auth API errors
+            status = getattr(auth_error, "status", None)
+
+            # Invalid refresh token (status 400)
+            if status == 400:
+                logger.error("Invalid refresh token: %s", str(auth_error))
+                raise UnauthorizedException(
+                    message_key="auth.errors.invalid_refresh_token",
+                    custom_code=CustomStatusCode.UNAUTHORIZED,
+                ) from auth_error
+
+            # Rate limiting (status 429)
+            if status == 429:
+                logger.error("Rate limit exceeded during refresh: %s", str(auth_error))
+                raise TooManyRequestsException(
+                    message_key="errors.rate_limit_exceeded",
+                    custom_code=CustomStatusCode.RATE_LIMIT_EXCEEDED,
+                ) from auth_error
+
+            # Other client-side errors (4xx)
+            if status and 400 <= status < 500:
+                logger.error(
+                    "Auth API error during refresh (status %s): %s",
+                    status,
+                    str(auth_error),
+                )
+                raise UnauthorizedException(
+                    message_key="auth.errors.authentication_failed",
+                    custom_code=CustomStatusCode.UNAUTHORIZED,
+                ) from auth_error
+
+            # Server-side or unexpected errors (5xx or unknown)
+            logger.error("Authentication service error during refresh: %s", str(auth_error))
+            raise ServiceUnavailableException(
+                message_key="auth.errors.authentication_service_unavailable",
+                custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+            ) from auth_error
         except Exception as exc:
+            # Handle network errors, connection issues, or unexpected errors
             logger.error("Failed to refresh session: %s", str(exc))
+            raise ServiceUnavailableException(
+                message_key="auth.errors.authentication_service_unavailable",
+                custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+            ) from exc
+
+        # Verify that access_token and refresh_token belong to the same user
+        if access_token_user_id != res.user.id:
+            logger.warning(
+                "Token mismatch detected: access_token user_id=%s, refresh_token user_id=%s",
+                access_token_user_id,
+                res.user.id,
+            )
             raise UnauthorizedException(
                 message_key="auth.errors.authentication_failed",
                 custom_code=CustomStatusCode.UNAUTHORIZED,
-            ) from exc
+            )
 
-        user_metadata = res.user.user_metadata or {}
-        return AuthResponse(
+        return RefreshSessionResponse(
             access_token=res.session.access_token,
             refresh_token=res.session.refresh_token,
             expires_in=res.session.expires_in,
             expires_at=res.session.expires_at,
-            user=UserInfo(
-                id=res.user.id,
-                email=res.user.email,
-                first_name=user_metadata.get("first_name"),
-                last_name=user_metadata.get("last_name"),
-                phone=user_metadata.get("phone"),
-                timezone=user_metadata.get("timezone"),
-                org_setup_status_completed=bool(user_metadata.get("organization_id")),
-                organization_id=user_metadata.get("organization_id"),
-            ),
+            token_refreshed=True,
         )
 
     async def set_password(self, user_id: str, password: str) -> PasswordResponse:

@@ -1325,9 +1325,7 @@ class TestAuditLogsAPI:
         """Fixture for FastAPI app with audit logs router."""
         from fastapi import FastAPI
 
-        from apps.user_service.app.api.audit_logs.audit_logs import (
-            router as audit_router,
-        )
+        from apps.user_service.app.api.audit_logs import router as audit_router
         from apps.user_service.app.utils.common_utils import (
             check_user_access_async,
         )

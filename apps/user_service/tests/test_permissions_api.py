@@ -18,9 +18,7 @@ def app():
     """Create FastAPI app with permissions router for testing."""
     from fastapi import FastAPI
 
-    from apps.user_service.app.api.admin_management.permissions import (
-        router as permissions_router,
-    )
+    from apps.user_service.app.api.permissions import router as permissions_router
     from apps.user_service.app.utils.common_utils import check_permissions
     from libs.shared_middleware.jwt_auth import get_user_from_auth
 

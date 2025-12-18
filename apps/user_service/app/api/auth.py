@@ -22,6 +22,7 @@ from apps.user_service.app.schemas.auth import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     PasswordResponse,
+    RefreshSessionResponse,
     ResetPasswordRequest,
     SetPasswordRequest,
     SignupRequest,
@@ -81,12 +82,12 @@ async def login(
 @handle_api_exceptions("refresh")
 @router.put(
     "/refresh",
-    response_model=AuthResponse,
+    response_model=RefreshSessionResponse,
     status_code=http_status.HTTP_200_OK,
     description="Refresh user session",
     summary="Refresh user session",
     responses={
-        http_status.HTTP_200_OK: {"description": "Session refreshed successfully"},
+        http_status.HTTP_200_OK: {"description": "Session refresh response"},
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
         http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
         http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
@@ -108,9 +109,16 @@ async def refresh(
         refresh_token=refresh_token,
     )
 
+    # Use different message based on whether token was refreshed
+    message_key = (
+        "auth.success.session_refreshed"
+        if result.token_refreshed
+        else "auth.success.token_not_expired"
+    )
+
     return success_response(
         request=request,
-        message_key="auth.success.session_refreshed",
+        message_key=message_key,
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=result,

@@ -101,13 +101,13 @@ def patch_operations_to_use_mock_supabase():
     """Ensure all operations modules use the in-memory Supabase mock."""
     # pylint: disable=too-complex
     try:
-        import apps.user_service.app.api.admin_management.organisation as org_api
-        import apps.user_service.app.api.admin_management.permissions as perms_api
-        import apps.user_service.app.api.admin_management.roles as roles_api
-        import apps.user_service.app.api.admin_management.sessions.sessions as sessions_api
-        import apps.user_service.app.api.admin_management.users.users as users_api
-        import apps.user_service.app.api.audit_logs.audit_logs as audit_api
+        import apps.user_service.app.api.audit_logs as audit_api
         import apps.user_service.app.api.auth as auth_api
+        import apps.user_service.app.api.organisation as org_api
+        import apps.user_service.app.api.permissions as perms_api
+        import apps.user_service.app.api.roles as roles_api
+        import apps.user_service.app.api.sessions as sessions_api
+        import apps.user_service.app.api.users as users_api
         import libs.shared_db.postgres_db.user_service_operations.audit_operations as audit_ops
         import libs.shared_db.postgres_db.user_service_operations.organisation_operations as org_ops
         import libs.shared_db.postgres_db.user_service_operations.permission_operations as perm_ops

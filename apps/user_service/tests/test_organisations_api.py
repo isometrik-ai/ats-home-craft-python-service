@@ -127,9 +127,7 @@ def app():
     """Create FastAPI app with organisation router for testing."""
     from fastapi import FastAPI
 
-    from apps.user_service.app.api.admin_management.organisation import (
-        router as org_router,
-    )
+    from apps.user_service.app.api.organisation import router as org_router
     from apps.user_service.app.utils.common_utils import (
         check_permissions,
         check_user_access_async,
@@ -156,7 +154,7 @@ def inject_legacy_plan_and_max_users(monkeypatch):
     This allows the existing API logic (which still expects top-level
     plan_type/max_users) to keep working in tests.
     """
-    from apps.user_service.app.api.admin_management import organisation as org_module
+    from apps.user_service.app.api import organisation as org_module
     from apps.user_service.app.schemas import auth as auth_module
 
     original_body_getattr = getattr(org_module.NewOrganisationBody, "__getattr__", None)
@@ -236,18 +234,15 @@ class TestOrganisationList:
 
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "get_list_of_organisations"
-                ),
+                ("apps.user_service.app.api.organisation.get_list_of_organisations"),
                 AsyncMock(return_value=mock_organisations),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.get_organisations_count"),
+                ("apps.user_service.app.api.organisation.get_organisations_count"),
                 AsyncMock(return_value=2),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -270,18 +265,15 @@ class TestOrganisationList:
         """Test organisation list when no organisations exist."""
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "get_list_of_organisations"
-                ),
+                ("apps.user_service.app.api.organisation.get_list_of_organisations"),
                 AsyncMock(return_value=[]),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.get_organisations_count"),
+                ("apps.user_service.app.api.organisation.get_organisations_count"),
                 AsyncMock(return_value=0),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -318,18 +310,15 @@ class TestOrganisationList:
 
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "get_list_of_organisations"
-                ),
+                ("apps.user_service.app.api.organisation.get_list_of_organisations"),
                 AsyncMock(return_value=mock_organisations),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.get_organisations_count"),
+                ("apps.user_service.app.api.organisation.get_organisations_count"),
                 AsyncMock(return_value=1),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -368,18 +357,15 @@ class TestOrganisationList:
 
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "get_list_of_organisations"
-                ),
+                ("apps.user_service.app.api.organisation.get_list_of_organisations"),
                 AsyncMock(return_value=mock_organisations),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.get_organisations_count"),
+                ("apps.user_service.app.api.organisation.get_organisations_count"),
                 AsyncMock(return_value=1),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -416,18 +402,15 @@ class TestOrganisationList:
 
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "get_list_of_organisations"
-                ),
+                ("apps.user_service.app.api.organisation.get_list_of_organisations"),
                 AsyncMock(return_value=mock_organisations),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.get_organisations_count"),
+                ("apps.user_service.app.api.organisation.get_organisations_count"),
                 AsyncMock(return_value=1),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -465,18 +448,15 @@ class TestOrganisationList:
         # Mock _process_organisations_data to test the else branch
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "get_list_of_organisations"
-                ),
+                ("apps.user_service.app.api.organisation.get_list_of_organisations"),
                 AsyncMock(return_value=mock_organisations),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.get_organisations_count"),
+                ("apps.user_service.app.api.organisation.get_organisations_count"),
                 AsyncMock(return_value="unexpected_type"),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -486,10 +466,7 @@ class TestOrganisationList:
                 ),
             ),
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "_process_organisations_data"
-                )
+                ("apps.user_service.app.api.organisation._process_organisations_data")
             ) as mock_process,
         ):
             # Create properly formatted organizations list for the mock
@@ -543,10 +520,7 @@ class TestOrganisationDetails:
         )
 
         with patch(
-            (
-                "apps.user_service.app.api.admin_management.organisation."
-                "get_organisation_details_by_id"
-            ),
+            ("apps.user_service.app.api.organisation.get_organisation_details_by_id"),
             AsyncMock(return_value=mock_organisation),
         ):
             response = client.get(f"/v1/admin/organisation/{valid_id}")
@@ -561,7 +535,7 @@ class TestOrganisationDetails:
         valid_id = str(uuid.uuid4())
 
         with patch(
-            "apps.user_service.app.api.admin_management.organisation.get_organisation_details_by_id",
+            "apps.user_service.app.api.organisation.get_organisation_details_by_id",
             AsyncMock(return_value=None),
         ):
             response = client.get(f"/v1/admin/organisation/{valid_id}")
@@ -628,10 +602,7 @@ class TestCreateOrganisation:
 
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "create_organisation_with_super_admin"
-                ),
+                ("apps.user_service.app.api.organisation.create_organisation_with_super_admin"),
                 AsyncMock(return_value=mock_result),
             ),
             patch(
@@ -641,7 +612,7 @@ class TestCreateOrganisation:
                 )
             ) as mock_get_client,
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -775,10 +746,7 @@ class TestCreateOrganisation:
         # So this test should actually succeed (201) since there's no permission validation
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "create_organisation_with_super_admin"
-                ),
+                ("apps.user_service.app.api.organisation.create_organisation_with_super_admin"),
                 AsyncMock(
                     return_value={
                         "organization": {},
@@ -794,7 +762,7 @@ class TestCreateOrganisation:
                 )
             ) as mock_get_client,
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -845,7 +813,7 @@ class TestCreateOrganisation:
 
         # Mock extract_user_context to return None user_id
         with patch(
-            ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+            ("apps.user_service.app.api.organisation.extract_user_context"),
             AsyncMock(
                 return_value=MagicMock(user_id=None, email="test@example.com", organization_id=None)
             ),
@@ -878,14 +846,11 @@ class TestCreateOrganisation:
         # Mock check_organisation_slug_unique to return False (slug exists)
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "check_organisation_slug_unique"
-                ),
+                ("apps.user_service.app.api.organisation.check_organisation_slug_unique"),
                 AsyncMock(return_value=False),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -923,18 +888,15 @@ class TestCreateOrganisation:
         # Mock slug check to pass, but database operation to fail
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "check_organisation_slug_unique"
-                ),
+                ("apps.user_service.app.api.organisation.check_organisation_slug_unique"),
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin",
+                "apps.user_service.app.api.organisation.create_organisation_with_super_admin",
                 AsyncMock(side_effect=ConnectionError("Database connection failed")),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -972,18 +934,15 @@ class TestCreateOrganisation:
         # Mock slug check to pass, but database operation to fail with timeout
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "check_organisation_slug_unique"
-                ),
+                ("apps.user_service.app.api.organisation.check_organisation_slug_unique"),
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.organisation.create_organisation_with_super_admin",
+                "apps.user_service.app.api.organisation.create_organisation_with_super_admin",
                 AsyncMock(side_effect=TimeoutError("Database timeout")),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -1021,21 +980,15 @@ class TestCreateOrganisation:
         # Mock slug check to pass, but database operation to fail with value error
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "check_organisation_slug_unique"
-                ),
+                ("apps.user_service.app.api.organisation.check_organisation_slug_unique"),
                 AsyncMock(return_value=True),
             ),
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "create_organisation_with_super_admin"
-                ),
+                ("apps.user_service.app.api.organisation.create_organisation_with_super_admin"),
                 AsyncMock(side_effect=ValueError("Invalid data format")),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -1101,21 +1054,15 @@ class TestCreateOrganisation:
         # Mock the functions to test personal account type logic
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "create_organisation_with_super_admin"
-                ),
+                ("apps.user_service.app.api.organisation.create_organisation_with_super_admin"),
                 AsyncMock(return_value=mock_result),
             ),
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "check_organisation_slug_unique"
-                ),
+                ("apps.user_service.app.api.organisation.check_organisation_slug_unique"),
                 AsyncMock(return_value=True),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="test-user-id",
@@ -1125,10 +1072,7 @@ class TestCreateOrganisation:
                 ),
             ),
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "_determine_organization_name"
-                )
+                ("apps.user_service.app.api.organisation._determine_organization_name")
             ) as mock_determine_name,
         ):
             mock_determine_name.return_value = "John Doe"  # Simulate personal account type
@@ -1186,17 +1130,11 @@ class TestUpdateOrganisation:
 
         with (
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "get_organisation_details_by_id"
-                ),
+                ("apps.user_service.app.api.organisation.get_organisation_details_by_id"),
                 AsyncMock(return_value=mock_organisation_data),
             ),
             patch(
-                (
-                    "apps.user_service.app.api.admin_management.organisation."
-                    "update_organisation_details"
-                ),
+                ("apps.user_service.app.api.organisation.update_organisation_details"),
                 AsyncMock(return_value=mock_result),
             ),
         ):
@@ -1213,10 +1151,7 @@ class TestUpdateOrganisation:
         request_data = {"name": "Updated Organization", "domain": "updated.com"}
 
         with patch(
-            (
-                "apps.user_service.app.api.admin_management.organisation."
-                "get_organisation_details_by_id"
-            ),
+            ("apps.user_service.app.api.organisation.get_organisation_details_by_id"),
             AsyncMock(return_value=None),
         ):
             response = client.put(f"/v1/admin/organisation/{organisation_id}", json=request_data)
@@ -1238,7 +1173,7 @@ class TestUpdateOrganisation:
         request_data = {"name": "Updated Organization"}
 
         with patch(
-            ("apps.user_service.app.api.admin_management.organisation.check_permissions"),
+            ("apps.user_service.app.api.organisation.check_permissions"),
             AsyncMock(
                 side_effect=HTTPException(status_code=403, detail="Insufficient permissions")
             ),
@@ -1269,7 +1204,7 @@ class TestDeleteOrganisation:
 
         with (
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="user123",
@@ -1279,11 +1214,11 @@ class TestDeleteOrganisation:
                 ),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.check_permissions"),
+                ("apps.user_service.app.api.organisation.check_permissions"),
                 AsyncMock(),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.delete_organisation"),
+                ("apps.user_service.app.api.organisation.delete_organisation"),
                 AsyncMock(return_value=True),
             ),
         ):
@@ -1299,7 +1234,7 @@ class TestDeleteOrganisation:
 
         with (
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="user123",
@@ -1309,11 +1244,11 @@ class TestDeleteOrganisation:
                 ),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.check_permissions"),
+                ("apps.user_service.app.api.organisation.check_permissions"),
                 AsyncMock(),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.delete_organisation"),
+                ("apps.user_service.app.api.organisation.delete_organisation"),
                 AsyncMock(return_value=False),
             ),
         ):
@@ -1327,7 +1262,7 @@ class TestDeleteOrganisation:
         invalid_id = "invalid-uuid"
 
         with patch(
-            ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+            ("apps.user_service.app.api.organisation.extract_user_context"),
             AsyncMock(
                 return_value=MagicMock(
                     user_id="user123",
@@ -1346,7 +1281,7 @@ class TestDeleteOrganisation:
 
         with (
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="user123",
@@ -1356,7 +1291,7 @@ class TestDeleteOrganisation:
                 ),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.check_permissions"),
+                ("apps.user_service.app.api.organisation.check_permissions"),
                 AsyncMock(
                     side_effect=HTTPException(status_code=403, detail="Insufficient permissions")
                 ),
@@ -1372,7 +1307,7 @@ class TestDeleteOrganisation:
 
         with (
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.extract_user_context"),
+                ("apps.user_service.app.api.organisation.extract_user_context"),
                 AsyncMock(
                     return_value=MagicMock(
                         user_id="user123",
@@ -1382,11 +1317,11 @@ class TestDeleteOrganisation:
                 ),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.check_permissions"),
+                ("apps.user_service.app.api.organisation.check_permissions"),
                 AsyncMock(),
             ),
             patch(
-                ("apps.user_service.app.api.admin_management.organisation.delete_organisation"),
+                ("apps.user_service.app.api.organisation.delete_organisation"),
                 AsyncMock(return_value=True),
             ),
         ):
@@ -1402,7 +1337,7 @@ class TestDeleteOrganisation:
         organisation_id = str(uuid.uuid4())
 
         with patch(
-            "apps.user_service.app.api.admin_management.organisation.delete_organisation",
+            "apps.user_service.app.api.organisation.delete_organisation",
             AsyncMock(side_effect=Exception("Unexpected database error")),
         ):
             response = client.delete(f"/v1/admin/organisation/{organisation_id}")
