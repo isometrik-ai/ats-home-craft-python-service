@@ -57,7 +57,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 async def login(
     request: Request,
     data: AuthLogin,
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    db_connection: asyncpg.Connection = Depends(db_uow),
 ):
     """User login endpoint with optional 2FA support."""
     auth_service = AuthService(db_connection=db_connection)
@@ -101,8 +101,9 @@ async def refresh(
 ):
     """Refresh user session."""
     auth_service = AuthService(db_connection=db_connection)
-    access_token = request.headers.get("Access-Token").strip()
-    refresh_token = request.headers.get("Refresh-Token", None).strip()
+
+    access_token = request.headers.get("Access-Token")
+    refresh_token = request.headers.get("Refresh-Token")
 
     result = await auth_service.refresh_session(
         access_token=access_token,
@@ -214,7 +215,7 @@ async def forgot_password(
 async def reset_password(
     request: Request,
     data: ResetPasswordRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    db_connection: asyncpg.Connection = Depends(db_conn),
 ):
     """Reset user password using token from email"""
     auth_service = AuthService(db_connection=db_connection)
@@ -258,7 +259,7 @@ async def change_password(
     request: Request,
     data: ChangePasswordRequest = Body(...),
     current_user: dict = Depends(get_user_from_auth),
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    db_connection: asyncpg.Connection = Depends(db_conn),
 ):
     """Change user password endpoint."""
     auth_service = AuthService(db_connection=db_connection)

@@ -578,7 +578,7 @@ class AuthService:
         )
 
     async def refresh_session(
-        self, access_token: str, refresh_token: str
+        self, access_token: str | None, refresh_token: str | None
     ) -> RefreshSessionResponse:
         """Refresh user session.
 
@@ -590,12 +590,32 @@ class AuthService:
             RefreshSessionResponse: Token information with refresh status
 
         Raises:
+            BadRequestException: If access token or refresh token is missing
             UnauthorizedException: If access token is invalid, refresh token is invalid/expired,
                 or tokens don't belong to same user
             ServiceUnavailableException: If authentication service is unavailable or
                 encounters server errors
             TooManyRequestsException: If rate limit is exceeded
         """
+        # Validate required tokens
+        if not access_token:
+            raise BadRequestException(
+                message_key="errors.required_headers_missing",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+                params={"missing_headers": "Access-Token"},
+            )
+
+        if not refresh_token:
+            raise BadRequestException(
+                message_key="errors.required_headers_missing",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+                params={"missing_headers": "Refresh-Token"},
+            )
+
+        # Strip whitespace from tokens
+        access_token = access_token.strip()
+        refresh_token = refresh_token.strip()
+
         # Decode access token to extract user ID (without expiration check)
         try:
             decoded_access_token = jwt.decode(

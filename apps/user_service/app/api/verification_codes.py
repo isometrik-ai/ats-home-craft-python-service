@@ -14,7 +14,7 @@ from apps.user_service.app.app_instance import limiter
 
 # Utility imports
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
-from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.dependencies.db import db_uow
 from apps.user_service.app.dependencies.logger import get_logger
 
 # Schema imports
@@ -90,7 +90,7 @@ async def send_verification_code(
     request: Request,
     data: SendVerificationCodeRequest,
     current_user: dict | None = Depends(get_optional_user),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    db_connection: asyncpg.Connection = Depends(db_uow),
 ):
     """Send verification code endpoint for email or phone number verification.
 
@@ -155,7 +155,7 @@ async def verify_verification_code(
     request: Request,
     data: VerifyVerificationCodeRequest,
     current_user: dict | None = Depends(get_optional_user),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    db_connection: asyncpg.Connection = Depends(db_uow),
 ):
     """Verify verification code endpoint.
 
