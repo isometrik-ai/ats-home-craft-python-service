@@ -1107,24 +1107,28 @@ def test_get_optional_user_exception_handling():
 
 def test_get_client_ip_with_forwarded_for():
     """Test get_client_ip with X-Forwarded-For header - covers lines 91-94."""
-    from apps.user_service.app.api.verification_codes import get_client_ip
+    from apps.user_service.app.services.verification_code_service import (
+        VerificationCodeService,
+    )
 
     mock_request = MagicMock(spec=Request)
     mock_request.headers = {"X-Forwarded-For": "192.168.1.1, 10.0.0.1"}
 
-    ip = get_client_ip(mock_request)
+    ip = VerificationCodeService.get_client_ip(mock_request)
     assert ip == "192.168.1.1"
 
 
 def test_get_client_ip_with_real_ip():
     """Test get_client_ip with X-Real-IP header - covers lines 97-99."""
-    from apps.user_service.app.api.verification_codes import get_client_ip
+    from apps.user_service.app.services.verification_code_service import (
+        VerificationCodeService,
+    )
 
     mock_request = MagicMock(spec=Request)
     mock_request.headers = {"X-Real-IP": "203.0.113.1"}
     mock_request.client = None
 
-    ip = get_client_ip(mock_request)
+    ip = VerificationCodeService.get_client_ip(mock_request)
     assert ip == "203.0.113.1"
 
 
@@ -1136,7 +1140,6 @@ def test_get_client_ip_with_real_ip():
 @pytest.mark.asyncio
 async def test_validate_email_for_update_generic_exception():
     """Test _validate_email_for_update with generic exception - covers lines 138-140."""
-    from apps.user_service.app.api.verification_codes import _validate_email_for_update
 
     with patch(
         "apps.user_service.app.api.verification_codes.get_auth_user_by_email",
@@ -1149,7 +1152,6 @@ async def test_validate_email_for_update_generic_exception():
 @pytest.mark.asyncio
 async def test_validate_phone_for_update_generic_exception():
     """Test _validate_phone_for_update with generic exception - covers lines 195-196."""
-    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
 
     with patch(
         "apps.user_service.app.api.verification_codes.get_user_by_id",
@@ -1199,7 +1201,6 @@ async def test_verify_code_update_record_attempts_not_list():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_email_failure():
     """Test _update_email_or_phone for email update failure."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     # Mock the admin API calls to return None (failure)
     mock_admin_supabase, mock_admin_api = _build_admin_client()
@@ -1235,7 +1236,6 @@ async def test_update_email_or_phone_email_failure():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_email_exception():
     """Test _update_email_or_phone for email update exception."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     # Mock the admin API calls to raise exception
     mock_admin_supabase, mock_admin_api = _build_admin_client()
@@ -1271,7 +1271,6 @@ async def test_update_email_or_phone_email_exception():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_phone_exception():
     """Test _update_email_or_phone for phone update exception."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     # Mock the admin API calls to raise exception
     mock_admin_supabase, mock_admin_api = _build_admin_client()
@@ -1307,7 +1306,6 @@ async def test_update_email_or_phone_phone_exception():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_missing_jwt_secret():
     """Missing SUPABASE_JWT_SECRET should translate to failure."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -1337,7 +1335,6 @@ async def test_update_email_or_phone_missing_jwt_secret():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_expired_token():
     """Expired tokens should raise 401."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -1376,7 +1373,6 @@ async def test_update_email_or_phone_expired_token():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_user_conversion_error():
     """Failures converting Supabase user models should fall back gracefully."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -1423,7 +1419,6 @@ async def test_update_email_or_phone_user_conversion_error():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_no_user_response():
     """Missing Supabase user should raise 401."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -1449,7 +1444,6 @@ async def test_update_email_or_phone_no_user_response():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_email_update_no_response():
     """Email update should fail when admin API returns empty."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -1503,7 +1497,6 @@ async def test_update_email_or_phone_email_update_no_response():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_phone_update_no_response():
     """Phone update should fail when admin API returns empty."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -1557,7 +1550,6 @@ async def test_update_email_or_phone_phone_update_no_response():
 @pytest.mark.asyncio
 async def test_update_email_or_phone_generic_exception():
     """Generic Supabase client failures should raise 500."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     with patch(
         "apps.user_service.app.api.verification_codes._get_supabase_client_with_token",
@@ -1576,7 +1568,6 @@ async def test_update_email_or_phone_generic_exception():
 @pytest.mark.asyncio
 async def test_update_email_full_flow_with_retry():
     """Full email update path including retry logic."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -1646,7 +1637,6 @@ async def test_update_email_full_flow_with_retry():
 @pytest.mark.asyncio
 async def test_update_phone_full_flow_with_plus_stripping():
     """Phone update should retry when Supabase strips '+'."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -1716,7 +1706,6 @@ async def test_update_phone_full_flow_with_plus_stripping():
 @pytest.mark.asyncio
 async def test_update_email_metadata_verification_mismatch():
     """Metadata mismatch should trigger retry logic."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -1783,7 +1772,6 @@ async def test_update_email_metadata_verification_mismatch():
 @pytest.mark.asyncio
 async def test_session_persistence_error():
     """Storage failures while persisting session should raise 500."""
-    from apps.user_service.app.api.verification_codes import _update_email_or_phone
 
     mock_client = MagicMock()
     mock_user_response = MagicMock()
@@ -2149,7 +2137,6 @@ async def test_check_auth_user_exists_by_phone_no_phone_attr():
 @pytest.mark.asyncio
 async def test_validate_phone_for_update_no_user_data():
     """None response from get_user_by_id should not raise."""
-    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
 
     with patch(
         "apps.user_service.app.api.verification_codes.get_user_by_id",
@@ -2161,7 +2148,6 @@ async def test_validate_phone_for_update_no_user_data():
 @pytest.mark.asyncio
 async def test_validate_phone_for_update_no_user_attr():
     """User data missing .user attribute should not raise."""
-    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
 
     mock_user_data = MagicMock()
     del mock_user_data.user
@@ -2185,7 +2171,6 @@ async def test_validate_phone_for_update_no_user_attr():
 @pytest.mark.asyncio
 async def test_validate_phone_for_update_no_phone_field():
     """Users without phone field should pass validation."""
-    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
 
     mock_user_data = MagicMock()
     mock_user = MagicMock()
@@ -2229,7 +2214,6 @@ async def test_validate_authenticated_user_input_no_sub():
 
 def test_determine_triggered_text_authenticated_phone():
     """Test _determine_triggered_text for authenticated user phone - covers lines 421-424."""
-    from apps.user_service.app.api.verification_codes import _determine_triggered_text
 
     data = SendVerificationCodeRequest(type=VerificationType.PHONE_NUMBER, phoneNumber="1234567890")
     current_user = {"sub": "user-123"}
@@ -2386,14 +2370,12 @@ async def test_validate_authenticated_user_input_no_user_id():
 
 def test_sanitize_ip_valid_ipv4():
     """Ensure IPv4 addresses are accepted."""
-    from apps.user_service.app.api.verification_codes import _sanitize_ip
 
     assert _sanitize_ip("192.168.1.1") == "192.168.1.1"
 
 
 def test_sanitize_ip_valid_ipv6():
     """Ensure IPv6 addresses are accepted."""
-    from apps.user_service.app.api.verification_codes import _sanitize_ip
 
     ipv6 = "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
     assert _sanitize_ip(ipv6) == ipv6
@@ -2401,36 +2383,30 @@ def test_sanitize_ip_valid_ipv6():
 
 def test_sanitize_ip_with_comma():
     """First IP before comma should be returned."""
-    from apps.user_service.app.api.verification_codes import _sanitize_ip
 
     assert _sanitize_ip(" 192.168.1.1 , 10.0.0.1 ") == "192.168.1.1"
 
 
 def test_sanitize_ip_invalid():
     """Invalid IP strings return None."""
-    from apps.user_service.app.api.verification_codes import _sanitize_ip
 
     assert _sanitize_ip("invalid-ip") is None
 
 
 def test_sanitize_ip_none():
     """None input returns None."""
-    from apps.user_service.app.api.verification_codes import _sanitize_ip
 
     assert _sanitize_ip(None) is None
 
 
 def test_sanitize_ip_empty():
     """Empty string returns None."""
-    from apps.user_service.app.api.verification_codes import _sanitize_ip
 
     assert _sanitize_ip("") is None
 
 
 def test_get_client_ip_from_client_host():
     """Client host should be used when headers missing."""
-
-    from apps.user_service.app.api.verification_codes import get_client_ip
 
     mock_request = MagicMock(spec=Request)
     mock_request.headers = {}
@@ -2443,8 +2419,6 @@ def test_get_client_ip_from_client_host():
 def test_get_client_ip_invalid_host():
     """Invalid host should fall back to original value."""
 
-    from apps.user_service.app.api.verification_codes import get_client_ip
-
     mock_request = MagicMock(spec=Request)
     mock_request.headers = {}
     mock_request.client = MagicMock()
@@ -2456,8 +2430,6 @@ def test_get_client_ip_invalid_host():
 def test_get_client_ip_no_client():
     """Unknown should be returned when client missing."""
 
-    from apps.user_service.app.api.verification_codes import get_client_ip
-
     mock_request = MagicMock(spec=Request)
     mock_request.headers = {}
     mock_request.client = None
@@ -2467,35 +2439,30 @@ def test_get_client_ip_no_client():
 
 def test_normalize_phone_with_plus():
     """Leading + should be stripped."""
-    from apps.user_service.app.api.verification_codes import _normalize_phone
 
     assert _normalize_phone("+1234567890") == "1234567890"
 
 
 def test_normalize_phone_without_plus():
     """Phone strings without + stay unchanged."""
-    from apps.user_service.app.api.verification_codes import _normalize_phone
 
     assert _normalize_phone("1234567890") == "1234567890"
 
 
 def test_normalize_phone_multiple_plus():
     """Only the leading + symbols should be removed."""
-    from apps.user_service.app.api.verification_codes import _normalize_phone
 
     assert _normalize_phone("++1234567890") == "1234567890"
 
 
 def test_normalize_phone_none():
     """None input should return None."""
-    from apps.user_service.app.api.verification_codes import _normalize_phone
 
     assert _normalize_phone(None) is None
 
 
 def test_normalize_phone_empty():
     """Empty string should remain empty."""
-    from apps.user_service.app.api.verification_codes import _normalize_phone
 
     assert _normalize_phone("") == ""
 
@@ -2503,7 +2470,6 @@ def test_normalize_phone_empty():
 @pytest.mark.asyncio
 async def test_validate_email_for_update_same_email():
     """Entering the existing email should raise."""
-    from apps.user_service.app.api.verification_codes import _validate_email_for_update
 
     with pytest.raises(HTTPException) as exc:
         await _validate_email_for_update("test@example.com", "user-123", "test@example.com")
@@ -2514,7 +2480,6 @@ async def test_validate_email_for_update_same_email():
 @pytest.mark.asyncio
 async def test_validate_email_update_exists_other_user():
     """Duplicate email for another user should raise 409."""
-    from apps.user_service.app.api.verification_codes import _validate_email_for_update
 
     mock_user = MagicMock()
     mock_user.id = "other-user"
@@ -2533,7 +2498,6 @@ async def test_validate_email_update_exists_other_user():
 @pytest.mark.asyncio
 async def test_validate_email_update_exists_same_user():
     """Same user reusing their email should be allowed."""
-    from apps.user_service.app.api.verification_codes import _validate_email_for_update
 
     mock_user = MagicMock()
     mock_user.id = "user-123"
@@ -2548,7 +2512,6 @@ async def test_validate_email_update_exists_same_user():
 @pytest.mark.asyncio
 async def test_validate_email_for_update_get_user_fails():
     """Errors in lookup should be swallowed."""
-    from apps.user_service.app.api.verification_codes import _validate_email_for_update
 
     with patch(
         "apps.user_service.app.api.verification_codes.get_auth_user_by_email",
@@ -2560,7 +2523,6 @@ async def test_validate_email_for_update_get_user_fails():
 @pytest.mark.asyncio
 async def test_validate_email_for_update_email_not_found():
     """Missing emails should pass validation."""
-    from apps.user_service.app.api.verification_codes import _validate_email_for_update
 
     with patch(
         "apps.user_service.app.api.verification_codes.get_auth_user_by_email",
@@ -2653,7 +2615,6 @@ async def test_check_phone_exists_for_other_user_error():
 @pytest.mark.asyncio
 async def test_validate_phone_for_update_same_phone():
     """Using the same phone should raise."""
-    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
 
     mock_user_data = MagicMock()
     mock_user_data.user = MagicMock()
@@ -2671,7 +2632,6 @@ async def test_validate_phone_for_update_same_phone():
 @pytest.mark.asyncio
 async def test_validate_phone_for_update_different_phone():
     """New phones should pass validation."""
-    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
 
     mock_user_data = MagicMock()
     mock_user_data.user = MagicMock()
@@ -2696,7 +2656,6 @@ async def test_validate_phone_for_update_different_phone():
 @pytest.mark.asyncio
 async def test_validate_phone_for_update_get_user_fails():
     """Lookup failures should not break flow."""
-    from apps.user_service.app.api.verification_codes import _validate_phone_for_update
 
     with patch(
         "apps.user_service.app.api.verification_codes.get_user_by_id",
@@ -2707,7 +2666,6 @@ async def test_validate_phone_for_update_get_user_fails():
 
 def test_determine_triggered_text_authenticated_email():
     """Authenticated email requests map to EMAIL_UPDATE."""
-    from apps.user_service.app.api.verification_codes import _determine_triggered_text
 
     data = SendVerificationCodeRequest(type=VerificationType.EMAIL, email="new@example.com")
     current_user = {"sub": "user-123"}
@@ -2717,7 +2675,6 @@ def test_determine_triggered_text_authenticated_email():
 
 def test_determine_triggered_text_unauthenticated_email():
     """Signup email requests map to signup trigger."""
-    from apps.user_service.app.api.verification_codes import _determine_triggered_text
 
     data = SendVerificationCodeRequest(type=VerificationType.EMAIL, email="new@example.com")
 
@@ -2728,7 +2685,6 @@ def test_determine_triggered_text_unauthenticated_email():
 
 def test_determine_triggered_text_unauthenticated_phone():
     """Signup phone requests map to signup trigger."""
-    from apps.user_service.app.api.verification_codes import _determine_triggered_text
 
     data = SendVerificationCodeRequest(
         type=VerificationType.PHONE_NUMBER, phoneNumber="+1234567890"

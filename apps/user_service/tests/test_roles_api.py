@@ -17,7 +17,7 @@ def app():
     """Create FastAPI app with roles router for testing."""
     from fastapi import FastAPI
 
-    from apps.user_service.app.api.admin_management.roles import router as roles_router
+    from apps.user_service.app.api.roles import router as roles_router
     from apps.user_service.app.utils.common_utils import (
         UserContext,
         check_permissions,
@@ -57,7 +57,7 @@ class TestGetRoles:
         """Test successful roles list retrieval."""
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_roles_list",
+                "apps.user_service.app.api.roles.get_roles_list",
                 AsyncMock(
                     return_value=[
                         {
@@ -75,7 +75,7 @@ class TestGetRoles:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_roles_count",
+                "apps.user_service.app.api.roles.get_roles_count",
                 AsyncMock(return_value=1),
             ),
         ):
@@ -89,11 +89,11 @@ class TestGetRoles:
         """Test roles list with query parameters."""
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_roles_list",
+                "apps.user_service.app.api.roles.get_roles_list",
                 AsyncMock(return_value=[]),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_roles_count",
+                "apps.user_service.app.api.roles.get_roles_count",
                 AsyncMock(return_value=0),
             ),
         ):
@@ -112,11 +112,11 @@ class TestGetRoles:
         """Test roles list with database error."""
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_roles_list",
+                "apps.user_service.app.api.roles.get_roles_list",
                 AsyncMock(side_effect=Exception("Database error")),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_roles_count",
+                "apps.user_service.app.api.roles.get_roles_count",
                 AsyncMock(side_effect=Exception("Database error")),
             ),
         ):
@@ -133,7 +133,7 @@ class TestGetRoleById:
         role_id = str(uuid.uuid4())
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -146,7 +146,7 @@ class TestGetRoleById:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_permissions",
+                "apps.user_service.app.api.roles.get_role_permissions",
                 AsyncMock(return_value=[]),
             ),
         ):
@@ -164,7 +164,7 @@ class TestGetRoleById:
         """Test role retrieval when role doesn't exist."""
         role_id = str(uuid.uuid4())
         with patch(
-            "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+            "apps.user_service.app.api.roles.get_role_by_id",
             AsyncMock(return_value=None),
         ):
             res = client.get(f"/v1/admin/roles/{role_id}")
@@ -176,11 +176,11 @@ class TestGetRoleById:
         role_id = str(uuid.uuid4())
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(side_effect=Exception("Database error")),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_permissions",
+                "apps.user_service.app.api.roles.get_role_permissions",
                 AsyncMock(side_effect=Exception("Database error")),
             ),
         ):
@@ -202,11 +202,11 @@ class TestCreateRole:
         }
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_name_unique",
+                "apps.user_service.app.api.roles.check_role_name_unique",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.create_role",
+                "apps.user_service.app.api.roles.create_role",
                 AsyncMock(
                     return_value={
                         "id": str(uuid.uuid4()),
@@ -219,7 +219,7 @@ class TestCreateRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.assign_permissions_to_role",
+                "apps.user_service.app.api.roles.assign_permissions_to_role",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -236,7 +236,7 @@ class TestCreateRole:
             "permission_ids": [],
         }
         with patch(
-            "apps.user_service.app.api.admin_management.roles.check_role_name_unique",
+            "apps.user_service.app.api.roles.check_role_name_unique",
             AsyncMock(return_value=False),
         ):
             res = client.post("/v1/admin/roles", json=payload)
@@ -269,10 +269,7 @@ class TestCreateRole:
             "permission_ids": [],
         }
         with patch(
-            (
-                "apps.user_service.app.api.admin_management.roles."
-                "check_permission_exist_in_organization"
-            ),
+            ("apps.user_service.app.api.roles.check_permission_exist_in_organization"),
             AsyncMock(side_effect=Exception("Database error")),
         ):
             # Since there's no error handling decorator, the exception will be raised directly
@@ -289,7 +286,7 @@ class TestCreateRole:
         }
 
         with patch(
-            "apps.user_service.app.api.admin_management.roles.create_role",
+            "apps.user_service.app.api.roles.create_role",
             AsyncMock(
                 return_value={
                     "id": str(uuid.uuid4()),
@@ -323,11 +320,11 @@ class TestCreateRole:
         }
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.validate_uuid_format",
+                "apps.user_service.app.api.roles.validate_uuid_format",
                 MagicMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_permissions_exist",
+                "apps.user_service.app.api.roles.check_permissions_exist",
                 AsyncMock(return_value=False),
             ),
         ):
@@ -345,15 +342,15 @@ class TestUpdateRole:
         payload = {"name": "Renamed", "description": "Updated"}
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_name_unique",
+                "apps.user_service.app.api.roles.check_role_name_unique",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -364,7 +361,7 @@ class TestUpdateRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.update_role",
+                "apps.user_service.app.api.roles.update_role",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -377,7 +374,7 @@ class TestUpdateRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.assign_permissions_to_role",
+                "apps.user_service.app.api.roles.assign_permissions_to_role",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -397,7 +394,7 @@ class TestUpdateRole:
         role_id = str(uuid.uuid4())
         payload = {"name": "Updated", "description": "Updated"}
         with patch(
-            "apps.user_service.app.api.admin_management.roles.check_role_exists",
+            "apps.user_service.app.api.roles.check_role_exists",
             AsyncMock(return_value=False),
         ):
             res = client.put(f"/v1/admin/roles/{role_id}", json=payload)
@@ -410,11 +407,11 @@ class TestUpdateRole:
         payload = {"name": "Admin", "description": "Updated"}
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -425,7 +422,7 @@ class TestUpdateRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_name_unique",
+                "apps.user_service.app.api.roles.check_role_name_unique",
                 AsyncMock(return_value=False),
             ),
         ):
@@ -446,11 +443,11 @@ class TestUpdateRole:
         payload = {"name": "Updated", "description": "Updated"}
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(side_effect=Exception("Database error")),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(side_effect=Exception("Database error")),
             ),
         ):
@@ -464,11 +461,11 @@ class TestUpdateRole:
         payload = {}  # Empty payload - no changes
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -490,11 +487,11 @@ class TestUpdateRole:
         payload = {"permission_ids": [permission_id]}
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -505,15 +502,15 @@ class TestUpdateRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.validate_uuid_format",
+                "apps.user_service.app.api.roles.validate_uuid_format",
                 MagicMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_permissions_exist",
+                "apps.user_service.app.api.roles.check_permissions_exist",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.assign_permissions_to_role",
+                "apps.user_service.app.api.roles.assign_permissions_to_role",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -527,11 +524,11 @@ class TestUpdateRole:
         payload = {"permission_ids": []}  # Empty permissions list
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -542,7 +539,7 @@ class TestUpdateRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.assign_permissions_to_role",
+                "apps.user_service.app.api.roles.assign_permissions_to_role",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -556,11 +553,11 @@ class TestUpdateRole:
         payload = {"is_default": True}
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -571,7 +568,7 @@ class TestUpdateRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.update_role",
+                "apps.user_service.app.api.roles.update_role",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -585,11 +582,11 @@ class TestUpdateRole:
         payload = {"permission_ids": ["invalid-uuid"]}
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -611,11 +608,11 @@ class TestUpdateRole:
         payload = {"permission_ids": [permission_id]}
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -626,11 +623,11 @@ class TestUpdateRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.validate_uuid_format",
+                "apps.user_service.app.api.roles.validate_uuid_format",
                 MagicMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_permissions_exist",
+                "apps.user_service.app.api.roles.check_permissions_exist",
                 AsyncMock(return_value=False),
             ),
         ):
@@ -647,11 +644,11 @@ class TestDeleteRole:
         role_id = str(uuid.uuid4())
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -662,11 +659,11 @@ class TestDeleteRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_usage",
+                "apps.user_service.app.api.roles.check_role_usage",
                 AsyncMock(return_value=0),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.delete_role",
+                "apps.user_service.app.api.roles.delete_role",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -683,7 +680,7 @@ class TestDeleteRole:
         """Test role deletion when role doesn't exist."""
         role_id = str(uuid.uuid4())
         with patch(
-            "apps.user_service.app.api.admin_management.roles.check_role_exists",
+            "apps.user_service.app.api.roles.check_role_exists",
             AsyncMock(return_value=False),
         ):
             res = client.delete(f"/v1/admin/roles/{role_id}")
@@ -695,11 +692,11 @@ class TestDeleteRole:
         role_id = str(uuid.uuid4())
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -710,15 +707,15 @@ class TestDeleteRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_usage",
+                "apps.user_service.app.api.roles.check_role_usage",
                 AsyncMock(return_value=0),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_permissions",
+                "apps.user_service.app.api.roles.get_role_permissions",
                 AsyncMock(return_value=[]),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.delete_role",
+                "apps.user_service.app.api.roles.delete_role",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -731,15 +728,15 @@ class TestDeleteRole:
         role_id = str(uuid.uuid4())
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(side_effect=Exception("Database error")),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(side_effect=Exception("Database error")),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_usage",
+                "apps.user_service.app.api.roles.check_role_usage",
                 AsyncMock(side_effect=Exception("Database error")),
             ),
         ):
@@ -752,11 +749,11 @@ class TestDeleteRole:
         role_id = str(uuid.uuid4())
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -767,7 +764,7 @@ class TestDeleteRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_usage",
+                "apps.user_service.app.api.roles.check_role_usage",
                 AsyncMock(return_value=3),
             ),
         ):  # 3 members using this role
@@ -783,11 +780,11 @@ class TestDeleteRole:
         role_id = str(uuid.uuid4())
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -798,11 +795,11 @@ class TestDeleteRole:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_usage",
+                "apps.user_service.app.api.roles.check_role_usage",
                 AsyncMock(return_value=0),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.delete_role",
+                "apps.user_service.app.api.roles.delete_role",
                 AsyncMock(return_value=False),
             ),
         ):  # Role not found during deletion
@@ -819,9 +816,7 @@ class TestPermissionDenied:
         """Create app without permission override for testing permission denied scenarios."""
         from fastapi import FastAPI
 
-        from apps.user_service.app.api.admin_management.roles import (
-            router as roles_router,
-        )
+        from apps.user_service.app.api.roles import router as roles_router
         from apps.user_service.app.utils.common_utils import (
             check_user_access_async,
         )
@@ -846,17 +841,17 @@ class TestPermissionDenied:
         # Patch at the module level where it's imported
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_permissions",
+                "apps.user_service.app.api.roles.check_permissions",
                 AsyncMock(
                     side_effect=HTTPException(status_code=403, detail="Insufficient permissions")
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_roles_list",
+                "apps.user_service.app.api.roles.get_roles_list",
                 AsyncMock(return_value=[]),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_roles_count",
+                "apps.user_service.app.api.roles.get_roles_count",
                 AsyncMock(return_value=0),
             ),
         ):
@@ -876,21 +871,21 @@ class TestPermissionDenied:
         }
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_permissions",
+                "apps.user_service.app.api.roles.check_permissions",
                 AsyncMock(
                     side_effect=HTTPException(status_code=403, detail="Insufficient permissions")
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_permissions_exist",
+                "apps.user_service.app.api.roles.check_permissions_exist",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_name_unique",
+                "apps.user_service.app.api.roles.check_role_name_unique",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.create_role",
+                "apps.user_service.app.api.roles.create_role",
                 AsyncMock(return_value={"id": str(uuid.uuid4()), "created_at": datetime.now()}),
             ),
         ):
@@ -906,17 +901,17 @@ class TestPermissionDenied:
         payload = {"name": "Updated", "description": "Updated"}
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_permissions",
+                "apps.user_service.app.api.roles.check_permissions",
                 AsyncMock(
                     side_effect=HTTPException(status_code=403, detail="Insufficient permissions")
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -927,7 +922,7 @@ class TestPermissionDenied:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_name_unique",
+                "apps.user_service.app.api.roles.check_role_name_unique",
                 AsyncMock(return_value=True),
             ),
         ):
@@ -942,17 +937,17 @@ class TestPermissionDenied:
         role_id = str(uuid.uuid4())
         with (
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_permissions",
+                "apps.user_service.app.api.roles.check_permissions",
                 AsyncMock(
                     side_effect=HTTPException(status_code=403, detail="Insufficient permissions")
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_exists",
+                "apps.user_service.app.api.roles.check_role_exists",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.get_role_by_id",
+                "apps.user_service.app.api.roles.get_role_by_id",
                 AsyncMock(
                     return_value={
                         "id": role_id,
@@ -963,7 +958,7 @@ class TestPermissionDenied:
                 ),
             ),
             patch(
-                "apps.user_service.app.api.admin_management.roles.check_role_usage",
+                "apps.user_service.app.api.roles.check_role_usage",
                 AsyncMock(return_value=0),
             ),
         ):

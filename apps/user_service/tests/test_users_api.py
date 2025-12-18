@@ -9,9 +9,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from apps.user_service.app.api.admin_management.users.users import (
-    router as users_router,
-)
+from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.schemas.users import UserListItem
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -106,7 +104,7 @@ def test_users_list_success(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.users.get_users_details_list",
+            "apps.user_service.app.api.users.get_users_details_list",
             AsyncMock(
                 return_value=[
                     {
@@ -125,11 +123,11 @@ def test_users_list_success(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.users.get_users_total_count",
+            "apps.user_service.app.api.users.get_users_total_count",
             AsyncMock(return_value=1),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.users.transform_users",
+            "apps.user_service.app.api.users.transform_users",
             AsyncMock(return_value=[mock_user]),
         ),
     ):
@@ -155,11 +153,11 @@ def test_get_user_profile_success(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+            "apps.user_service.app.api.users.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+            "apps.user_service.app.api.users.get_user_profile_by_id",
             AsyncMock(
                 return_value={
                     "user_id": "u1",
@@ -182,11 +180,11 @@ def test_get_user_profile_success(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+            "apps.user_service.app.api.users.get_user_permissions",
             AsyncMock(return_value=[]),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+            "apps.user_service.app.api.users.get_user_by_id",
             AsyncMock(return_value=mock_supabase_user),
         ),
     ):
@@ -214,11 +212,11 @@ def test_get_user_profile_email_mismatch(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+            "apps.user_service.app.api.users.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+            "apps.user_service.app.api.users.get_user_profile_by_id",
             AsyncMock(
                 return_value={
                     "user_id": "u1",
@@ -241,11 +239,11 @@ def test_get_user_profile_email_mismatch(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+            "apps.user_service.app.api.users.get_user_by_id",
             AsyncMock(return_value=mock_user_data),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+            "apps.user_service.app.api.users.get_user_permissions",
             AsyncMock(return_value=[]),
         ),
     ):
@@ -268,11 +266,11 @@ def test_get_user_profile_invalid_user_type(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+            "apps.user_service.app.api.users.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+            "apps.user_service.app.api.users.get_user_profile_by_id",
             AsyncMock(
                 return_value={
                     "user_id": "u1",
@@ -296,15 +294,15 @@ def test_get_user_profile_invalid_user_type(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+            "apps.user_service.app.api.users.get_user_permissions",
             AsyncMock(return_value=[]),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.update_user_activity",
+            "apps.user_service.app.api.users.update_user_activity",
             AsyncMock(),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+            "apps.user_service.app.api.users.get_user_by_id",
             AsyncMock(return_value=mock_supabase_user),
         ),
     ):
@@ -341,19 +339,19 @@ def test_get_user_profile_no_organization_linked(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+            "apps.user_service.app.api.users.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+            "apps.user_service.app.api.users.get_user_profile_by_id",
             AsyncMock(return_value=None),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+            "apps.user_service.app.api.users.get_user_by_id",
             AsyncMock(return_value=mock_user_data),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+            "apps.user_service.app.api.users.get_user_permissions",
             AsyncMock(return_value=[]),
         ),
     ):
@@ -382,11 +380,11 @@ def test_get_user_profile_no_organization_id(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+            "apps.user_service.app.api.users.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+            "apps.user_service.app.api.users.get_user_profile_by_id",
             AsyncMock(
                 return_value={
                     "user_id": "u1",
@@ -407,11 +405,11 @@ def test_get_user_profile_no_organization_id(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+            "apps.user_service.app.api.users.get_user_permissions",
             AsyncMock(return_value=[]),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+            "apps.user_service.app.api.users.get_user_by_id",
             AsyncMock(return_value=mock_supabase_user),
         ),
     ):
@@ -436,11 +434,11 @@ def test_get_user_profile_no_role_id(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.extract_user_context",
+            "apps.user_service.app.api.users.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_profile_by_id",
+            "apps.user_service.app.api.users.get_user_profile_by_id",
             AsyncMock(
                 return_value={
                     "user_id": "u1",
@@ -461,15 +459,15 @@ def test_get_user_profile_no_role_id(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_permissions",
+            "apps.user_service.app.api.users.get_user_permissions",
             AsyncMock(return_value=[]),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.update_user_activity",
+            "apps.user_service.app.api.users.update_user_activity",
             AsyncMock(),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.user_profile.get_user_by_id",
+            "apps.user_service.app.api.users.get_user_by_id",
             AsyncMock(return_value=mock_supabase_user),
         ),
     ):
@@ -494,7 +492,7 @@ def test_update_user_email_success(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -505,7 +503,7 @@ def test_update_user_email_success(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -536,7 +534,7 @@ def test_update_user_email_user_not_found(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -547,7 +545,7 @@ def test_update_user_email_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(side_effect=HTTPException(status_code=404, detail="User not found")),
         ),
     ):
@@ -564,7 +562,7 @@ def test_update_user_email_duplicate_email(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -575,7 +573,7 @@ def test_update_user_email_duplicate_email(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -606,7 +604,7 @@ def test_update_user_email_database_error(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -617,7 +615,7 @@ def test_update_user_email_database_error(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -655,7 +653,7 @@ def test_ban_user_success(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -666,7 +664,7 @@ def test_ban_user_success(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -677,11 +675,11 @@ def test_ban_user_success(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.ban_the_user",
+            "apps.user_service.app.api.users.ban_the_user",
             AsyncMock(return_value={"id": user_id}),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.suspend_user",
+            "apps.user_service.app.api.users.suspend_user",
             AsyncMock(return_value=True),
         ),
     ):
@@ -696,7 +694,7 @@ def test_ban_user_not_found(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -707,7 +705,7 @@ def test_ban_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(side_effect=HTTPException(status_code=404, detail="User not found")),
         ),
     ):
@@ -722,7 +720,7 @@ def test_ban_user_already_banned(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -733,7 +731,7 @@ def test_ban_user_already_banned(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -744,7 +742,7 @@ def test_ban_user_already_banned(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.ban_the_user",
+            "apps.user_service.app.api.users.ban_the_user",
             AsyncMock(side_effect=HTTPException(status_code=400, detail="User is already banned")),
         ),
     ):
@@ -759,7 +757,7 @@ def test_ban_user_database_error(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -770,7 +768,7 @@ def test_ban_user_database_error(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -824,7 +822,7 @@ def test_ban_user_self_ban(client):
             mock_get_user_from_auth_same_user,
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             mock_check_permissions_async,
         ),
         patch(
@@ -848,7 +846,7 @@ def test_unban_user_success(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -859,7 +857,7 @@ def test_unban_user_success(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -870,11 +868,11 @@ def test_unban_user_success(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.unban_the_user",
+            "apps.user_service.app.api.users.unban_the_user",
             AsyncMock(return_value={"id": user_id}),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.revoke_suspended_user",
+            "apps.user_service.app.api.users.revoke_suspended_user",
             AsyncMock(return_value=True),
         ),
     ):
@@ -889,7 +887,7 @@ def test_unban_user_not_found(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -900,7 +898,7 @@ def test_unban_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(side_effect=HTTPException(status_code=404, detail="User not found")),
         ),
     ):
@@ -915,7 +913,7 @@ def test_unban_user_not_banned(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -926,7 +924,7 @@ def test_unban_user_not_banned(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -937,7 +935,7 @@ def test_unban_user_not_banned(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.unban_the_user",
+            "apps.user_service.app.api.users.unban_the_user",
             AsyncMock(side_effect=HTTPException(status_code=400, detail="User is not banned")),
         ),
     ):
@@ -985,7 +983,7 @@ def test_unban_user_self_unban(client):
             mock_get_user_from_auth_same_user,
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             mock_check_permissions_async,
         ),
         patch(
@@ -1009,7 +1007,7 @@ def test_ban_user_auth_user_not_found(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -1020,7 +1018,7 @@ def test_ban_user_auth_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -1031,7 +1029,7 @@ def test_ban_user_auth_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.ban_the_user",
+            "apps.user_service.app.api.users.ban_the_user",
             AsyncMock(return_value=False),
         ),
     ):  # Return False to trigger user not found
@@ -1046,7 +1044,7 @@ def test_ban_user_organization_user_not_found(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -1057,7 +1055,7 @@ def test_ban_user_organization_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -1068,11 +1066,11 @@ def test_ban_user_organization_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.ban_the_user",
+            "apps.user_service.app.api.users.ban_the_user",
             AsyncMock(return_value=True),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.suspend_user",
+            "apps.user_service.app.api.users.suspend_user",
             AsyncMock(return_value=False),
         ),
     ):  # Return False to trigger organization user not found
@@ -1087,7 +1085,7 @@ def test_unban_user_auth_user_not_found(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -1098,7 +1096,7 @@ def test_unban_user_auth_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -1109,7 +1107,7 @@ def test_unban_user_auth_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.unban_the_user",
+            "apps.user_service.app.api.users.unban_the_user",
             AsyncMock(return_value=False),
         ),
     ):  # Return False to trigger user not found or not banned
@@ -1124,7 +1122,7 @@ def test_unban_user_organization_user_not_found(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.check_permissions",
+            "apps.user_service.app.api.users.check_permissions",
             AsyncMock(
                 return_value=MagicMock(
                     organization_id=str(uuid.uuid4()),
@@ -1135,7 +1133,7 @@ def test_unban_user_organization_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.get_user_in_organization",
+            "apps.user_service.app.api.users.get_user_in_organization",
             AsyncMock(
                 return_value={
                     "user_id": user_id,
@@ -1146,11 +1144,11 @@ def test_unban_user_organization_user_not_found(client):
             ),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.unban_the_user",
+            "apps.user_service.app.api.users.unban_the_user",
             AsyncMock(return_value=True),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.users.update_user.revoke_suspended_user",
+            "apps.user_service.app.api.users.revoke_suspended_user",
             AsyncMock(return_value=False),
         ),
     ):  # Return False to trigger organization user not found

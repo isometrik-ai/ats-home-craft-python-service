@@ -144,6 +144,16 @@ class AuthResponse(BaseModel):
     user: UserInfo
 
 
+class RefreshSessionResponse(BaseModel):
+    """Response model for refresh session operations"""
+
+    access_token: str | None = None
+    refresh_token: str | None = None
+    expires_in: int | None = None
+    expires_at: datetime | None = None
+    token_refreshed: bool
+
+
 class SignupResponse(BaseModel):
     """Response model for signup operations"""
 

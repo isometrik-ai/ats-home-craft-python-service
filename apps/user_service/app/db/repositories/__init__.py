@@ -14,5 +14,12 @@ Usage:
 
 from .permission_repository import PermissionsRepository
 from .team_repository import TeamRepository
+from .user_repository import UserRepository
+from .verification_code_repository import VerificationCodeRepository
 
-__all__ = ["TeamRepository", "PermissionsRepository"]
+__all__ = [
+    "TeamRepository",
+    "PermissionsRepository",
+    "UserRepository",
+    "VerificationCodeRepository",
+]

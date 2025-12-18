@@ -2,24 +2,16 @@
 
 from fastapi import APIRouter
 
-from apps.user_service.app.api.admin_management.organisation import (
-    router as organisation_router,
-)
-from apps.user_service.app.api.admin_management.permissions import (
-    router as permissions_router,
-)
-from apps.user_service.app.api.admin_management.roles import router as roles_router
-from apps.user_service.app.api.admin_management.sessions.sessions import (
-    router as sessions_router,
-)
-from apps.user_service.app.api.admin_management.users.users import (
-    router as users_router,
-)
-from apps.user_service.app.api.audit_logs.audit_logs import router as audit_logs_router
+from apps.user_service.app.api.audit_logs import router as audit_logs_router
 from apps.user_service.app.api.auth import router as auth_router
 from apps.user_service.app.api.invites import router as invites_router
+from apps.user_service.app.api.organisation import router as organisation_router
+from apps.user_service.app.api.permissions import router as permissions_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
+from apps.user_service.app.api.roles import router as roles_router
+from apps.user_service.app.api.sessions import router as sessions_router
 from apps.user_service.app.api.teams import router as teams_router
+from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
 )

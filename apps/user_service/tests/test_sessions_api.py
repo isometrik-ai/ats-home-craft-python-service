@@ -13,9 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps.user_service.app.api.admin_management.sessions.sessions import (
-    router as sessions_router,
-)
+from apps.user_service.app.api.sessions import router as sessions_router
 from apps.user_service.app.schemas.auth import SessionFilter
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -82,15 +80,15 @@ def test_sessions_list_success(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
+            "apps.user_service.app.api.sessions.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+            "apps.user_service.app.api.sessions.check_permissions",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count",
+            "apps.user_service.app.api.sessions.get_sessions_with_count",
             AsyncMock(
                 return_value={
                     "data": [
@@ -135,15 +133,15 @@ def test_sessions_list_with_filters(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
+            "apps.user_service.app.api.sessions.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+            "apps.user_service.app.api.sessions.check_permissions",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count",
+            "apps.user_service.app.api.sessions.get_sessions_with_count",
             AsyncMock(return_value={"data": [], "total_count": 0}),
         ),
     ):
@@ -167,11 +165,11 @@ def test_sessions_list_database_error(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
+            "apps.user_service.app.api.sessions.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+            "apps.user_service.app.api.sessions.check_permissions",
             AsyncMock(return_value=mock_user_context),
         ),
     ):
@@ -194,11 +192,11 @@ def test_sessions_list_no_organization_id(client):
     mock_result = {"data": [], "total_count": 0}
     with (
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.extract_user_context",
+            "apps.user_service.app.api.sessions.extract_user_context",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.get_sessions_with_count",
+            "apps.user_service.app.api.sessions.get_sessions_with_count",
             AsyncMock(return_value=mock_result),
         ),
     ):
@@ -221,14 +219,11 @@ def test_org_sessions_list_success(client):
 
     with (
         patch(
-            "apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+            "apps.user_service.app.api.sessions.check_permissions",
             AsyncMock(return_value=mock_user_context),
         ),
         patch(
-            (
-                "apps.user_service.app.api.admin_management.sessions.sessions."
-                "get_org_sessions_with_count"
-            ),
+            ("apps.user_service.app.api.sessions.get_org_sessions_with_count"),
             AsyncMock(
                 return_value={
                     "data": [
@@ -271,7 +266,7 @@ def test_org_sessions_list_missing_organization_id(client):
     )
 
     with patch(
-        "apps.user_service.app.api.admin_management.sessions.sessions.check_permissions",
+        "apps.user_service.app.api.sessions.check_permissions",
         AsyncMock(return_value=mock_user_context),
     ):
         res = client.get("/v1/admin/sessions/all")
