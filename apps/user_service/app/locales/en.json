@@ -112,7 +112,8 @@
     "errors": {
       "permission_not_found": "The permission you are trying to access does not exist.",
       "creation_failed": "Failed to create permission",
-      "deletion_failed": "Failed to delete permission"
+      "deletion_failed": "Failed to delete permission",
+      "invalid_permissions": "One or more provided permissions are invalid."
     },
     "success": {
       "creation_successful": "Permission created successfully",
