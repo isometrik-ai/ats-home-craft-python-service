@@ -277,7 +277,7 @@ async def update_role_data(
     await role_service.update_role(str(role_id), role_data)
 
     updated_role_detail = await role_service.get_role_details(str(role_id))
-    updated_permission_ids = [str(perm.id) for perm in existing_role_detail.permissions]
+    updated_permission_ids = [str(perm.id) for perm in updated_role_detail.permissions]
 
     request.state.raw_audit_new_data = {
         "role_id": str(updated_role_detail.id),

@@ -300,7 +300,7 @@ class RoleRepository:
         return await self.db_connection.fetchrow(query, *params)
 
     # DELETE OPERATIONS
-    async def delete_role(self, role_id: str, organization_id: str) -> bool:
+    async def delete_role(self, role_id: str, organization_id: str) -> None:
         """Delete a role from the organization.
 
         Args:
