@@ -5,6 +5,7 @@ These utilities handle validation, processing, and common operations for invites
 """
 
 import hashlib
+import json
 from typing import Any
 
 from apps.user_service.app.dependencies.logger import get_logger
@@ -22,19 +23,26 @@ def build_invite_list_item(invite_data: dict[str, Any]) -> dict[str, Any]:
     Returns:
         dict: Formatted invitation list item
     """
+    # Handle metadata - it might be a JSON string or a dict
+    metadata = invite_data.get("metadata", {})
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata) if metadata else {}
+    elif not isinstance(metadata, dict):
+        metadata = {}
+
     return {
-        "invite_id": invite_data.get("id"),
+        "invite_id": str(invite_data.get("id")),
         "email": invite_data.get("email"),
-        "role_id": invite_data.get("role_id"),
+        "role_id": str(invite_data.get("role_id")),
         "status": invite_data.get("status"),
-        "invited_by": invite_data.get("invited_by"),
+        "invited_by": str(invite_data.get("invited_by")),
         "expires_at": invite_data.get("expires_at"),
         "created_at": invite_data.get("created_at"),
         "updated_at": invite_data.get("updated_at"),
-        "salutation": invite_data.get("metadata", {}).get("salutation", None),
-        "first_name": invite_data.get("metadata", {}).get("first_name", None),
-        "last_name": invite_data.get("metadata", {}).get("last_name", None),
-        "phone": invite_data.get("metadata", {}).get("phone", None),
+        "salutation": metadata.get("salutation", None),
+        "first_name": metadata.get("first_name", None),
+        "last_name": metadata.get("last_name", None),
+        "phone": metadata.get("phone", None),
     }
 
 

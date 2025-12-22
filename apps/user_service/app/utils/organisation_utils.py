@@ -12,6 +12,7 @@ Organisation-Specific Operations Covered:
 6. Default permissions and roles setup
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -169,13 +170,25 @@ async def validate_organization_subscription(organization_data: dict[str, Any]) 
         ConflictException: If max users limit is exceeded
     """
     organization_id = organization_data["id"]
-    subscription = organization_data.get("subscription")
+    subscription_raw = organization_data.get("subscription")
 
-    if not subscription:
+    if not subscription_raw:
         raise ForbiddenException(
             message_key="invitations.errors.organization_subscription_missing",
             custom_code=CustomStatusCode.FORBIDDEN,
         )
+
+    # Parse subscription if it's a JSON string
+    if isinstance(subscription_raw, str):
+        try:
+            subscription = json.loads(subscription_raw)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ForbiddenException(
+                message_key="invitations.errors.organization_subscription_missing",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            ) from exc
+    else:
+        subscription = subscription_raw
 
     max_users = subscription.get("max_users")
     subscription_end = subscription.get("end_date")

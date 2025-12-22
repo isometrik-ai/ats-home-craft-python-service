@@ -232,9 +232,13 @@ def send_organization_invitation_email(
 
         # Format expires_at to human-readable format
         try:
-            # Parse ISO format datetime string (handle both Z and +00:00 formats)
-            expires_at_clean = expires_at.replace("Z", "+00:00")
-            expires_datetime = datetime.fromisoformat(expires_at_clean)
+            # Handle datetime objects directly
+            if isinstance(expires_at, datetime):
+                expires_datetime = expires_at
+            else:
+                # Parse ISO format datetime string (handle both Z and +00:00 formats)
+                expires_at_clean = str(expires_at).replace("Z", "+00:00")
+                expires_datetime = datetime.fromisoformat(expires_at_clean)
 
             # Format as human-readable: "December 9, 2025 at 11:41 AM UTC"
             # If datetime has timezone info, format with UTC label

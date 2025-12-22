@@ -12,7 +12,11 @@ Usage:
     teams = await repo.get_teams_list(organization_id)
 """
 
+from .invite_repository import InviteRepository
+from .organisation_member_repository import OrganisationMemberRepository
+from .organisation_repository import OrganisationRepository
 from .permission_repository import PermissionsRepository
+from .role_repository import RoleRepository
 from .team_repository import TeamRepository
 from .user_repository import UserRepository
 from .verification_code_repository import VerificationCodeRepository
@@ -20,6 +24,10 @@ from .verification_code_repository import VerificationCodeRepository
 __all__ = [
     "TeamRepository",
     "PermissionsRepository",
+    "OrganisationRepository",
+    "OrganisationMemberRepository",
+    "RoleRepository",
     "UserRepository",
     "VerificationCodeRepository",
+    "InviteRepository",
 ]

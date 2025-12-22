@@ -30,7 +30,8 @@
     "success": {
       "invitation_accepted": "Invitation accepted successfully.",
       "invitation_resent": "Invitation resent successfully.",
-      "invitation_created": "Invitation created successfully."
+      "invitation_created": "Invitation created successfully.",
+      "invitation_deleted": "Invitation deleted successfully."
     }
   },
   "organisations": {

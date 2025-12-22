@@ -4,12 +4,15 @@ This module provides asyncpg-based database operations for the `permissions` tab
 All SQL queries for permission management should be centralized here.
 """
 
+from datetime import datetime, timezone
+
 import asyncpg
 
 from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import (
     CreatePermissionRequest,
 )
+from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
 
 logger = get_logger("permissions_repository")
 
@@ -117,3 +120,30 @@ class PermissionsRepository:
         """
         row = await self.db_connection.fetchrow(query, permission_id, organization_id)
         return row is not None
+
+    async def create_default_permissions(self, organization_id: str) -> list[str]:
+        """Insert default permissions for a new organisation and return their IDs."""
+        if not DEFAULT_PERMISSIONS:
+            return []
+
+        columns = ["organization_id", "code", "name", "description", "category", "created_at"]
+
+        now = datetime.now(timezone.utc)
+        values = []
+        placeholders = []
+
+        for idx, (code, name, description, category) in enumerate(DEFAULT_PERMISSIONS):
+            base_idx = idx * len(columns)
+            values.extend([organization_id, code, name, description, category, now])
+            placeholders.append(
+                f"({', '.join(f'${base_idx + i + 1}' for i in range(len(columns)))})"
+            )
+
+        query = f"""
+            INSERT INTO permissions ({", ".join(columns)})
+            VALUES {", ".join(placeholders)}
+            RETURNING id
+        """
+
+        rows = await self.db_connection.fetch(query, *values)
+        return [str(row["id"]) for row in rows]

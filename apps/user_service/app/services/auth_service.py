@@ -577,27 +577,21 @@ class AuthService:
             ),
         )
 
-    async def refresh_session(
+    def _validate_tokens_present(
         self, access_token: str | None, refresh_token: str | None
-    ) -> RefreshSessionResponse:
-        """Refresh user session.
+    ) -> tuple[str, str]:
+        """Validate that both tokens are present and return stripped versions.
 
         Args:
             access_token: Current access token
             refresh_token: Refresh token
 
         Returns:
-            RefreshSessionResponse: Token information with refresh status
+            Tuple of (stripped_access_token, stripped_refresh_token)
 
         Raises:
             BadRequestException: If access token or refresh token is missing
-            UnauthorizedException: If access token is invalid, refresh token is invalid/expired,
-                or tokens don't belong to same user
-            ServiceUnavailableException: If authentication service is unavailable or
-                encounters server errors
-            TooManyRequestsException: If rate limit is exceeded
         """
-        # Validate required tokens
         if not access_token:
             raise BadRequestException(
                 message_key="errors.required_headers_missing",
@@ -612,11 +606,20 @@ class AuthService:
                 params={"missing_headers": "Refresh-Token"},
             )
 
-        # Strip whitespace from tokens
-        access_token = access_token.strip()
-        refresh_token = refresh_token.strip()
+        return access_token.strip(), refresh_token.strip()
 
-        # Decode access token to extract user ID (without expiration check)
+    def _decode_and_validate_access_token(self, access_token: str) -> tuple[str, bool]:
+        """Decode access token and check if it's expired.
+
+        Args:
+            access_token: Access token to decode
+
+        Returns:
+            Tuple of (user_id, is_expired) where is_expired is True if token is expired
+
+        Raises:
+            UnauthorizedException: If access token is invalid
+        """
         try:
             decoded_access_token = jwt.decode(
                 access_token,
@@ -629,22 +632,32 @@ class AuthService:
 
             # Check if token is expired (required for refresh)
             exp = decoded_access_token.get("exp")
-            if exp and exp > int(time.time()):
-                # Token is not expired, return token_refreshed=False
-                return RefreshSessionResponse(
-                    token_refreshed=False,
-                )
+            is_expired = not (exp and exp > int(time.time()))
+
+            return access_token_user_id, is_expired
         except jwt.InvalidTokenError as exc:
-            # Invalid access token, raise error
             raise UnauthorizedException(
                 message_key="auth.errors.authentication_failed",
                 custom_code=CustomStatusCode.UNAUTHORIZED,
             ) from exc
 
+    async def _refresh_user_session_with_error_handling(self, refresh_token: str) -> Any:
+        """Refresh user session with comprehensive error handling.
+
+        Args:
+            refresh_token: Refresh token
+
+        Returns:
+            Result from refresh_user_session
+
+        Raises:
+            UnauthorizedException: If refresh token is invalid/expired
+            TooManyRequestsException: If rate limit is exceeded
+            ServiceUnavailableException: If authentication service is unavailable
+        """
         try:
-            res = await refresh_user_session(refresh_token)
+            return await refresh_user_session(refresh_token)
         except AuthApiError as auth_error:
-            # Handle specific Supabase Auth API errors
             status = getattr(auth_error, "status", None)
 
             # Invalid refresh token (status 400)
@@ -689,17 +702,62 @@ class AuthService:
                 custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
             ) from exc
 
-        # Verify that access_token and refresh_token belong to the same user
-        if access_token_user_id != res.user.id:
+    def _validate_token_user_match(self, access_token_user_id: str, refresh_user_id: str) -> None:
+        """Validate that access token and refresh token belong to the same user.
+
+        Args:
+            access_token_user_id: User ID from access token
+            refresh_user_id: User ID from refresh token result
+
+        Raises:
+            UnauthorizedException: If tokens don't belong to same user
+        """
+        if access_token_user_id != refresh_user_id:
             logger.warning(
                 "Token mismatch detected: access_token user_id=%s, refresh_token user_id=%s",
                 access_token_user_id,
-                res.user.id,
+                refresh_user_id,
             )
             raise UnauthorizedException(
                 message_key="auth.errors.authentication_failed",
                 custom_code=CustomStatusCode.UNAUTHORIZED,
             )
+
+    async def refresh_session(
+        self, access_token: str | None, refresh_token: str | None
+    ) -> RefreshSessionResponse:
+        """Refresh user session.
+
+        Args:
+            access_token: Current access token
+            refresh_token: Refresh token
+
+        Returns:
+            RefreshSessionResponse: Token information with refresh status
+
+        Raises:
+            BadRequestException: If access token or refresh token is missing
+            UnauthorizedException: If access token is invalid, refresh token is invalid/expired,
+                or tokens don't belong to same user
+            ServiceUnavailableException: If authentication service is unavailable or
+                encounters server errors
+            TooManyRequestsException: If rate limit is exceeded
+        """
+        # Validate required tokens
+        access_token, refresh_token = self._validate_tokens_present(access_token, refresh_token)
+
+        # Decode access token and check expiration
+        access_token_user_id, is_expired = self._decode_and_validate_access_token(access_token)
+
+        # If token is not expired, return without refreshing
+        if not is_expired:
+            return RefreshSessionResponse(token_refreshed=False)
+
+        # Refresh the session
+        res = await self._refresh_user_session_with_error_handling(refresh_token)
+
+        # Verify tokens belong to same user
+        self._validate_token_user_match(access_token_user_id, res.user.id)
 
         return RefreshSessionResponse(
             access_token=res.session.access_token,
