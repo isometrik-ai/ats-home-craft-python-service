@@ -183,13 +183,13 @@ async def create_isometrik_user(
 
         payload = {
             "userName": user_name,
-            "userIdentifier": user_id,
+            "userIdentifier": str(user_id),
             "userProfileImageUrl": avatar_url,
             "password": password,
             "metaData": {
-                "user_id": user_id,
+                "user_id": str(user_id),
                 "role": role,
-                "organization_id": organization_id,
+                "organization_id": str(organization_id),
             },
             "messageNotificationEmail": email,
             "emailNotifications": True,
