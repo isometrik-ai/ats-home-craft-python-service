@@ -18,6 +18,7 @@
   "invitations": {
     "errors": {
       "invitation_not_found": "The invitation you are trying to access does not exist.",
+      "invitation_invalid_or_expired": "This invitation is invalid or has expired. Please request a new invitation.",
       "user_already_a_member": "User is already a member of this organization",
       "organization_not_found": "The organization you are trying to accept the invitation for does not exist.",
       "role_not_found": "The role you are trying to access does not exist.",

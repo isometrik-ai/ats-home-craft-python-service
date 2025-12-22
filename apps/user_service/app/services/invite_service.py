@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
@@ -68,17 +69,160 @@ class InviteService:
             db_connection=db_connection
         )
 
+    def _generate_invite_token(self) -> tuple[str, str]:
+        """Generate a fresh invite token and its hash.
+        
+        Returns:
+            tuple[str, str]: A tuple of (invite_token, token_hash)
+        """
+        invite_token = secrets.token_urlsafe(32)
+        token_hash = hash_token(invite_token)
+        return invite_token, token_hash
+
+    def _parse_json_field(self, field_value: str | dict[str, Any] | None) -> dict[str, Any]:
+        """Parse a JSON field that may be a string or dict.
+        
+        Args:
+            field_value: The field value that may be a JSON string or dict
+            
+        Returns:
+            dict[str, Any]: Parsed dictionary, empty dict if None or invalid
+        """
+        if field_value is None:
+            return {}
+        if isinstance(field_value, dict):
+            return field_value
+        if isinstance(field_value, str):
+            return json.loads(field_value) if field_value else {}
+        return {}
+
+    def _generate_invite_url(self, invite_token: str) -> str:
+        """Generate invitation URL from token.
+        
+        Args:
+            invite_token: The invitation token
+            
+        Returns:
+            str: The complete invitation URL
+        """
+        return f"{BASE_URL.rstrip('/')}/invite/accept/?token={invite_token}&page=invite-user"
+
+    def _format_datetime_iso(self, dt: datetime | Any) -> str:
+        """Format datetime to ISO string.
+        
+        Args:
+            dt: Datetime object or any value
+            
+        Returns:
+            str: ISO formatted string or string representation
+        """
+        if isinstance(dt, datetime):
+            return dt.isoformat()
+        return str(dt)
+
+    async def _get_role_data(self, role_id: str, organization_id: str) -> dict[str, Any]:
+        """Get role data by ID and validate it exists.
+        
+        Args:
+            role_id: The role ID
+            organization_id: The organization ID
+            
+        Returns:
+            dict[str, Any]: Role data dictionary
+            
+        Raises:
+            NotFoundException: If role is not found
+        """
+        role_row = await self.role_repository.get_role_by_id(role_id, organization_id)
+        if not role_row:
+            raise NotFoundException(
+                message_key="invitations.errors.role_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return dict(role_row)
+
+    def _build_full_name_from_metadata(
+        self, metadata: dict[str, Any] | None
+    ) -> str:
+        """Build full name from user metadata dictionary.
+        
+        Args:
+            metadata: User metadata dictionary containing salutation, first_name, last_name
+            
+        Returns:
+            str: Full name string
+        """
+        if not metadata:
+            return ""
+        return build_full_name(
+            metadata.get("salutation"),
+            metadata.get("first_name"),
+            metadata.get("last_name"),
+        )
+
+    def _build_full_name_from_user_metadata(self, user_metadata: dict[str, Any] | None) -> str:
+        """Build full name from user's user_metadata field.
+        
+        Args:
+            user_metadata: User's user_metadata field
+            
+        Returns:
+            str: Full name string
+        """
+        if not user_metadata:
+            return ""
+        return build_full_name(
+            user_metadata.get("salutation"),
+            user_metadata.get("first_name"),
+            user_metadata.get("last_name"),
+        )
+
+    def _validate_invitation_for_acceptance(
+        self, invitation_data: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Validate invitation exists, is pending, and not expired.
+        
+        Args:
+            invitation_data: Invitation data dictionary or None
+            
+        Returns:
+            dict[str, Any]: Validated invitation data
+            
+        Raises:
+            NotFoundException: If invitation is invalid, not pending, or expired
+        """
+        if not invitation_data:
+            raise NotFoundException(
+                message_key="invitations.errors.invitation_invalid_or_expired",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        if invitation_data.get("status") != "pending":
+            raise NotFoundException(
+                message_key="invitations.errors.invitation_invalid_or_expired",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        expires_at = invitation_data.get("expires_at")
+        if expires_at and isinstance(expires_at, datetime):
+            if expires_at <= datetime.now(timezone.utc):
+                raise NotFoundException(
+                    message_key="invitations.errors.invitation_invalid_or_expired",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+
+        return invitation_data
+
     async def accept_and_set_password(
         self, body: InviteAcceptBySettingPasswordRequest
     ) -> dict[str, Any]:
         """Accept an organization invitation by setting password."""
-        # Get invitation details by token
-        invitation_data = await self.invite_repository.get_invite_by_token(body.token)
-        if not invitation_data:
-            raise NotFoundException(
-                message_key="invitations.errors.invitation_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
+        # Get invitation details by token with row locking for atomic acceptance
+        token_hash = hash_token(body.token)
+        invitation_data = await self.invite_repository.get_invite_by_token(
+            token_hash, for_update=True
+        )
+        invitation_data = self._validate_invitation_for_acceptance(invitation_data)
 
         # Check if user is already a member
         existing_member = await self.invite_repository.check_user_membership(
@@ -100,21 +244,11 @@ class InviteService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        role_row = await self.role_repository.get_role_by_id(
+        role_data = await self._get_role_data(
             invitation_data["role_id"], invitation_data["organization_id"]
         )
-        if not role_row:
-            raise NotFoundException(
-                message_key="invitations.errors.role_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        role_data = dict(role_row)
 
-        inv_meta = invitation_data.get("metadata", {})
-        if isinstance(inv_meta, str):
-            import json
-
-            inv_meta = json.loads(inv_meta) if inv_meta else {}
+        inv_meta = self._parse_json_field(invitation_data.get("metadata"))
 
         signup_result = await sign_up_supabase_user(
             SignupRequest(
@@ -136,12 +270,7 @@ class InviteService:
                 custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
         # Get isometrik credentials from organization settings
-        org_settings = organization_data.get("settings", {})
-        if isinstance(org_settings, str):
-            import json
-
-            org_settings = json.loads(org_settings) if org_settings else {}
-
+        org_settings = self._parse_json_field(organization_data.get("settings"))
         isometrik_credentials = org_settings.get("isometrik_application_details", {})
 
         if not isometrik_credentials:
@@ -221,9 +350,8 @@ class InviteService:
             )
 
         # Generate invite token
-        invite_token = secrets.token_urlsafe(32)
-        token_hash = hash_token(invite_token)
-        expires_at = datetime.now() + timedelta(days=INVITE_EXPIRY_DAYS)
+        invite_token, token_hash = self._generate_invite_token()
+        expires_at = datetime.now(timezone.utc) + timedelta(days=INVITE_EXPIRY_DAYS)
 
         invite_data = {
             "organization_id": organization_id,
@@ -244,33 +372,20 @@ class InviteService:
         created_invite = await self.invite_repository.create_invite(invite_data)
 
         # Generate invitation URL
-        invite_url = f"{BASE_URL.rstrip('/')}/invite/accept/?token={token_hash}&page=invite-user"
+        invite_url = self._generate_invite_url(invite_token)
 
-        role_row = await self.role_repository.get_role_by_id(str(body.role_id), organization_id)
-        if not role_row:
-            raise NotFoundException(
-                message_key="invitations.errors.role_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        role_data = dict(role_row)
+        role_data = await self._get_role_data(str(body.role_id), organization_id)
 
         inviter = await get_user_by_id(self.user_context.user_id)
 
         invitee_full_name = build_full_name(body.salutation, body.first_name, body.last_name)
 
-        user_meta = inviter.user.user_metadata or {}
-        inviter_full_name = build_full_name(
-            user_meta.get("salutation"),
-            user_meta.get("first_name"),
-            user_meta.get("last_name"),
+        inviter_full_name = self._build_full_name_from_user_metadata(
+            inviter.user.user_metadata
         )
 
         # Send invitation email
-        expires_at_str = (
-            created_invite["expires_at"].isoformat()
-            if isinstance(created_invite["expires_at"], datetime)
-            else str(created_invite["expires_at"])
-        )
+        expires_at_str = self._format_datetime_iso(created_invite["expires_at"])
         send_organization_invitation_email(
             email=body.email,
             organization_name=organization_data["name"],
@@ -353,50 +468,37 @@ class InviteService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # Generate invitation URL
-        invite_url = (
-            f"{BASE_URL.rstrip('/')}/invite/accept/"
-            f"?token={invitation_data['token_hash']}&page=invite-user"
-        )
-
-        role_row = await self.role_repository.get_role_by_id(
+        role_data = await self._get_role_data(
             invitation_data["role_id"], organization_data["id"]
         )
 
-        if not role_row:
-            raise NotFoundException(
-                message_key="invitations.errors.role_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        role_data = dict(role_row)
-
         inviter = await get_user_by_id(str(invitation_data["invited_by"]))
 
-        inv_meta = invitation_data.get("metadata", {})
-        if isinstance(inv_meta, str):
-            import json
+        inv_meta = self._parse_json_field(invitation_data.get("metadata"))
+        invitee_full_name = self._build_full_name_from_metadata(inv_meta)
 
-            inv_meta = json.loads(inv_meta) if inv_meta else {}
-
-        invitee_full_name = build_full_name(
-            inv_meta.get("salutation"),
-            inv_meta.get("first_name"),
-            inv_meta.get("last_name"),
+        inviter_full_name = self._build_full_name_from_user_metadata(
+            inviter.user.user_metadata
         )
 
-        user_meta = inviter.user.user_metadata or {}
-        inviter_full_name = build_full_name(
-            user_meta.get("salutation"),
-            user_meta.get("first_name"),
-            user_meta.get("last_name"),
+        # Generate fresh token and extend expiration date when resending
+        invite_token, token_hash = self._generate_invite_token()
+        new_expires_at = datetime.now(timezone.utc) + timedelta(days=INVITE_EXPIRY_DAYS)
+        updated_invitation = await self.invite_repository.update_invite_token_and_expiration(
+            invite_id, token_hash, new_expires_at
         )
 
-        # Send invitation email
-        expires_at_str = (
-            invitation_data["expires_at"].isoformat()
-            if isinstance(invitation_data["expires_at"], datetime)
-            else str(invitation_data["expires_at"])
-        )
+        if not updated_invitation:
+            raise NotFoundException(
+                message_key="invitations.errors.invitation_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        # Generate invitation URL with new token
+        invite_url = self._generate_invite_url(invite_token)
+
+        # Send invitation email with new expiration date
+        expires_at_str = self._format_datetime_iso(new_expires_at)
         send_organization_invitation_email(
             email=invitation_data["email"],
             organization_name=organization_data["name"],
@@ -411,7 +513,7 @@ class InviteService:
             "invite_id": invite_id,
             "invite_url": invite_url,
             "email": invitation_data["email"],
-            "expires_at": invitation_data["expires_at"],
+            "expires_at": new_expires_at,
         }
 
     async def delete_invitation(self, invite_id: str) -> None:

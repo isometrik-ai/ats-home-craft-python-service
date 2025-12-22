@@ -6,6 +6,7 @@ transaction handling and efficient batch operations.
 """
 
 import json
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -56,9 +57,13 @@ class InviteRepository:
         return dict(row) if row else {}
 
     # READ OPERATIONS
-    async def get_invite_by_token(self, token_hash: str) -> dict[str, Any] | None:
-        """Get invitation details by token hash."""
-        query = """
+    def _get_invite_select_clause(self) -> str:
+        """Get the common SELECT clause for invite queries with organization join.
+        
+        Returns:
+            str: SQL SELECT clause string
+        """
+        return """
             SELECT
                 i.id,
                 i.organization_id,
@@ -78,34 +83,33 @@ class InviteRepository:
                 ) as organizations
             FROM organization_invites i
             LEFT JOIN organizations o ON o.id = i.organization_id
+        """
+
+    async def get_invite_by_token(
+        self, token_hash: str, for_update: bool = False
+    ) -> dict[str, Any] | None:
+        """Get invitation details by token hash.
+        
+        Args:
+            token_hash: The hashed token to search for
+            for_update: If True, locks the row with SELECT FOR UPDATE for atomic operations
+        """
+        # Use FOR UPDATE OF i to only lock the organization_invites table,
+        # not the joined organizations table (which is on the nullable side of LEFT JOIN)
+        for_update_clause = "FOR UPDATE OF i" if for_update else ""
+        query = f"""
+            {self._get_invite_select_clause()}
             WHERE i.token_hash = $1
             LIMIT 1
+            {for_update_clause}
         """
         row = await self.db_connection.fetchrow(query, token_hash)
         return dict(row) if row else None
 
     async def get_invite_by_id(self, invite_id: str) -> dict[str, Any] | None:
         """Get invitation details by ID."""
-        query = """
-            SELECT
-                i.id,
-                i.organization_id,
-                i.email,
-                i.role_id,
-                i.invited_by,
-                i.token_hash,
-                i.status,
-                i.expires_at,
-                i.created_at,
-                i.updated_at,
-                i.metadata,
-                json_build_object(
-                    'name', o.name,
-                    'slug', o.slug,
-                    'domain', o.domain
-                ) as organizations
-            FROM organization_invites i
-            LEFT JOIN organizations o ON o.id = i.organization_id
+        query = f"""
+            {self._get_invite_select_clause()}
             WHERE i.id = $1
             LIMIT 1
         """
@@ -209,6 +213,35 @@ class InviteRepository:
                 message_key="invitations.errors.invitation_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+
+    async def update_invite_expiration(
+        self, invite_id: str, expires_at: datetime
+    ) -> dict[str, Any] | None:
+        """Update invitation expiration date."""
+        query = """
+            UPDATE organization_invites
+            SET expires_at = $1,
+                updated_at = NOW()
+            WHERE id = $2
+            RETURNING *
+        """
+        row = await self.db_connection.fetchrow(query, expires_at, invite_id)
+        return dict(row) if row else None
+
+    async def update_invite_token_and_expiration(
+        self, invite_id: str, token_hash: str, expires_at: datetime
+    ) -> dict[str, Any] | None:
+        """Update invitation token hash and expiration date."""
+        query = """
+            UPDATE organization_invites
+            SET token_hash = $1,
+                expires_at = $2,
+                updated_at = NOW()
+            WHERE id = $3
+            RETURNING *
+        """
+        row = await self.db_connection.fetchrow(query, token_hash, expires_at, invite_id)
+        return dict(row) if row else None
 
     # DELETE OPERATIONS
     async def delete_invite(self, invite_id: str, organization_id: str) -> None:
