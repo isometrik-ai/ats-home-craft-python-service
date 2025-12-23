@@ -26,7 +26,9 @@ async def ban_the_user(user_id: str) -> bool:
     """
     supabase = await get_supabase_admin_client()
     try:
-        result = await supabase.auth.admin.update_user_by_id(user_id, {"ban_duration": "365d"})
+        # Convert 365 days to hours (365 * 24 = 8760 hours)
+        # Supabase uses Go's time format which supports: ns, us, ms, s, m, h (not "d")
+        result = await supabase.auth.admin.update_user_by_id(user_id, {"ban_duration": "8760h"})
         return result.user is not None
 
     except APIError as e:

@@ -20,10 +20,12 @@ import jwt
 import supabase
 from fastapi import Request
 from supabase.lib.client_options import AsyncClientOptions
+from supabase_auth.helpers import model_dump_json
 from supabase_auth.types import Session as SupabaseSession
 
 # Database operations imports
 from apps.user_service.app.db.repositories import (
+    OrganisationMemberRepository,
     UserRepository,
     VerificationCodeRepository,
 )
@@ -87,6 +89,9 @@ class VerificationCodeService:
         self.db_connection = db_connection
         self.user_repository = UserRepository(db_connection=db_connection)
         self.verification_code_repository = VerificationCodeRepository(db_connection=db_connection)
+        self.organisation_member_repository = OrganisationMemberRepository(
+            db_connection=db_connection
+        )
 
     # UTILITY METHODS
     @staticmethod
@@ -345,7 +350,7 @@ class VerificationCodeService:
         current_user_id = current_user.get("sub")
 
         # If verification code has a user_id, it must match the current user
-        if stored_user_id and current_user_id and stored_user_id != current_user_id:
+        if stored_user_id and current_user_id and str(stored_user_id) != str(current_user_id):
             raise ForbiddenException(
                 message_key="verification_codes.errors.verification_code_ownership_mismatch",
                 custom_code=CustomStatusCode.FORBIDDEN,
@@ -488,11 +493,14 @@ class VerificationCodeService:
         expires_in = max(exp - current_time, 3600) if exp > 0 else 3600
         expires_at = exp if exp > 0 else current_time + expires_in
 
+        # Get user_id from decoded token
+        user_id = decoded.get("sub")
+
         # Create session with access token and a placeholder refresh token
         # The refresh token won't be used if the access token is still valid
         session = SupabaseSession(
             access_token=access_token,
-            refresh_token="placeholder_refresh_token",  # Placeholder - won't be validated
+            refresh_token="placeholder_refresh_token",  # Placeholder - won't be validated if token is valid
             expires_in=expires_in,
             expires_at=expires_at,
             token_type="bearer",
@@ -501,7 +509,17 @@ class VerificationCodeService:
 
         # Save session directly to storage and set in-memory session
         # This mimics what _save_session() does internally
-        await supabase.auth.set_session(session)
+        storage_key = supabase.auth._storage_key
+        session_json = model_dump_json(session)
+
+        # Set in-memory session first
+        supabase.auth._in_memory_session = session
+
+        # Save to storage if persist_session is enabled
+        if supabase.auth._persist_session:
+            await supabase.auth._storage.set_item(storage_key, session_json)
+
+        logger.info("Session manually created and saved for user %s", user_id)
 
     async def _update_user_email(self, user_id: str, email: str) -> bool:
         """Update user email using Supabase admin API.
@@ -545,6 +563,8 @@ class VerificationCodeService:
                             "user_metadata": updated_metadata,
                         },
                     )
+            # Also update organization_members table
+            await self.organisation_member_repository.update_user_email_by_user_id(user_id, email)
             return True
 
         raise InternalServerErrorException(
@@ -603,18 +623,8 @@ class VerificationCodeService:
                         "user_metadata": updated_metadata,
                     },
                 )
-                # Also update organization_members table
-                await (
-                    admin_supabase.table("organization_members")
-                    .update(
-                        {
-                            "phone": phone,
-                            "updated_at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    )
-                    .eq("user_id", user_id)
-                    .execute()
-                )
+            # Also update organization_members table
+            await self.organisation_member_repository.update_user_phone_by_user_id(user_id, phone)
             return True
 
         raise InternalServerErrorException(

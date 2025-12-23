@@ -17,6 +17,7 @@ from .organisation_member_repository import OrganisationMemberRepository
 from .organisation_repository import OrganisationRepository
 from .permission_repository import PermissionsRepository
 from .role_repository import RoleRepository
+from .session_repository import SessionRepository
 from .team_repository import TeamRepository
 from .user_repository import UserRepository
 from .verification_code_repository import VerificationCodeRepository
@@ -27,6 +28,7 @@ __all__ = [
     "OrganisationRepository",
     "OrganisationMemberRepository",
     "RoleRepository",
+    "SessionRepository",
     "UserRepository",
     "VerificationCodeRepository",
     "InviteRepository",
