@@ -469,3 +469,40 @@ class RoleRepository:
             AND organization_id = $2
         """
         return await self.db_connection.fetch(query, role_ids, organization_id)
+
+    async def get_permission_counts_for_roles(
+        self, role_ids: list[str], organization_id: str
+    ) -> dict[str, int]:
+        """Get permission counts for multiple roles in a single query.
+
+        This method efficiently retrieves permission counts for multiple roles
+        in one database round-trip, reducing latency when dealing with many roles.
+
+        Args:
+            role_ids: List of role UUIDs to get permission counts for. Can be empty.
+            organization_id: UUID of the organization to scope the permissions.
+
+        Returns:
+            Dictionary mapping role_id (as string) to permission count (int).
+            Roles with no permissions will have a count of 0.
+        """
+        if not role_ids:
+            return {}
+
+        query = """
+            SELECT
+                role_id::text as role_id,
+                COUNT(*)::int as permission_count
+            FROM role_permissions
+            WHERE role_id = ANY($1::uuid[])
+            AND organization_id = $2
+            GROUP BY role_id
+        """
+        rows = await self.db_connection.fetch(query, role_ids, organization_id)
+
+        # Build dictionary from results, ensuring all requested role_ids are included
+        permissions_count_map = {str(role_id): 0 for role_id in role_ids}
+        for row in rows:
+            permissions_count_map[row["role_id"]] = row["permission_count"]
+
+        return permissions_count_map

@@ -383,7 +383,7 @@ class SessionItem(BaseModel):
     Attributes:
         id (str): Unique session identifier
         user_id (str): User ID associated with the session
-        organization_id (str): Organization ID associated with the session
+        organization_id (Optional[str]): Organization ID associated with the session (None for personal sessions)
         ip_address (str): IP address from which session was created
         user_agent (str): User agent string
         device_fingerprint (Optional[str]): Device fingerprint for security
@@ -398,7 +398,9 @@ class SessionItem(BaseModel):
 
     id: str = Field(..., description="Unique session identifier")
     user_id: str = Field(..., description="User ID associated with the session")
-    organization_id: str = Field(..., description="Organization ID associated with the session")
+    organization_id: str | None = Field(
+        None, description="Organization ID associated with the session (None for personal sessions)"
+    )
     ip_address: str = Field(..., description="IP address from which session was created")
     user_agent: str = Field(..., description="User agent string")
     device_fingerprint: str | None = Field(None, description="Device fingerprint for security")

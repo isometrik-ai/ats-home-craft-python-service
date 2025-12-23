@@ -572,14 +572,11 @@ class UserService:
 
         # Group users by role_id to minimize database queries
         role_ids = {user.get("role_id") for user in users_data if user.get("role_id")}
-        permissions_count_map: dict[str, int] = {}
 
-        # Fetch permissions count for each unique role
-        for role_id in role_ids:
-            permissions = await self.role_repository.get_role_permissions(
-                role_id=role_id, organization_id=organization_id
-            )
-            permissions_count_map[str(role_id)] = len(permissions)
+        # Fetch permission counts for all unique roles in a single query
+        permissions_count_map = await self.role_repository.get_permission_counts_for_roles(
+            role_ids=list(role_ids), organization_id=organization_id
+        )
 
         # Transform users data
         return [

@@ -54,7 +54,9 @@ class SessionService:
         return SessionItem(
             id=str(session_data["id"]),
             user_id=str(session_data["user_id"]),
-            organization_id=str(session_data["organization_id"]),
+            organization_id=str(session_data["organization_id"])
+            if session_data["organization_id"] is not None
+            else None,
             ip_address=str(session_data["ip_address"]),
             user_agent=session_data["user_agent"],
             device_fingerprint=session_data["device_fingerprint"],
