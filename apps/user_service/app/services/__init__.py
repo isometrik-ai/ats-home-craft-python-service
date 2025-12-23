@@ -2,16 +2,19 @@
 This package contains all service classes for the user service.
 Services provide business logic and orchestration of operations.
 """
-
-from .auth_service import AuthService
-from .invite_service import InviteService
-from .organisation_service import OrganisationService
-from .permission_service import PermissionsService
-from .role_service import RoleService
-from .session_service import SessionService
-from .team_service import TeamService
-from .user_service import UserService
-from .verification_code_service import VerificationCodeService
+from apps.user_service.app.services.auth_service import AuthService
+from apps.user_service.app.services.invite_service import InviteService
+from apps.user_service.app.services.organisation_service import (
+    OrganisationService,
+)
+from apps.user_service.app.services.permission_service import PermissionsService
+from apps.user_service.app.services.role_service import RoleService
+from apps.user_service.app.services.session_service import SessionService
+from apps.user_service.app.services.team_service import TeamService
+from apps.user_service.app.services.user_service import UserService
+from apps.user_service.app.services.verification_code_service import (
+    VerificationCodeService,
+)
 
 __all__ = [
     "AuthService",

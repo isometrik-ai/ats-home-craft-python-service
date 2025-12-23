@@ -11,16 +11,25 @@ Usage:
     repo = TeamRepository(db_connection)
     teams = await repo.get_teams_list(organization_id)
 """
-
-from .invite_repository import InviteRepository
-from .organisation_member_repository import OrganisationMemberRepository
-from .organisation_repository import OrganisationRepository
-from .permission_repository import PermissionsRepository
-from .role_repository import RoleRepository
-from .session_repository import SessionRepository
-from .team_repository import TeamRepository
-from .user_repository import UserRepository
-from .verification_code_repository import VerificationCodeRepository
+from apps.user_service.app.db.repositories.invite_repository import InviteRepository
+from apps.user_service.app.db.repositories.organisation_member_repository import (
+    OrganisationMemberRepository,
+)
+from apps.user_service.app.db.repositories.organisation_repository import (
+    OrganisationRepository,
+)
+from apps.user_service.app.db.repositories.permission_repository import (
+    PermissionsRepository,
+)
+from apps.user_service.app.db.repositories.role_repository import RoleRepository
+from apps.user_service.app.db.repositories.session_repository import (
+    SessionRepository,
+)
+from apps.user_service.app.db.repositories.team_repository import TeamRepository
+from apps.user_service.app.db.repositories.user_repository import UserRepository
+from apps.user_service.app.db.repositories.verification_code_repository import (
+    VerificationCodeRepository,
+)
 
 __all__ = [
     "TeamRepository",
