@@ -1260,7 +1260,7 @@ class TestUserAdminOperations:
             result = await ban_the_user(user_id)
             assert result is True
             mock_supabase.auth.admin.update_user_by_id.assert_called_once_with(
-                user_id, {"ban_duration": "365d"}
+                user_id, {"ban_duration": "8760h"}
             )
 
     @pytest.mark.asyncio

@@ -2,25 +2,22 @@
 This module provides endpoints for managing user sessions.
 """
 
+import asyncpg
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
+from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.logger import get_logger
-from apps.user_service.app.schemas.admin_access_management import SessionItem
 from apps.user_service.app.schemas.auth import SessionFilter
+from apps.user_service.app.services.session_service import SessionService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     extract_user_context,
-    format_iso_datetime,
-)
-from libs.shared_db.postgres_db.user_service_operations.session_operations import (
-    get_org_sessions_with_count,
-    get_sessions_with_count,
+    handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USERS_VIEW
-from libs.shared_utils.http_exceptions import BadRequestException
 from libs.shared_utils.response_factory import list_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -29,33 +26,7 @@ router = APIRouter(prefix="/sessions", tags=["Sessions Management"])
 logger = get_logger("sessions-api")
 
 
-def _format_session_item(session_data: dict) -> SessionItem:
-    """Format session data into SessionItem."""
-    return SessionItem(
-        id=str(session_data["id"]),
-        user_id=str(session_data["user_id"]),
-        organization_id=str(session_data["organization_id"]),
-        ip_address=str(session_data["ip_address"]),
-        user_agent=session_data["user_agent"],
-        device_fingerprint=session_data["device_fingerprint"],
-        risk_score=session_data["risk_score"],
-        login_timestamp=(
-            session_data["login_timestamp"]
-            if isinstance(session_data["login_timestamp"], str)
-            else format_iso_datetime(session_data["login_timestamp"]) or ""
-        ),
-        logout_timestamp=(
-            session_data["logout_timestamp"]
-            if isinstance(session_data["logout_timestamp"], str)
-            else format_iso_datetime(session_data["logout_timestamp"]) or ""
-        ),
-        session_status=session_data["session_status"],
-        login_method=session_data["login_method"],
-        accessed_phi=session_data["accessed_phi"],
-        phi_access_purpose=session_data["phi_access_purpose"],
-    )
-
-
+@handle_api_exceptions("get sessions list")
 @router.get(
     "",
     response_model=None,
@@ -76,6 +47,7 @@ def _format_session_item(session_data: dict) -> SessionItem:
 async def get_sessions_list(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     search: str | None = Query(
         None,
         description="Search term to filter sessions by user email or IP address (case-insensitive)",
@@ -89,7 +61,7 @@ async def get_sessions_list(
         None, description="Filter by login method (password, sso, mfa)"
     ),
 ):
-    """Get all sessions for the current organization"""
+    """Get all sessions for the current organization."""
     # Extract user context from JWT token
     user_context = await extract_user_context(current_user)
 
@@ -99,7 +71,7 @@ async def get_sessions_list(
             permission_codes=SETTINGS_SYSTEM_MANAGE,
         )
 
-    # Create SessionFilter from query_params
+    # Create SessionFilter from query params
     filters = SessionFilter(
         search=search,
         session_status=session_status,
@@ -108,18 +80,12 @@ async def get_sessions_list(
         offset=(page - 1) * page_size,
     )
 
-    # Get sessions and count in a single optimized database call
-    result = await get_sessions_with_count(
-        organization_id=user_context.organization_id,
-        user_id=user_context.user_id,
-        filters=filters,
-    )
+    # Create service and delegate to service
+    session_service = SessionService(user_context=user_context, db_connection=db_connection)
+    result = await session_service.get_user_sessions(filters=filters)
 
-    sessions_data = result["data"]
+    sessions = result["sessions"]
     total_count = result["total_count"]
-
-    # Format sessions data using utility functions
-    sessions = [_format_session_item(session) for session in sessions_data]
 
     return list_response(
         request=request,
@@ -133,6 +99,7 @@ async def get_sessions_list(
     )
 
 
+@handle_api_exceptions("get organization sessions")
 @router.get(
     "/all",
     response_model=None,
@@ -153,6 +120,7 @@ async def get_sessions_list(
 async def get_organization_sessions(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     search: str | None = Query(
         None,
         description="Search term to filter sessions by user email or IP address (case-insensitive)",
@@ -169,20 +137,13 @@ async def get_organization_sessions(
     """Get all sessions for all users in the current organization.
     Intended for org-level admins with settings management permission.
     """
-    # Extract context and enforce permissions in a single helper call
+    # Extract context and enforce permissions
     user_context = await check_permissions(
         current_user=current_user,
         permission_codes=SETTINGS_USERS_VIEW,
     )
 
-    # Require organization_id – org-wide listing doesn't apply to personal accounts
-    if not user_context.organization_id:
-        raise BadRequestException(
-            message_key="sessions.errors.bad_request",
-            custom_code=CustomStatusCode.BAD_REQUEST,
-        )
-
-    # Fetch sessions data and count
+    # Create SessionFilter from query params
     filters = SessionFilter(
         search=search,
         session_status=session_status,
@@ -191,15 +152,14 @@ async def get_organization_sessions(
         offset=(page - 1) * page_size,
     )
 
-    result = await get_org_sessions_with_count(
-        organization_id=user_context.organization_id,
-        filters=filters,
-    )
+    # Create service and delegate to service
+    session_service = SessionService(user_context=user_context, db_connection=db_connection)
+    result = await session_service.get_organization_sessions(filters=filters)
 
-    sessions_data = result["data"]
+    sessions = result["sessions"]
     total_count = result["total_count"]
 
-    if not sessions_data:
+    if not sessions:
         return list_response(
             request=request,
             items=[],
@@ -210,9 +170,6 @@ async def get_organization_sessions(
             custom_code=CustomStatusCode.NO_CONTENT,
             status_code=http_status.HTTP_200_OK,
         )
-
-    # Format sessions data using utility functions
-    sessions = [_format_session_item(session) for session in sessions_data]
 
     return list_response(
         request=request,

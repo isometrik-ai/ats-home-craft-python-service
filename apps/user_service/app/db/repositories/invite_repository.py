@@ -59,7 +59,7 @@ class InviteRepository:
     # READ OPERATIONS
     def _get_invite_select_clause(self) -> str:
         """Get the common SELECT clause for invite queries with organization join.
-        
+
         Returns:
             str: SQL SELECT clause string
         """
@@ -89,7 +89,7 @@ class InviteRepository:
         self, token_hash: str, for_update: bool = False
     ) -> dict[str, Any] | None:
         """Get invitation details by token hash.
-        
+
         Args:
             token_hash: The hashed token to search for
             for_update: If True, locks the row with SELECT FOR UPDATE for atomic operations

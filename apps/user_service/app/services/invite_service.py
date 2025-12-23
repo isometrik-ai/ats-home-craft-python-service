@@ -71,7 +71,7 @@ class InviteService:
 
     def _generate_invite_token(self) -> tuple[str, str]:
         """Generate a fresh invite token and its hash.
-        
+
         Returns:
             tuple[str, str]: A tuple of (invite_token, token_hash)
         """
@@ -81,10 +81,10 @@ class InviteService:
 
     def _parse_json_field(self, field_value: str | dict[str, Any] | None) -> dict[str, Any]:
         """Parse a JSON field that may be a string or dict.
-        
+
         Args:
             field_value: The field value that may be a JSON string or dict
-            
+
         Returns:
             dict[str, Any]: Parsed dictionary, empty dict if None or invalid
         """
@@ -98,10 +98,10 @@ class InviteService:
 
     def _generate_invite_url(self, invite_token: str) -> str:
         """Generate invitation URL from token.
-        
+
         Args:
             invite_token: The invitation token
-            
+
         Returns:
             str: The complete invitation URL
         """
@@ -109,10 +109,10 @@ class InviteService:
 
     def _format_datetime_iso(self, dt: datetime | Any) -> str:
         """Format datetime to ISO string.
-        
+
         Args:
             dt: Datetime object or any value
-            
+
         Returns:
             str: ISO formatted string or string representation
         """
@@ -122,14 +122,14 @@ class InviteService:
 
     async def _get_role_data(self, role_id: str, organization_id: str) -> dict[str, Any]:
         """Get role data by ID and validate it exists.
-        
+
         Args:
             role_id: The role ID
             organization_id: The organization ID
-            
+
         Returns:
             dict[str, Any]: Role data dictionary
-            
+
         Raises:
             NotFoundException: If role is not found
         """
@@ -141,14 +141,12 @@ class InviteService:
             )
         return dict(role_row)
 
-    def _build_full_name_from_metadata(
-        self, metadata: dict[str, Any] | None
-    ) -> str:
+    def _build_full_name_from_metadata(self, metadata: dict[str, Any] | None) -> str:
         """Build full name from user metadata dictionary.
-        
+
         Args:
             metadata: User metadata dictionary containing salutation, first_name, last_name
-            
+
         Returns:
             str: Full name string
         """
@@ -162,10 +160,10 @@ class InviteService:
 
     def _build_full_name_from_user_metadata(self, user_metadata: dict[str, Any] | None) -> str:
         """Build full name from user's user_metadata field.
-        
+
         Args:
             user_metadata: User's user_metadata field
-            
+
         Returns:
             str: Full name string
         """
@@ -181,13 +179,13 @@ class InviteService:
         self, invitation_data: dict[str, Any] | None
     ) -> dict[str, Any]:
         """Validate invitation exists, is pending, and not expired.
-        
+
         Args:
             invitation_data: Invitation data dictionary or None
-            
+
         Returns:
             dict[str, Any]: Validated invitation data
-            
+
         Raises:
             NotFoundException: If invitation is invalid, not pending, or expired
         """
@@ -380,9 +378,7 @@ class InviteService:
 
         invitee_full_name = build_full_name(body.salutation, body.first_name, body.last_name)
 
-        inviter_full_name = self._build_full_name_from_user_metadata(
-            inviter.user.user_metadata
-        )
+        inviter_full_name = self._build_full_name_from_user_metadata(inviter.user.user_metadata)
 
         # Send invitation email
         expires_at_str = self._format_datetime_iso(created_invite["expires_at"])
@@ -468,18 +464,14 @@ class InviteService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        role_data = await self._get_role_data(
-            invitation_data["role_id"], organization_data["id"]
-        )
+        role_data = await self._get_role_data(invitation_data["role_id"], organization_data["id"])
 
         inviter = await get_user_by_id(str(invitation_data["invited_by"]))
 
         inv_meta = self._parse_json_field(invitation_data.get("metadata"))
         invitee_full_name = self._build_full_name_from_metadata(inv_meta)
 
-        inviter_full_name = self._build_full_name_from_user_metadata(
-            inviter.user.user_metadata
-        )
+        inviter_full_name = self._build_full_name_from_user_metadata(inviter.user.user_metadata)
 
         # Generate fresh token and extend expiration date when resending
         invite_token, token_hash = self._generate_invite_token()
