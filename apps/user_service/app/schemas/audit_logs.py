@@ -4,9 +4,36 @@ This module contains all Pydantic models and schemas related to audit logs.
 These schemas are used for request/response validation and API documentation.
 """
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class AuditLogFilter(BaseModel):
+    """Filter parameters for audit log queries.
+
+    Attributes:
+        organization_id: Organization ID (required)
+        search: Search term to filter by description, action_type, or table_name
+        action_type: Filter by action type
+        table_name: Filter by table name
+        user_id: Filter by user ID
+        start_date: Filter by start date
+        end_date: Filter by end date
+        limit: Maximum number of results to return
+        offset: Number of results to skip for pagination
+    """
+
+    organization_id: str = Field(..., description="Organization ID")
+    search: str | None = Field(None, description="Search term")
+    action_type: str | None = Field(None, description="Action type filter")
+    table_name: str | None = Field(None, description="Table name filter")
+    user_id: str | None = Field(None, description="User ID filter")
+    start_date: datetime | None = Field(None, description="Start date filter")
+    end_date: datetime | None = Field(None, description="End date filter")
+    limit: int = Field(20, ge=1, description="Maximum number of results")
+    offset: int = Field(0, ge=0, description="Number of results to skip")
 
 
 class AuditLogBase(BaseModel):

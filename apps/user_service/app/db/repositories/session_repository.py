@@ -86,8 +86,11 @@ class SessionRepository:
         if include_search and filters.search and organization_id:
             search_term = f"%{filters.search}%"
             conditions.append(
-                f"(LOWER(om.email) LIKE LOWER(${param_index}) OR "
-                f"LOWER(om.first_name || ' ' || COALESCE(om.last_name, '')) LIKE LOWER(${param_index}))"
+                (
+                    f"(LOWER(om.email) LIKE LOWER(${param_index}) OR "
+                    f"LOWER(om.first_name || ' ' || COALESCE(om.last_name, '')) "
+                    f"LIKE LOWER(${param_index}))"
+                )
             )
             params.append(search_term)
             param_index += 1
@@ -204,11 +207,15 @@ class SessionRepository:
         if include_search and filters.search:
             search_term = f"%{filters.search}%"
             conditions.append(
-                f"(LOWER(om.email) LIKE LOWER(${param_index}) OR "
-                f"LOWER(om.first_name || ' ' || COALESCE(om.last_name, '')) LIKE LOWER(${param_index}) OR "
-                f"LOWER(us.ip_address::text) LIKE LOWER(${param_index}) OR "
-                f"LOWER(us.user_agent) LIKE LOWER(${param_index}))"
+                (
+                    f"(LOWER(om.email) LIKE LOWER(${param_index}) OR "
+                    f"LOWER(om.first_name || ' ' || COALESCE(om.last_name, '')) "
+                    f"LIKE LOWER(${param_index}) OR "
+                    f"LOWER(us.ip_address::text) LIKE LOWER(${param_index}) OR "
+                    f"LOWER(us.user_agent) LIKE LOWER(${param_index}))"
+                )
             )
+
             params.append(search_term)
             param_index += 1
 

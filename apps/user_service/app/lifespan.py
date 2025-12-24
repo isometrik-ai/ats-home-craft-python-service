@@ -22,12 +22,13 @@ async def lifespan(app: FastAPI):
     # Startup
     app_logger.info("Starting up user service application")
 
-    audit_logger.start_processing()
-    app_logger.info("Audit logger processing started successfully")
-
-    # Initialize DB pool
+    # Initialize DB pool (audit_logger will use the same pool)
     await get_pool()
     app_logger.info("Database pool initialized successfully")
+
+    # Start audit logger processing (pool is already initialized)
+    await audit_logger.start_processing()
+    app_logger.info("Audit logger processing started successfully")
 
     try:
         yield

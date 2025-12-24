@@ -11,6 +11,7 @@ Usage:
     repo = TeamRepository(db_connection)
     teams = await repo.get_teams_list(organization_id)
 """
+
 from apps.user_service.app.db.repositories.invite_repository import InviteRepository
 from apps.user_service.app.db.repositories.organisation_member_repository import (
     OrganisationMemberRepository,
