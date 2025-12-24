@@ -26,11 +26,15 @@ from typing import Any
 
 from fastapi import Request
 
-from apps.user_service.app.dependencies.logger import get_logger
-from libs.shared_db.postgres_db.user_service_operations.audit_operations import (
-    bulk_create_audit_logs,
-    get_last_audit_log_hash,
+from apps.user_service.app.db.repositories.audit_log_repository import (
+    AuditLogRepository,
 )
+from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.services.audit_log_service import (
+    AuditLogService,
+)
+from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
+from libs.shared_db.drivers.asyncpg_uow import UnitOfWork
 from libs.shared_utils.http_exceptions import InternalServerErrorException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -66,17 +70,22 @@ class AuditLogger:
         self._processing_task = None
         self._last_hash = None
         self._shutdown_event = asyncio.Event()
+        self._pool = None  # Cached pool reference
 
         # Processing configuration
         self._batch_size = 10
         self._batch_timeout = 3.0
         self._max_retries = 3
 
-    def start_processing(self):
+    async def start_processing(self):
         """Start the audit processing task.
 
-        Note: Database operations are now handled by centralized operations.
+        Note: Database operations are now handled by repository using asyncpg.
         """
+        # Initialize pool once at startup
+        if self._pool is None:
+            self._pool = await get_pool()
+
         if self._processing_task is None:
             self._processing_task = asyncio.create_task(self._process_audit_queue())
 
@@ -246,7 +255,14 @@ class AuditLogger:
             Optional[str]: The last hash from the database, or None if no audit logs exist
         """
         org_id = organization_id or "default"
-        return await get_last_audit_log_hash(organization_id=org_id)
+
+        try:
+            async with AcquireConnection(self._pool) as conn:
+                repository = AuditLogRepository(db_connection=conn)
+                return await repository.get_last_audit_log_hash(organization_id=org_id)
+        except Exception as e:
+            logger.error("Error fetching last audit log hash: %s", str(e), exc_info=True)
+            return None
 
     async def _write_audit_batch(self, events: list[dict]) -> None:
         """Write a batch of audit events to the database.
@@ -264,7 +280,7 @@ class AuditLogger:
                 org_id = events[0].get("organization_id") if events else None
                 self._last_hash = await self._get_last_hash_from_db(org_id)
 
-            # Prepare batch data for centralized operations
+            # Prepare batch data with hash signatures and retention dates
             batch_data = []
             for event in events:
                 hash_signature = self._generate_hash(event)
@@ -301,8 +317,14 @@ class AuditLogger:
                 # Update last hash for next event
                 self._last_hash = hash_signature
 
-            # Use centralized bulk create operation
-            await bulk_create_audit_logs(batch_data)
+            # Prepare data for database (JSONB serialization, normalization)
+            prepared_data = AuditLogService.prepare_bulk_audit_logs_for_db(batch_data)
+
+            # Use repository bulk create operation with transaction for atomicity
+            async with UnitOfWork(self._pool) as conn:
+                repository = AuditLogRepository(db_connection=conn)
+                await repository.bulk_create_audit_logs(prepared_data)
+                # Transaction commits automatically on successful exit
 
         except Exception as e:
             logger.error("Unknown error: %s", e, exc_info=True)

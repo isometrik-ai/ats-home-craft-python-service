@@ -500,7 +500,7 @@ class VerificationCodeService:
         # The refresh token won't be used if the access token is still valid
         session = SupabaseSession(
             access_token=access_token,
-            refresh_token="placeholder_refresh_token",  # Placeholder - won't be validated if token is valid
+            refresh_token="placeholder_refresh_token",
             expires_in=expires_in,
             expires_at=expires_at,
             token_type="bearer",

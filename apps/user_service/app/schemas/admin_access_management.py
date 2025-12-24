@@ -383,7 +383,7 @@ class SessionItem(BaseModel):
     Attributes:
         id (str): Unique session identifier
         user_id (str): User ID associated with the session
-        organization_id (Optional[str]): Organization ID associated with the session (None for personal sessions)
+        organization_id (Optional[str]): Organization ID associated with the session
         ip_address (str): IP address from which session was created
         user_agent (str): User agent string
         device_fingerprint (Optional[str]): Device fingerprint for security

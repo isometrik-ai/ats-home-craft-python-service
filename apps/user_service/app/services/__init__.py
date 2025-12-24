@@ -2,6 +2,7 @@
 This package contains all service classes for the user service.
 Services provide business logic and orchestration of operations.
 """
+
 from apps.user_service.app.services.auth_service import AuthService
 from apps.user_service.app.services.invite_service import InviteService
 from apps.user_service.app.services.organisation_service import (
