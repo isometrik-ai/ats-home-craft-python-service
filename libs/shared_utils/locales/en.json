@@ -8,6 +8,7 @@
         "user_not_found": "Requested user with ID {user_id} not found",
         "not_found": "Requested resource not found",
         "validation": "Validation error: {message}",
+        "bad_request": "Bad request: {message}",
         "conflict": "Conflict",
         "internal_server_error": "An internal server error occurred",
         "missing_required_param": "Missing required parameter: {param_name}",
