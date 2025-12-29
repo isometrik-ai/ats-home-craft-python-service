@@ -60,7 +60,9 @@ async def get_supabase_service_client(
     """
     if _cache.service is None or user_agent or custom_headers:
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-            raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set for service client.")
+            raise RuntimeError(
+                "SUPABASE_URL and SUPABASE_SERVICE_KEY must be set for service client."
+            )
 
         headers = {}
         if user_agent:
@@ -80,7 +82,7 @@ async def get_supabase_service_client(
         # Warm-up to ensure credentials are valid
         try:
             await _cache.service.auth.admin.list_users()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _cache.service = None
             raise RuntimeError(
                 "Supabase service client warm-up failed; verify SUPABASE_SERVICE_KEY and URL."

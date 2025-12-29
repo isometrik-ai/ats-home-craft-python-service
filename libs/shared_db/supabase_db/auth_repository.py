@@ -33,7 +33,7 @@ async def create_user(
             }
         )
         return resp.user.model_dump() if resp and resp.user else {}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise exc
 
 
@@ -42,7 +42,7 @@ async def get_user_by_id(client: AsyncClient, user_id: str) -> dict[str, Any]:
     try:
         resp = await client.auth.admin.get_user_by_id(user_id)
         return resp.user.model_dump() if resp and resp.user else {}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise exc
 
 
@@ -51,16 +51,18 @@ async def delete_user(client: AsyncClient, user_id: str) -> bool:
     try:
         await client.auth.admin.delete_user(user_id)
         return True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise exc
 
 
-async def list_users(client: AsyncClient, page: int = 1, per_page: int = 50) -> list[dict[str, Any]]:
+async def list_users(
+    client: AsyncClient, page: int = 1, per_page: int = 50
+) -> list[dict[str, Any]]:
     """List auth users with pagination."""
     try:
         resp = await client.auth.admin.list_users(page=page, per_page=per_page)
         if resp and resp.users:
             return [user.model_dump() for user in resp.users]
         return []
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise exc
