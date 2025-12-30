@@ -6,6 +6,7 @@ All endpoints include proper authentication, validation, and database operations
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
+from supabase import AsyncClient
 
 # Schema imports
 from apps.user_service.app.app_instance import limiter
@@ -15,6 +16,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 
 # Logger import
 from apps.user_service.app.dependencies.db import db_conn, db_uow
+from apps.user_service.app.dependencies.supabase import supabase_anon, supabase_service
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
     InviteAcceptResponse,
@@ -78,6 +80,7 @@ router = APIRouter(prefix="/invite", tags=["Organization Invitations"])
 async def accept_and_set_password_invitation(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_anon),
     body: InviteAcceptBySettingPasswordRequest = Body(...),
 ):
     """Accept an organization invitation by setting password"""
@@ -87,7 +90,9 @@ async def accept_and_set_password_invitation(
     request.state.audit_risk_level = "medium"
 
     # Create service and delegate to service
-    invite_service = InviteService(user_context=None, db_connection=db_connection)
+    invite_service = InviteService(
+        user_context=None, db_connection=db_connection, sb_client=sb_client
+    )
     await invite_service.accept_and_set_password(body)
 
     return success_response(
@@ -131,6 +136,7 @@ async def create_invitation(
     organization_id: str,
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_service),
     current_user: dict = Depends(get_user_from_auth),
     body: InviteCreateRequest = Body(...),
 ):
@@ -155,7 +161,9 @@ async def create_invitation(
     }
 
     # Create service and delegate to service
-    invite_service = InviteService(user_context=user_context, db_connection=db_connection)
+    invite_service = InviteService(
+        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+    )
     result = await invite_service.create_invitation(organization_id, body)
 
     return success_response(
@@ -270,6 +278,7 @@ async def get_organization_invitations(
 async def resend_invitation(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_service),
     current_user: dict = Depends(get_user_from_auth),
     invite_id: str = Path(..., description="The UUID of the invitation"),
 ):
@@ -293,7 +302,9 @@ async def resend_invitation(
     }
 
     # Create service and delegate to service
-    invite_service = InviteService(user_context=user_context, db_connection=db_connection)
+    invite_service = InviteService(
+        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+    )
     result = await invite_service.resend_invitation(invite_id)
 
     return success_response(
