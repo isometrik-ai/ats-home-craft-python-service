@@ -18,7 +18,7 @@ from typing import Any
 # Third-party imports
 import asyncpg
 import jwt
-from supabase import AuthApiError
+from supabase import AsyncClient, AuthApiError
 
 # repositories
 from apps.user_service.app.db.repositories import UserRepository
@@ -46,31 +46,26 @@ from apps.user_service.app.schemas.verification_codes import (
 from apps.user_service.app.services.verification_code_service import (
     VerificationCodeService,
 )
-from libs.shared_db.supabase_db.admin_operations.user import (
-    delete_auth_user,
-    update_password_with_link_identity,
-)
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
-    login_user,
-)
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
-    refresh_session as refresh_user_session,
-)
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
-    send_password_reset_email,
-    sign_up_supabase_user,
-    update_password_with_token,
-)
-
-# Shared library imports
-from libs.shared_middleware.jwt_auth import get_user_from_token
 
 # Email utilities
-from libs.shared_utils.email_utils import (
+from apps.user_service.app.utils.email_utils import (
     send_password_change_success_email,
     send_password_reset_success_email,
     send_welcome_email,
 )
+
+# Shared library imports
+from libs.shared_db.supabase_db.auth_repository import (
+    delete_user,
+    login_user,
+    refresh_session,
+    send_password_reset_email,
+    sign_up_supabase_user,
+    update_password_with_link_identity,
+    update_password_with_token,
+)
+from libs.shared_db.supabase_db.client import get_supabase_client
+from libs.shared_middleware.jwt_auth import get_user_from_token
 
 # Shared exceptions and status codes
 from libs.shared_utils.http_exceptions import (
@@ -94,7 +89,7 @@ class AuthService:
     Handles all authentication operations including login, signup, password management, and 2FA.
     """
 
-    def __init__(self, db_connection: asyncpg.Connection):
+    def __init__(self, db_connection: asyncpg.Connection, sb_client: AsyncClient | None = None):
         """Initialize AuthService with database connection.
 
         Args:
@@ -102,6 +97,7 @@ class AuthService:
         """
         self.db_connection = db_connection
         self.user_repository = UserRepository(db_connection=db_connection)
+        self.supabase_client = sb_client
 
     # UTILITY METHODS
     @staticmethod
@@ -198,21 +194,25 @@ class AuthService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # Create VerifyVerificationCodeRequest for validation
-        verify_request = VerifyVerificationCodeRequest(
-            type=VerificationType.EMAIL,
-            verification_id=verification_id,
-            verification_code=verification_code,
-            email=email,
-        )
+        if not verification_record.get("verified", False):
+            raise BadRequestException(
+                message_key="verification_codes.errors.verification_code_not_verified",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
 
-        # Validate using service method
-        verification_service._validate_verification_record(verification_record, verify_request)
+        stored_given_input = verification_record.get("given_input")
+        if stored_given_input != email:
+            raise BadRequestException(
+                message_key="auth.errors.verification_code_not_matched_email",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
 
-        # Verify and update record
-        await verification_service._verify_code_and_update_record(
-            verification_record, verification_code, verification_id
-        )
+        stored_code = verification_record.get("verification_code")
+        if verification_code != stored_code:
+            raise BadRequestException(
+                message_key="verification_codes.errors.verification_code_invalid",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
 
     # SESSION MANAGEMENT METHODS
     @staticmethod
@@ -245,7 +245,7 @@ class AuthService:
             return session
 
         try:
-            login_result = await login_user(email, password)
+            login_result = await login_user(email, password, self.supabase_client)
             return self._extract_session(login_result.session)
         except Exception as login_error:
             logger.warning("Could not get session after signup for %s: %s", email, str(login_error))
@@ -487,7 +487,8 @@ class AuthService:
 
     # MAIN SERVICE METHODS
     async def login(
-        self, data: AuthLogin, user_agent: str | None, device_signature: str | None
+        self,
+        data: AuthLogin,
     ) -> AuthResponse:
         """Handle user login with optional 2FA support.
 
@@ -495,8 +496,6 @@ class AuthService:
 
         Args:
             data: Login credentials containing email, password, and optional 2FA fields
-            user_agent: User agent header
-            device_signature: Device signature header
 
         Returns:
             AuthResponse: Access token and user information
@@ -509,10 +508,7 @@ class AuthService:
         # First verify password to prevent timing attacks
         try:
             result = await login_user(
-                email=data.email,
-                password=data.password,
-                user_agent=user_agent,
-                device_signature=device_signature,
+                email=data.email, password=data.password, sb_client=self.supabase_client
             )
         except AuthApiError as auth_error:
             # Handle specific credential-related errors
@@ -656,7 +652,7 @@ class AuthService:
             ServiceUnavailableException: If authentication service is unavailable
         """
         try:
-            return await refresh_user_session(refresh_token)
+            return await refresh_session(refresh_token, self.supabase_client)
         except AuthApiError as auth_error:
             status = getattr(auth_error, "status", None)
 
@@ -781,7 +777,11 @@ class AuthService:
             BadRequestException: If password is weak or update fails
         """
         self._validate_password_strength(password)
-        result = await update_password_with_link_identity(user_id, password)
+        result = await update_password_with_link_identity(
+            client=self.supabase_client,
+            user_id=user_id,
+            password=password,
+        )
         if result:
             return PasswordResponse(message="Password set successfully")
         raise BadRequestException(
@@ -808,7 +808,7 @@ class AuthService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        await send_password_reset_email(email)
+        await send_password_reset_email(email, self.supabase_client)
         return ForgotPasswordResponse(
             message="Password reset email sent successfully. Please check your email."
         )
@@ -836,7 +836,7 @@ class AuthService:
 
         self._validate_password_strength(new_password)
 
-        result = await update_password_with_token(user["sub"], new_password)
+        result = await update_password_with_token(user["sub"], new_password, self.supabase_client)
         if not result.user:
             logger.error("Password update failed - no user in result")
             raise BadRequestException(
@@ -887,7 +887,7 @@ class AuthService:
             verification_code=signup_data.verification_code,
         )
 
-        signup_result = await sign_up_supabase_user(signup_data)
+        signup_result = await sign_up_supabase_user(signup_data, self.supabase_client)
 
         session = await self._get_session_after_signup(
             signup_result=signup_result, email=signup_data.email, password=signup_data.password
@@ -964,7 +964,7 @@ class AuthService:
         Raises:
             NotFoundException: If user not found
         """
-        result = await delete_auth_user(user_id)
+        result = await delete_user(sb_client=self.supabase_client, user_id=user_id)
 
         if result is None:
             raise NotFoundException(
@@ -1003,7 +1003,8 @@ class AuthService:
 
         # Step 1: Verify current password matches database password
         try:
-            await login_user(user_email, current_password)
+            anon_client = await get_supabase_client()
+            await login_user(user_email, current_password, anon_client)
         except Exception as e:
             # Convert authentication failures to BadRequestException
             # Other exceptions will bubble up to the decorator
@@ -1020,7 +1021,9 @@ class AuthService:
             )
 
         # Step 3: Update password
-        result = await update_password_with_link_identity(user_id, new_password)
+        result = await update_password_with_link_identity(
+            self.supabase_client, user_id, new_password
+        )
         if not result:
             raise BadRequestException(
                 message_key="auth.errors.failed_to_update_password",
@@ -1054,7 +1057,7 @@ class AuthService:
             BadRequestException: If credentials are invalid
         """
         try:
-            await login_user(email, password)
+            await login_user(email, password, self.supabase_client)
         except Exception as e:
             # Convert authentication failures to BadRequestException
             # Other exceptions will bubble up to the decorator

@@ -40,23 +40,10 @@ from apps.user_service.app.schemas.verification_codes import (
     VerificationType,
     VerifyVerificationCodeRequest,
 )
-from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
-    DEFAULT_OTP,
-    EMAIL_DEFAULT_OTP,
-    EMAIL_OTP_ENABLED,
-    MAX_ATTEMPT_VERIFICATION,
-    OTP_ENABLED,
-    PHONE_DEFAULT_OTP,
-    PHONE_OTP_ENABLED,
-    VERIFICATION_ATTEMPT_WINDOW_HOURS,
-)
+from apps.user_service.app.utils.email_utils import send_verification_code_email
 
 # Shared library imports
-from libs.shared_db.supabase_db.admin_operations.user import (
-    get_user_by_id,
-)
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
-from libs.shared_utils.email_utils import send_verification_code_email
+from libs.shared_db.supabase_db.auth_repository import get_user_by_id
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     ConflictException,
@@ -73,6 +60,17 @@ logger = get_logger("verification-code-service")
 
 # Environment variables
 VERIFICATION_CODE_EXPIRY_MINUTES = int(os.getenv("VERIFICATION_CODE_EXPIRY_MINUTES", "10"))
+MAX_ATTEMPT_VERIFICATION = int(os.getenv("MAX_ATTEMPT_VERIFICATION", "5"))
+OTP_ENABLED = os.getenv("OTP_ENABLED", "true").lower() == "true"
+DEFAULT_OTP = os.getenv("DEFAULT_OTP", "1111")
+EMAIL_OTP_ENABLED = os.getenv("EMAIL_OTP_ENABLED", "true").lower() == "true"
+EMAIL_DEFAULT_OTP = os.getenv("EMAIL_DEFAULT_OTP", "1111")
+PHONE_OTP_ENABLED = os.getenv("PHONE_OTP_ENABLED", "true").lower() == "true"
+PHONE_DEFAULT_OTP = os.getenv("PHONE_DEFAULT_OTP", "1111")
+_VERIFICATION_ATTEMPT_WINDOW_HOURS = os.getenv("VERIFICATION_ATTEMPT_WINDOW_HOURS")
+VERIFICATION_ATTEMPT_WINDOW_HOURS = (
+    int(_VERIFICATION_ATTEMPT_WINDOW_HOURS) if _VERIFICATION_ATTEMPT_WINDOW_HOURS else 24
+)
 
 
 class VerificationCodeService:
@@ -80,7 +78,9 @@ class VerificationCodeService:
     Handles all verification code operations including send and verify.
     """
 
-    def __init__(self, db_connection: asyncpg.Connection):
+    def __init__(
+        self, db_connection: asyncpg.Connection, sb_client: supabase.AsyncClient | None = None
+    ):
         """Initialize VerificationCodeService with database connection.
 
         Args:
@@ -92,6 +92,7 @@ class VerificationCodeService:
         self.organisation_member_repository = OrganisationMemberRepository(
             db_connection=db_connection
         )
+        self.supabase_client = sb_client
 
     # UTILITY METHODS
     @staticmethod
@@ -252,7 +253,7 @@ class VerificationCodeService:
             BadRequestException: If phone is same as current
             ConflictException: If phone already registered
         """
-        user_data = await get_user_by_id(user_id)
+        user_data = await get_user_by_id(self.supabase_client, user_id)
         if user_data and hasattr(user_data, "user") and user_data.user:
             # Check the actual phone field, not user_metadata
             current_user_phone = None
@@ -534,28 +535,27 @@ class VerificationCodeService:
         Raises:
             InternalServerErrorException: If update fails
         """
-        admin_supabase = await get_supabase_admin_client()
         current_time = datetime.now(timezone.utc).isoformat()
-        user_data = await admin_supabase.auth.admin.get_user_by_id(user_id)
+        user_data = await self.supabase_client.auth.admin.get_user_by_id(user_id)
         existing_metadata = user_data.user.user_metadata or {}
         updated_metadata = {**existing_metadata, "email": email}
 
-        response = await admin_supabase.auth.admin.update_user_by_id(
+        response = await self.supabase_client.auth.admin.update_user_by_id(
             user_id, {"email": email, "email_confirmed_at": current_time}
         )
 
-        await admin_supabase.auth.admin.update_user_by_id(
+        await self.supabase_client.auth.admin.update_user_by_id(
             user_id,
             {"user_metadata": updated_metadata},
         )
 
         if response and response.user:
             # Verify email was actually updated
-            updated_user = await admin_supabase.auth.admin.get_user_by_id(user_id)
+            updated_user = await self.supabase_client.auth.admin.get_user_by_id(user_id)
             if updated_user and updated_user.user:
                 if updated_user.user.email != email:
                     # Retry update if email doesn't match
-                    await admin_supabase.auth.admin.update_user_by_id(
+                    await self.supabase_client.auth.admin.update_user_by_id(
                         user_id,
                         {
                             "email": email,
@@ -585,9 +585,8 @@ class VerificationCodeService:
         Raises:
             InternalServerErrorException: If update fails
         """
-        admin_supabase = await get_supabase_admin_client()
         current_time = datetime.now(timezone.utc).isoformat()
-        user_data = await admin_supabase.auth.admin.get_user_by_id(user_id)
+        user_data = await self.supabase_client.auth.admin.get_user_by_id(user_id)
         existing_metadata = {}
         if user_data and user_data.user:
             existing_metadata = user_data.user.user_metadata or {}
@@ -595,12 +594,12 @@ class VerificationCodeService:
         updated_metadata = dict(existing_metadata)
         updated_metadata["phone"] = phone
 
-        response = await admin_supabase.auth.admin.update_user_by_id(
+        response = await self.supabase_client.auth.admin.update_user_by_id(
             user_id,
             {"phone": phone, "phone_confirmed_at": current_time},
         )
 
-        await admin_supabase.auth.admin.update_user_by_id(
+        await self.supabase_client.auth.admin.update_user_by_id(
             user_id,
             {"user_metadata": updated_metadata},
         )
@@ -615,7 +614,7 @@ class VerificationCodeService:
             # Verify both phone field and user_metadata were updated
             if updated_phone != phone or updated_metadata_phone != phone:
                 # Retry update if phone doesn't match
-                await admin_supabase.auth.admin.update_user_by_id(
+                await self.supabase_client.auth.admin.update_user_by_id(
                     user_id,
                     {
                         "phone": phone,
@@ -717,7 +716,7 @@ class VerificationCodeService:
         # Get current email from Supabase auth
         current_user_email = ""
         if user_id:
-            user_data = await get_user_by_id(user_id)
+            user_data = await get_user_by_id(self.supabase_client, user_id)
             if user_data and hasattr(user_data, "user") and user_data.user:
                 # Get the actual email field, not user_metadata
                 if hasattr(user_data.user, "email") and user_data.user.email:

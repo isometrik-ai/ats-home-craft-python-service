@@ -21,7 +21,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 # Logger import
 from apps.user_service.app.dependencies.logger import get_logger
-from libs.shared_db.supabase_db.db import get_supabase_client
+from libs.shared_db.supabase_db.client import get_supabase_client
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     InternalServerErrorException,

@@ -1,5 +1,4 @@
-"""
-Supabase async client factory with caching.
+"""Supabase async client factory with caching.
 
 Provides two cached clients:
 - Anon client (RLS-enforced)
@@ -9,9 +8,8 @@ Provides two cached clients:
 from __future__ import annotations
 
 import os
-from typing import Optional
 
-from httpx import AsyncClient as HTTPXAsyncClient
+from fastapi import Request
 from supabase import AsyncClient, ClientOptions, create_async_client
 
 from libs.shared_db.common import setup_import_paths_and_env
@@ -31,9 +29,11 @@ class _SupabaseCache:
         self.service: AsyncClient | None = None
 
     def reset_service(self) -> None:
+        """reset supabase service"""
         self.service = None
 
     def reset_all(self) -> None:
+        """reset all"""
         self.anon = None
         self.service = None
 
@@ -42,9 +42,7 @@ _cache = _SupabaseCache()
 
 
 async def get_supabase_client() -> AsyncClient:
-    """
-    Get the cached anon Supabase client (RLS enforced).
-    """
+    """Get the cached anon Supabase client (RLS enforced)."""
     if _cache.anon is None:
         if not SUPABASE_URL or not SUPABASE_ANON_KEY:
             raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY must be set for anon client.")
@@ -52,34 +50,48 @@ async def get_supabase_client() -> AsyncClient:
     return _cache.anon
 
 
-async def get_supabase_service_client(
-    user_agent: Optional[str] = None, custom_headers: Optional[dict] = None
+async def supabase_anon_with_headers(
+    request: Request,
 ) -> AsyncClient:
+    """Create a per-request anon Supabase client with custom headers.
+    NOT cached.
     """
-    Get the cached service-role Supabase client (admin privileges).
-    """
-    if _cache.service is None or user_agent or custom_headers:
+    headers: dict[str, str] = {}
+
+    user_agent = request.headers.get("User-Agent")
+    device_signature = request.headers.get("X-Device-Signature")
+
+    if user_agent:
+        headers["User-Agent"] = user_agent
+    if device_signature:
+        headers["X-Device-Signature"] = device_signature
+
+    options = ClientOptions(
+        persist_session=False,
+        headers=headers,
+    )
+
+    return await create_async_client(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+        options=options,
+    )
+
+
+async def get_supabase_service_client() -> AsyncClient:
+    """Get the cached service-role Supabase client (admin privileges)."""
+    if _cache.service is None:
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
             raise RuntimeError(
                 "SUPABASE_URL and SUPABASE_SERVICE_KEY must be set for service client."
             )
 
-        headers = {}
-        if user_agent:
-            headers["User-Agent"] = user_agent
-        if custom_headers:
-            headers.update(custom_headers)
-
-        http_client = HTTPXAsyncClient(headers=headers) if headers else None
-        options = ClientOptions(persist_session=False) if http_client else None
-
         _cache.service = await create_async_client(
             SUPABASE_URL,
             SUPABASE_SERVICE_KEY,
-            options=options,
+            options=ClientOptions(persist_session=False),
         )
 
-        # Warm-up to ensure credentials are valid
         try:
             await _cache.service.auth.admin.list_users()
         except Exception as exc:

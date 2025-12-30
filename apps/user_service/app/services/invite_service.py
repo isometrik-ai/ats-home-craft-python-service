@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
+from supabase import AsyncClient
 
 from apps.user_service.app.db.repositories import (
     InviteRepository,
@@ -21,17 +22,17 @@ from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
     InviteCreateRequest,
 )
-from apps.user_service.app.utils.common_utils import UserContext, validate_uuid_format
-from apps.user_service.app.utils.invite_utils import build_invite_list_item, hash_token
-from apps.user_service.app.utils.organisation_utils import (
-    validate_organization_subscription,
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    hash_token,
+    validate_uuid_format,
 )
+from apps.user_service.app.utils.email_utils import send_organization_invitation_email
 from apps.user_service.app.utils.user_utils import build_full_name
-from libs.shared_db.supabase_db.admin_operations.user import get_user_by_id
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
+from libs.shared_db.supabase_db.auth_repository import (
+    get_user_by_id,
     sign_up_supabase_user,
 )
-from libs.shared_utils.email_utils import send_organization_invitation_email
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     ForbiddenException,
@@ -59,6 +60,7 @@ class InviteService:
         self,
         user_context: UserContext | None,
         db_connection: asyncpg.Connection,
+        sb_client: AsyncClient | None = None,
     ) -> None:
         self.user_context = user_context
         self.db_connection = db_connection
@@ -68,6 +70,7 @@ class InviteService:
         self.organisation_member_repository = OrganisationMemberRepository(
             db_connection=db_connection
         )
+        self.supabase_client = sb_client
 
     def _generate_invite_token(self) -> tuple[str, str]:
         """Generate a fresh invite token and its hash.
@@ -259,7 +262,8 @@ class InviteService:
                 salutation=inv_meta.get("salutation", None),
                 verification_id="",
                 verification_code="",
-            )
+            ),
+            self.supabase_client,
         )
 
         if not signup_result:
@@ -325,7 +329,7 @@ class InviteService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         # Check organization capacity
-        await validate_organization_subscription(organization_data)
+        await self.validate_organization_subscription(organization_data)
 
         # Check if user is already a member
         existing_member = await self.invite_repository.check_user_membership(
@@ -374,11 +378,13 @@ class InviteService:
 
         role_data = await self._get_role_data(str(body.role_id), organization_id)
 
-        inviter = await get_user_by_id(self.user_context.user_id)
+        inviter = await get_user_by_id(self.supabase_client, self.user_context.user_id)
 
         invitee_full_name = build_full_name(body.salutation, body.first_name, body.last_name)
 
-        inviter_full_name = self._build_full_name_from_user_metadata(inviter.user.user_metadata)
+        # Access user_metadata from the returned dictionary
+        inviter_user_metadata = inviter.get("user_metadata", {})
+        inviter_full_name = self._build_full_name_from_user_metadata(inviter_user_metadata)
 
         # Send invitation email
         expires_at_str = self._format_datetime_iso(created_invite["expires_at"])
@@ -424,7 +430,7 @@ class InviteService:
             status=status,
         )
 
-        invitations_list = [build_invite_list_item(invite) for invite in invitations_data]
+        invitations_list = [self.build_invite_list_item(invite) for invite in invitations_data]
 
         total_count = await self.invite_repository.get_organization_invites_count(
             organization_id=organization_id, status=status
@@ -466,12 +472,14 @@ class InviteService:
 
         role_data = await self._get_role_data(invitation_data["role_id"], organization_data["id"])
 
-        inviter = await get_user_by_id(str(invitation_data["invited_by"]))
+        inviter = await get_user_by_id(self.supabase_client, str(invitation_data["invited_by"]))
 
         inv_meta = self._parse_json_field(invitation_data.get("metadata"))
         invitee_full_name = self._build_full_name_from_metadata(inv_meta)
 
-        inviter_full_name = self._build_full_name_from_user_metadata(inviter.user.user_metadata)
+        # Access user_metadata from the returned dictionary
+        inviter_user_metadata = inviter.get("user_metadata", {})
+        inviter_full_name = self._build_full_name_from_user_metadata(inviter_user_metadata)
 
         # Generate fresh token and extend expiration date when resending
         invite_token, token_hash = self._generate_invite_token()
@@ -566,3 +574,105 @@ class InviteService:
         )
 
         return result
+
+    async def validate_organization_subscription(self, organization_data: dict[str, Any]) -> bool:
+        """Validate whether the organization has a valid subscription.
+
+        Args:
+            organization_data (dict): Organization data
+
+        Returns:
+            bool: True if organization has a valid subscription
+
+        Raises:
+            ForbiddenException: If subscription is missing or expired
+            ConflictException: If max users limit is exceeded
+        """
+        organization_id = organization_data["id"]
+        subscription_raw = organization_data.get("subscription")
+
+        if not subscription_raw:
+            raise ForbiddenException(
+                message_key="invitations.errors.organization_subscription_missing",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+
+        # Parse subscription if it's a JSON string
+        if isinstance(subscription_raw, str):
+            try:
+                subscription = json.loads(subscription_raw)
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise ForbiddenException(
+                    message_key="invitations.errors.organization_subscription_missing",
+                    custom_code=CustomStatusCode.FORBIDDEN,
+                ) from exc
+        else:
+            subscription = subscription_raw
+
+        max_users = subscription.get("max_users")
+        subscription_end = subscription.get("end_date")
+
+        # Parse end date safely
+        try:
+            end_date = datetime.fromisoformat(subscription_end)
+        except ValueError as exc:
+            raise ForbiddenException(
+                message_key="invitations.errors.subscription_expired",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            ) from exc
+
+        # Make datetime timezone-aware
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=timezone.utc)
+
+        total_members = await self.organisation_member_repository.get_users_total_count(
+            organization_id=organization_id,
+            search=None,
+        )
+
+        # Subscription expired
+        if datetime.now(timezone.utc) > end_date:
+            raise ForbiddenException(
+                message_key="invitations.errors.subscription_expired",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+
+        # Max capacity exceeded
+        if total_members >= max_users:
+            raise ConflictException(
+                message_key="invitations.errors.invalid_max_users",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        return True
+
+    def build_invite_list_item(self, invite_data: dict[str, Any]) -> dict[str, Any]:
+        """Build invitation list item for API response.
+
+        Args:
+            invite_data (dict): Invitation data from database
+
+        Returns:
+            dict: Formatted invitation list item
+        """
+        # Handle metadata - it might be a JSON string or a dict
+        metadata = invite_data.get("metadata", {})
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata) if metadata else {}
+        elif not isinstance(metadata, dict):
+            metadata = {}
+
+        return {
+            "invite_id": str(invite_data.get("id")),
+            "email": invite_data.get("email"),
+            "role_id": str(invite_data.get("role_id")),
+            "status": invite_data.get("status"),
+            "invited_by": str(invite_data.get("invited_by")),
+            "expires_at": invite_data.get("expires_at"),
+            "created_at": invite_data.get("created_at"),
+            "updated_at": invite_data.get("updated_at"),
+            "salutation": metadata.get("salutation", None),
+            "first_name": metadata.get("first_name", None),
+            "last_name": metadata.get("last_name", None),
+            "phone": metadata.get("phone", None),
+        }
