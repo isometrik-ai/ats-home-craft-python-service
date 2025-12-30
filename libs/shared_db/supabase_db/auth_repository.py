@@ -1,5 +1,4 @@
-"""
-Auth repository helpers using the Supabase Python client.
+"""Auth repository helpers using the Supabase Python client.
 
 Use with the service client for admin operations on auth users.
 """
@@ -19,8 +18,16 @@ async def create_user(
     phone: str | None = None,
     email_confirm: bool = False,
 ) -> dict[str, Any]:
-    """
-    Create a Supabase Auth user (service client required).
+    """Create a Supabase Auth user (service client required).
+    Args:
+        client: Supabase AsyncClient
+        email: Email address
+        password: Password
+        user_metadata: User metadata
+        phone: Phone number
+        email_confirm: Whether to confirm email
+    Returns:
+        dict[str, Any]: User data
     """
     try:
         resp = await client.auth.admin.create_user(
@@ -38,7 +45,13 @@ async def create_user(
 
 
 async def get_user_by_id(client: AsyncClient, user_id: str) -> dict[str, Any]:
-    """Fetch an auth user by ID."""
+    """Fetch an auth user by ID.
+    Args:
+        client: Supabase AsyncClient
+        user_id: User ID
+    Returns:
+        dict[str, Any]: User data
+    """
     try:
         resp = await client.auth.admin.get_user_by_id(user_id)
         return resp.user.model_dump() if resp and resp.user else {}
@@ -47,7 +60,13 @@ async def get_user_by_id(client: AsyncClient, user_id: str) -> dict[str, Any]:
 
 
 async def delete_user(client: AsyncClient, user_id: str) -> bool:
-    """Delete an auth user by ID."""
+    """Delete an auth user by ID.
+    Args:
+        client: Supabase AsyncClient
+        user_id: User ID
+    Returns:
+        bool: True if user was deleted successfully, False otherwise
+    """
     try:
         await client.auth.admin.delete_user(user_id)
         return True
@@ -58,7 +77,14 @@ async def delete_user(client: AsyncClient, user_id: str) -> bool:
 async def list_users(
     client: AsyncClient, page: int = 1, per_page: int = 50
 ) -> list[dict[str, Any]]:
-    """List auth users with pagination."""
+    """List auth users with pagination.
+    Args:
+        client: Supabase AsyncClient
+        page: Page number
+        per_page: Number of users per page
+    Returns:
+        list[dict[str, Any]]: List of user data
+    """
     try:
         resp = await client.auth.admin.list_users(page=page, per_page=per_page)
         if resp and resp.users:

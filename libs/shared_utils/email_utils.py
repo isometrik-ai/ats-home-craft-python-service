@@ -3,22 +3,23 @@ This module provides shared email functionality for sending emails via Supabase 
 """
 
 import logging
-import os
 from datetime import datetime
 
 import httpx
 
+from libs.shared_config.app_settings import shared_settings
+
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_URL = shared_settings.supabase.url
+SERVICE_ROLE_KEY = shared_settings.supabase.service_key
 
-COMMON_COMPANY_NAME = "House of App AI"
-COMMON_SUPPORT_EMAIL = "support@houseofapp.ai"
-COMMON_COMPANY_ADDRESS = "123 Main Street, City, State 12345"
-COMMON_PRIVACY_POLICY_URL = "https://houseofapp.ai/privacy"
-COMMON_TERMS_URL = "https://houseofapp.ai/terms"
-ROSS_AI_FROM_NAME = "Ross.Ai"
+COMMON_COMPANY_NAME = shared_settings.company_name
+COMMON_SUPPORT_EMAIL = shared_settings.company_support_email
+COMMON_COMPANY_ADDRESS = shared_settings.company_address
+COMMON_PRIVACY_POLICY_URL = shared_settings.company_privacy_policy_url
+COMMON_TERMS_URL = shared_settings.company_terms_url
+ROSS_AI_FROM_NAME = shared_settings.app_name
 
 
 def send_email(

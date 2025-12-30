@@ -11,7 +11,6 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.dependencies.logger import get_logger
 
 # Schema imports
 from apps.user_service.app.schemas.teams import (
@@ -35,6 +34,7 @@ from libs.shared_utils.common_query import (
     TEAMS_MANAGEMENT_EDIT,
     TEAMS_MANAGEMENT_VIEW,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 

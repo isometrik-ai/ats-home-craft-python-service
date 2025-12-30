@@ -5,7 +5,6 @@ All Supabase Auth admin API operations for user management should be centralized
 
 from fastapi import HTTPException, status
 
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.schemas.users import CreateUserRequest
 from apps.user_service.app.utils.common_utils import UserContext
@@ -24,6 +23,7 @@ from libs.shared_utils.http_exceptions import (
     BadRequestException,
     InternalServerErrorException,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("user_utility_admin")

@@ -6,11 +6,11 @@ All Supabase Auth admin API operations for user management should be centralized
 from httpx import HTTPError, RequestError, TimeoutException
 from postgrest import APIError
 
-from apps.user_service.app.dependencies.logger import get_logger
 from libs.shared_db.supabase_db.db import (
     get_fresh_supabase_admin_client,
     get_supabase_admin_client,
 )
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("user_admin_operations")
 

@@ -3,27 +3,14 @@ This module contains all verification code-related database operations.
 All SQL queries for verification code management should be centralized here.
 """
 
-import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from apps.user_service.app.config.app_settings import app_settings
 from libs.shared_db.supabase_db.db import get_fresh_supabase_admin_client
 from libs.shared_utils.http_exceptions import InternalServerErrorException
 from libs.shared_utils.status_codes import CustomStatusCode
-
-MAX_ATTEMPT_VERIFICATION = int(os.getenv("MAX_ATTEMPT_VERIFICATION", "5"))
-OTP_ENABLED = os.getenv("OTP_ENABLED", "true").lower() == "true"
-DEFAULT_OTP = os.getenv("DEFAULT_OTP", "1111")
-EMAIL_OTP_ENABLED = os.getenv("EMAIL_OTP_ENABLED", "true").lower() == "true"
-EMAIL_DEFAULT_OTP = os.getenv("EMAIL_DEFAULT_OTP", "1111")
-PHONE_OTP_ENABLED = os.getenv("PHONE_OTP_ENABLED", "true").lower() == "true"
-PHONE_DEFAULT_OTP = os.getenv("PHONE_DEFAULT_OTP", "1111")
-VERIFICATION_CODE_EXPIRY_MINUTES = int(os.getenv("VERIFICATION_CODE_EXPIRY_MINUTES", "10"))
-_VERIFICATION_ATTEMPT_WINDOW_HOURS = os.getenv("VERIFICATION_ATTEMPT_WINDOW_HOURS")
-VERIFICATION_ATTEMPT_WINDOW_HOURS = (
-    int(_VERIFICATION_ATTEMPT_WINDOW_HOURS) if _VERIFICATION_ATTEMPT_WINDOW_HOURS else 24
-)
 
 
 async def create_verification_code(
@@ -48,14 +35,11 @@ async def create_verification_code(
 
     type_upper = type_text.upper()
     if type_upper == "EMAIL":
-        otp_enabled = EMAIL_OTP_ENABLED
-        default_otp = EMAIL_DEFAULT_OTP
-    elif type_upper == "PHONE_NUMBER":
-        otp_enabled = PHONE_OTP_ENABLED
-        default_otp = PHONE_DEFAULT_OTP
+        otp_enabled = app_settings.two_fa_settings.email_otp_enabled
+        default_otp = app_settings.two_fa_settings.email_default_otp
     else:
-        otp_enabled = OTP_ENABLED
-        default_otp = DEFAULT_OTP
+        otp_enabled = app_settings.two_fa_settings.phone_otp_enabled
+        default_otp = app_settings.two_fa_settings.phone_default_otp
 
     if otp_enabled:
         verification_code = str(secrets.randbelow(9000) + 1000)
@@ -63,7 +47,9 @@ async def create_verification_code(
         verification_code = default_otp
 
     current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    expiry_at = current_time_ms + (VERIFICATION_CODE_EXPIRY_MINUTES * 60 * 1000)
+    expiry_at = current_time_ms + (
+        app_settings.two_fa_settings.verification_code_expiry_minutes * 60 * 1000
+    )
 
     verification_data = {
         "type_text": type_text,

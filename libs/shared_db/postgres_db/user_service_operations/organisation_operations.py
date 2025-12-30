@@ -5,13 +5,11 @@ All SQL queries for organisation management should be centralized here.
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.auth import PlanType
-from libs import NOW_CONSTANT
 from libs.shared_db.supabase_db.admin_operations.user import (
     get_user_by_id,
     update_metadata_of_user,
@@ -19,10 +17,8 @@ from libs.shared_db.supabase_db.admin_operations.user import (
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
 from libs.shared_utils.http_exceptions import ServiceUnavailableException
-from libs.shared_utils.isometrik_service import (
-    create_isometrik_user,
-    is_isometrik_enabled,
-)
+from libs.shared_utils.isometrik_service import create_isometrik_user
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("organisation_operations")
@@ -97,8 +93,8 @@ async def create_new_organisation(organisation_data: dict[str, Any]) -> dict[str
         "company_size": organisation_data.get("company_size"),
         "description": organisation_data.get("description"),
         "referral_source": organisation_data.get("referral_source"),
-        "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT,
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
         "created_by_id": organisation_data.get("user_id"),
     }
 
@@ -129,8 +125,8 @@ async def create_new_organisation(organisation_data: dict[str, Any]) -> dict[str
     org_record["settings"] = settings
 
     subscription_dict = {
-        "start_date": datetime.now(timezone.utc).isoformat(),
-        "end_date": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+        "start_date": datetime.now(UTC),
+        "end_date": (datetime.now(UTC) + timedelta(days=7)).isoformat(),
         "plan_type": PlanType.TRIAL,
         "max_users": 5,
     }
@@ -156,8 +152,8 @@ async def create_new_organisation(organisation_data: dict[str, Any]) -> dict[str
         "description": organisation_data.get("description"),
         "referral_source": organisation_data.get("referral_source"),
         "subscription": organisation_data.get("subscription"),
-        "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT,
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
         "created_by_id": organisation_data.get("user_id"),
     }
 
@@ -296,7 +292,7 @@ async def update_organisation_details(
         return {}
 
     # 3️⃣ Always set updated_at (mimicking the audit column logic)
-    payload["updated_at"] = NOW_CONSTANT
+    payload["updated_at"] = datetime.now(UTC)
 
     # 4️⃣ Execute update with Supabase SDK (mimicking the WHERE id = $N logic)
     table = supabase.table("organizations")
@@ -541,24 +537,23 @@ async def add_member_to_organisation(
     supabase = await get_supabase_admin_client()
 
     isometrik_user_id = None
-    if is_isometrik_enabled():
-        isometrik_response = await create_isometrik_user(
-            user_id=member_data["user_id"],
-            first_name=member_data.get("first_name", None),
-            last_name=member_data.get("last_name", None),
-            email=member_data["email"],
-            isometrik_credentials=isometrik_credentials,
-            organization_id=organization_id,
-            role=member_data.get("role", "owner"),
-            avatar_url=member_data.get("logo_url", None),
-        )
-        if isometrik_response:
-            isometrik_user_id = isometrik_response.get("userId", None)
-            if not isometrik_user_id:
-                raise ServiceUnavailableException(
-                    message_key="errors.failed_to_create_isometrik_user",
-                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
-                )
+    isometrik_response = await create_isometrik_user(
+        user_id=member_data["user_id"],
+        first_name=member_data.get("first_name", None),
+        last_name=member_data.get("last_name", None),
+        email=member_data["email"],
+        isometrik_credentials=isometrik_credentials,
+        organization_id=organization_id,
+        role=member_data.get("role", "owner"),
+        avatar_url=member_data.get("logo_url", None),
+    )
+    if isometrik_response:
+        isometrik_user_id = isometrik_response.get("userId", None)
+        if not isometrik_user_id:
+            raise ServiceUnavailableException(
+                message_key="errors.failed_to_create_isometrik_user",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
 
     if isometrik_user_id:
         member_data["isometrik_user_id"] = isometrik_user_id
@@ -570,9 +565,9 @@ async def add_member_to_organisation(
         "role_id": member_data.get("role_id"),
         "status": member_data.get("status", "active"),
         "organization_id": organization_id,
-        "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT,
-        "joined_at": NOW_CONSTANT,
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
+        "joined_at": datetime.now(UTC),
     }
 
     data = await get_user_by_id(member_data["user_id"])
@@ -623,7 +618,7 @@ async def update_member_role(organisation_id: str, user_id: str, role_id: str) -
 
     table = supabase.table("organization_members")
     query = (
-        table.update({"role_id": role_id, "updated_at": NOW_CONSTANT})
+        table.update({"role_id": role_id, "updated_at": datetime.now(UTC)})
         .eq("user_id", user_id)
         .eq("organization_id", organisation_id)
     )
@@ -666,7 +661,7 @@ async def update_organisation_settings(organisation_id: str, settings: dict[str,
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({"settings": settings, "updated_at": NOW_CONSTANT}).eq(
+    query = table.update({"settings": settings, "updated_at": datetime.now(UTC)}).eq(
         "id", organisation_id
     )
     result = await query.execute()
@@ -705,7 +700,7 @@ async def update_organisation_preferences(
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({"preferences": preferences, "updated_at": NOW_CONSTANT}).eq(
+    query = table.update({"preferences": preferences, "updated_at": datetime.now(UTC)}).eq(
         "id", organisation_id
     )
     result = await query.execute()
@@ -874,8 +869,8 @@ async def bulk_add_members(
                 "role_id": member_data.get("role_id"),
                 "status": member_data.get("status", "active"),
                 "organization_id": organisation_id,
-                "created_at": NOW_CONSTANT,
-                "updated_at": NOW_CONSTANT,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
             }
         )
 
@@ -912,7 +907,7 @@ async def create_default_permissions_for_organisation(
                 "name": name,
                 "description": description,
                 "category": category,
-                "created_at": NOW_CONSTANT,
+                "created_at": datetime.now(UTC),
             }
         )
 
@@ -942,8 +937,8 @@ async def create_super_admin_role(organisation_id: str) -> dict[str, Any]:
         "description": "Full administrative access to all system features",
         "organization_id": organisation_id,
         "is_default": True,
-        "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT,
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
     }
 
     table = supabase.table("roles")
@@ -990,7 +985,7 @@ async def assign_all_permissions_to_role(role_id: str, organisation_id: str) -> 
                 "organization_id": organisation_id,
                 "role_id": role_id,
                 "permission_id": permission["id"],
-                "created_at": NOW_CONSTANT,
+                "created_at": datetime.now(UTC),
             }
         )
 
@@ -1073,7 +1068,7 @@ async def archive_organisation(organisation_id: str) -> bool:
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({"status": "archived", "updated_at": NOW_CONSTANT}).eq(
+    query = table.update({"status": "archived", "updated_at": datetime.now(UTC)}).eq(
         "id", organisation_id
     )
     result = await query.execute()
@@ -1091,7 +1086,9 @@ async def restore_organisation(organisation_id: str) -> bool:
     supabase = await get_supabase_admin_client()
 
     table = supabase.table("organizations")
-    query = table.update({"status": "active", "updated_at": NOW_CONSTANT}).eq("id", organisation_id)
+    query = table.update({"status": "active", "updated_at": datetime.now(UTC)}).eq(
+        "id", organisation_id
+    )
     result = await query.execute()
 
     return _has_result_data(result)

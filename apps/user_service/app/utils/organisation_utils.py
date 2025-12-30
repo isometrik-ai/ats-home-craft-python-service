@@ -16,8 +16,6 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger
-
 # Local imports
 from apps.user_service.app.utils.common_utils import ORG_STATUSES
 from libs.shared_db.postgres_db.user_service_operations.organisation_operations import (
@@ -34,10 +32,8 @@ from libs.shared_utils.http_exceptions import (
     ServiceUnavailableException,
     ValidationException,
 )
-from libs.shared_utils.isometrik_service import (
-    create_isometrik_application,
-    is_isometrik_enabled,
-)
+from libs.shared_utils.isometrik_service import create_isometrik_application
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("organisation_utils")
@@ -58,8 +54,6 @@ async def _create_isometrik_application_if_enabled(
         ServiceUnavailableException: If Isometrik application creation fails
         Exception: If any other exception occurs
     """
-    if not is_isometrik_enabled():
-        return None
     try:
         isometrik_response = await create_isometrik_application(
             organization_name=organization_name, product_types=["chat", "video"], plan="basic"

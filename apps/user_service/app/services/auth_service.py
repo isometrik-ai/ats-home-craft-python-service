@@ -10,7 +10,6 @@ Last Updated: 2024-12-19
 
 # Standard library imports
 import json
-import os
 import re
 import time
 from typing import Any
@@ -20,11 +19,10 @@ import asyncpg
 import jwt
 from supabase import AuthApiError
 
+from apps.user_service.app.config.app_settings import shared_settings
+
 # repositories
 from apps.user_service.app.db.repositories import UserRepository
-
-# Internal utility imports
-from apps.user_service.app.dependencies.logger import get_logger
 
 # Schema imports
 from apps.user_service.app.schemas.auth import (
@@ -83,6 +81,9 @@ from libs.shared_utils.http_exceptions import (
     UnauthorizedException,
     ValidationException,
 )
+
+# Internal utility imports
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 # Initialize logger
@@ -623,7 +624,7 @@ class AuthService:
         try:
             decoded_access_token = jwt.decode(
                 access_token,
-                os.getenv("SUPABASE_JWT_SECRET"),
+                shared_settings.supabase.jwt_secret,
                 algorithms=["HS256"],
                 audience="authenticated",
                 options={"verify_exp": False},

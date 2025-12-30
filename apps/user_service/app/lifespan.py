@@ -10,8 +10,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from apps.user_service.app.dependencies.audit_logs.audit_logger import audit_logger
-from apps.user_service.app.dependencies.logger import app_logger
 from libs.shared_db.drivers.asyncpg_client import close_pool, get_pool
+from libs.shared_utils.logger import app_logger
 
 
 @asynccontextmanager

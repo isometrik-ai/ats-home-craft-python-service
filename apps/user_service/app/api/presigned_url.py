@@ -2,38 +2,30 @@
 This module provides API endpoints for generating presigned URLs
 for Cloudflare R2 (S3-compatible) file uploads."""
 
-import os
-import sys
-
 import boto3
 from botocore.config import Config
 from fastapi import APIRouter, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.config.app_settings import shared_settings
 from apps.user_service.app.schemas.presigned_url import (
     PresignedUrlResponse,
 )
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_utils.http_exceptions import InternalServerErrorException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
-
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, base_path)
-
-monorepo_root = os.path.abspath(os.path.join(base_path, "../../.."))
-sys.path.insert(0, monorepo_root)
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
 logger = get_logger(__name__)
 
-R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY")
-R2_SECRET_KEY = os.getenv("R2_SECRET_KEY")
-R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
-R2_BUCKET = os.getenv("R2_BUCKET")
+R2_ACCESS_KEY = shared_settings.cloudflare_r2.access_key
+R2_SECRET_KEY = shared_settings.cloudflare_r2.secret_key
+R2_ACCOUNT_ID = shared_settings.cloudflare_r2.account_id
+R2_BUCKET = shared_settings.cloudflare_r2.bucket_name
 
 
 def get_r2_client():

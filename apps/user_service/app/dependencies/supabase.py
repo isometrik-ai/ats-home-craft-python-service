@@ -1,5 +1,4 @@
-"""
-Supabase client dependencies for FastAPI.
+"""Supabase client dependencies for FastAPI.
 
 Provides:
 - supabase_service: service-role client (admin operations)

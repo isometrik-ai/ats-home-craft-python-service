@@ -6,14 +6,12 @@ and includes API routes. It also handles path configuration for imports.
 
 # Standard library imports
 import os
-import sys
 from pathlib import Path
 
 from ddtrace.contrib.asgi import TraceMiddleware
 
 # Third-party imports
 from ddtrace.trace import tracer
-from dotenv import load_dotenv
 from fastapi import status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -22,35 +20,29 @@ from apps.user_service.app.api.routes import router as api_router
 
 # Local application imports
 from apps.user_service.app.app_instance import app
+from apps.user_service.app.config.app_settings import app_settings
 from apps.user_service.app.dependencies.exception_middleware import (
     CacheRequestBodyMiddleware,
-    register_exception_handlers,
 )
-from apps.user_service.app.dependencies.logger import setup_logging
 from libs.shared_middleware.jwt_auth import JWTAuthMiddleware
+from libs.shared_utils.fastapi_exception_handlers import register_exception_handlers
+from libs.shared_utils.logger import setup_logging
 from libs.shared_utils.translations import register_translation_path
-
-# Setup paths and environment
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-monorepo_root = os.path.abspath(os.path.join(base_path, "../.."))
-sys.path.insert(0, base_path)
-sys.path.insert(0, monorepo_root)
-load_dotenv(os.path.join(monorepo_root, ".env"))
 
 # Register app-specific locale directory for translations
 service_locale_dir = Path(os.path.dirname(__file__)) / "locales"
 register_translation_path(service_locale_dir)
 
 # Initialize logging at module level
-app_logger = setup_logging(log_level="INFO")
+app_logger = setup_logging()
 
 # ddtrace.auto is imported above and automatically patches supported libraries
 
 
 # Update the app's metadata
-app.title = "House Of Apps AI"
-app.description = "API For House Of Apps AI"
-app.version = "1.0.0"
+app.title = app_settings.shared_settings.app_name
+app.description = app_settings.shared_settings.app_description
+app.version = app_settings.shared_settings.app_version
 
 
 class HealthResponse(BaseModel):
@@ -80,12 +72,6 @@ app.add_middleware(
 )
 
 register_exception_handlers(app)
-
-# Middleware order (executed in reverse order of addition):
-# 1. CORS - Handles preflight requests and adds CORS headers to all responses
-# 2. Tracing - Monitors all requests for observability
-# 3. Body Caching - Caches request body for reuse (before auth/auditing)
-# 4. JWT Auth - Validates authentication tokens
 
 # Add Datadog tracing middleware (monitors all requests)
 app.add_middleware(TraceMiddleware, tracer=tracer)

@@ -3,14 +3,12 @@ This module contains all organization invitation-related database operations.
 All SQL queries for invitation management should be centralized here.
 """
 
-import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger
+from apps.user_service.app.config.app_settings import app_settings
 from apps.user_service.app.utils.invite_utils import hash_token
-from libs import NOW_CONSTANT
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     create_new_user,
 )
@@ -19,15 +17,11 @@ from libs.shared_db.supabase_db.db import (
     get_supabase_admin_client,
 )
 from libs.shared_utils.http_exceptions import ServiceUnavailableException
-from libs.shared_utils.isometrik_service import (
-    create_isometrik_user,
-    is_isometrik_enabled,
-)
+from libs.shared_utils.isometrik_service import create_isometrik_user
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("invite_operations")
-
-INVITE_EXPIRY_DAYS = int(os.getenv("INVITE_EXPIRY_DAYS", "7"))
 
 
 async def create_organization_invite(invite_data: dict[str, Any]) -> dict[str, Any]:
@@ -42,7 +36,7 @@ async def create_organization_invite(invite_data: dict[str, Any]) -> dict[str, A
     invite_token = secrets.token_urlsafe(32)
     token_hash = hash_token(invite_token)
 
-    expires_at = datetime.now() + timedelta(days=INVITE_EXPIRY_DAYS)
+    expires_at = datetime.now() + timedelta(days=app_settings.invite_expiry_days)
 
     invite_record = {
         "organization_id": invite_data["organization_id"],
@@ -52,8 +46,8 @@ async def create_organization_invite(invite_data: dict[str, Any]) -> dict[str, A
         "invited_by": invite_data["invited_by"],
         "status": "pending",
         "expires_at": expires_at.isoformat(),
-        "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT,
+        "created_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
         "metadata": {
             "first_name": invite_data["first_name"],
             "last_name": invite_data["last_name"],
@@ -185,11 +179,11 @@ async def update_invite_status(invite_id: str, status: str, accepted_by: str | N
     """
     supabase = await get_fresh_supabase_admin_client()
 
-    update_data = {"status": status, "updated_at": NOW_CONSTANT}
+    update_data = {"status": status, "updated_at": datetime.now(UTC).isoformat()}
 
     if accepted_by:
         update_data["accepted_by"] = accepted_by
-        update_data["accepted_at"] = NOW_CONSTANT
+        update_data["accepted_at"] = datetime.now(UTC).isoformat()
 
     table = supabase.table("organization_invites")
     update_query = table.update(update_data)
@@ -288,24 +282,23 @@ async def add_user_to_organization(
     """
 
     isometrik_user_id = None
-    if is_isometrik_enabled():
-        isometrik_response = await create_isometrik_user(
-            user_id=invite_data["user_id"],
-            first_name=invite_data.get("first_name", None),
-            last_name=invite_data.get("last_name", None),
-            email=email,
-            isometrik_credentials=isometrik_credentials,
-            organization_id=organization_id,
-            role="member",
-        )
-        if isometrik_response:
-            isometrik_user_id = isometrik_response.get("userId", None)
+    isometrik_response = await create_isometrik_user(
+        user_id=invite_data["user_id"],
+        first_name=invite_data.get("first_name", None),
+        last_name=invite_data.get("last_name", None),
+        email=email,
+        isometrik_credentials=isometrik_credentials,
+        organization_id=organization_id,
+        role="member",
+    )
+    if isometrik_response:
+        isometrik_user_id = isometrik_response.get("userId", None)
 
-            if not isometrik_user_id:
-                raise ServiceUnavailableException(
-                    message_key="errors.isometrik.failed_to_create_user",
-                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
-                )
+        if not isometrik_user_id:
+            raise ServiceUnavailableException(
+                message_key="errors.isometrik.failed_to_create_user",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
 
     if isometrik_user_id:
         invite_data["isometrik_user_id"] = isometrik_user_id
@@ -324,9 +317,9 @@ async def add_user_to_organization(
         "status": "active",
         "invited_by": invited_by,
         "isometrik_user_id": invite_data.get("isometrik_user_id", None),
-        "joined_at": NOW_CONSTANT,
-        "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT,
+        "joined_at": datetime.now(UTC).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
 
     result = await create_new_user(member_record)

@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("audit_operations")
 

@@ -17,7 +17,6 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 
 # Logger import
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.dependencies.logger import get_logger
 
 # Schema imports
 from apps.user_service.app.schemas.organisations import (
@@ -43,6 +42,7 @@ from apps.user_service.app.utils.common_utils import (
 # Permission imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 

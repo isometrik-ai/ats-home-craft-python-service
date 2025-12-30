@@ -16,7 +16,6 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_db.postgres_db.user_service_operations.user_operations import (
     get_user_profile_by_id,
@@ -33,6 +32,7 @@ from libs.shared_utils.http_exceptions import (
     NotFoundException,
     ValidationException,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("common_utils")

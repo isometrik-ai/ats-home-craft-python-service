@@ -17,9 +17,6 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
 # Utility imports
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 
-# Logger import
-from apps.user_service.app.dependencies.logger import get_logger
-
 # Schema imports
 from apps.user_service.app.schemas.admin_access_management import (
     CreatePermissionRequest,
@@ -41,6 +38,9 @@ from libs.shared_utils.common_query import (
     PERMISSIONS_MANAGEMENT_DELETE,
     PERMISSIONS_MANAGEMENT_VIEW,
 )
+
+# Logger import
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 

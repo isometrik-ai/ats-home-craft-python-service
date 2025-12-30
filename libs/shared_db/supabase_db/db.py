@@ -4,18 +4,14 @@ PostgreSQL database connections, loading environment variables,
 and creating a Supabase client for database operations.
 """
 
-import os
-
 from httpx import AsyncClient as HTTPXAsyncClient
 from supabase import AsyncClient, ClientOptions, create_async_client
 
-from libs.shared_db.common import setup_import_paths_and_env
+from libs.shared_config.app_settings import shared_settings
 
-setup_import_paths_and_env()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_URL = shared_settings.supabase.url
+SUPABASE_ANON_KEY = shared_settings.supabase.anon_key
+SUPABASE_SERVICE_KEY = shared_settings.supabase.service_key
 
 
 class SupabaseClientCache:
@@ -44,20 +40,20 @@ class SupabaseClientCache:
         client and hitting RLS policies during privileged operations (e.g. audit writes).
         """
         if self._supabase_admin_client is None:
-            if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+            if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
                 raise RuntimeError(
                     "Missing Supabase admin configuration. Ensure SUPABASE_URL and "
-                    "SUPABASE_SERVICE_KEY are set before starting the app."
+                    "SUPABASE_SERVICE_KEY are set."
                 )
 
             if http_client is not None:
                 options = ClientOptions(persist_session=False)
                 self._supabase_admin_client = await create_async_client(
-                    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, options=options
+                    SUPABASE_URL, SUPABASE_SERVICE_KEY, options=options
                 )
             else:
                 self._supabase_admin_client = await create_async_client(
-                    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+                    SUPABASE_URL, SUPABASE_SERVICE_KEY
                 )
 
             try:

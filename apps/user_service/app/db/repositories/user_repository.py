@@ -7,7 +7,7 @@ transaction handling and efficient batch operations.
 
 import asyncpg
 
-from apps.user_service.app.dependencies.logger import get_logger
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("user_repository")
 

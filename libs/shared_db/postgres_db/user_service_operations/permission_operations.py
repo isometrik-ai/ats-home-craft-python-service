@@ -3,14 +3,14 @@ This module contains all permission-related database operations.
 All SQL queries for permission management should be centralized here.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import (
     CreatePermissionRequest,
 )
-from libs import NOW_CONSTANT
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("permission_operations")
 
@@ -33,7 +33,7 @@ async def create_new_permission(
         "category": permission_data.category,
         "description": permission_data.description,
         "organization_id": organization_id,
-        "created_at": NOW_CONSTANT,
+        "created_at": datetime.now(UTC),
     }
 
     result = await supabase.table("permissions").insert(permission_record).execute()

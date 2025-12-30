@@ -11,7 +11,6 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import (
     CreateRoleRequest,
     CreateRoleResponse,
@@ -33,6 +32,7 @@ from libs.shared_utils.common_query import (
     ROLES_MANAGEMENT_EDIT,
     ROLES_MANAGEMENT_VIEW,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 

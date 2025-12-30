@@ -9,11 +9,11 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.db.repositories.session_repository import SessionRepository
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import SessionItem
 from apps.user_service.app.schemas.auth import SessionFilter
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import BadRequestException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("session_service")

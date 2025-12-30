@@ -29,13 +29,13 @@ from fastapi import Request
 from apps.user_service.app.db.repositories.audit_log_repository import (
     AuditLogRepository,
 )
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.services.audit_log_service import (
     AuditLogService,
 )
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.drivers.asyncpg_uow import UnitOfWork
 from libs.shared_utils.http_exceptions import InternalServerErrorException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("audit_logs")

@@ -1,124 +1,147 @@
-"""Shared FastAPI exception handler utilities."""
+"""FastAPI exception handlers."""
 
-from fastapi import FastAPI
-from fastapi import HTTPException as FastAPIHTTPException
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
+from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from libs.shared_utils.http_exceptions import (
+    BadRequestException,
+    CustomHTTPException,
+    DuplicateValueException,
+    ForbiddenException,
+    NotFoundException,
+    RateLimitExceededException,
+    UnauthorizedException,
+    ValidationException,
+)
 from libs.shared_utils.response_factory import error_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
-class FastAPIExceptionHandlers:
-    """Configurable exception handlers for FastAPI apps."""
+def _handle_http_exception(request: Request, exc: StarletteHTTPException):
+    """Handle StarletteHTTPException."""
+    status_map = {
+        404: ("errors.not_found", CustomStatusCode.NOT_FOUND),
+        403: ("errors.forbidden", CustomStatusCode.FORBIDDEN),
+        401: ("errors.unauthorized", CustomStatusCode.UNAUTHORIZED),
+        405: ("errors.method_not_allowed", CustomStatusCode.BAD_REQUEST),
+        429: ("errors.rate_limit_exceeded", CustomStatusCode.RATE_LIMIT_EXCEEDED),
+        500: ("errors.server_error", CustomStatusCode.SERVER_ERROR),
+    }
 
-    def register(self, app: FastAPI) -> None:
-        """Register handlers on the provided FastAPI instance."""
+    key, custom_code = status_map.get(
+        exc.status_code,
+        (f"errors.status_{exc.status_code}", CustomStatusCode.BAD_REQUEST),
+    )
 
-        @app.exception_handler(StarletteHTTPException)
-        async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-            return self._handle_http_exception(request, exc)
+    params = {}
+    if exc.status_code == 405:
+        params = {"method": request.method, "path": request.url.path}
+    elif exc.status_code == 429 and "Retry-After" in exc.headers:
+        params = {"retry_after": exc.headers["Retry-After"]}
 
-        @app.exception_handler(FastAPIHTTPException)
-        async def fastapi_http_exception_handler(request: Request, exc: FastAPIHTTPException):
-            return self._handle_http_exception(request, exc)
+    return error_response(
+        request=request,
+        message_key=key,
+        status_code=exc.status_code,
+        custom_code=custom_code,
+        params=params if params else None,
+        headers=exc.headers if hasattr(exc, "headers") else None,
+    )
 
-        @app.exception_handler(RequestValidationError)
-        async def validation_exception_handler(request: Request, exc: RequestValidationError):
-            return self._handle_validation_exception(request, exc)
 
-        @app.exception_handler(Exception)
-        async def unexpected_exception_handler(request: Request, exc: Exception):
-            return self._handle_unexpected_exception(request, exc)
+def _handle_validation_exception(request: Request, exc: RequestValidationError | ValidationError):
+    """Handle RequestValidationError."""
+    detailed_errors = []
+    first_error = exc.errors()[0] if exc.errors() else None
+    first_error_msg = (
+        first_error.get("msg", "Unknown error") if first_error else "Unknown validation error"
+    )
 
-        @app.exception_handler(ValidationError)
-        async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
-            return self._handle_validation_exception(request, exc)
+    if first_error and first_error.get("type") == "missing":
+        param_name = first_error.get("loc", ["unknown"])[-1]
+        first_error_msg = f"Missing required parameter: {param_name}"
+        message_key = "errors.missing_required_param"
+        params = {"param_name": param_name}
+    else:
+        message_key = "errors.validation"
+        params = {"message": first_error_msg}
 
-        @app.exception_handler(ValueError)
-        async def value_error_exception_handler(request: Request, exc: ValueError):
-            return self._handle_value_error_exception(request, exc)
+    # Known header fields to improve location hints for header/dependency validation
+    header_fields = {
+        "authorization",
+        "lan",
+        "x-tenant-id",
+        "x-project-id",
+        "city",
+        "state",
+        "country",
+        "ipaddress",
+        "latitude",
+        "longitude",
+        "platform",
+        "version",
+    }
 
-    def _handle_http_exception(
-        self,
-        request: Request,
-        exc: StarletteHTTPException | FastAPIHTTPException,
-    ):
-        """Handle HTTP exceptions (both Starlette and FastAPI)."""
-        status_map = {
-            404: ("errors.not_found", CustomStatusCode.NOT_FOUND),
-            403: ("errors.forbidden", CustomStatusCode.FORBIDDEN),
-            401: ("errors.unauthorized", CustomStatusCode.UNAUTHORIZED),
-            405: ("errors.method_not_allowed", CustomStatusCode.BAD_REQUEST),
-            429: ("errors.rate_limit_exceeded", CustomStatusCode.RATE_LIMIT_EXCEEDED),
-            500: ("errors.internal_server_error", CustomStatusCode.INTERNAL_SERVER_ERROR),
-        }
+    for error in exc.errors():
+        loc_parts = [str(loc) for loc in error.get("loc", [])]
 
-        key, custom_code = status_map.get(
-            exc.status_code,
-            (f"errors.status_{exc.status_code}", CustomStatusCode.BAD_REQUEST),
+        # If location lacks a section prefix and looks like one of our headers, prefix it
+        if loc_parts and loc_parts[0] not in {"body", "query", "path", "header", "cookie"}:
+            if loc_parts[0] in header_fields:
+                loc_parts.insert(0, "headers")
+
+        location = ".".join(loc_parts)
+        detailed_errors.append(
+            {
+                "field": location,
+                "type": error.get("type", ""),
+                "msg": error.get("msg", ""),
+            },
         )
 
-        params = {}
-        if exc.status_code == 405:
-            params = {"method": request.method, "path": request.url.path}
-        elif exc.status_code == 429 and "Retry-After" in exc.headers:
-            params = {"retry_after": exc.headers["Retry-After"]}
+    return error_response(
+        request=request,
+        message_key=message_key,
+        status_code=422,
+        custom_code=CustomStatusCode.VALIDATION_ERROR,
+        errors=detailed_errors,
+        params=params,
+    )
 
-        return error_response(
-            request=request,
-            message_key=key,
-            status_code=exc.status_code,
-            custom_code=custom_code,
-            params=params if params else None,
-            headers=exc.headers if hasattr(exc, "headers") else None,
-        )
 
-    def _handle_validation_exception(
-        self, request: Request, exc: RequestValidationError | ValidationError
-    ):
-        """Handle request validation errors."""
-        detailed_errors = []
-        first_error = exc.errors()[0] if exc.errors() else None
-        first_error_msg = (
-            first_error.get("msg", "Unknown error") if first_error else "Unknown validation error"
-        )
+def _register_http_exception_handler(app: FastAPI) -> None:
+    """Register HTTP exception handler."""
 
-        if first_error and first_error.get("type") == "missing":
-            param_name = first_error.get("loc", ["unknown"])[-1]
-            first_error_msg = f"Missing required parameter: {param_name}"
-            message_key = "errors.missing_required_param"
-            params = {"param_name": param_name}
-        else:
-            message_key = "errors.validation"
-            params = {"message": first_error_msg}
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        return _handle_http_exception(request, exc)
 
-        for error in exc.errors():
-            loc_parts = [str(loc) for loc in error.get("loc", [])]
 
-            # If location lacks a section prefix and looks like one of our headers, prefix it
-            location = ".".join(loc_parts)
-            detailed_errors.append(
-                {
-                    "field": location,
-                    "type": error.get("type", ""),
-                    "msg": error.get("msg", ""),
-                },
-            )
+def _register_validation_exception_handler(app: FastAPI) -> None:
+    """Register validation exception handler."""
 
-        return error_response(
-            request=request,
-            message_key=message_key,
-            status_code=422,
-            custom_code=CustomStatusCode.VALIDATION_ERROR,
-            errors=detailed_errors,
-            params=params,
-        )
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        return _handle_validation_exception(request, exc)
 
-    def _handle_value_error_exception(self, request: Request, exc: ValueError):
-        """Handle value error exceptions."""
+
+def _register_pydantic_validation_exception_handler(app: FastAPI) -> None:
+    """Register raw Pydantic validation exception handler (e.g., dependency models)."""
+
+    @app.exception_handler(ValidationError)
+    async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
+        # Reuse the same shape as RequestValidationError
+        return _handle_validation_exception(request, exc)
+
+
+def _register_value_error_exception_handler(app: FastAPI) -> None:
+    """Register ValueError handler to return uniform bad request responses."""
+
+    @app.exception_handler(ValueError)
+    async def value_error_exception_handler(request: Request, exc: ValueError):
         msg = str(exc) or "Invalid value"
         errors = [{"field": None, "type": "value_error", "msg": msg}]
         return error_response(
@@ -130,34 +153,175 @@ class FastAPIExceptionHandlers:
             params={"message": msg},
         )
 
-    def _handle_unexpected_exception(self, request: Request, exc: Exception):
-        """Handle unexpected exceptions."""
 
+def _register_not_found_exception_handler(app: FastAPI) -> None:
+    """Register not found exception handler."""
+
+    @app.exception_handler(NotFoundException)
+    async def not_found_exception_handler(request: Request, exc: NotFoundException):
         return error_response(
             request=request,
-            message_key="errors.internal_server_error",
-            status_code=500,
-            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
-            errors=[{"field": None, "type": "unexpected_error", "msg": str(exc)}],
+            message_key=exc.message_key or "errors.not_found",
+            status_code=404,
+            custom_code=exc.custom_code or CustomStatusCode.NOT_FOUND,
+            params=exc.params or None,
+            errors=exc.errors or None,
+            headers=exc.headers or None,
         )
 
 
-def register_exception_handlers(
-    app: FastAPI,
-    *,
-    handlers: FastAPIExceptionHandlers | None = None,
-) -> FastAPIExceptionHandlers:
-    """Register exception handlers on the provided FastAPI app.
+def _register_duplicate_value_exception_handler(app: FastAPI) -> None:
+    """Register duplicate value exception handler."""
 
-    Returns the handler instance for further customization if needed.
-    """
+    @app.exception_handler(DuplicateValueException)
+    async def duplicate_value_exception_handler(request: Request, exc: DuplicateValueException):
+        return error_response(
+            request=request,
+            message_key=exc.message_key or "errors.duplicate_value",
+            status_code=409,
+            custom_code=exc.custom_code or CustomStatusCode.DUPLICATE_ENTRY,
+            params=exc.params or None,
+            errors=exc.errors or None,
+            headers=exc.headers or None,
+        )
 
-    instance = handlers or FastAPIExceptionHandlers()
-    instance.register(app)
-    return instance
+
+def _register_rate_limit_exception_handler(app: FastAPI) -> None:
+    """Register rate limit exception handler."""
+
+    @app.exception_handler(RateLimitExceededException)
+    async def rate_limit_exceeded_exception_handler(
+        request: Request, exc: RateLimitExceededException
+    ):
+        headers = {"Retry-After": str(exc.retry_after)} if hasattr(exc, "retry_after") else None
+        return error_response(
+            request=request,
+            message_key="errors.rate_limit_exceeded",
+            status_code=429,
+            custom_code=CustomStatusCode.RATE_LIMIT_EXCEEDED,
+            params={"retry_after": exc.retry_after} if hasattr(exc, "retry_after") else None,
+            headers=headers,
+        )
 
 
-__all__ = [
-    "FastAPIExceptionHandlers",
-    "register_exception_handlers",
-]
+def _register_slowapi_rate_limit_exception_handler(app: FastAPI) -> None:
+    """Register slowapi rate limit exception handler."""
+
+    @app.exception_handler(RateLimitExceeded)
+    async def slowapi_rate_limit_exceeded_exception_handler(
+        request: Request, exc: RateLimitExceeded
+    ):
+        # Extract retry_after from the exception if available
+        retry_after = getattr(exc, "retry_after", 60)
+        headers = {"Retry-After": str(retry_after)}
+
+        return error_response(
+            request=request,
+            message_key="errors.rate_limit_exceeded",
+            status_code=429,
+            custom_code=CustomStatusCode.RATE_LIMIT_EXCEEDED,
+            params={"retry_after": retry_after},
+            headers=headers,
+        )
+
+
+def _register_validation_custom_exception_handler(app: FastAPI) -> None:
+    """Register custom validation exception handler."""
+
+    @app.exception_handler(ValidationException)
+    async def custom_validation_exception_handler(request: Request, exc: ValidationException):
+        return error_response(
+            request=request,
+            message_key=exc.message_key,
+            status_code=exc.status_code,
+            custom_code=exc.custom_code,
+            params=exc.params,
+            errors=exc.errors,
+            headers=exc.headers if hasattr(exc, "headers") else None,
+        )
+
+
+def _register_custom_http_exception_handler(app: FastAPI) -> None:
+    """Register custom HTTP exception handler."""
+
+    @app.exception_handler(CustomHTTPException)
+    async def custom_http_exception_handler(request: Request, exc: CustomHTTPException):
+        return error_response(
+            request=request,
+            message_key=exc.message_key,
+            status_code=exc.status_code,
+            custom_code=exc.custom_code,
+            params=exc.params,
+            errors=exc.errors,
+            headers=exc.headers if hasattr(exc, "headers") else None,
+        )
+
+
+def _register_unauthorized_exception_handler(app: FastAPI) -> None:
+    """Register unauthorized exception handler."""
+
+    @app.exception_handler(UnauthorizedException)
+    async def unauthorized_exception_handler(request: Request, exc: UnauthorizedException):
+        return error_response(
+            request=request,
+            message_key=exc.message_key,
+            status_code=exc.status_code,
+            custom_code=exc.custom_code,
+            params=exc.params,
+            errors=exc.errors,
+            headers=exc.headers,
+        )
+
+
+def _register_forbidden_exception_handler(app: FastAPI) -> None:
+    """Register forbidden exception handler."""
+
+    @app.exception_handler(ForbiddenException)
+    async def forbidden_exception_handler(request: Request, exc: ForbiddenException):
+        return error_response(
+            request=request,
+            message_key=exc.message_key,
+            status_code=exc.status_code,
+            custom_code=exc.custom_code,
+            params=exc.params,
+            errors=exc.errors,
+            headers=exc.headers,
+        )
+
+
+def _register_bad_request_exception_handler(app: FastAPI) -> None:
+    """Register bad request exception handler."""
+
+    @app.exception_handler(BadRequestException)
+    async def bad_request_exception_handler(request: Request, exc: BadRequestException):
+        return error_response(
+            request=request,
+            message_key=exc.message_key,
+            status_code=exc.status_code,
+            custom_code=exc.custom_code,
+            params=exc.params,
+            errors=exc.errors,
+            headers=exc.headers,
+        )
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """Register all exception handlers with the FastAPI app."""
+    handlers = [
+        _register_http_exception_handler,
+        _register_validation_exception_handler,
+        _register_pydantic_validation_exception_handler,
+        _register_value_error_exception_handler,
+        _register_not_found_exception_handler,
+        _register_duplicate_value_exception_handler,
+        _register_rate_limit_exception_handler,
+        _register_slowapi_rate_limit_exception_handler,
+        _register_validation_custom_exception_handler,
+        _register_custom_http_exception_handler,
+        _register_unauthorized_exception_handler,
+        _register_forbidden_exception_handler,
+        _register_bad_request_exception_handler,
+    ]
+
+    for handler in handlers:
+        handler(app)

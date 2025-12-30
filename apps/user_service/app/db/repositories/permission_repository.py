@@ -8,11 +8,11 @@ from datetime import datetime, timezone
 
 import asyncpg
 
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import (
     CreatePermissionRequest,
 )
 from libs.shared_utils.common_query import DEFAULT_PERMISSIONS
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("permissions_repository")
 

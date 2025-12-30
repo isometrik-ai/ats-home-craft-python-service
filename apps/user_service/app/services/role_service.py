@@ -5,7 +5,6 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.admin_access_management import (
     CreateRoleRequest,
     RoleDetailItem,
@@ -25,6 +24,7 @@ from libs.shared_utils.http_exceptions import (
     ForbiddenException,
     NotFoundException,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("role_service")

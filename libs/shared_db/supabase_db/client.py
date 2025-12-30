@@ -1,5 +1,4 @@
-"""
-Supabase async client factory with caching.
+"""Supabase async client factory with caching.
 
 Provides two cached clients:
 - Anon client (RLS-enforced)
@@ -8,19 +7,14 @@ Provides two cached clients:
 
 from __future__ import annotations
 
-import os
-from typing import Optional
-
 from httpx import AsyncClient as HTTPXAsyncClient
 from supabase import AsyncClient, ClientOptions, create_async_client
 
-from libs.shared_db.common import setup_import_paths_and_env
+from libs.shared_config.app_settings import shared_settings
 
-setup_import_paths_and_env()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_URL = shared_settings.supabase.url
+SUPABASE_ANON_KEY = shared_settings.supabase.anon_key
+SUPABASE_SERVICE_KEY = shared_settings.supabase.service_key
 
 
 class _SupabaseCache:
@@ -31,9 +25,11 @@ class _SupabaseCache:
         self.service: AsyncClient | None = None
 
     def reset_service(self) -> None:
+        """Reset the cached service client."""
         self.service = None
 
     def reset_all(self) -> None:
+        """Reset all cached clients."""
         self.anon = None
         self.service = None
 
@@ -42,9 +38,7 @@ _cache = _SupabaseCache()
 
 
 async def get_supabase_client() -> AsyncClient:
-    """
-    Get the cached anon Supabase client (RLS enforced).
-    """
+    """Get the cached anon Supabase client (RLS enforced)."""
     if _cache.anon is None:
         if not SUPABASE_URL or not SUPABASE_ANON_KEY:
             raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY must be set for anon client.")
@@ -53,10 +47,17 @@ async def get_supabase_client() -> AsyncClient:
 
 
 async def get_supabase_service_client(
-    user_agent: Optional[str] = None, custom_headers: Optional[dict] = None
+    user_agent: str | None = None, custom_headers: dict | None = None
 ) -> AsyncClient:
-    """
-    Get the cached service-role Supabase client (admin privileges).
+    """Get the cached service-role Supabase client (admin privileges).
+    Args:
+        user_agent: Optional User-Agent string
+        custom_headers: Optional dict of additional custom headers (e.g., X-Device-Signature)
+    Returns:
+        AsyncClient: The cached service-role Supabase client
+    Raises:
+        RuntimeError: If SUPABASE_URL or SUPABASE_SERVICE_KEY is not set
+        Exception: If the service client warm-up fails
     """
     if _cache.service is None or user_agent or custom_headers:
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:

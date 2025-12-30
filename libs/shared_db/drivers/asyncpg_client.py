@@ -18,16 +18,15 @@ Production-minded options (env):
 - DB_MAX_IDLE_TIME (seconds; passed to asyncpg max_inactive_connection_lifetime)
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
-import os
 import random
 import ssl
 from collections.abc import Awaitable, Callable
 
 import asyncpg
+
+from libs.shared_config.app_settings import shared_settings
 
 # Internal singleton pool reference kept in a holder to avoid globals
 _pool_holder: dict[str, asyncpg.Pool | None] = {"pool": None}
@@ -38,22 +37,22 @@ def _build_dsn() -> str:
 
     Prefers a single DATABASE_URL; otherwise composes from individual parts.
     """
-    dsn = os.getenv("DATABASE_URL")
+    dsn = shared_settings.database.url
     if dsn:
         return dsn
 
-    host = os.getenv("DB_HOST", "localhost")
-    port = os.getenv("DB_PORT", "5432")
-    name = os.getenv("DB_DATABASE", "")
-    user = os.getenv("DB_USER", "")
-    password = os.getenv("DB_PASSWORD", "")
+    host = shared_settings.database.host
+    port = shared_settings.database.port
+    name = shared_settings.database.database
+    user = shared_settings.database.user
+    password = shared_settings.database.password
 
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"
 
 
 def _make_ssl_context() -> ssl.SSLContext | None:
     """Build an SSL context based on DB_SSL_MODE."""
-    mode = os.getenv("DB_SSL_MODE", "disable").lower()
+    mode = shared_settings.database.ssl_mode
     if mode == "disable":
         return None
     if mode == "require":
@@ -62,7 +61,7 @@ def _make_ssl_context() -> ssl.SSLContext | None:
         ctx.verify_mode = ssl.CERT_NONE
         return ctx
     if mode == "verify-full":
-        cafile = os.getenv("DB_SSL_ROOT_CERT")
+        cafile = shared_settings.database.ssl_root_cert
         ctx = ssl.create_default_context(cafile=cafile)
         ctx.check_hostname = True
         ctx.verify_mode = ssl.CERT_REQUIRED
@@ -106,14 +105,13 @@ async def get_pool() -> asyncpg.Pool:
 
     dsn = _build_dsn()
     # Defaults align with .env (see DB_MIN_POOL, DB_MAX_POOL, etc.)
-    min_size = int(os.getenv("DB_MIN_POOL", "1"))
-    max_size = int(os.getenv("DB_MAX_POOL", "10"))
-    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "30.0"))
+    min_size = shared_settings.database.min_pool
+    max_size = shared_settings.database.max_pool
+    command_timeout = shared_settings.database.command_timeout
     ssl_context = _make_ssl_context()
-    max_idle = float(os.getenv("DB_MAX_IDLE_TIME", "300.0"))
+    max_idle = shared_settings.database.max_idle_time
 
-    statement_timeout_env = os.getenv("DB_STATEMENT_TIMEOUT_MS")
-    statement_timeout_ms = int(statement_timeout_env) if statement_timeout_env is not None else None
+    statement_timeout_ms = shared_settings.database.statement_timeout_ms
     init_cb = _init_connection_factory(statement_timeout_ms)
 
     pool = await asyncpg.create_pool(
@@ -145,10 +143,9 @@ class AcquireConnection:
         self.conn: asyncpg.Connection | None = None
 
     async def __aenter__(self) -> asyncpg.Connection:
-        max_attempts = int(os.getenv("DB_ACQUIRE_MAX_RETRY", "3"))
-        base_delay = float(os.getenv("DB_ACQUIRE_BASE_DELAY", "1.0"))
-        acquire_timeout_env = os.getenv("DB_ACQUIRE_TIMEOUT", "10.0")
-        acquire_timeout = float(acquire_timeout_env) if acquire_timeout_env else None
+        max_attempts = shared_settings.database.acquire_max_retry
+        base_delay = shared_settings.database.acquire_base_delay
+        acquire_timeout = shared_settings.database.acquire_timeout
 
         last_exc: Exception | None = None
         for attempt in range(1, max_attempts + 1):

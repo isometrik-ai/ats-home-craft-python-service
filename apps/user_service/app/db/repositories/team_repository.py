@@ -7,7 +7,6 @@ transaction handling and efficient batch operations.
 
 import asyncpg
 
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.teams import (
     TeamDbDelete,
     TeamDbIn,
@@ -15,6 +14,7 @@ from apps.user_service.app.schemas.teams import (
     TeamRoles,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("team_repository")

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.config.app_settings import app_settings
 from apps.user_service.app.db.repositories import (
     InviteRepository,
     OrganisationMemberRepository,
@@ -39,14 +39,8 @@ from libs.shared_utils.http_exceptions import (
     NotFoundException,
     ServiceUnavailableException,
 )
-from libs.shared_utils.isometrik_service import (
-    create_isometrik_user,
-    is_isometrik_enabled,
-)
+from libs.shared_utils.isometrik_service import create_isometrik_user
 from libs.shared_utils.status_codes import CustomStatusCode
-
-INVITE_EXPIRY_DAYS = int(os.getenv("INVITE_EXPIRY_DAYS", "7"))
-BASE_URL = os.getenv("BASE_URL")
 
 
 class InviteService:
@@ -105,7 +99,10 @@ class InviteService:
         Returns:
             str: The complete invitation URL
         """
-        return f"{BASE_URL.rstrip('/')}/invite/accept/?token={invite_token}&page=invite-user"
+        return (
+            f"{app_settings.shared_settings.website_url.rstrip('/')}"
+            f"/invite/accept/?token={invite_token}&page=invite-user"
+        )
 
     def _format_datetime_iso(self, dt: datetime | Any) -> str:
         """Format datetime to ISO string.
@@ -349,7 +346,7 @@ class InviteService:
 
         # Generate invite token
         invite_token, token_hash = self._generate_invite_token()
-        expires_at = datetime.now(timezone.utc) + timedelta(days=INVITE_EXPIRY_DAYS)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=app_settings.invite_expiry_days)
 
         invite_data = {
             "organization_id": organization_id,
@@ -475,7 +472,9 @@ class InviteService:
 
         # Generate fresh token and extend expiration date when resending
         invite_token, token_hash = self._generate_invite_token()
-        new_expires_at = datetime.now(timezone.utc) + timedelta(days=INVITE_EXPIRY_DAYS)
+        new_expires_at = datetime.now(timezone.utc) + timedelta(
+            days=app_settings.invite_expiry_days
+        )
         updated_invitation = await self.invite_repository.update_invite_token_and_expiration(
             invite_id, token_hash, new_expires_at
         )
@@ -524,24 +523,23 @@ class InviteService:
     ) -> dict[str, Any]:
         """Add user to organization as a member."""
         isometrik_user_id = None
-        if is_isometrik_enabled():
-            isometrik_response = await create_isometrik_user(
-                user_id=invite_data["user_id"],
-                first_name=invite_data.get("first_name", None),
-                last_name=invite_data.get("last_name", None),
-                email=email,
-                isometrik_credentials=isometrik_credentials,
-                organization_id=organization_id,
-                role="member",
-            )
-            if isometrik_response:
-                isometrik_user_id = isometrik_response.get("userId", None)
+        isometrik_response = await create_isometrik_user(
+            user_id=invite_data["user_id"],
+            first_name=invite_data.get("first_name", None),
+            last_name=invite_data.get("last_name", None),
+            email=email,
+            isometrik_credentials=isometrik_credentials,
+            organization_id=organization_id,
+            role="member",
+        )
+        if isometrik_response:
+            isometrik_user_id = isometrik_response.get("userId", None)
 
-                if not isometrik_user_id:
-                    raise ServiceUnavailableException(
-                        message_key="errors.isometrik.failed_to_create_user",
-                        custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
-                    )
+            if not isometrik_user_id:
+                raise ServiceUnavailableException(
+                    message_key="errors.isometrik.failed_to_create_user",
+                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+                )
 
         if isometrik_user_id:
             invite_data["isometrik_user_id"] = isometrik_user_id

@@ -3,12 +3,12 @@ This module contains all role-related database operations.
 All SQL queries for role management should be centralized here.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger
-from libs import NOW_CONSTANT
 from libs.shared_db.supabase_db.db import get_supabase_admin_client
 from libs.shared_utils.common_query import ROLE_SELECT_FIELDS
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("role_operations")
 
@@ -32,8 +32,8 @@ async def create_role(
         "description": description,
         "organization_id": organization_id,
         "is_default": is_default,
-        "created_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT,
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
     }
 
     result = await supabase.table("roles").insert(role_record).execute()
@@ -91,7 +91,7 @@ async def update_role(
         return {}
 
     # Add updated_at
-    update_payload["updated_at"] = NOW_CONSTANT
+    update_payload["updated_at"] = datetime.now(UTC)
 
     result = (
         await supabase.table("roles")
@@ -236,7 +236,7 @@ async def assign_permissions_to_role(
                 "organization_id": organization_id,
                 "role_id": role_id,
                 "permission_id": permission_id,
-                "created_at": NOW_CONSTANT,
+                "created_at": datetime.now(UTC),
             }
         )
 

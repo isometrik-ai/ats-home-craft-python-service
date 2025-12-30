@@ -8,7 +8,7 @@ import hashlib
 import json
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger
+from libs.shared_utils.logger import get_logger
 
 # Initialize logger
 logger = get_logger("invite_utils")

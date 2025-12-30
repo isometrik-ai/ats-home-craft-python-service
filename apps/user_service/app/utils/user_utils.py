@@ -3,7 +3,6 @@
 from datetime import datetime
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger  # Logger import
 from apps.user_service.app.schemas.users import (
     PermissionInfo,
     RoleInfo,
@@ -11,6 +10,7 @@ from apps.user_service.app.schemas.users import (
     UserProfileData,
     VerificationPreference,
 )
+from libs.shared_utils.logger import get_logger  # Logger import
 
 # Initialize logger
 logger = get_logger("user-utils")

@@ -9,7 +9,6 @@ Last Updated: 2024-12-19
 """
 
 import ipaddress
-import os
 import secrets
 import time
 from datetime import datetime, timezone
@@ -23,6 +22,8 @@ from supabase.lib.client_options import AsyncClientOptions
 from supabase_auth.helpers import model_dump_json
 from supabase_auth.types import Session as SupabaseSession
 
+from apps.user_service.app.config.app_settings import app_settings
+
 # Database operations imports
 from apps.user_service.app.db.repositories import (
     OrganisationMemberRepository,
@@ -30,25 +31,12 @@ from apps.user_service.app.db.repositories import (
     VerificationCodeRepository,
 )
 
-# Utility imports
-from apps.user_service.app.dependencies.logger import get_logger
-
 # Schema imports
 from apps.user_service.app.schemas.verification_codes import (
     SendVerificationCodeRequest,
     VerificationTrigger,
     VerificationType,
     VerifyVerificationCodeRequest,
-)
-from libs.shared_db.postgres_db.user_service_operations.verification_operations import (
-    DEFAULT_OTP,
-    EMAIL_DEFAULT_OTP,
-    EMAIL_OTP_ENABLED,
-    MAX_ATTEMPT_VERIFICATION,
-    OTP_ENABLED,
-    PHONE_DEFAULT_OTP,
-    PHONE_OTP_ENABLED,
-    VERIFICATION_ATTEMPT_WINDOW_HOURS,
 )
 
 # Shared library imports
@@ -66,13 +54,13 @@ from libs.shared_utils.http_exceptions import (
     TooManyRequestsException,
     UnauthorizedException,
 )
+
+# Utility imports
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 # Initialize logger
 logger = get_logger("verification-code-service")
-
-# Environment variables
-VERIFICATION_CODE_EXPIRY_MINUTES = int(os.getenv("VERIFICATION_CODE_EXPIRY_MINUTES", "10"))
 
 
 class VerificationCodeService:
@@ -429,8 +417,8 @@ class VerificationCodeService:
         Raises:
             InternalServerErrorException: If Supabase configuration is missing
         """
-        supabase_url = os.getenv("SUPABASE_URL")
-        supabase_anon_key = os.getenv("SUPABASE_ANON_KEY")
+        supabase_url = app_settings.shared_settings.supabase.url
+        supabase_anon_key = app_settings.shared_settings.supabase.anon_key
 
         if not supabase_url or not supabase_anon_key:
             raise InternalServerErrorException(
@@ -466,7 +454,7 @@ class VerificationCodeService:
             )
 
         # Decode JWT to get expiration time
-        supabase_jwt_secret = os.getenv("SUPABASE_JWT_SECRET")
+        supabase_jwt_secret = app_settings.shared_settings.supabase.jwt_secret
         if not supabase_jwt_secret:
             raise InternalServerErrorException(
                 message_key="errors.missing_configuration",
@@ -821,21 +809,21 @@ class VerificationCodeService:
         recent_codes = await self.verification_code_repository.get_recent_verification_codes(
             type_text=verification_type,
             given_input=given_input,
-            limit=MAX_ATTEMPT_VERIFICATION,
-            window_hours=VERIFICATION_ATTEMPT_WINDOW_HOURS,
+            limit=app_settings.two_fa_settings.max_attempt_verification,
+            window_hours=app_settings.two_fa_settings.verification_attempt_window_hours,
         )
 
         unverified_count = sum(1 for code in recent_codes if not code.get("verified", False))
 
-        if unverified_count >= MAX_ATTEMPT_VERIFICATION:
+        if unverified_count >= app_settings.two_fa_settings.max_attempt_verification:
             raise TooManyRequestsException(
                 message_key="verification_codes.errors.maximum_send_otp_attempts_reached",
                 custom_code=CustomStatusCode.RATE_LIMIT_EXCEEDED,
-                params={"max_attempts": MAX_ATTEMPT_VERIFICATION},
+                params={"max_attempts": app_settings.two_fa_settings.max_attempt_verification},
             )
 
         # Calculate remaining attempts after creating new code
-        attempts_left = MAX_ATTEMPT_VERIFICATION - unverified_count - 1
+        attempts_left = app_settings.two_fa_settings.max_attempt_verification - unverified_count - 1
         return attempts_left
 
     async def create_verification_code(
@@ -862,16 +850,11 @@ class VerificationCodeService:
         # Determine OTP
         type_upper = type_text.upper()
         if type_upper == "EMAIL":
-            otp_enabled = EMAIL_OTP_ENABLED
-            default_otp = EMAIL_DEFAULT_OTP
-        elif type_upper == "PHONE_NUMBER":
-            otp_enabled = PHONE_OTP_ENABLED
-            default_otp = PHONE_DEFAULT_OTP
-        else:
-            # Fallback to legacy settings for unknown types
-            otp_enabled = OTP_ENABLED
-            default_otp = DEFAULT_OTP
-            logger.warning("Unknown verification type '%s', using legacy OTP settings", type_text)
+            otp_enabled = app_settings.two_fa_settings.email_otp_enabled
+            default_otp = app_settings.two_fa_settings.email_default_otp
+        else:  # PHONE_NUMBER
+            otp_enabled = app_settings.two_fa_settings.phone_otp_enabled
+            default_otp = app_settings.two_fa_settings.phone_default_otp
 
         if otp_enabled:
             # Generate cryptographically secure random 4-digit code (1000-9999)
@@ -883,7 +866,9 @@ class VerificationCodeService:
 
         # Expiry time in milliseconds
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        expiry_at = current_time_ms + (VERIFICATION_CODE_EXPIRY_MINUTES * 60 * 1000)
+        expiry_at = current_time_ms + (
+            app_settings.two_fa_settings.verification_code_expiry_minutes * 60 * 1000
+        )
 
         verification_data = {
             "type_text": type_text,
@@ -951,10 +936,8 @@ class VerificationCodeService:
             send_verification_code_email(
                 email=given_input,
                 otp_code=verification_code,
-                expiry_minutes=VERIFICATION_CODE_EXPIRY_MINUTES,
+                expiry_minutes=app_settings.two_fa_settings.verification_code_expiry_minutes,
             )
-
-        logger.info("Verification code sent for %s: %s", data.type.value, given_input)
 
         # Return response data
         return {

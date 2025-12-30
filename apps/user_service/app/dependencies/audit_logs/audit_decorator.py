@@ -13,7 +13,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_logger import (
     AuditEventData,
     audit_logger,
 )
-from apps.user_service.app.dependencies.logger import get_logger
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("audit_logs")
 

@@ -6,12 +6,12 @@ All Supabase queries for session management should be centralized here.
 from datetime import datetime, timezone
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.auth import SessionFilter
 from libs.shared_db.supabase_db.db import (
     get_fresh_supabase_admin_client,
     get_supabase_admin_client,
 )
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger(__name__)
 

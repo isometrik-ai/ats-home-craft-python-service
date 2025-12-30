@@ -7,7 +7,7 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.dependencies.logger import get_logger
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("organisation_member_repository")
 

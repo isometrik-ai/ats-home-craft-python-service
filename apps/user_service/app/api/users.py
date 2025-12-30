@@ -10,7 +10,6 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.users import (
     UpdateUserEmailRequest,
     UpdateUserProfileRequest,
@@ -25,6 +24,7 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 

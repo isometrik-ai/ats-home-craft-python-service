@@ -13,7 +13,6 @@ from apps.user_service.app.db.repositories.organisation_member_repository import
     OrganisationMemberRepository,
 )
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.users import (
     PermissionInfo,
     RoleInfoWithDescription,
@@ -32,6 +31,7 @@ from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
     update_supabase_user_email,
 )
 from libs.shared_utils.http_exceptions import BadRequestException, NotFoundException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("user_service")
@@ -381,72 +381,126 @@ class UserService:
     async def get_user_profile_with_metadata(
         self, user_id: str, organization_id: str | None = None
     ) -> dict[str, Any]:
-        """Get complete user profile with metadata from Supabase Auth.
-
-        This method handles all business logic for getting user profile:
-        - Fetches user from organization_members
-        - Fetches metadata from Supabase Auth
-        - Merges and enriches the data
-        - Gets user permissions
-        - Updates user activity
-        - Formats response data for API
-
+        """Get complete user profile merged with Supabase Auth metadata.
         Args:
             user_id: User ID
-            organization_id: Optional organization ID
-
+            organization_id: Organization ID
         Returns:
-            dict containing:
-            - profile_data: UserProfileData formatted data
-            - audit_data: Audit data for logging
+            dict[str, Any]: User profile data
         """
-        # Get user profile from organization_members
         user_profile = await self.get_user_profile_by_id(user_id, organization_id)
-
-        # Get user data from Supabase Auth
         user_data = await get_user_by_id(user_id)
-        current_email = self.user_context.email
-        current_phone = None
-        user_metadata = {}
 
-        if user_data and user_data.user:
-            user_obj = user_data.user
-            if hasattr(user_obj, "email_change") and user_obj.email_change:
-                current_email = user_obj.email_change
-            else:
-                current_email = user_obj.email
+        current_email, user_metadata, current_phone = self._extract_auth_user_contact(
+            user_data, fallback_email=self.user_context.email
+        )
 
-            user_metadata = user_obj.user_metadata or {}
+        user_profile = self._build_or_update_profile(
+            base_profile=user_profile,
+            user_metadata=user_metadata,
+            user_id=user_id,
+            current_email=current_email,
+            current_phone=current_phone,
+        )
 
-            if user_metadata and user_metadata.get("phone"):
-                current_phone = user_metadata.get("phone")
-            elif hasattr(user_obj, "phone") and user_obj.phone:
-                current_phone = user_obj.phone
-            elif hasattr(user_obj, "phone_change") and user_obj.phone_change:
-                current_phone = user_obj.phone_change
+        user_profile["verification_preference"] = self._extract_verification_preference(
+            user_metadata
+        )
 
-        # If no profile in organization_members, create from metadata
-        if not user_profile:
+        identities = self._build_identities(user_data)
+        if identities:
+            user_profile["identities"] = identities
+
+        permissions_data = await self._get_permissions_with_activity(user_id, organization_id)
+
+        if user_profile.get("roles") and isinstance(user_profile["roles"], dict):
+            user_profile["role_description"] = user_profile["roles"].get("description", "")
+
+        user_profile["permissions"] = permissions_data
+
+        role_info = self._build_role_info(user_profile)
+        permissions = self._format_permissions(permissions_data)
+
+        profile_data = create_user_profile_data(
+            user_profile=user_profile,
+            user_type=self.user_context.user_type or "organization_member",
+            role_info=role_info,
+            permissions=permissions,
+        )
+
+        audit_data = self._build_audit_data(user_profile, permissions)
+
+        return {
+            "profile_data": profile_data,
+            "audit_data": audit_data,
+        }
+
+    @staticmethod
+    def _extract_auth_user_contact(
+        user_data: Any, fallback_email: str
+    ) -> tuple[str, dict[str, Any], str | None]:
+        """Pull email, metadata, and phone info from Supabase auth payload.
+        Args:
+            user_data: User data
+            fallback_email: Fallback email
+        Returns:
+            tuple[str, dict[str, Any], str | None]: Email, metadata, and phone info
+        """
+        email = fallback_email
+        phone = None
+        metadata: dict[str, Any] = {}
+
+        user_obj = getattr(user_data, "user", None)
+        if not user_obj:
+            return email, metadata, phone
+
+        email = getattr(user_obj, "email_change", None) or getattr(user_obj, "email", email)
+        metadata = getattr(user_obj, "user_metadata", {}) or {}
+
+        if metadata.get("phone"):
+            phone = metadata.get("phone")
+        elif getattr(user_obj, "phone", None):
+            phone = user_obj.phone
+        elif getattr(user_obj, "phone_change", None):
+            phone = user_obj.phone_change
+
+        return email, metadata, phone
+
+    def _build_or_update_profile(
+        self,
+        base_profile: dict[str, Any] | None,
+        user_metadata: dict[str, Any],
+        user_id: str,
+        current_email: str,
+        current_phone: str | None,
+    ) -> dict[str, Any]:
+        """Create profile from metadata or refresh email/phone on an existing profile.
+        Args:
+            base_profile: Base profile data
+            user_metadata: User metadata
+            user_id: User ID
+            current_email: Current email
+            current_phone: Current phone
+        Returns:
+            dict[str, Any]: Profile data
+        """
+        if not base_profile:
             first_name = user_metadata.get("first_name", "")
             last_name = user_metadata.get("last_name", "")
             full_name = user_metadata.get(
                 "full_name",
                 f"{first_name} {last_name}".strip() or current_email.split("@")[0],
             )
-            avatar_url = user_metadata.get("avatar_url")
-            phone = current_phone or user_metadata.get("phone")
-            tzone = user_metadata.get("timezone", "UTC")
-            salutation = user_metadata.get("salutation", None)
-            user_profile = {
+            return {
                 "user_id": user_id,
                 "email": current_email,
                 "full_name": full_name,
                 "first_name": first_name,
                 "last_name": last_name,
-                "avatar_url": avatar_url,
-                "phone": phone,
-                "timezone": tzone,
-                "salutation": salutation,
+                "avatar_url": user_metadata.get("avatar_url"),
+                "phone": current_phone or user_metadata.get("phone"),
+                "timezone": user_metadata.get("timezone", "UTC"),
+                "salutation": user_metadata.get("salutation"),
                 "role_id": None,
                 "status": "active",
                 "created_at": None,
@@ -456,68 +510,99 @@ class UserService:
                 "organization_id": None,
                 "roles": None,
             }
-        else:
-            # Update email and phone from Supabase Auth if different
-            if user_profile["email"].lower() != current_email.lower():
-                user_profile["email"] = current_email
 
-            profile_phone = user_profile.get("phone")
-            if current_phone and profile_phone != current_phone:
-                user_profile["phone"] = current_phone
+        # Update email and phone from Supabase Auth if different
+        if base_profile.get("email", "").lower() != current_email.lower():
+            base_profile["email"] = current_email
 
-        # Add verification preference
-        verification_preference_data = user_metadata.get("verification_preference")
-        if verification_preference_data and isinstance(verification_preference_data, dict):
-            user_profile["verification_preference"] = verification_preference_data
-        else:
-            user_profile["verification_preference"] = None
+        profile_phone = base_profile.get("phone")
+        if current_phone and profile_phone != current_phone:
+            base_profile["phone"] = current_phone
 
-        # Add identities
-        identities_list = []
-        if user_data and user_data.user and hasattr(user_data.user, "identities"):
-            for identity in user_data.user.identities:
-                identity_data = {
+        return base_profile
+
+    @staticmethod
+    def _extract_verification_preference(user_metadata: dict[str, Any]) -> dict[str, Any] | None:
+        """Extract verification preference from user metadata.
+        Args:
+            user_metadata: User metadata
+        Returns:
+            dict[str, Any] | None: Verification preference
+        """
+        preference = user_metadata.get("verification_preference")
+        return preference if isinstance(preference, dict) else None
+
+    @staticmethod
+    def _build_identities(user_data: Any) -> list[dict[str, Any]]:
+        """Build identities from user data.
+        Args:
+            user_data: User data
+        Returns:
+            list[dict[str, Any]]: Identities
+        """
+        identities: list[dict[str, Any]] = []
+        user_obj = getattr(user_data, "user", None)
+        if not user_obj or not hasattr(user_obj, "identities"):
+            return identities
+
+        for identity in user_obj.identities:
+            provider_id = (
+                identity.identity_data.get("provider_id")
+                if identity.provider != "email"
+                else identity.identity_data.get("email")
+            ) or identity.identity_data.get("sub")
+
+            identities.append(
+                {
                     "provider": identity.provider,
                     "created_at": identity.created_at,
                     "updated_at": identity.updated_at,
+                    "provider_id": provider_id,
                 }
-                if identity.provider != "email":
-                    identity_data["provider_id"] = identity.identity_data.get(
-                        "provider_id", identity.identity_data.get("sub", None)
-                    )
-                else:
-                    identity_data["provider_id"] = identity.identity_data.get("email", None)
-                identities_list.append(identity_data)
+            )
 
-        if identities_list:
-            user_profile["identities"] = identities_list
+        return identities
 
-        # Get permissions and update activity if user is in organization
-        permissions_data = []
-        if organization_id:
-            await self.update_user_activity(user_id, organization_id)
-            permissions_data = await self.get_user_permissions(user_id, organization_id)
+    async def _get_permissions_with_activity(
+        self, user_id: str, organization_id: str | None
+    ) -> list[dict[str, Any]]:
+        """Update activity and fetch permissions when organization_id is provided.
+        Args:
+            user_id: User ID
+            organization_id: Organization ID
+        Returns:
+            list[dict[str, Any]]: Permissions with activity
+        """
+        if not organization_id:
+            return []
 
-        # Add role description from roles if available
-        if user_profile.get("roles") and isinstance(user_profile["roles"], dict):
-            user_profile["role_description"] = user_profile["roles"].get("description", "")
+        await self.update_user_activity(user_id, organization_id)
+        return await self.get_user_permissions(user_id, organization_id)
 
-        user_profile["permissions"] = permissions_data
-
-        # Format role info for API response
+    @staticmethod
+    def _build_role_info(user_profile: dict[str, Any]) -> RoleInfoWithDescription:
+        """Build role information.
+        Args:
+            user_profile: User profile data
+        Returns:
+            RoleInfoWithDescription: Role information
+        """
         if user_profile.get("role_id") is None:
-            role_info = RoleInfoWithDescription(
-                role_id="",
-                description="No organization assigned",
-            )
-        else:
-            role_info = RoleInfoWithDescription(
-                role_id=str(user_profile["role_id"]),
-                description=user_profile.get("role_description", ""),
-            )
+            return RoleInfoWithDescription(role_id="", description="No organization assigned")
+        return RoleInfoWithDescription(
+            role_id=str(user_profile["role_id"]),
+            description=user_profile.get("role_description", ""),
+        )
 
-        # Format permissions for API response
-        permissions = [
+    @staticmethod
+    def _format_permissions(permissions_data: list[dict[str, Any]]) -> list[PermissionInfo]:
+        """Format permissions data.
+        Args:
+            permissions_data: List of permissions data
+        Returns:
+            list[PermissionInfo]: List of formatted permissions
+        """
+        return [
             PermissionInfo(
                 permission_id=str(p["id"]),
                 permission_name=p["name"],
@@ -527,16 +612,16 @@ class UserService:
             for p in permissions_data
         ]
 
-        # Create formatted profile data
-        profile_data = create_user_profile_data(
-            user_profile=user_profile,
-            user_type=self.user_context.user_type or "organization_member",
-            role_info=role_info,
-            permissions=permissions,
-        )
-
-        # Prepare audit data
-        audit_data = {
+    @staticmethod
+    def _build_audit_data(user_profile: dict[str, Any], permissions: list[PermissionInfo]) -> dict:
+        """Build audit data.
+        Args:
+            user_profile: User profile data
+            permissions: List of permissions
+        Returns:
+            dict: Audit data
+        """
+        return {
             "user_id": str(user_profile["user_id"]),
             "email": user_profile["email"],
             "full_name": user_profile["full_name"],
@@ -545,11 +630,6 @@ class UserService:
             "status": user_profile["status"],
             "permission_count": len(permissions),
             "access_timestamp": datetime.now().isoformat(),
-        }
-
-        return {
-            "profile_data": profile_data,
-            "audit_data": audit_data,
         }
 
     async def transform_users(
@@ -615,9 +695,7 @@ class UserService:
             organization_id: Organization ID
 
         Returns:
-            dict containing:
-            - audit_data: Audit data for the ban operation
-            - current_user_data: User data before ban (for audit old data)
+            dict[str, Any]: Audit data for the ban operation
 
         Raises:
             BadRequestException: If user tries to ban themselves
@@ -769,82 +847,139 @@ class UserService:
             body: Update profile request body
 
         Returns:
-            dict containing updated profile and audit data
+            dict[str, Any]: Updated profile and audit data
 
         Raises:
             BadRequestException: If validation fails
         """
-        # Get current user data
-        current_user_data = None
-        if organization_id:
-            current_user_data = await self.organisation_member_repository.get_user_profile_by_id(
-                user_id=user_id, organization_id=organization_id
+        current_user_data = await self._fetch_profile_for_update(user_id, organization_id)
+
+        update_data, metadata_update = self._build_update_payload(body, current_user_data)
+
+        if not update_data and not metadata_update:
+            raise BadRequestException(
+                message_key="users.errors.no_fields_provided_for_update",
+                custom_code=CustomStatusCode.BAD_REQUEST,
             )
 
-        # If user not in organization, get from Supabase Auth metadata
-        if not current_user_data:
-            user_metadata = {}
-            user_data = await get_user_by_id(user_id)
-            if user_data and hasattr(user_data, "user") and user_data.user:
-                user_metadata = user_data.user.user_metadata or {}
+        if organization_id and update_data:
+            await self.update_user_info(user_id, organization_id, update_data)
 
-            current_user_data = {
-                "user_id": user_id,
-                "email": self.user_context.email,
-                "first_name": user_metadata.get("first_name", ""),
-                "last_name": user_metadata.get("last_name", ""),
-                "full_name": user_metadata.get("full_name", ""),
-                "timezone": user_metadata.get("timezone", "UTC"),
-                "avatar_url": user_metadata.get("avatar_url"),
-                "organization_id": organization_id,
-            }
+        if metadata_update:
+            merged_metadata = await self._merge_metadata(user_id, metadata_update)
+            await update_metadata_of_user(user_id, merged_metadata)
 
-        # Prepare update data
-        update_data = {}
-        metadata_update = {}
+        updated_profile = await self.get_user_profile_by_id(user_id, organization_id)
+        profile_for_audit = updated_profile or current_user_data
 
-        # Get current values to calculate full_name
+        return {
+            "updated_profile": updated_profile,
+            "audit_data": self._build_update_audit_data(
+                profile_for_audit, organization_id, user_id
+            ),
+            "current_user_data": current_user_data,
+        }
+
+    async def _fetch_profile_for_update(
+        self, user_id: str, organization_id: str | None
+    ) -> dict[str, Any]:
+        """Fetch current profile from org or fallback to Supabase metadata.
+        Args:
+            user_id: User ID
+            organization_id: Organization ID
+        Returns:
+            dict[str, Any]: Current profile
+        """
+        if organization_id:
+            profile = await self.organisation_member_repository.get_user_profile_by_id(
+                user_id=user_id, organization_id=organization_id
+            )
+            if profile:
+                return profile
+
+        user_metadata = {}
+        user_data = await get_user_by_id(user_id)
+        if user_data and getattr(user_data, "user", None):
+            user_metadata = user_data.user.user_metadata or {}
+
+        return {
+            "user_id": user_id,
+            "email": self.user_context.email,
+            "first_name": user_metadata.get("first_name", ""),
+            "last_name": user_metadata.get("last_name", ""),
+            "full_name": user_metadata.get("full_name", ""),
+            "timezone": user_metadata.get("timezone", "UTC"),
+            "avatar_url": user_metadata.get("avatar_url"),
+            "organization_id": organization_id,
+        }
+
+    def _build_update_payload(
+        self, body: UpdateUserProfileRequest, current_user_data: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Create update payloads for DB and auth metadata.
+        Args:
+            body: Update user profile request body
+            current_user_data: Current user data
+        Returns:
+            tuple[dict[str, Any], dict[str, Any]]: Update data and metadata update
+        """
+        update_data: dict[str, Any] = {}
+        metadata_update: dict[str, Any] = {}
+
         current_first_name = current_user_data.get("first_name") or ""
         current_last_name = current_user_data.get("last_name") or ""
 
-        # Update first_name if provided
         if body.first_name is not None:
             update_data["first_name"] = body.first_name
             metadata_update["first_name"] = body.first_name
             current_first_name = body.first_name
 
-        # Update last_name if provided
         if body.last_name is not None:
             update_data["last_name"] = body.last_name
             metadata_update["last_name"] = body.last_name
             current_last_name = body.last_name
 
-        # Calculate full_name from first_name + last_name
         if body.first_name is not None or body.last_name is not None:
-            full_name_parts = [
-                part.strip() for part in [current_first_name, current_last_name] if part.strip()
-            ]
-            full_name = " ".join(full_name_parts) if full_name_parts else ""
+            full_name = self._compute_full_name(current_first_name, current_last_name)
             if full_name:
                 update_data["full_name"] = full_name
                 metadata_update["full_name"] = full_name
 
-        # Update timezone if provided
         if body.timezone is not None:
             update_data["timezone"] = body.timezone
             metadata_update["timezone"] = body.timezone
 
-        # Update avatar_url if provided
         if body.avatar_url is not None:
             update_data["avatar_url"] = body.avatar_url
             metadata_update["avatar_url"] = body.avatar_url
 
-        # Update salutation if provided
         if body.salutation is not None:
             update_data["salutation"] = body.salutation
             metadata_update["salutation"] = body.salutation
 
-        # Handle verification preference
+        metadata_update |= self._build_verification_metadata(body)
+
+        return update_data, metadata_update
+
+    @staticmethod
+    def _compute_full_name(first_name: str, last_name: str) -> str:
+        """Compute full name from first and last name.
+        Args:
+            first_name: First name
+            last_name: Last name
+        Returns:
+            str: Full name
+        """
+        full_name_parts = [part.strip() for part in [first_name, last_name] if part.strip()]
+        return " ".join(full_name_parts) if full_name_parts else ""
+
+    def _build_verification_metadata(self, body: UpdateUserProfileRequest) -> dict[str, Any]:
+        """Validate and construct verification preference metadata.
+        Args:
+            body: Update user profile request body
+        Returns:
+            dict[str, Any]: Verification preference metadata
+        """
         if body.two_fa_enabled is not None:
             verification_method = body.verification_method.upper()
             if verification_method not in ["PHONE", "EMAIL"]:
@@ -852,68 +987,46 @@ class UserService:
                     message_key="users.errors.invalid_verification_method",
                     custom_code=CustomStatusCode.BAD_REQUEST,
                 )
-            verification_preference = {
-                "enabled": body.two_fa_enabled,
-                "type": verification_method,
+            return {
+                "verification_preference": {
+                    "enabled": body.two_fa_enabled,
+                    "type": verification_method,
+                }
             }
-            metadata_update["verification_preference"] = verification_preference
-        elif body.verification_method and body.verification_method.upper() != "EMAIL":
+
+        if body.verification_method and body.verification_method.upper() != "EMAIL":
             raise BadRequestException(
                 message_key="users.errors.two_fa_enabled_required",
                 custom_code=CustomStatusCode.BAD_REQUEST,
             )
 
-        # Validate at least one field is provided
-        if not update_data and not metadata_update:
-            raise BadRequestException(
-                message_key="users.errors.no_fields_provided_for_update",
-                custom_code=CustomStatusCode.BAD_REQUEST,
-            )
+        return {}
 
-        # Update organization_members table if user is in an organization
-        if organization_id:
-            await self.update_user_info(user_id, organization_id, update_data)
+    async def _merge_metadata(
+        self, user_id: str, metadata_update: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Merge incoming metadata with existing Supabase metadata."""
+        existing_metadata: dict[str, Any] = {}
+        user_data = await get_user_by_id(user_id)
+        if user_data and getattr(user_data, "user", None):
+            existing_metadata = user_data.user.user_metadata or {}
 
-        # Update Supabase Auth user_metadata if we have metadata to update
-        if metadata_update:
-            existing_metadata = {}
-            user_data = await get_user_by_id(user_id)
-            if user_data and hasattr(user_data, "user") and user_data.user:
-                existing_metadata = user_data.user.user_metadata or {}
+        return {**existing_metadata, **metadata_update}
 
-            updated_metadata = {**existing_metadata, **metadata_update}
-            await update_metadata_of_user(user_id, updated_metadata)
-
-        # Get updated user profile
-        updated_profile = await self.get_user_profile_by_id(user_id, organization_id)
-
-        # Return audit data
+    def _build_update_audit_data(
+        self, profile: dict[str, Any], organization_id: str | None, user_id: str
+    ) -> dict[str, Any]:
+        """Build audit payload for profile update."""
         return {
-            "updated_profile": updated_profile,
-            "audit_data": {
-                "user_id": str(user_id),
-                "first_name": updated_profile.get("first_name")
-                if updated_profile
-                else current_user_data.get("first_name"),
-                "last_name": updated_profile.get("last_name")
-                if updated_profile
-                else current_user_data.get("last_name"),
-                "salutation": updated_profile.get("salutation")
-                if updated_profile
-                else current_user_data.get("salutation"),
-                "full_name": updated_profile.get("full_name")
-                if updated_profile
-                else current_user_data.get("full_name"),
-                "timezone": updated_profile.get("timezone")
-                if updated_profile
-                else current_user_data.get("timezone"),
-                "avatar_url": updated_profile.get("avatar_url")
-                if updated_profile
-                else current_user_data.get("avatar_url"),
-                "organization_id": str(organization_id) if organization_id else None,
-                "updated_by_user_id": self.user_context.user_id,
-                "updated_by_email": self.user_context.email,
-                "update_timestamp": datetime.now().isoformat(),
-            },
-            "current_user_data": current_user_data,
+            "user_id": str(user_id),
+            "first_name": profile.get("first_name"),
+            "last_name": profile.get("last_name"),
+            "salutation": profile.get("salutation"),
+            "full_name": profile.get("full_name"),
+            "timezone": profile.get("timezone"),
+            "avatar_url": profile.get("avatar_url"),
+            "organization_id": str(organization_id) if organization_id else None,
+            "updated_by_user_id": self.user_context.user_id,
+            "updated_by_email": self.user_context.email,
+            "update_timestamp": datetime.now().isoformat(),
         }

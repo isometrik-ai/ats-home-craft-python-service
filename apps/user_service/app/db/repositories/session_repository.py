@@ -9,8 +9,8 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.auth import SessionFilter
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("session_repository")
 

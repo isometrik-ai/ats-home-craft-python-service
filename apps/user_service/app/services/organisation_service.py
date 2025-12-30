@@ -38,7 +38,6 @@ from libs.shared_utils.http_exceptions import (
 from libs.shared_utils.isometrik_service import (
     create_isometrik_application,
     create_isometrik_user,
-    is_isometrik_enabled,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -504,10 +503,7 @@ class OrganisationService:
     async def _create_isometrik_application_if_enabled(
         self, body: NewOrganisationBody
     ) -> dict | None:
-        """Create isometrik application when enabled; ignore failures to keep flow non-blocking."""
-        if not is_isometrik_enabled():
-            return None
-
+        """Create isometrik application."""
         try:
             resp = await create_isometrik_application(
                 organization_name=body.company_data.company_name,
@@ -608,7 +604,7 @@ class OrganisationService:
         }
 
         # Create Isometrik user if enabled and credentials are provided
-        if is_isometrik_enabled() and isometrik_creds:
+        if isometrik_creds:
             isometrik_user = await create_isometrik_user(
                 user_id=member_data["user_id"],
                 first_name=member_data["first_name"],

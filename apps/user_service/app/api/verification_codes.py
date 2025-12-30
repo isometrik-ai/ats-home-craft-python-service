@@ -15,7 +15,6 @@ from apps.user_service.app.app_instance import limiter
 # Utility imports
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_uow
-from apps.user_service.app.dependencies.logger import get_logger
 
 # Schema imports
 from apps.user_service.app.schemas.verification_codes import (
@@ -34,6 +33,7 @@ from apps.user_service.app.utils.common_utils import handle_api_exceptions
 # Shared library imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.http_exceptions import InternalServerErrorException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 

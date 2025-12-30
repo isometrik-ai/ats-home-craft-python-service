@@ -3,16 +3,15 @@ This module contains all user-related database operations.
 All SQL queries for user management should be centralized here.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.users import UserListItem
-from libs import NOW_CONSTANT
 from libs.shared_db.supabase_db.db import (
     get_fresh_supabase_admin_client,
     get_supabase_admin_client,
 )
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("user_operations")
 
@@ -132,9 +131,9 @@ async def create_new_user(user_data: dict[str, Any]) -> dict[str, Any]:
         "status": user_data.get("status", "active"),
         "organization_id": user_data.get("organization_id"),
         "isometrik_user_id": user_data.get("isometrik_user_id", None),
-        "created_at": NOW_CONSTANT,
-        "joined_at": NOW_CONSTANT,
-        "updated_at": NOW_CONSTANT,
+        "created_at": datetime.now(UTC),
+        "joined_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
     }
 
     result = await supabase.table("organization_members").insert(user_record).execute()
@@ -166,7 +165,7 @@ async def update_user_info(
     if not update_payload:
         return {}
 
-    update_payload["updated_at"] = NOW_CONSTANT
+    update_payload["updated_at"] = datetime.now(UTC)
 
     result = (
         await supabase.table("organization_members")
@@ -331,7 +330,7 @@ async def update_user_activity(user_id: str, organization_id: str) -> None:
 
     await (
         supabase.table("organization_members")
-        .update({"last_active_at": NOW_CONSTANT, "updated_at": NOW_CONSTANT})
+        .update({"last_active_at": datetime.now(UTC), "updated_at": datetime.now(UTC)})
         .eq("user_id", user_id)
         .eq("organization_id", organization_id)
         .eq("status", "active")
@@ -349,7 +348,7 @@ async def suspend_user(user_id: str, organization_id: str) -> bool:
     """
     supabase = await get_supabase_admin_client()
 
-    update_data = {"status": "suspended", "updated_at": NOW_CONSTANT}
+    update_data = {"status": "suspended", "updated_at": datetime.now(UTC)}
 
     result = (
         await supabase.table("organization_members")
@@ -372,7 +371,7 @@ async def revoke_suspended_user(user_id: str, organization_id: str) -> bool:
     """
     supabase = await get_supabase_admin_client()
 
-    update_data = {"status": "active", "updated_at": NOW_CONSTANT}
+    update_data = {"status": "active", "updated_at": datetime.now(UTC)}
 
     result = (
         await supabase.table("organization_members")
@@ -398,7 +397,7 @@ async def update_user_email(user_id: str, organization_id: str, new_email: str) 
 
     result = (
         await supabase.table("organization_members")
-        .update({"email": new_email, "updated_at": NOW_CONSTANT})
+        .update({"email": new_email, "updated_at": datetime.now(UTC)})
         .eq("user_id", user_id)
         .eq("organization_id", organization_id)
         .execute()

@@ -13,28 +13,23 @@ The module integrates with Supabase for user authentication and
 permission management, using environment variables for configuration.
 """
 
-import os  # Standard library import first
-
 import jwt
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# Logger import
-from apps.user_service.app.dependencies.logger import get_logger
+from libs.shared_config.app_settings import shared_settings
 from libs.shared_db.supabase_db.db import get_supabase_client
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     InternalServerErrorException,
     UnauthorizedException,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger(__name__)
 
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
-
-# Helper functions for user validation
 def extract_user_data(
     user: dict,
 ) -> tuple[str | None, str | None, str | None, str | None]:
@@ -167,7 +162,7 @@ def get_user_from_token(token: str) -> dict:
     try:
         payload = jwt.decode(
             token,
-            SUPABASE_JWT_SECRET,
+            shared_settings.supabase.jwt_secret,
             algorithms=["HS256"],
             audience="authenticated",
         )
@@ -233,7 +228,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         try:
             payload = jwt.decode(
                 token,
-                SUPABASE_JWT_SECRET,
+                shared_settings.supabase.jwt_secret,
                 algorithms=["HS256"],
                 audience="authenticated",
             )

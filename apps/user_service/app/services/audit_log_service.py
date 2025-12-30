@@ -14,7 +14,6 @@ import asyncpg
 from apps.user_service.app.db.repositories.audit_log_repository import (
     AuditLogRepository,
 )
-from apps.user_service.app.dependencies.logger import get_logger
 from apps.user_service.app.schemas.audit_logs import (
     AuditLogDetailItem,
     AuditLogFilter,
@@ -25,6 +24,7 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("audit_log_service")
@@ -156,59 +156,51 @@ class AuditLogService:
 
     @staticmethod
     def _parse_json_field(value: Any, default: Any = None) -> Any:
-        """Parse JSON field from database.
-
+        """Parse JSON field from database, handling double-encoded strings.
         Args:
-            value: Value from database (JSON-encoded string like '"null"' or '"{\\"key\\": ...}"')
-            default: Default value to return if parsing fails or value is None
-
+            value: Value to parse
+            default: Default value if parsing fails
         Returns:
-            Parsed dict/list or default (None)
+            Any: Parsed value
         """
         if value is None:
             return default
 
-        # If already a dict or list, return as is (for changed_fields, compliance_tags)
         if isinstance(value, (dict, list)):
             return value
 
-        # Must be a string - parse JSON
         if not isinstance(value, str):
             return default
 
-        value_stripped = value.strip()
-        if not value_stripped:
+        candidate = value.strip()
+        if not candidate:
             return default
 
-        try:
-            # Parse the JSON-encoded string
-            # (e.g., '"null"' -> "null", '"{\\"key\\": ...}"' -> '{"key": ...}')
-            parsed = json.loads(value_stripped)
+        return AuditLogService._decode_json_candidate(candidate=candidate, default=default)
 
-            # If result is None, return default
-            if parsed is None:
+    @staticmethod
+    def _decode_json_candidate(candidate: str, default: Any = None) -> Any:
+        """Decode JSON string once or twice, returning dict/list or default.
+        Args:
+            candidate: Candidate string to decode
+            default: Default value if decoding fails
+        Returns:
+            Any: Decoded value
+        """
+        for _ in range(2):
+            try:
+                candidate = json.loads(candidate)
+            except (json.JSONDecodeError, TypeError, ValueError):
                 return default
 
-            # If result is the string "null", return default
-            if parsed == "null":
+            if candidate in (None, "null"):
                 return default
+            if isinstance(candidate, (dict, list)):
+                return candidate
+            if isinstance(candidate, str):
+                continue
 
-            # If result is a string (double-encoded JSON), parse again
-            if isinstance(parsed, str):
-                try:
-                    double_parsed = json.loads(parsed)
-                    # Return dict/list, or None if parsed to None
-                    return double_parsed if isinstance(double_parsed, (dict, list)) else default
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    return default
-
-            # If result is already dict/list, return it
-            if isinstance(parsed, (dict, list)):
-                return parsed
-
-            return default
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return default
+        return default
 
     @staticmethod
     def _format_ip_address(ip_address: Any) -> str:

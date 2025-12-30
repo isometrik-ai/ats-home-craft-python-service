@@ -3,43 +3,21 @@ This module provides integration with Isometrik API for application creation.
 Handles creation of Isometrik applications.
 """
 
-import os
 from typing import Any
 
 import httpx
 
-from apps.user_service.app.dependencies.logger import get_logger
+from libs.shared_config.app_settings import shared_settings
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     InternalServerErrorException,
     RateLimitExceededException,
     ServiceUnavailableException,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("isometrik_service")
-
-
-# Environment variables
-ISOMETRIK_ENABLED = os.getenv("ISOMETRIK_ENABLED", "false").lower() in (
-    "true",
-    "1",
-    "yes",
-)
-ISOMETRIK_ADMIN_API_URL = os.getenv("ISOMETRIK_ADMIN_API_URL", "https://admin-apis.isometrik.io")
-ISOMETRIK_API_URL = os.getenv("ISOMETRIK_API_URL", "https://apis.isometrik.ai")
-ISOMETRIK_CLIENT_NAME = os.getenv("ISOMETRIK_CLIENT_NAME", "691ad27c348f70f518ee0053")
-ISOMETRIK_REGION_ID = os.getenv("ISOMETRIK_REGION_ID", "507f1f77bcf86cd799439011")
-ISOMETRIK_AUTH_TOKEN = os.getenv("ISOMETRIK_AUTH_TOKEN", "aXNvbWV0cmlrOjFZVXBDYlJEblU4MzBISA==")
-
-
-def is_isometrik_enabled() -> bool:
-    """Check if Isometrik integration is enabled via environment variable.
-
-    Returns:
-        bool: True if Isometrik is enabled, False otherwise
-    """
-    return ISOMETRIK_ENABLED
 
 
 def get_isometrik_data_from_settings(
@@ -82,21 +60,21 @@ async def create_isometrik_application(
 
         # Prepare request payload
         payload = {
-            "clientName": ISOMETRIK_CLIENT_NAME,
+            "clientName": shared_settings.isometrik.client_name,
             "name": organization_name,
             "productType": product_types,
-            "regionId": ISOMETRIK_REGION_ID,
+            "regionId": shared_settings.isometrik.region_id,
             "plan": plan,
         }
 
         # Prepare headers
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Basic {ISOMETRIK_AUTH_TOKEN}",
+            "Authorization": f"Basic {shared_settings.isometrik.auth_token}",
         }
 
         # Make API call
-        url = f"{ISOMETRIK_ADMIN_API_URL}/v1/intr/application"
+        url = f"{shared_settings.isometrik.admin_api_url}/v1/intr/application"
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
@@ -203,7 +181,7 @@ async def create_isometrik_user(
             "appSecret": isometrik_credentials.get("appSecret", ""),
         }
 
-        url = f"{ISOMETRIK_API_URL}/chat/user"
+        url = f"{shared_settings.isometrik.api_url}/chat/user"
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
