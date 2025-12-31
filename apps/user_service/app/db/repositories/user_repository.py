@@ -107,3 +107,69 @@ class UserRepository:
 
         row = await self.db_connection.fetchrow(query, *params)
         return bool(row)
+
+    async def verify_current_password(self, user_id: str, current_password: str) -> bool:
+        """Verify current password using Postgres crypt() function.
+
+        This uses the EXACT same crypt() function that Supabase/GoTrue uses internally
+        to verify passwords. No assumptions about bcrypt implementation needed.
+
+        Args:
+            user_id: User ID
+            current_password: Password to verify
+
+        Returns:
+            True if password is correct, False otherwise
+        """
+        # Query that uses Postgres's crypt() function to verify password
+        # crypt(password, hash) returns the hash if password matches
+        query = """
+            SELECT encrypted_password = crypt($1, encrypted_password) AS password_valid
+            FROM auth.users
+            WHERE id = $2
+        """
+
+        result = await self.db_connection.fetchval(
+            query,
+            current_password,  # $1 - the password to verify
+            user_id,  # $2 - the user ID
+        )
+
+        # result will be True if password matches, False if not, None if user not found
+        return result is True
+
+    async def _verify_credentials_by_email(self, email: str, password: str) -> bool:
+        """Verify email and password combination.
+
+        This verifies that BOTH the email exists AND the password is correct.
+        Used when we need to authenticate by email (e.g., check_2fa_status).
+
+        Args:
+            email: User email
+            password: Password to verify
+
+        Returns:
+            True if credentials are correct, False otherwise
+        """
+        query = """
+            SELECT encrypted_password = crypt($2, encrypted_password) AS password_valid
+            FROM auth.users
+            WHERE email = $1
+        """
+
+        result = await self.db_connection.fetchrow(
+            query,
+            email,  # $1
+            password,  # $2
+        )
+
+        if not result:
+            # Email not found
+            return False
+
+        if not result["password_valid"]:
+            # Email found but password incorrect
+            return False
+
+        # Both email and password are correct
+        return True

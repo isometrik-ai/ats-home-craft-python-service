@@ -315,7 +315,7 @@ async def signup(
     request: Request,
     signup_data: SignupRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
-    sb_client: AsyncClient = Depends(supabase_service),
+    sb_client: AsyncClient = Depends(supabase_anon),
 ):
     """User signup endpoint for both personal and business accounts
     This endpoint creates a complete account setup including User signup with Supabase Auth
