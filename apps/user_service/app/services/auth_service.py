@@ -62,7 +62,6 @@ from libs.shared_db.supabase_db.auth_repository import (
     update_password_with_link_identity,
     update_password_with_token,
 )
-from libs.shared_db.supabase_db.client import get_supabase_client
 from libs.shared_middleware.jwt_auth import get_user_from_token
 
 # Shared exceptions and status codes
@@ -230,13 +229,11 @@ class AuthService:
             return session
         return None
 
-    async def _get_session_after_signup(self, signup_result: Any, email: str, password: str) -> Any:
+    async def _get_session_after_signup(self, signup_result: Any) -> Any:
         """Get session after signup, trying signup session first, then login if needed.
 
         Args:
             signup_result: Result from sign_up_supabase_user
-            email: User email
-            password: User password
 
         Returns:
             Session object if available, None otherwise
@@ -244,13 +241,6 @@ class AuthService:
         session = self._extract_session(signup_result.session)
         if session:
             return session
-
-        try:
-            login_result = await login_user(email, password, self.supabase_client)
-            return self._extract_session(login_result.session)
-        except Exception as login_error:
-            logger.warning("Could not get session after signup for %s: %s", email, str(login_error))
-
         return None
 
     # EMAIL METHODS
@@ -890,9 +880,7 @@ class AuthService:
 
         signup_result = await sign_up_supabase_user(signup_data, self.supabase_client)
 
-        session = await self._get_session_after_signup(
-            signup_result=signup_result, email=signup_data.email, password=signup_data.password
-        )
+        session = await self._get_session_after_signup(signup_result=signup_result)
 
         if not session:
             raise InternalServerErrorException(
@@ -1003,16 +991,13 @@ class AuthService:
         self._validate_password_strength(new_password)
 
         # Step 1: Verify current password matches database password
-        try:
-            anon_client = await get_supabase_client()
-            await login_user(user_email, current_password, anon_client)
-        except Exception as e:
-            # Convert authentication failures to BadRequestException
-            # Other exceptions will bubble up to the decorator
+        is_valid = await self.user_repository.verify_current_password(user_id, current_password)
+
+        if not is_valid:
             raise BadRequestException(
                 message_key="auth.errors.authentication_failed",
                 custom_code=CustomStatusCode.BAD_REQUEST,
-            ) from e
+            )
 
         # Step 2: Check if new password is same as current password
         if current_password == new_password:
@@ -1057,15 +1042,16 @@ class AuthService:
         Raises:
             BadRequestException: If credentials are invalid
         """
-        try:
-            await login_user(email, password, self.supabase_client)
-        except Exception as e:
-            # Convert authentication failures to BadRequestException
-            # Other exceptions will bubble up to the decorator
+        is_valid = await self.user_repository._verify_credentials_by_email(
+            email=email, password=password
+        )
+        # Convert authentication failures to BadRequestException
+        # Other exceptions will bubble up to the decorator
+        if not is_valid:
             raise BadRequestException(
                 message_key="auth.errors.authentication_failed",
                 custom_code=CustomStatusCode.BAD_REQUEST,
-            ) from e
+            )
 
     async def check_2fa_status(self, email: str, password: str) -> Check2FAStatusResponse:
         """Check if 2FA is enabled for a user account.
