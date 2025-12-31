@@ -5,6 +5,7 @@ shared across all API modules. These utilities eliminate code duplication and
 standardize common operations.
 """
 
+import hashlib
 import json
 import time
 import traceback
@@ -17,19 +18,12 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
-from libs.shared_db.postgres_db.user_service_operations.user_operations import (
-    get_user_profile_by_id,
-)
-from libs.shared_db.supabase_db.admin_operations.user import (
-    get_user_by_id,
-    update_metadata_of_user,
-)
-from libs.shared_db.supabase_db.db import get_supabase_admin_client
+from libs.shared_db.supabase_db.auth_repository import get_user_by_id, update_metadata
+from libs.shared_db.supabase_db.client import get_supabase_service_client
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.http_exceptions import (
     ForbiddenException,
     InternalServerErrorException,
-    NotFoundException,
     ValidationException,
 )
 from libs.shared_utils.logger import get_logger
@@ -156,17 +150,17 @@ async def extract_user_context(current_user: dict) -> UserContext:
                 custom_code=CustomStatusCode.INVALID_DATA,
                 params={"error": "email not found"},
             )
-
+        supabase_client = await get_supabase_service_client()
         if not organization_id:
-            user_data = await get_user_by_id(user_id)
+            user_data = await get_user_by_id(supabase_client, user_id)
             organization_id = user_data.user.user_metadata.get("organization_id", None)
 
             # If organization_id is still None, try to get it from organization_members table
             if not organization_id:
                 # Query organization_members table to find user's organization
-                supabase = await get_supabase_admin_client()
+                # supabase = await get_supabase_admin_client()
                 result = (
-                    await supabase.table("organization_members")
+                    await supabase_client.table("organization_members")
                     .select("organization_id")
                     .eq("user_id", user_id)
                     .limit(1)
@@ -178,7 +172,8 @@ async def extract_user_context(current_user: dict) -> UserContext:
                     organization_id = result.data[0]["organization_id"]
 
                     # Update user metadata with the found organization_id
-                    await update_metadata_of_user(
+                    await update_metadata(
+                        supabase_client,
                         user_id,
                         {
                             "organization_id": organization_id,
@@ -441,36 +436,6 @@ MAX_PAGE_SIZE = 100
 UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 
-async def get_user_in_organization(user_id: str, organization_id: str):
-    """Fetch user profile data and raise 404 if not found in organization.
-
-    This utility function handles the common pattern of:
-    1. Fetching user profile data
-    2. Checking if user exists in organization
-    3. Raising 404 if user not found
-
-    Args:
-        user_id (str): User ID to fetch
-        organization_id (str): Organization ID for filtering
-
-    Returns:
-        Record: User profile data
-
-    Raises:
-        NotFoundException: If user not found in organization
-    """
-
-    current_user_data = await get_user_profile_by_id(user_id, organization_id)
-    if not current_user_data:
-        raise NotFoundException(
-            message_key="errors.user_not_found",
-            custom_code=CustomStatusCode.NOT_FOUND,
-            params={"user_id": user_id},
-        )
-
-    return current_user_data
-
-
 def set_audit_old_data_from_user(request: Request, current_user_data: dict) -> None:
     """Set audit old data from user profile information.
 
@@ -503,3 +468,8 @@ def set_audit_old_data_from_user(request: Request, current_user_data: dict) -> N
         audit_data["last_active_at"] = format_iso_datetime(current_user_data["last_active_at"])
 
     request.state.raw_audit_old_data = audit_data
+
+
+def hash_token(token: str) -> str:
+    """Hash token using SHA256 for secure storage"""
+    return hashlib.sha256(token.encode()).hexdigest()

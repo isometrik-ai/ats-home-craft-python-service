@@ -6,12 +6,18 @@ Includes login and signup functionality with proper error handling.
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Request
 from fastapi import status as http_status
+from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import (
     audit_api_call,
 )
 from apps.user_service.app.dependencies.db import db_conn, db_uow
+from apps.user_service.app.dependencies.supabase import (
+    supabase_anon,
+    supabase_anon_client_with_headers,
+    supabase_service,
+)
 from apps.user_service.app.schemas.auth import (
     AuthLogin,
     AuthResponse,
@@ -58,17 +64,12 @@ async def login(
     request: Request,
     data: AuthLogin,
     db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_anon_client_with_headers),
 ):
     """User login endpoint with optional 2FA support."""
-    auth_service = AuthService(db_connection=db_connection)
-    user_agent = request.headers.get("User-Agent")
-    device_signature = request.headers.get("X-Device-Signature")
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
 
-    result = await auth_service.login(
-        data=data,
-        user_agent=user_agent,
-        device_signature=device_signature,
-    )
+    result = await auth_service.login(data=data)
 
     return success_response(
         request=request,
@@ -98,9 +99,10 @@ async def login(
 async def refresh(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
+    sb_client: AsyncClient = Depends(supabase_anon),
 ):
     """Refresh user session."""
-    auth_service = AuthService(db_connection=db_connection)
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
 
     access_token = request.headers.get("Access-Token")
     refresh_token = request.headers.get("Refresh-Token")
@@ -147,9 +149,10 @@ async def set_password(
     current_user: dict = Depends(get_user_from_auth),
     data: SetPasswordRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Set password for user Signed Up from Google or Magic Link."""
-    auth_service = AuthService(db_connection=db_connection)
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
     result = await auth_service.set_password(
         user_id=current_user["sub"],
         password=data.password,
@@ -183,9 +186,10 @@ async def forgot_password(
     request: Request,
     data: ForgotPasswordRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    sb_client: AsyncClient = Depends(supabase_anon),
 ):
     """Send password reset email to user (only if email exists in system)"""
-    auth_service = AuthService(db_connection=db_connection)
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
     result = await auth_service.forgot_password(email=data.email)
     return success_response(
         request=request,
@@ -216,9 +220,10 @@ async def reset_password(
     request: Request,
     data: ResetPasswordRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Reset user password using token from email"""
-    auth_service = AuthService(db_connection=db_connection)
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
     result = await auth_service.reset_password(
         token=data.token,
         new_password=data.new_password,
@@ -260,9 +265,10 @@ async def change_password(
     data: ChangePasswordRequest = Body(...),
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Change user password endpoint."""
-    auth_service = AuthService(db_connection=db_connection)
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
     result = await auth_service.change_password(
         user_id=current_user.get("sub"),
         user_email=current_user.get("email"),
@@ -309,11 +315,12 @@ async def signup(
     request: Request,
     signup_data: SignupRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_service),
 ):
     """User signup endpoint for both personal and business accounts
     This endpoint creates a complete account setup including User signup with Supabase Auth
     """
-    auth_service = AuthService(db_connection=db_connection)
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
     result = await auth_service.signup(signup_data)
     return success_response(
         request=request,
@@ -384,9 +391,10 @@ async def delete_user(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Delete user directly from auth.users table without validation."""
-    auth_service = AuthService(db_connection=db_connection)
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
     user_id = current_user["sub"]
     await auth_service.delete_user(user_id)
     return success_response(
@@ -417,9 +425,10 @@ async def check_2fa_status(
     request: Request,
     data: Check2FAStatusRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    sb_client: AsyncClient = Depends(supabase_anon),
 ):
     """Check if 2FA is enabled for a user account."""
-    auth_service = AuthService(db_connection=db_connection)
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
     result = await auth_service.check_2fa_status(
         email=data.email,
         password=data.password,

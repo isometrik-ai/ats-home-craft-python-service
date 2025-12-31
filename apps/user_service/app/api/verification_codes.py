@@ -8,6 +8,7 @@ All business logic is delegated to VerificationCodeService.
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi import status as http_status
+from supabase import AsyncClient
 
 # App instance
 from apps.user_service.app.app_instance import limiter
@@ -17,6 +18,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_uow
 
 # Schema imports
+from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.verification_codes import (
     SendVerificationCodeRequest,
     SendVerificationCodeResponse,
@@ -91,6 +93,7 @@ async def send_verification_code(
     data: SendVerificationCodeRequest,
     current_user: dict | None = Depends(get_optional_user),
     db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Send verification code endpoint for email or phone number verification.
 
@@ -98,7 +101,9 @@ async def send_verification_code(
     """
     try:
         # Initialize service with database connection
-        verification_service = VerificationCodeService(db_connection=db_connection)
+        verification_service = VerificationCodeService(
+            db_connection=db_connection, sb_client=sb_client
+        )
 
         # Call service method to handle business logic
         result = await verification_service.send_verification_code(
@@ -156,6 +161,7 @@ async def verify_verification_code(
     data: VerifyVerificationCodeRequest,
     current_user: dict | None = Depends(get_optional_user),
     db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Verify verification code endpoint.
 
@@ -163,7 +169,9 @@ async def verify_verification_code(
     """
     try:
         # Initialize service with database connection
-        verification_service = VerificationCodeService(db_connection=db_connection)
+        verification_service = VerificationCodeService(
+            db_connection=db_connection, sb_client=sb_client
+        )
 
         # Call service method to handle business logic
         result = await verification_service.verify_verification_code(

@@ -18,7 +18,7 @@ from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from libs.shared_config.app_settings import shared_settings
-from libs.shared_db.supabase_db.db import get_supabase_client
+from libs.shared_db.supabase_db.client import get_supabase_client
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     InternalServerErrorException,

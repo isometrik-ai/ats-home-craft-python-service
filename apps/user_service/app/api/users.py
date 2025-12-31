@@ -6,10 +6,12 @@ All endpoints include proper authentication, validation, and database operations
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
+from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.users import (
     UpdateUserEmailRequest,
     UpdateUserProfileRequest,
@@ -186,6 +188,7 @@ async def update_user_email(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    sb_client: AsyncClient = Depends(supabase_service),
     body: UpdateUserEmailRequest = Body(...),
     user_id: str = Path(..., description="The ID of the user to update"),
 ):
@@ -193,7 +196,9 @@ async def update_user_email(
     user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
 
     # Create service and delegate all business logic to service
-    user_service = UserService(user_context=user_context, db_connection=db_connection)
+    user_service = UserService(
+        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+    )
     result = await user_service.update_user_email(user_id, user_context.organization_id, body.email)
 
     # Set old values for audit comparison
@@ -240,6 +245,7 @@ async def ban_user(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    sb_client=Depends(supabase_service),
     user_id: str = Path(..., description="The ID of the user to ban"),
 ):
     """Ban a user for a specified duration."""
@@ -252,7 +258,9 @@ async def ban_user(
     request.state.audit_description = f"Admin banned user: {user_id}"
 
     # Create service and delegate all business logic to service
-    user_service = UserService(user_context=user_context, db_connection=db_connection)
+    user_service = UserService(
+        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+    )
     result = await user_service.ban_user(user_id, user_context.organization_id)
 
     # Set audit data from service
@@ -300,6 +308,7 @@ async def unban_user(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    sb_client=Depends(supabase_service),
     user_id: str = Path(..., description="The ID of the user to unban"),
 ):
     """Unban a user by user ID."""
@@ -312,7 +321,9 @@ async def unban_user(
     request.state.audit_risk_level = "medium"
 
     # Create service and delegate all business logic to service
-    user_service = UserService(user_context=user_context, db_connection=db_connection)
+    user_service = UserService(
+        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+    )
     result = await user_service.unban_user(user_id, user_context.organization_id)
 
     # Set audit data from service
@@ -360,6 +371,7 @@ async def update_user_profile(
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    sb_client=Depends(supabase_service),
     body: UpdateUserProfileRequest = Body(...),
 ):
     """Update authenticated user's own profile information."""
@@ -372,7 +384,9 @@ async def update_user_profile(
     request.state.audit_description = f"User updating their own profile: {user_context.user_id}"
 
     # Create service and delegate all business logic to service
-    user_service = UserService(user_context=user_context, db_connection=db_connection)
+    user_service = UserService(
+        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+    )
     result = await user_service.update_user_profile(
         user_id=user_context.user_id,
         organization_id=user_context.organization_id,

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 import asyncpg
+from supabase import AsyncClient
 
 from apps.user_service.app.db.repositories.organisation_member_repository import (
     OrganisationMemberRepository,
@@ -15,20 +16,22 @@ from apps.user_service.app.db.repositories.organisation_member_repository import
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
 from apps.user_service.app.schemas.users import (
     PermissionInfo,
+    RoleInfo,
     RoleInfoWithDescription,
     UpdateUserProfileRequest,
     UserListItem,
+    UserProfileData,
+    VerificationPreference,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
-from apps.user_service.app.utils.user_utils import create_user_profile_data
-from libs.shared_db.supabase_db.admin_operations.user import (
-    ban_the_user,
-    get_user_by_id,
-    unban_the_user,
-    update_metadata_of_user,
-)
-from libs.shared_db.supabase_db.admin_operations.user_utility_admin import (
+from apps.user_service.app.utils.user_utils import (
     update_supabase_user_email,
+)
+from libs.shared_db.supabase_db.auth_repository import (
+    ban_user,
+    get_user_by_id,
+    unban_user,
+    update_metadata,
 )
 from libs.shared_utils.http_exceptions import BadRequestException, NotFoundException
 from libs.shared_utils.logger import get_logger
@@ -48,12 +51,14 @@ class UserService:
         self,
         user_context: UserContext,
         db_connection: asyncpg.Connection,
+        sb_client: AsyncClient | None = None,
     ) -> None:
         """Initialize UserService with user context and database connection.
 
         Args:
             user_context: Authenticated user context
             db_connection: database connection for postgresql
+            sb_client: Supabase client
         """
         self.user_context = user_context
         # Initialize repositories with database connection
@@ -61,6 +66,7 @@ class UserService:
             db_connection=db_connection
         )
         self.role_repository = RoleRepository(db_connection=db_connection)
+        self.supabase_client = sb_client
 
     async def get_user_profile_by_id(
         self, user_id: str, organization_id: str | None = None
@@ -361,7 +367,13 @@ class UserService:
             )
 
         # Also update in Supabase Auth
-        await update_supabase_user_email(user_id, organization_id, new_email)
+        await update_supabase_user_email(
+            user_id,
+            organization_id,
+            new_email,
+            self.organisation_member_repository,
+            self.supabase_client,
+        )
 
         return {"current_user_data": current_user_data}
 
@@ -389,7 +401,9 @@ class UserService:
             dict[str, Any]: User profile data
         """
         user_profile = await self.get_user_profile_by_id(user_id, organization_id)
-        user_data = await get_user_by_id(user_id)
+
+        # Get user data from Supabase Auth
+        user_data = await get_user_by_id(self.supabase_client, user_id)
 
         current_email, user_metadata, current_phone = self._extract_auth_user_contact(
             user_data, fallback_email=self.user_context.email
@@ -421,7 +435,7 @@ class UserService:
         role_info = self._build_role_info(user_profile)
         permissions = self._format_permissions(permissions_data)
 
-        profile_data = create_user_profile_data(
+        profile_data = self._create_user_profile_data(
             user_profile=user_profile,
             user_type=self.user_context.user_type or "organization_member",
             role_info=role_info,
@@ -720,7 +734,7 @@ class UserService:
             )
 
         # Ban user in Supabase Auth
-        result = await ban_the_user(user_id)
+        result = await ban_user(self.supabase_client, user_id)
         if not result:
             raise NotFoundException(
                 message_key="users.errors.user_not_found",
@@ -795,7 +809,7 @@ class UserService:
             )
 
         # Unban user in Supabase Auth
-        result = await unban_the_user(user_id)
+        result = await unban_user(self.supabase_client, user_id)
         if not result:
             raise NotFoundException(
                 message_key="users.errors.user_not_found",
@@ -867,7 +881,7 @@ class UserService:
 
         if metadata_update:
             merged_metadata = await self._merge_metadata(user_id, metadata_update)
-            await update_metadata_of_user(user_id, merged_metadata)
+            await update_metadata(self.supabase_client, user_id, merged_metadata)
 
         updated_profile = await self.get_user_profile_by_id(user_id, organization_id)
         profile_for_audit = updated_profile or current_user_data
@@ -898,7 +912,7 @@ class UserService:
                 return profile
 
         user_metadata = {}
-        user_data = await get_user_by_id(user_id)
+        user_data = await get_user_by_id(self.supabase_client, user_id)
         if user_data and getattr(user_data, "user", None):
             user_metadata = user_data.user.user_metadata or {}
 
@@ -1007,7 +1021,7 @@ class UserService:
     ) -> dict[str, Any]:
         """Merge incoming metadata with existing Supabase metadata."""
         existing_metadata: dict[str, Any] = {}
-        user_data = await get_user_by_id(user_id)
+        user_data = await get_user_by_id(self.supabase_client, user_id)
         if user_data and getattr(user_data, "user", None):
             existing_metadata = user_data.user.user_metadata or {}
 
@@ -1030,3 +1044,72 @@ class UserService:
             "updated_by_email": self.user_context.email,
             "update_timestamp": datetime.now().isoformat(),
         }
+
+    def _create_user_profile_data(
+        self,
+        user_profile: dict[str, Any],
+        user_type: str = "organization_member",
+        role_info: RoleInfo | RoleInfoWithDescription | None = None,
+        permissions: list[PermissionInfo] | None = None,
+    ) -> UserProfileData:
+        """Creates a UserProfileData object from user profile data.
+        This is the single source of truth for creating user profile responses.
+
+        Args:
+            user_profile: User profile data from database
+            user_type: Type of user (default: organization_member)
+            role_info: Optional role information
+            permissions: Optional list of permissions
+
+        Returns:
+            UserProfileData object with formatted user profile
+        """
+        # Extract verification_preference from user_profile dict
+        verification_preference = None
+        verification_pref_data = user_profile.get("verification_preference")
+        if verification_pref_data and isinstance(verification_pref_data, dict):
+            verification_preference = VerificationPreference(
+                two_fa_enabled=verification_pref_data.get("enabled", False),
+                verification_method=verification_pref_data.get("type", ""),
+            )
+
+        return UserProfileData(
+            user_id=str(user_profile["user_id"]),
+            email=user_profile["email"],
+            full_name=user_profile["full_name"],
+            first_name=user_profile["first_name"],
+            last_name=user_profile["last_name"],
+            avatar_url=user_profile["avatar_url"],
+            phone=user_profile["phone"],
+            timezone=user_profile["timezone"] or "UTC",
+            salutation=user_profile.get("salutation", None),
+            status=user_profile["status"],
+            joined_at=(
+                user_profile["joined_at"].isoformat()
+                if user_profile["joined_at"] and isinstance(user_profile["joined_at"], datetime)
+                else datetime.now().isoformat()
+            ),
+            last_active_at=(
+                user_profile["last_active_at"].isoformat()
+                if user_profile["last_active_at"]
+                and isinstance(user_profile["last_active_at"], datetime)
+                else user_profile["last_active_at"]
+            ),
+            organization_id=str(user_profile["organization_id"]),
+            user_type=user_type,
+            role=role_info,
+            permissions=permissions or [],
+            identities=user_profile["identities"],
+            verification_preference=verification_preference,
+        )
+
+    def _build_full_name(self, *parts: str) -> str:
+        """Build a full name from parts.
+
+        Args:
+            *parts: Parts of the full name
+
+        Returns:
+            str: Full name
+        """
+        return " ".join(filter(None, parts))

@@ -2,14 +2,12 @@
 This module provides shared email functionality for sending emails via Supabase Edge Functions.
 """
 
-import logging
 from datetime import datetime
 
 import httpx
 
 from libs.shared_config.app_settings import shared_settings
-
-logger = logging.getLogger(__name__)
+from libs.shared_utils.logger import get_logger
 
 SUPABASE_URL = shared_settings.supabase.url
 SERVICE_ROLE_KEY = shared_settings.supabase.service_key
@@ -20,6 +18,8 @@ COMMON_COMPANY_ADDRESS = shared_settings.company_address
 COMMON_PRIVACY_POLICY_URL = shared_settings.company_privacy_policy_url
 COMMON_TERMS_URL = shared_settings.company_terms_url
 ROSS_AI_FROM_NAME = shared_settings.app_name
+
+logger = get_logger(__name__)
 
 
 def send_email(

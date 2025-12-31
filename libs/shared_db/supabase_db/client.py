@@ -7,7 +7,7 @@ Provides two cached clients:
 
 from __future__ import annotations
 
-from httpx import AsyncClient as HTTPXAsyncClient
+from fastapi import Request
 from supabase import AsyncClient, ClientOptions, create_async_client
 
 from libs.shared_config.app_settings import shared_settings
@@ -46,41 +46,48 @@ async def get_supabase_client() -> AsyncClient:
     return _cache.anon
 
 
-async def get_supabase_service_client(
-    user_agent: str | None = None, custom_headers: dict | None = None
+async def supabase_anon_with_headers(
+    request: Request,
 ) -> AsyncClient:
-    """Get the cached service-role Supabase client (admin privileges).
-    Args:
-        user_agent: Optional User-Agent string
-        custom_headers: Optional dict of additional custom headers (e.g., X-Device-Signature)
-    Returns:
-        AsyncClient: The cached service-role Supabase client
-    Raises:
-        RuntimeError: If SUPABASE_URL or SUPABASE_SERVICE_KEY is not set
-        Exception: If the service client warm-up fails
+    """Create a per-request anon Supabase client with custom headers.
+    NOT cached.
     """
-    if _cache.service is None or user_agent or custom_headers:
+    headers: dict[str, str] = {}
+
+    user_agent = request.headers.get("User-Agent")
+    device_signature = request.headers.get("X-Device-Signature")
+
+    if user_agent:
+        headers["User-Agent"] = user_agent
+    if device_signature:
+        headers["X-Device-Signature"] = device_signature
+
+    options = ClientOptions(
+        persist_session=False,
+        headers=headers,
+    )
+
+    return await create_async_client(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+        options=options,
+    )
+
+
+async def get_supabase_service_client() -> AsyncClient:
+    """Get the cached service-role Supabase client (admin privileges)."""
+    if _cache.service is None:
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
             raise RuntimeError(
                 "SUPABASE_URL and SUPABASE_SERVICE_KEY must be set for service client."
             )
 
-        headers = {}
-        if user_agent:
-            headers["User-Agent"] = user_agent
-        if custom_headers:
-            headers.update(custom_headers)
-
-        http_client = HTTPXAsyncClient(headers=headers) if headers else None
-        options = ClientOptions(persist_session=False) if http_client else None
-
         _cache.service = await create_async_client(
             SUPABASE_URL,
             SUPABASE_SERVICE_KEY,
-            options=options,
+            options=ClientOptions(persist_session=False),
         )
 
-        # Warm-up to ensure credentials are valid
         try:
             await _cache.service.auth.admin.list_users()
         except Exception as exc:
