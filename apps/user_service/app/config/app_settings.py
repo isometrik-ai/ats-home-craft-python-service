@@ -11,12 +11,9 @@ from libs.shared_config.app_settings import (
     shared_settings,
 )
 
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-monorepo_root = os.path.abspath(os.path.join(base_path, "../.."))
-
 # Only load main .env if not in test environment
 if not os.environ.get("ENVIRONMENT") == "test":
-    load_dotenv(os.path.join(monorepo_root, ".env"))  # Only affects local runs, safe in Docker too
+    load_dotenv()  # Only affects local runs, safe in Docker too
 
 config = Config()
 
