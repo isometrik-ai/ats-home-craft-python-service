@@ -3,12 +3,18 @@
 from fastapi import HTTPException, status
 from supabase import AsyncClient
 
-from apps.user_service.app.db.repositories.organisation_member_repository import (
-    OrganisationMemberRepository,
+from apps.user_service.app.db.repositories import (
+    OrganizationMemberRepository,
+    OrganizationRepository,
 )
+from apps.user_service.app.schemas.auth import IsometrikDetails
+from apps.user_service.app.utils.common_utils import parse_json_field
 from apps.user_service.app.utils.email_utils import send_email
 from libs.shared_db.supabase_db.auth_repository import generate_magic_link, update_email
+from libs.shared_utils.http_exceptions import ForbiddenException
+from libs.shared_utils.isometrik_service import login_to_isometrik
 from libs.shared_utils.logger import get_logger  # Logger import
+from libs.shared_utils.status_codes import CustomStatusCode
 
 # Initialize logger
 logger = get_logger("user-utils")
@@ -30,7 +36,7 @@ async def update_supabase_user_email(
     user_id: str,
     organization_id: str,
     email: str,
-    organisation_member_repository: OrganisationMemberRepository,
+    organization_member_repository: OrganizationMemberRepository,
     sb_client: AsyncClient,
 ):
     """Update user email and send magic link notification
@@ -38,11 +44,11 @@ async def update_supabase_user_email(
         user_id: User ID
         organization_id: Organization ID
         email: New email address
-        organisation_member_repository: Repository instance for database operations
+        organization_member_repository: Repository instance for database operations
         sb_client: Supabase client
     """
     try:
-        user_info = await organisation_member_repository.get_user_profile_by_id(
+        user_info = await organization_member_repository.get_user_profile_by_id(
             user_id, organization_id
         )
 
@@ -59,7 +65,7 @@ async def update_supabase_user_email(
             )
 
         # Update email in organization_members table
-        result = await organisation_member_repository.update_user_email(
+        result = await organization_member_repository.update_user_email(
             user_id, organization_id, email
         )
         if not result:
@@ -187,3 +193,41 @@ async def send_admin_update_email(sb_client: AsyncClient, user: dict) -> bool:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to send admin update email",
         ) from error
+
+
+async def get_isometrik_details(
+    user_id: str, organization_id: str, organization_repository: OrganizationRepository
+) -> IsometrikDetails | None:
+    """Get Isometrik details for a user.
+
+    Args:
+        user_id: User ID
+        organization_id: Organization ID
+        organization_repository: Organization repository
+    Returns:
+        dict | None: Isometrik details
+    """
+    organization = await organization_repository.get_organization_by_id(organization_id)
+    if not organization:
+        return None
+    if organization and organization.get("status") != "active":
+        raise ForbiddenException(
+            message_key="organizations.errors.organization_not_active",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+    org_settings = parse_json_field(organization.get("settings"))
+    isometrik_credentials = org_settings.get("isometrik_application_details", {})
+    isometrik_login_response = await login_to_isometrik(
+        user_id=user_id,
+        isometrik_credentials=isometrik_credentials,
+    )
+    isometrik_details = None
+    if isometrik_login_response:
+        isometrik_details = IsometrikDetails(
+            user_id=isometrik_login_response.get("userId"),
+            token=isometrik_login_response.get("userToken"),
+            license_key=isometrik_credentials.get("licenseKey"),
+            user_secret=isometrik_credentials.get("userSecret"),
+            app_secret=isometrik_credentials.get("appSecret"),
+        )
+    return isometrik_details

@@ -122,7 +122,7 @@ class PermissionsRepository:
         return row is not None
 
     async def create_default_permissions(self, organization_id: str) -> list[str]:
-        """Insert default permissions for a new organisation and return their IDs."""
+        """Insert default permissions for a new organization and return their IDs."""
         if not DEFAULT_PERMISSIONS:
             return []
 

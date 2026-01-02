@@ -1,4 +1,4 @@
-"""Service for organisation business logic."""
+"""Service for organization business logic."""
 
 from __future__ import annotations
 
@@ -13,17 +13,17 @@ import asyncpg
 from pydantic import BaseModel
 
 from apps.user_service.app.db.repositories import (
-    OrganisationMemberRepository,
-    OrganisationRepository,
+    OrganizationMemberRepository,
+    OrganizationRepository,
     PermissionsRepository,
     RoleRepository,
 )
 from apps.user_service.app.schemas.auth import AccountType, PlanType, Subscription
-from apps.user_service.app.schemas.organisations import (
-    NewOrganisationBody,
-    OrganisationInfo,
-    OrganisationListResponse,
+from apps.user_service.app.schemas.organizations import (
+    NewOrganizationBody,
     OrganizationAdminUpdate,
+    OrganizationInfo,
+    OrganizationListResponse,
 )
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -65,8 +65,8 @@ def _serialize_pydantic_models(value: Any) -> Any:
     return value
 
 
-class OrganisationService:
-    """Service for organisation business logic.
+class OrganizationService:
+    """Service for organization business logic.
 
     User context is provided during initialization.
     """
@@ -78,36 +78,36 @@ class OrganisationService:
     ) -> None:
         self.user_context = user_context
         self.db_connection = db_connection
-        self.organisation_repository = OrganisationRepository(db_connection=db_connection)
+        self.organization_repository = OrganizationRepository(db_connection=db_connection)
         self.permissions_repository = PermissionsRepository(db_connection=db_connection)
         self.role_repository = RoleRepository(db_connection=db_connection)
-        self.organisation_member_repository = OrganisationMemberRepository(
+        self.organization_member_repository = OrganizationMemberRepository(
             db_connection=db_connection
         )
 
-    async def list_organisations(
+    async def list_organizations(
         self,
         page: int = 1,
         page_size: int = 20,
         search: str | None = None,
         status: str | None = None,
-    ) -> OrganisationListResponse:
-        """Retrieve paginated list of organisations."""
-        organisations_data = await self.organisation_repository.get_organisations_list(
+    ) -> OrganizationListResponse:
+        """Retrieve paginated list of organizations."""
+        organizations_data = await self.organization_repository.get_organizations_list(
             search=search,
             status=status,
             limit=page_size,
             offset=(page - 1) * page_size,
         )
-        total_count = await self.organisation_repository.get_organisations_count(
+        total_count = await self.organization_repository.get_organizations_count(
             search=search, status=status
         )
 
-        items = [self._map_to_organisation_info(org) for org in organisations_data]
+        items = [self._map_to_organization_info(org) for org in organizations_data]
         total_pages = math.ceil(total_count / page_size) if page_size else 0
         message = "success.no_data" if total_count == 0 else "success.retrieved"
 
-        return OrganisationListResponse(
+        return OrganizationListResponse(
             data=items,
             total_count=total_count,
             page=page,
@@ -116,37 +116,37 @@ class OrganisationService:
             message=message,
         )
 
-    async def get_organisation_detail(self, organisation_id: str) -> OrganisationInfo:
-        """Get organisation by ID."""
-        validate_uuid_format(organisation_id, "organisation_id")
-        org = await self.organisation_repository.get_organisation_by_id(organisation_id)
+    async def get_organization_detail(self, organization_id: str) -> OrganizationInfo:
+        """Get organization by ID."""
+        validate_uuid_format(organization_id, "organization_id")
+        org = await self.organization_repository.get_organization_by_id(organization_id)
         if not org:
             raise NotFoundException(
-                message_key="organisations.errors.not_found",
+                message_key="organizations.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return self._map_to_organisation_info(org)
+        return self._map_to_organization_info(org)
 
-    async def create_organisation(
+    async def create_organization(
         self,
-        body: NewOrganisationBody,
+        body: NewOrganizationBody,
         slug: str | None,
     ) -> dict:
-        """Create a new organisation after slug uniqueness check."""
+        """Create a new organization after slug uniqueness check."""
         # Validate user context
         if self.user_context.user_id is None:
             raise ForbiddenException(
-                message_key="organisations.errors.forbidden",
+                message_key="organizations.errors.forbidden",
                 custom_code=CustomStatusCode.FORBIDDEN,
             )
         if self.user_context.organization_id is not None:
             raise ConflictException(
-                message_key="organisations.errors.conflict",
+                message_key="organizations.errors.conflict",
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
-        organisation_id = str(uuid.uuid4())
-        validate_uuid_format(organisation_id, "organisation_id")
+        organization_id = str(uuid.uuid4())
+        validate_uuid_format(organization_id, "organization_id")
 
         resolved_slug = slug or self._generate_slug(
             body.company_data.company_name, AccountType.BUSINESS.value
@@ -157,8 +157,8 @@ class OrganisationService:
         settings = self._build_settings(body)
         isometrik_details = await self._create_isometrik_application_if_enabled(body)
 
-        org_payload = self._build_organisation_payload(
-            organisation_id=organisation_id,
+        org_payload = self._build_organization_payload(
+            organization_id=organization_id,
             resolved_slug=resolved_slug,
             body=body,
             subscription=subscription,
@@ -166,22 +166,22 @@ class OrganisationService:
             isometrik_details=isometrik_details,
         )
 
-        created = await self.organisation_repository.create_organisation(org_payload)
+        created = await self.organization_repository.create_organization(org_payload)
 
         permission_ids = await self.permissions_repository.create_default_permissions(
-            organization_id=organisation_id
+            organization_id=organization_id
         )
-        super_admin_role_id = await self._create_super_admin_role(organisation_id, permission_ids)
+        super_admin_role_id = await self._create_super_admin_role(organization_id, permission_ids)
         # Pass isometrik_details to _add_requesting_user_as_member
         await self._add_requesting_user_as_member(
-            organisation_id=organisation_id,
+            organization_id=organization_id,
             role_id=super_admin_role_id,
             body=body,
             isometrik_creds=isometrik_details,  # Pass the isometrik details here
         )
         # Match API response shape
         return {
-            "organization_id": organisation_id,
+            "organization_id": organization_id,
             "organization_name": created["name"],
             "slug": created["slug"],
             "user_id": self.user_context.user_id,
@@ -189,17 +189,17 @@ class OrganisationService:
             "role_name": "admin",
         }
 
-    async def update_organisation(
-        self, organisation_id: str, update_data: OrganizationAdminUpdate
+    async def update_organization(
+        self, organization_id: str, update_data: OrganizationAdminUpdate
     ) -> dict:
-        """Update organisation fields with slug validation when provided."""
-        validate_uuid_format(organisation_id, "organisation_id")
+        """Update organization fields with slug validation when provided."""
+        validate_uuid_format(organization_id, "organization_id")
 
         # Get only the minimal fields needed for update (id, name, slug, settings)
-        existing = await self.organisation_repository.get_organisation_for_update(organisation_id)
+        existing = await self.organization_repository.get_organization_for_update(organization_id)
         if not existing:
             raise NotFoundException(
-                message_key="organisations.errors.not_found",
+                message_key="organizations.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
@@ -208,17 +208,17 @@ class OrganisationService:
 
         if not update_payload:
             return {
-                "organization_id": organisation_id,
+                "organization_id": organization_id,
                 "organization_name": existing.get("name"),
                 "slug": existing.get("slug"),
             }
 
         # Validate slug uniqueness if slug is being updated
         if "slug" in update_payload:
-            await self._validate_slug_unique(update_payload["slug"], exclude_id=organisation_id)
+            await self._validate_slug_unique(update_payload["slug"], exclude_id=organization_id)
 
         # Transform update payload to database structure
-        # Only pass existing settings for comparison, not the entire organisation object
+        # Only pass existing settings for comparison, not the entire organization object
         existing_settings = existing.get("settings") or {}
         db_payload = self._transform_update_to_db_format(existing_settings, update_payload)
 
@@ -231,26 +231,26 @@ class OrganisationService:
             db_payload["subscription"] = json.dumps(serialized_subscription)
 
         # Perform the update
-        updated = await self.organisation_repository.update_organisation(
-            organisation_id=organisation_id, update_data=db_payload
+        updated = await self.organization_repository.update_organization(
+            organization_id=organization_id, update_data=db_payload
         )
         return {
-            "organization_id": organisation_id,
+            "organization_id": organization_id,
             "organization_name": updated.get("name", existing.get("name")),
             "slug": updated.get("slug", existing.get("slug")),
         }
 
-    async def delete_organisation(self, organisation_id: str) -> None:
-        """Soft delete organisation."""
-        validate_uuid_format(organisation_id, "organisation_id")
-        await self.organisation_repository.delete_organisation(organisation_id)
+    async def delete_organization(self, organization_id: str) -> None:
+        """Soft delete organization."""
+        validate_uuid_format(organization_id, "organization_id")
+        await self.organization_repository.delete_organization(organization_id)
 
     async def _validate_slug_unique(self, slug: str, exclude_id: str | None = None) -> None:
-        """Ensure organisation slug is unique."""
-        is_unique = await self.organisation_repository.check_slug_unique(slug, exclude_id)
+        """Ensure organization slug is unique."""
+        is_unique = await self.organization_repository.check_slug_unique(slug, exclude_id)
         if not is_unique:
             raise ConflictException(
-                message_key="organisations.errors.slug_conflict",
+                message_key="organizations.errors.slug_conflict",
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
@@ -419,13 +419,13 @@ class OrganisationService:
         }
 
     @staticmethod
-    def _map_to_organisation_info(org_data: dict[str, Any]) -> OrganisationInfo:
-        """Map raw DB row to OrganisationInfo schema."""
-        settings = OrganisationService._parse_settings(org_data.get("settings"))
-        subscription_obj = OrganisationService._parse_subscription(org_data.get("subscription"))
-        settings_fields = OrganisationService._extract_settings_fields(settings)
+    def _map_to_organization_info(org_data: dict[str, Any]) -> OrganizationInfo:
+        """Map raw DB row to OrganizationInfo schema."""
+        settings = OrganizationService._parse_settings(org_data.get("settings"))
+        subscription_obj = OrganizationService._parse_subscription(org_data.get("subscription"))
+        settings_fields = OrganizationService._extract_settings_fields(settings)
 
-        return OrganisationInfo(
+        return OrganizationInfo(
             organization_id=str(org_data["id"]),
             name=org_data.get("name"),
             slug=org_data.get("slug"),
@@ -453,14 +453,14 @@ class OrganisationService:
 
     @staticmethod
     def _generate_slug(name: str, account_type: str = AccountType.BUSINESS.value) -> str:
-        """Generate a URL-friendly slug from organisation name with account type prefix."""
+        """Generate a URL-friendly slug from organization name with account type prefix."""
         clean_name = name.lower().strip()
         normalized = "".join(c if c.isalnum() else "-" for c in clean_name)
         compact = "-".join(filter(None, normalized.split("-")))
         prefix = "personal" if account_type == AccountType.PERSONAL.value else "business"
         return f"{prefix}-{compact}"
 
-    def _build_subscription(self, body: NewOrganisationBody) -> dict:
+    def _build_subscription(self, body: NewOrganizationBody) -> dict:
         """Create subscription payload with trial defaults when missing."""
         subscription = getattr(body.company_data, "subscription", None)
         if subscription:
@@ -476,7 +476,7 @@ class OrganisationService:
             "end_date": (now + timedelta(days=7)).isoformat(),
         }
 
-    def _build_settings(self, body: NewOrganisationBody) -> dict:
+    def _build_settings(self, body: NewOrganizationBody) -> dict:
         """Build settings payload; fall back to derived defaults when not provided."""
         provided_settings = getattr(body.company_data, "settings", None)
         if provided_settings:
@@ -501,7 +501,7 @@ class OrganisationService:
         return _serialize_pydantic_models(settings)
 
     async def _create_isometrik_application_if_enabled(
-        self, body: NewOrganisationBody
+        self, body: NewOrganizationBody
     ) -> dict | None:
         """Create isometrik application."""
         try:
@@ -515,16 +515,16 @@ class OrganisationService:
         except Exception as error:
             raise error
 
-    def _build_organisation_payload(
+    def _build_organization_payload(
         self,
-        organisation_id: str,
+        organization_id: str,
         resolved_slug: str,
-        body: NewOrganisationBody,
+        body: NewOrganizationBody,
         subscription: dict,
         settings: dict,
         isometrik_details: dict | None,
     ) -> dict:
-        """Assemble organisation payload for repository."""
+        """Assemble organization payload for repository."""
         # Add isometrik_application_details to settings if provided
         if isometrik_details is not None:
             settings = settings.copy() if settings else {}
@@ -545,7 +545,7 @@ class OrganisationService:
         )
 
         return {
-            "id": organisation_id,
+            "id": organization_id,
             "name": body.company_data.company_name,
             "slug": resolved_slug,
             "domain": body.company_data.company_website,
@@ -559,35 +559,35 @@ class OrganisationService:
         }
 
     async def _create_super_admin_role(
-        self, organisation_id: str, permission_ids: list[str]
+        self, organization_id: str, permission_ids: list[str]
     ) -> str:
         """Create super admin role and attach permissions."""
         super_admin_role = await self.role_repository.create_role(
             name="admin",
             description="Full administrative access to all system features",
-            organization_id=organisation_id,
+            organization_id=organization_id,
             is_default=True,
         )
         super_admin_role_id = str(super_admin_role["id"])
         if permission_ids:
             await self.role_repository.assign_permissions_to_role(
                 role_id=super_admin_role_id,
-                organization_id=organisation_id,
+                organization_id=organization_id,
                 permission_ids=permission_ids,
             )
         return super_admin_role_id
 
     async def _add_requesting_user_as_member(
         self,
-        organisation_id: str,
+        organization_id: str,
         role_id: str,
-        body: NewOrganisationBody,
+        body: NewOrganizationBody,
         isometrik_creds: dict | None = None,
     ) -> None:
-        """Add the requesting user as an organisation member with the provided role.
+        """Add the requesting user as an organization member with the provided role.
 
         Args:
-            organisation_id: The ID of the organization
+            organization_id: The ID of the organization
             role_id: The ID of the role to assign to the member
             body: The request body containing member data
             isometrik_creds: Optional Isometrik credentials if already available
@@ -611,12 +611,12 @@ class OrganisationService:
                 last_name=member_data["last_name"],
                 email=member_data["email"],
                 isometrik_credentials=isometrik_creds,
-                organization_id=organisation_id,
+                organization_id=organization_id,
                 role="admin",  # Default role for organization creators
             )
             if isometrik_user and (user_id := isometrik_user.get("userId")):
                 member_data["isometrik_user_id"] = user_id
 
-        await self.organisation_member_repository.add_member(
-            organization_id=organisation_id, member_data=member_data
+        await self.organization_member_repository.add_member(
+            organization_id=organization_id, member_data=member_data
         )

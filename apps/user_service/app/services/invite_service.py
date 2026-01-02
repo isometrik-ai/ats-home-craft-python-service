@@ -1,23 +1,27 @@
 """Service for invite business logic."""
 
-from __future__ import annotations
-
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
+from gotrue.errors import AuthApiError
 from supabase import AsyncClient
 
 from apps.user_service.app.config.app_settings import app_settings
 from apps.user_service.app.db.repositories import (
     InviteRepository,
-    OrganisationMemberRepository,
-    OrganisationRepository,
+    OrganizationMemberRepository,
+    OrganizationRepository,
     RoleRepository,
 )
-from apps.user_service.app.schemas.auth import SignupRequest
+from apps.user_service.app.schemas.auth import (
+    AuthResponse,
+    IsometrikDetails,
+    SignupRequest,
+    UserInfo,
+)
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
     InviteCreateRequest,
@@ -31,6 +35,7 @@ from apps.user_service.app.utils.email_utils import send_organization_invitation
 from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_db.supabase_db.auth_repository import (
     get_user_by_id,
+    login_user,
     sign_up_supabase_user,
 )
 from libs.shared_utils.http_exceptions import (
@@ -59,9 +64,9 @@ class InviteService:
         self.user_context = user_context
         self.db_connection = db_connection
         self.invite_repository = InviteRepository(db_connection=db_connection)
-        self.organisation_repository = OrganisationRepository(db_connection=db_connection)
+        self.organization_repository = OrganizationRepository(db_connection=db_connection)
         self.role_repository = RoleRepository(db_connection=db_connection)
-        self.organisation_member_repository = OrganisationMemberRepository(
+        self.organization_member_repository = OrganizationMemberRepository(
             db_connection=db_connection
         )
         self.supabase_client = sb_client
@@ -213,7 +218,7 @@ class InviteService:
 
     async def accept_and_set_password(
         self, body: InviteAcceptBySettingPasswordRequest
-    ) -> dict[str, Any]:
+    ) -> AuthResponse:
         """Accept an organization invitation by setting password."""
         # Get invitation details by token with row locking for atomic acceptance
         token_hash = hash_token(body.token)
@@ -233,7 +238,7 @@ class InviteService:
             )
 
         # Get organization data when needed for isometrik credentials
-        organization_data = await self.organisation_repository.get_organisation_by_id(
+        organization_data = await self.organization_repository.get_organization_by_id(
             invitation_data["organization_id"]
         )
         if not organization_data:
@@ -248,26 +253,47 @@ class InviteService:
 
         inv_meta = self._parse_json_field(invitation_data.get("metadata"))
 
-        signup_result = await sign_up_supabase_user(
-            SignupRequest(
+        try:
+            auth_result = await sign_up_supabase_user(
+                SignupRequest(
+                    email=invitation_data["email"],
+                    password=body.password,
+                    first_name=inv_meta.get("first_name", None),
+                    last_name=inv_meta.get("last_name", None),
+                    phone=inv_meta.get("phone", None),
+                    timezone="UTC",
+                    salutation=inv_meta.get("salutation", None),
+                    verification_id="",
+                    verification_code="",
+                ),
+                self.supabase_client,
+            )
+        except AuthApiError as exc:
+            # Supabase returns AuthApiError when user already exists
+            if not (exc.status == 422 or exc.code == "user_already_exists"):
+                raise
+
+            auth_result = await login_user(
                 email=invitation_data["email"],
                 password=body.password,
-                first_name=inv_meta.get("first_name", None),
-                last_name=inv_meta.get("last_name", None),
-                phone=inv_meta.get("phone", None),
-                timezone="UTC",
-                salutation=inv_meta.get("salutation", None),
-                verification_id="",
-                verification_code="",
-            ),
-            self.supabase_client,
-        )
+                sb_client=self.supabase_client,
+            )
+            if not auth_result or not auth_result.user:
+                raise ConflictException(
+                    message_key="auth.errors.user_already_registered",
+                    custom_code=CustomStatusCode.CONFLICT,
+                ) from exc
 
-        if not signup_result:
+        if not auth_result:
             raise InternalServerErrorException(
                 message_key="errors.internal_server_error",
                 custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
+
+        session = auth_result.session
+        user = auth_result.user
+        user_metadata = getattr(user, "user_metadata", {}) or {}
+
         # Get isometrik credentials from organization settings
         org_settings = self._parse_json_field(organization_data.get("settings"))
         isometrik_credentials = org_settings.get("isometrik_application_details", {})
@@ -279,10 +305,10 @@ class InviteService:
             )
 
         # Add user to organization
-        await self._add_user_to_organization(
+        isometrik_details = await self._add_user_to_organization(
             organization_id=invitation_data["organization_id"],
             invite_data={
-                "user_id": signup_result.user.id,
+                "user_id": user.id,
                 "first_name": inv_meta.get("first_name", None),
                 "last_name": inv_meta.get("last_name", None),
                 "phone": inv_meta.get("phone", None),
@@ -298,10 +324,25 @@ class InviteService:
 
         # Update invitation status
         await self.invite_repository.update_invite_status(
-            invitation_data["id"], "accepted", signup_result.user.id
+            invitation_data["id"], "accepted", user.id
         )
 
-        return {"status": "accepted"}
+        return AuthResponse(
+            access_token=session.access_token,
+            refresh_token=getattr(session, "refresh_token", None),
+            expires_in=getattr(session, "expires_in", None),
+            expires_at=getattr(session, "expires_at", None),
+            user=UserInfo(
+                id=getattr(user, "id", None),
+                email=getattr(user, "email", None),
+                first_name=user_metadata.get("first_name", None),
+                last_name=user_metadata.get("last_name", None),
+                phone=user_metadata.get("phone", None),
+                timezone=user_metadata.get("timezone", None),
+                organization_id=str(organization_data.get("id", None)),
+            ),
+            isometrik_details=isometrik_details,
+        )
 
     async def create_invitation(
         self, organization_id: str, body: InviteCreateRequest
@@ -317,7 +358,7 @@ class InviteService:
             )
 
         # Get organization details when needed for validation and email
-        organization_data = await self.organisation_repository.get_organisation_by_id(
+        organization_data = await self.organization_repository.get_organization_by_id(
             organization_id
         )
         if not organization_data:
@@ -348,6 +389,9 @@ class InviteService:
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
+        # Validate the role exists for this organization before inserting the invite
+        role_data = await self._get_role_data(str(body.role_id), organization_id)
+
         # Generate invite token
         invite_token, token_hash = self._generate_invite_token()
         expires_at = datetime.now(timezone.utc) + timedelta(days=app_settings.invite_expiry_days)
@@ -372,8 +416,6 @@ class InviteService:
 
         # Generate invitation URL
         invite_url = self._generate_invite_url(invite_token)
-
-        role_data = await self._get_role_data(str(body.role_id), organization_id)
 
         inviter = await get_user_by_id(self.supabase_client, self.user_context.user_id)
 
@@ -458,7 +500,7 @@ class InviteService:
             )
 
         # Get organization details when needed for email
-        organization_data = await self.organisation_repository.get_organisation_by_id(
+        organization_data = await self.organization_repository.get_organization_by_id(
             invitation_data["organization_id"]
         )
         if not organization_data:
@@ -528,7 +570,7 @@ class InviteService:
         role_name: str,
         invited_by: str,
         isometrik_credentials: dict[str, Any],
-    ) -> dict[str, Any]:
+    ) -> IsometrikDetails:
         """Add user to organization as a member."""
         isometrik_user_id = None
         isometrik_response = await create_isometrik_user(
@@ -567,11 +609,19 @@ class InviteService:
             "isometrik_user_id": invite_data.get("isometrik_user_id", None),
         }
 
-        result = await self.organisation_member_repository.add_member(
+        await self.organization_member_repository.add_member(
             organization_id=organization_id, member_data=member_record
         )
 
-        return result
+        isometrik_details = IsometrikDetails(
+            user_id=isometrik_response.get("userId"),
+            token=isometrik_response.get("userToken"),
+            license_key=isometrik_credentials.get("licenseKey"),
+            user_secret=isometrik_credentials.get("userSecret"),
+            app_secret=isometrik_credentials.get("appSecret"),
+        )
+
+        return isometrik_details
 
     async def validate_organization_subscription(self, organization_data: dict[str, Any]) -> bool:
         """Validate whether the organization has a valid subscription.
@@ -623,7 +673,7 @@ class InviteService:
         if end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=timezone.utc)
 
-        total_members = await self.organisation_member_repository.get_users_total_count(
+        total_members = await self.organization_member_repository.get_users_total_count(
             organization_id=organization_id,
             search=None,
         )

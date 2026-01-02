@@ -26,7 +26,7 @@ from apps.user_service.app.config.app_settings import app_settings
 
 # Database operations imports
 from apps.user_service.app.db.repositories import (
-    OrganisationMemberRepository,
+    OrganizationMemberRepository,
     UserRepository,
     VerificationCodeRepository,
 )
@@ -76,7 +76,7 @@ class VerificationCodeService:
         self.db_connection = db_connection
         self.user_repository = UserRepository(db_connection=db_connection)
         self.verification_code_repository = VerificationCodeRepository(db_connection=db_connection)
-        self.organisation_member_repository = OrganisationMemberRepository(
+        self.organization_member_repository = OrganizationMemberRepository(
             db_connection=db_connection
         )
         self.supabase_client = sb_client
@@ -551,7 +551,7 @@ class VerificationCodeService:
                         },
                     )
             # Also update organization_members table
-            await self.organisation_member_repository.update_user_email_by_user_id(user_id, email)
+            await self.organization_member_repository.update_user_email_by_user_id(user_id, email)
             return True
 
         raise InternalServerErrorException(
@@ -610,7 +610,7 @@ class VerificationCodeService:
                     },
                 )
             # Also update organization_members table
-            await self.organisation_member_repository.update_user_phone_by_user_id(user_id, phone)
+            await self.organization_member_repository.update_user_phone_by_user_id(user_id, phone)
             return True
 
         raise InternalServerErrorException(

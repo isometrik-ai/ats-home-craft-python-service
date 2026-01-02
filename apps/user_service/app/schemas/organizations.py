@@ -1,6 +1,6 @@
-"""Organisation Schemas Module.
+"""Organization Schemas Module.
 
-This module contains all Pydantic models and schemas related to organisation management.
+This module contains all Pydantic models and schemas related to organization management.
 These schemas are used for request/response validation and API documentation.
 """
 
@@ -23,71 +23,71 @@ from apps.user_service.app.schemas.auth import (
 )
 
 
-class OrganisationInfo(BaseModel):
-    """Model for organisation information
+class OrganizationInfo(BaseModel):
+    """Model for organization information
 
-    This model contains all organisation information including basic details,
+    This model contains all organization information including basic details,
     plan information, and user-specific data.
 
     Attributes:
-        organization_id (str): Unique identifier for the organisation
-        name (str): Organisation's name
-        slug (str): URL-friendly slug for the organisation
-        domain (Optional[str]): Organisation's domain name
-        logo_url (Optional[str]): URL to organisation's logo
-        status (str): Organisation's current status (active, suspended, trial)
+        organization_id (str): Unique identifier for the organization
+        name (str): Organization's name
+        slug (str): URL-friendly slug for the organization
+        domain (Optional[str]): Organization's domain name
+        logo_url (Optional[str]): URL to organization's logo
+        status (str): Organization's current status (active, suspended, trial)
         subscription (Optional[Subscription]): Subscription information
-        timezone (str): Organisation's timezone setting
-        created_at (Optional[str]): ISO timestamp when organisation was created
-        updated_at (Optional[str]): ISO timestamp when organisation was last updated
-        member_count (int): Number of active members in the organisation
-        user_role (Optional[str]): Current user's role in this organisation
+        timezone (str): Organization's timezone setting
+        created_at (Optional[str]): ISO timestamp when organization was created
+        updated_at (Optional[str]): ISO timestamp when organization was last updated
+        member_count (int): Number of active members in the organization
+        user_role (Optional[str]): Current user's role in this organization
     """
 
-    organization_id: str = Field(..., description="Unique identifier for the organisation")
-    name: str = Field(..., description="Organisation's name")
-    slug: str = Field(..., description="URL-friendly slug for the organisation")
-    domain: str | None = Field(None, description="Organisation's domain name")
-    logo_url: str | None = Field(None, description="URL to organisation's logo")
+    organization_id: str = Field(..., description="Unique identifier for the organization")
+    name: str = Field(..., description="Organization's name")
+    slug: str = Field(..., description="URL-friendly slug for the organization")
+    domain: str | None = Field(None, description="Organization's domain name")
+    logo_url: str | None = Field(None, description="URL to organization's logo")
     subscription: Subscription | None = Field(
         default=None,
         description="Subscription information stored in the dedicated column",
     )
-    status: str = Field(..., description="Organisation's current status (active, suspended, trial)")
-    timezone: str = Field(default="UTC", description="Organisation's timezone setting")
-    created_at: str | None = Field(None, description="ISO timestamp when organisation was created")
+    status: str = Field(..., description="Organization's current status (active, suspended, trial)")
+    timezone: str = Field(default="UTC", description="Organization's timezone setting")
+    created_at: str | None = Field(None, description="ISO timestamp when organization was created")
     updated_at: str | None = Field(
-        None, description="ISO timestamp when organisation was last updated"
+        None, description="ISO timestamp when organization was last updated"
     )
-    member_count: int = Field(default=0, description="Number of active members in the organisation")
-    address: Address | None = Field(None, description="Organisation's address")
+    member_count: int = Field(default=0, description="Number of active members in the organization")
+    address: Address | None = Field(None, description="Organization's address")
     primary_practice_areas: list[PracticeArea] | None = Field(
-        None, description="Organisation's primary practice areas"
+        None, description="Organization's primary practice areas"
     )
     secondary_practice_areas: list[PracticeArea] | None = Field(
-        None, description="Organisation's secondary practice areas"
+        None, description="Organization's secondary practice areas"
     )
     specializations: list[Specialization] | None = Field(
-        None, description="Organisation's specializations"
+        None, description="Organization's specializations"
     )
     preferred_integration: list[PreferredIntegration] | None = Field(
-        None, description="Organisation's preferred integrations"
+        None, description="Organization's preferred integrations"
     )
     need_help_importing_data: bool | None = Field(
-        None, description="Organisation's need help importing data"
+        None, description="Organization's need help importing data"
     )
     need_migration_assistance: bool | None = Field(
-        None, description="Organisation's need migration assistance"
+        None, description="Organization's need migration assistance"
     )
     compliance_security: ComplianceSecurity | None = Field(
-        None, description="Organisation's compliance security"
+        None, description="Organization's compliance security"
     )
     enterprise_features: EnterpriseFeatures | None = Field(
-        None, description="Organisation's enterprise features"
+        None, description="Organization's enterprise features"
     )
-    team_setup: TeamSetup | None = Field(None, description="Organisation's team setup")
-    description: str | None = Field(None, description="Organisation's description")
-    company_size: str | None = Field(None, description="Organisation's company size")
+    team_setup: TeamSetup | None = Field(None, description="Organization's team setup")
+    description: str | None = Field(None, description="Organization's description")
+    company_size: str | None = Field(None, description="Organization's company size")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -110,21 +110,21 @@ class OrganisationInfo(BaseModel):
     )
 
 
-class OrganisationListResponse(BaseModel):
-    """Response model for organisation list operations
+class OrganizationListResponse(BaseModel):
+    """Response model for organization list operations
 
-    This is the standard response wrapper for organisation list endpoints.
+    This is the standard response wrapper for organization list endpoints.
 
     Attributes:
         message (str): Response message describing the operation result
-        data (List[OrganisationInfo]): List of organisations if successful
-        total_count (int): Total number of organisations
+        data (List[OrganizationInfo]): List of organizations if successful
+        total_count (int): Total number of organizations
         page (int): Current page number
         page_size (int): Number of items per page
     """
 
-    data: list[OrganisationInfo] = Field(..., description="List of organisations if successful")
-    total_count: int = Field(..., description="Total number of organisations")
+    data: list[OrganizationInfo] = Field(..., description="List of organizations if successful")
+    total_count: int = Field(..., description="Total number of organizations")
     message: str = Field(..., description="Response message describing the operation result")
     page: int = Field(..., description="Current page number")
     page_size: int = Field(..., description="Number of items per page")
@@ -159,41 +159,41 @@ class OrganisationListResponse(BaseModel):
     )
 
 
-class OrganisationResponse(BaseModel):
-    """Response model for basic organisation operations."""
+class OrganizationResponse(BaseModel):
+    """Response model for basic organization operations."""
 
     message: str = Field(..., description="Response message describing the operation result")
     status: str = Field(..., description="Response status (success or error)")
 
 
-class CreateOrganisationRequest(BaseModel):
-    """Request model for creating a new organisation
+class CreateOrganizationRequest(BaseModel):
+    """Request model for creating a new organization
 
     Attributes:
-        name (str): Organisation's name (required)
-        slug (str): URL-friendly slug for the organisation (required)
-        domain (Optional[str]): Organisation's domain name
-        logo_url (Optional[str]): URL to organisation's logo
+        name (str): Organization's name (required)
+        slug (str): URL-friendly slug for the organization (required)
+        domain (Optional[str]): Organization's domain name
+        logo_url (Optional[str]): URL to organization's logo
         plan_type (str): Type of plan (starter, professional, enterprise)
         max_users (int): Maximum number of users allowed
-        timezone (str): Organisation's timezone preference
+        timezone (str): Organization's timezone preference
     """
 
-    name: str = Field(..., min_length=2, max_length=255, description="Organisation's name")
+    name: str = Field(..., min_length=2, max_length=255, description="Organization's name")
     slug: str = Field(
         ...,
         min_length=2,
         max_length=100,
-        description="URL-friendly slug for the organisation",
+        description="URL-friendly slug for the organization",
     )
-    domain: str | None = Field(None, description="Organisation's domain name")
-    logo_url: str | None = Field(None, description="URL to organisation's logo")
+    domain: str | None = Field(None, description="Organization's domain name")
+    logo_url: str | None = Field(None, description="URL to organization's logo")
     plan_type: str = Field(
         default="starter",
         description="Type of plan (starter, professional, enterprise)",
     )
     max_users: int = Field(default=10, description="Maximum number of users allowed")
-    timezone: str = Field(default="UTC", description="Organisation's timezone preference")
+    timezone: str = Field(default="UTC", description="Organization's timezone preference")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -210,13 +210,13 @@ class CreateOrganisationRequest(BaseModel):
     )
 
 
-class UpdateOrganisationRequest(BaseModel):
-    """Request model for updating organisation information
+class UpdateOrganizationRequest(BaseModel):
+    """Request model for updating organization information
 
     All fields are optional for partial updates.
 
     Attributes:
-        name (Optional[str]): Updated organisation name
+        name (Optional[str]): Updated organization name
         slug (Optional[str]): Updated slug
         domain (Optional[str]): Updated domain name
         logo_url (Optional[str]): Updated logo URL
@@ -226,7 +226,7 @@ class UpdateOrganisationRequest(BaseModel):
     """
 
     name: str | None = Field(
-        None, min_length=2, max_length=255, description="Updated organisation name"
+        None, min_length=2, max_length=255, description="Updated organization name"
     )
     slug: str | None = Field(None, min_length=2, max_length=100, description="Updated slug")
     domain: str | None = Field(None, description="Updated domain name")
@@ -247,21 +247,21 @@ class UpdateOrganisationRequest(BaseModel):
     )
 
 
-class UpdateOrganisationResponse(BaseModel):
-    """Response model for organisation update operations
+class UpdateOrganizationResponse(BaseModel):
+    """Response model for organization update operations
 
     Attributes:
         message (str): Response message
-        data (Optional[OrganisationInfo]): Updated organisation data
+        data (Optional[OrganizationInfo]): Updated organization data
     """
 
-    data: OrganisationInfo | None = Field(None, description="Updated organisation data")
+    data: OrganizationInfo | None = Field(None, description="Updated organization data")
     message: str = Field(..., description="Response message describing the operation result")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "message": "Organisation updated successfully",
+                "message": "Organization updated successfully",
                 "data": {
                     "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                     "name": "Updated Acme Corporation",
@@ -277,21 +277,21 @@ class UpdateOrganisationResponse(BaseModel):
     )
 
 
-class OrganisationDetailResponse(BaseModel):
-    """Response model for organisation detail operations
+class OrganizationDetailResponse(BaseModel):
+    """Response model for organization detail operations
 
     Attributes:
         message (str): Response message describing the operation result
-        data (Optional[OrganisationInfo]): Organisation data if successful
+        data (Optional[OrganizationInfo]): Organization data if successful
     """
 
-    data: OrganisationInfo | None = Field(None, description="Organisation data if successful")
+    data: OrganizationInfo | None = Field(None, description="Organization data if successful")
     message: str = Field(..., description="Response message describing the operation result")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "message": "Organisation retrieved successfully",
+                "message": "Organization retrieved successfully",
                 "data": {
                     "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                     "name": "Sony Corporation",
@@ -308,36 +308,36 @@ class OrganisationDetailResponse(BaseModel):
     )
 
 
-class NewOrganisationBody(BaseModel):
-    """Request body for creating a new organisation along with an initial user.
+class NewOrganizationBody(BaseModel):
+    """Request body for creating a new organization along with an initial user.
 
-    This model is used when a new organisation is being registered and an initial user
+    This model is used when a new organization is being registered and an initial user
     (such as the owner or admin) is created at the same time.
 
     Attributes:
         user_data (Optional[User]): Information about the initial user to be created.
-        company_data (Optional[CompanyData]): Information about the organisation/company.
+        company_data (Optional[CompanyData]): Information about the organization/company.
     """
 
     user_data: User | None = None
     company_data: CompanyData
 
 
-class CreateOrganisationWithUserResponse(BaseModel):
-    """Response model for creating organisation with user signup
+class CreateOrganizationWithUserResponse(BaseModel):
+    """Response model for creating organization with user signup
 
     Attributes:
         message (str): Response message describing the operation result
-        data (dict): Created organisation and user data
+        data (dict): Created organization and user data
     """
 
-    data: dict[str, Any] = Field(..., description="Created organisation and user data")
+    data: dict[str, Any] = Field(..., description="Created organization and user data")
     message: str = Field(..., description="Response message describing the operation result")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "message": "Organisation and user created successfully",
+                "message": "Organization and user created successfully",
                 "data": {
                     "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                     "user_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -351,7 +351,7 @@ class CreateOrganisationWithUserResponse(BaseModel):
 
 
 class OrganizationUpdate(BaseModel):
-    """Payload for organisation *owners or standard admins*.
+    """Payload for organization *owners or standard admins*.
     Every field is optional so the caller may patch only what they need.
     """
 
@@ -359,19 +359,19 @@ class OrganizationUpdate(BaseModel):
     name: str | None = Field(
         None,
         max_length=255,
-        description="Organisation's display name",
+        description="Organization's display name",
     )
     logo_url: str | None = Field(
         None,
         description=(
-            "Path to the organisation's logo image "
+            "Path to the organization's logo image "
             "(e.g., 'house-of-apps-legal-ai/org-id/filename.jpg')"
         ),
     )
     industry: str | None = Field(
         None,
         max_length=100,
-        description="Industry or vertical the organisation operates in",
+        description="Industry or vertical the organization operates in",
     )
     company_size: str | None = Field(
         None,
@@ -380,38 +380,38 @@ class OrganizationUpdate(BaseModel):
     )
     description: str | None = Field(
         None,
-        description="Short description or mission statement of the organisation",
+        description="Short description or mission statement of the organization",
     )
     referral_source: str | None = Field(
         None,
         max_length=100,
-        description="How the organisation first heard about the platform",
+        description="How the organization first heard about the platform",
     )
-    address: Address | None = Field(None, description="Organisation's address")
+    address: Address | None = Field(None, description="Organization's address")
     primary_practice_areas: list[PracticeArea] | None = Field(
-        None, description="Organisation's primary practice areas"
+        None, description="Organization's primary practice areas"
     )
     secondary_practice_areas: list[PracticeArea] | None = Field(
-        None, description="Organisation's secondary practice areas"
+        None, description="Organization's secondary practice areas"
     )
     specializations: list[Specialization] | None = Field(
-        None, description="Organisation's specializations"
+        None, description="Organization's specializations"
     )
     preferred_integration: list[PreferredIntegration] | None = Field(
-        None, description="Organisation's preferred integrations"
+        None, description="Organization's preferred integrations"
     )
     compliance_security: ComplianceSecurity | None = Field(
-        None, description="Organisation's compliance security"
+        None, description="Organization's compliance security"
     )
     enterprise_features: EnterpriseFeatures | None = Field(
-        None, description="Organisation's enterprise features"
+        None, description="Organization's enterprise features"
     )
-    team_setup: TeamSetup | None = Field(None, description="Organisation's team setup")
+    team_setup: TeamSetup | None = Field(None, description="Organization's team setup")
 
     timezone: str | None = Field(
         None,
         max_length=50,
-        description="Default timezone for the organisation",
+        description="Default timezone for the organization",
     )
 
     model_config = ConfigDict(
@@ -429,16 +429,16 @@ class OrganizationAdminUpdate(OrganizationUpdate):
 
     slug: str | None = Field(
         None,
-        description="URL-friendly slug used in organisation-specific links",
+        description="URL-friendly slug used in organization-specific links",
     )
     domain: str | None = Field(
         None,
         max_length=255,
-        description="Primary domain name associated with the organisation",
+        description="Primary domain name associated with the organization",
     )
     status: str | None = Field(
         None,
-        description="Organisation's account status (active, suspended, trial)",
+        description="Organization's account status (active, suspended, trial)",
     )
 
     @model_validator(mode="after")

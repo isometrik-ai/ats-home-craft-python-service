@@ -10,7 +10,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/legalai-fast-api
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/house-of-apps-ai-fast-api
 
 jobs:
   lint:
@@ -95,7 +95,11 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ env.IMAGE_NAME }}:development
+          tags: |
+            ${{ env.IMAGE_NAME }}:development
+            # ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            # ${{ env.IMAGE_NAME }}:${{ github.sha }}:development
+            ${{ env.IMAGE_NAME }}:dev-${{ github.run_number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -105,7 +109,11 @@ jobs:
       - name: Notify deployment
         run: |
           echo "✅ Development deployment completed!"
-          echo "📦 Image: ${{ env.IMAGE_NAME }}:development"
+          echo "📦 Images tagged:"
+          echo "   - ${{ env.IMAGE_NAME }}:development"
+          # echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          # echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}:development"
+          echo "   - ${{ env.IMAGE_NAME }}:dev-${{ github.run_number }}"
           echo "🔗 Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
 
   docker-build-prod:
@@ -132,7 +140,11 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ env.IMAGE_NAME }}:latest
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            # ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            # ${{ env.IMAGE_NAME }}:${{ github.sha }}:production
+            ${{ env.IMAGE_NAME }}:prod-${{ github.run_number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -142,5 +154,9 @@ jobs:
       - name: Notify deployment
         run: |
           echo "✅ Production deployment completed!"
-          echo "📦 Image: ${{ env.IMAGE_NAME }}:latest"
+          echo "📦 Images tagged:"
+          echo "   - ${{ env.IMAGE_NAME }}:latest"
+          # echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          # echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}:production"
+          echo "   - ${{ env.IMAGE_NAME }}:prod-${{ github.run_number }}"
           echo "🔗 Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"

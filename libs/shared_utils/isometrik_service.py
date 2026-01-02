@@ -227,3 +227,85 @@ async def create_isometrik_user(
             message_key="errors.internal_server_error",
             custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         ) from e
+
+
+async def login_to_isometrik(
+    user_id: str,
+    isometrik_credentials: dict[str, Any],
+) -> dict[str, Any]:
+    """Login to Isometrik.
+
+    Args:
+        user_id (str): User ID
+        isometrik_credentials (dict[str, Any]): Isometrik credentials from settings
+            Should contain: userSecret, licenseKey, appSecret
+    Returns:
+        dict[str, Any]: Response from Isometrik API containing login details
+
+    Raises:
+        BadRequestException: If API call returns 400 status code
+        RateLimitExceededException: If API call returns 429 status code
+        ServiceUnavailableException: If API call returns 5xx status code
+        InternalServerErrorException: If unexpected error occurs
+    """
+    try:
+        password = user_id.replace("-", "")[:12] + "Ai$"
+
+        payload = {
+            "userIdentifier": str(user_id),
+            "password": password,
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "userSecret": isometrik_credentials.get("userSecret", ""),
+            "licenseKey": isometrik_credentials.get("licenseKey", ""),
+            "appSecret": isometrik_credentials.get("appSecret", ""),
+        }
+
+        url = f"{shared_settings.isometrik.api_url}/chat/user/authenticate"
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+
+            try:
+                return response.json()
+            except ValueError as e:
+                logger.error("Invalid JSON in Isometrik API response: %s", response.text)
+                raise ServiceUnavailableException(
+                    message_key="errors.external_service_unavailable",
+                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+                ) from e
+
+    except httpx.HTTPStatusError as e:
+        status_code = e.response.status_code
+        if 400 <= status_code < 500:
+            raise BadRequestException(
+                message_key="errors.external_api_bad_request",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_BAD_REQUEST,
+            ) from e
+
+        if status_code == 429:
+            raise RateLimitExceededException(
+                message_key="errors.external_api_rate_limited",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_RATE_LIMIT,
+            ) from e
+
+        # 5xx errors
+        raise ServiceUnavailableException(
+            message_key="errors.external_service_unavailable",
+            custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+        ) from e
+    except httpx.RequestError as e:
+        logger.error("Isometrik API connection error: %s", str(e))
+        raise ServiceUnavailableException(
+            message_key="errors.external_service_unavailable",
+            custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+        ) from e
+    except Exception as e:
+        logger.error("Unexpected error creating Isometrik chat user: %s", str(e))
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        ) from e

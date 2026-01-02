@@ -17,9 +17,9 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 # Logger import
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_anon, supabase_service
+from apps.user_service.app.schemas.auth import AuthResponse
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
-    InviteAcceptResponse,
     InviteCreateRequest,
     InviteListResponse,
     InviteResponse,
@@ -48,10 +48,10 @@ router = APIRouter(prefix="/invite", tags=["Organization Invitations"])
     description="Accept an organization invitation by setting password",
     summary="Accept an organization invitation by setting password",
     status_code=http_status.HTTP_202_ACCEPTED,
-    response_model=None,
+    response_model=AuthResponse,
     responses={
         http_status.HTTP_202_ACCEPTED: {
-            "model": InviteAcceptResponse,
+            "model": AuthResponse,
             "description": "Invitation accepted successfully",
         },
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
@@ -93,13 +93,14 @@ async def accept_and_set_password_invitation(
     invite_service = InviteService(
         user_context=None, db_connection=db_connection, sb_client=sb_client
     )
-    await invite_service.accept_and_set_password(body)
+    result = await invite_service.accept_and_set_password(body)
 
     return success_response(
         request=request,
         message_key="invitations.success.invitation_accepted",
         custom_code=CustomStatusCode.ACCEPTED,
         status_code=http_status.HTTP_202_ACCEPTED,
+        data=result,
     )
 
 

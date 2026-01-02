@@ -18,7 +18,7 @@ import jwt
 from fastapi import Depends, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from apps.user_service.app.db.repositories import OrganisationMemberRepository
+from apps.user_service.app.db.repositories import OrganizationMemberRepository
 from apps.user_service.app.dependencies.db import db_conn
 from libs.shared_config.app_settings import shared_settings
 from libs.shared_db.supabase_db.client import get_supabase_client
@@ -66,7 +66,7 @@ def setup_audit_context(
     }
 
 
-async def check_user_access_async(permission_code: list[str], user_id, organisation_id):
+async def check_user_access_async(permission_code: list[str], user_id, organization_id):
     """Check if a user has the specified role permission using Supabase SDK.
 
     This function provides a truly async alternative for permission checking
@@ -76,7 +76,7 @@ async def check_user_access_async(permission_code: list[str], user_id, organisat
         permission_code (List[str]): List of permission codes to check
         (e.g., ["settings.roles.manage", "business.dashboard.view", etc])
         user_id (str): The ID of the user to check permissions for
-        organisation_id (str): The ID of the Organisation to check permissions for
+        organization_id (str): The ID of the Organization to check permissions for
 
     Returns:
         bool: True if user has permission, False otherwise
@@ -90,9 +90,9 @@ async def check_user_access_async(permission_code: list[str], user_id, organisat
         # Get global Supabase client
         supabase = await get_supabase_client()
 
-        if not organisation_id:
+        if not organization_id:
             raise BadRequestException(
-                message_key="organisations.errors.user_not_a_member_of_any_organization",
+                message_key="organizations.errors.user_not_a_member_of_any_organization",
                 custom_code=CustomStatusCode.BAD_REQUEST,
             )
 
@@ -101,7 +101,7 @@ async def check_user_access_async(permission_code: list[str], user_id, organisat
             "check_permission",
             {
                 "user_id": user_id,
-                "organization_id": organisation_id,
+                "organization_id": organization_id,
                 "permission_code": permission_code,
             },
         )
@@ -134,7 +134,7 @@ async def get_user_from_auth(
     # Extract user data from JWT token
     user_id, user_email, session_id = extract_user_data(user)
 
-    org_member_repo = OrganisationMemberRepository(db_connection=db_connection)
+    org_member_repo = OrganizationMemberRepository(db_connection=db_connection)
     organization_id = await org_member_repo.get_organization_id_by_user_id(user_id)
 
     # Setup audit context

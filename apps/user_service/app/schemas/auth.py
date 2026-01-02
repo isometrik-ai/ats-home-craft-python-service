@@ -148,6 +148,16 @@ class OrganizationInfo(BaseModel):
     status: str
 
 
+class IsometrikDetails(BaseModel):
+    """Isometrik details model"""
+
+    user_id: str = Field(None, description="Isometrik user ID")
+    token: str = Field(None, description="Isometrik token")
+    license_key: str = Field(None, description="Isometrik license key")
+    user_secret: str = Field(None, description="Isometrik user secret")
+    app_secret: str = Field(None, description="Isometrik app secret")
+
+
 class AuthResponse(BaseModel):
     """Response model for authentication operations"""
 
@@ -156,6 +166,7 @@ class AuthResponse(BaseModel):
     expires_in: int
     expires_at: datetime
     user: UserInfo
+    isometrik_details: IsometrikDetails | None = None
 
 
 class RefreshSessionResponse(BaseModel):
@@ -466,7 +477,7 @@ class Subscription(BaseModel):
     max_users: int | None = Field(
         default=None,
         ge=1,
-        description="Maximum number of licensed seats for the organisation",
+        description="Maximum number of licensed seats for the organization",
     )
     plan_type: PlanType = Field(
         default=PlanType.TRIAL,

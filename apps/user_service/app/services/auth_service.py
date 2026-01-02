@@ -19,7 +19,8 @@ from apps.user_service.app.config.app_settings import shared_settings
 
 # repositories
 from apps.user_service.app.db.repositories import (
-    OrganisationMemberRepository,
+    OrganizationMemberRepository,
+    OrganizationRepository,
     UserRepository,
 )
 
@@ -50,6 +51,7 @@ from apps.user_service.app.utils.email_utils import (
     send_password_reset_success_email,
     send_welcome_email,
 )
+from apps.user_service.app.utils.user_utils import get_isometrik_details
 
 # Shared library imports
 from libs.shared_db.supabase_db.auth_repository import (
@@ -96,6 +98,7 @@ class AuthService:
         """
         self.db_connection = db_connection
         self.user_repository = UserRepository(db_connection=db_connection)
+        self.organization_repository = OrganizationRepository(db_connection=db_connection)
         self.supabase_client = sb_client
 
     # UTILITY METHODS
@@ -548,8 +551,14 @@ class AuthService:
 
         # Get organization_id from organization_members table
         user_id = getattr(user, "id", None)
-        org_member_repo = OrganisationMemberRepository(self.db_connection)
+        org_member_repo = OrganizationMemberRepository(self.db_connection)
         organization_id = await org_member_repo.get_organization_id_by_user_id(user_id)
+
+        isometrik_details = await get_isometrik_details(
+            user_id=user_id,
+            organization_id=organization_id,
+            organization_repository=self.organization_repository,
+        )
 
         return AuthResponse(
             access_token=session.access_token,
@@ -566,6 +575,7 @@ class AuthService:
                 org_setup_status_completed=bool(organization_id),
                 organization_id=organization_id,
             ),
+            isometrik_details=isometrik_details,
         )
 
     def _validate_tokens_present(

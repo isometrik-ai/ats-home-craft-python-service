@@ -1,4 +1,4 @@
-"""Organisation Member Repository Module - AsyncPG Implementation.
+"""Organization Member Repository Module - AsyncPG Implementation.
 
 This repository encapsulates all DB operations for organization_members.
 """
@@ -9,11 +9,11 @@ import asyncpg
 
 from libs.shared_utils.logger import get_logger
 
-logger = get_logger("organisation_member_repository")
+logger = get_logger("organization_member_repository")
 
 
-class OrganisationMemberRepository:
-    """Database operations class for organisation members using asyncpg."""
+class OrganizationMemberRepository:
+    """Database operations class for organization members using asyncpg."""
 
     def __init__(self, db_connection: asyncpg.Connection) -> None:
         self.db_connection = db_connection
@@ -23,7 +23,7 @@ class OrganisationMemberRepository:
         organization_id: str,
         member_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """Add a member to an organisation."""
+        """Add a member to an organization."""
         query = """
             INSERT INTO organization_members (
                 user_id,

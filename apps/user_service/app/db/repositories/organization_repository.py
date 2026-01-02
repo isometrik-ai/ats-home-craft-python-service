@@ -1,7 +1,7 @@
-"""Organisation Database Repository Module - AsyncPG Implementation
+"""Organization Database Repository Module - AsyncPG Implementation
 
-This module contains organisation-related database operations using asyncpg.
-All SQL queries for organisation management are centralized here with proper
+This module contains organization-related database operations using asyncpg.
+All SQL queries for organization management are centralized here with proper
 transaction handling and efficient batch operations.
 """
 
@@ -13,20 +13,20 @@ from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
-logger = get_logger("organisation_repository")
+logger = get_logger("organization_repository")
 
 
-class OrganisationRepository:
-    """Database operations class for organisation management using asyncpg."""
+class OrganizationRepository:
+    """Database operations class for organization management using asyncpg."""
 
     def __init__(self, db_connection: asyncpg.Connection) -> None:
         self.db_connection = db_connection
 
     # CREATE OPERATIONS
-    async def create_organisation(self, organisation_data: dict[str, Any]) -> dict[str, Any]:
-        """Create a new organisation record."""
-        columns = list(organisation_data.keys())
-        values = [organisation_data[col] for col in columns]
+    async def create_organization(self, organization_data: dict[str, Any]) -> dict[str, Any]:
+        """Create a new organization record."""
+        columns = list(organization_data.keys())
+        values = [organization_data[col] for col in columns]
         placeholders = [f"${idx}" for idx in range(1, len(columns) + 1)]
 
         query = f"""
@@ -39,7 +39,7 @@ class OrganisationRepository:
         return dict(row)
 
     # READ OPERATIONS
-    def _build_organisation_conditions(
+    def _build_organization_conditions(
         self,
         search: str | None = None,
         status: str | None = None,
@@ -69,16 +69,16 @@ class OrganisationRepository:
 
         return " AND ".join(conditions), params
 
-    async def get_organisations_list(
+    async def get_organizations_list(
         self,
         search: str | None = None,
         status: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Retrieve paginated list of organisations with active member counts."""
+        """Retrieve paginated list of organizations with active member counts."""
 
-        where_clause, params = self._build_organisation_conditions(search, status)
+        where_clause, params = self._build_organization_conditions(search, status)
 
         params.extend([limit, offset])
         limit_idx = len(params) - 1
@@ -117,14 +117,14 @@ class OrganisationRepository:
         rows = await self.db_connection.fetch(query, *params)
         return [dict(row) for row in rows]
 
-    async def get_organisations_count(
+    async def get_organizations_count(
         self,
         search: str | None = None,
         status: str | None = None,
     ) -> int:
-        """Get total count of organisations matching search criteria."""
+        """Get total count of organizations matching search criteria."""
 
-        where_clause, params = self._build_organisation_conditions(search, status)
+        where_clause, params = self._build_organization_conditions(search, status)
 
         query = f"""
             SELECT COUNT(*)::int
@@ -134,11 +134,11 @@ class OrganisationRepository:
 
         return await self.db_connection.fetchval(query, *params) or 0
 
-    async def get_organisation_by_id(
+    async def get_organization_by_id(
         self,
-        organisation_id: str,
+        organization_id: str,
     ) -> dict[str, Any] | None:
-        """Get organisation by ID with active member count."""
+        """Get organization by ID with active member count."""
 
         query = """
             SELECT
@@ -169,14 +169,14 @@ class OrganisationRepository:
             LIMIT 1
         """
 
-        row = await self.db_connection.fetchrow(query, organisation_id)
+        row = await self.db_connection.fetchrow(query, organization_id)
         return dict(row) if row else None
 
-    async def get_organisation_for_update(
+    async def get_organization_for_update(
         self,
-        organisation_id: str,
+        organization_id: str,
     ) -> dict[str, Any] | None:
-        """Get minimal organisation fields needed for update operations.
+        """Get minimal organization fields needed for update operations.
 
         Returns id, name, slug, and settings.
         """
@@ -191,22 +191,22 @@ class OrganisationRepository:
             AND o.status != 'archived'
             LIMIT 1
         """
-        row = await self.db_connection.fetchrow(query, organisation_id)
+        row = await self.db_connection.fetchrow(query, organization_id)
         return dict(row) if row else None
 
     # VALIDATION OPERATIONS
-    async def check_organisation_exists(self, organisation_id: str) -> bool:
-        """Check if organisation exists and is not archived."""
+    async def check_organization_exists(self, organization_id: str) -> bool:
+        """Check if organization exists and is not archived."""
         query = """
             SELECT EXISTS(
                 SELECT 1 FROM organizations
                 WHERE id = $1 AND status != 'archived'
             )
         """
-        return await self.db_connection.fetchval(query, organisation_id)
+        return await self.db_connection.fetchval(query, organization_id)
 
     async def check_slug_unique(self, slug: str, exclude_id: str | None = None) -> bool:
-        """Check if organisation slug is unique, optionally excluding an ID."""
+        """Check if organization slug is unique, optionally excluding an ID."""
         exclude_clause = ""
         params = [slug]
 
@@ -226,12 +226,12 @@ class OrganisationRepository:
         return await self.db_connection.fetchval(query, *params)
 
     # UPDATE OPERATIONS
-    async def update_organisation(
+    async def update_organization(
         self,
-        organisation_id: str,
+        organization_id: str,
         update_data: dict[str, Any],
     ) -> dict[str, Any]:
-        """Update organisation fields."""
+        """Update organization fields."""
         if not update_data:
             return {}
 
@@ -241,7 +241,7 @@ class OrganisationRepository:
             set_clauses.append(f"{field} = ${idx}")
             params.append(value)
 
-        params.extend([organisation_id])
+        params.extend([organization_id])
 
         query = f"""
             UPDATE organizations
@@ -252,22 +252,22 @@ class OrganisationRepository:
         row = await self.db_connection.fetchrow(query, *params)
         if not row:
             raise NotFoundException(
-                message_key="organisations.errors.organisation_not_found",
+                message_key="organizations.errors.organization_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return dict(row)
 
     # DELETE OPERATIONS
-    async def delete_organisation(self, organisation_id: str) -> None:
-        """Delete organisation (hard delete)."""
+    async def delete_organization(self, organization_id: str) -> None:
+        """Delete organization (hard delete)."""
         query = """
             DELETE FROM organizations
             WHERE id = $1
             RETURNING id
         """
-        result = await self.db_connection.fetchval(query, organisation_id)
+        result = await self.db_connection.fetchval(query, organization_id)
         if result is None:
             raise NotFoundException(
-                message_key="organisations.errors.organisation_not_found",
+                message_key="organizations.errors.organization_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )

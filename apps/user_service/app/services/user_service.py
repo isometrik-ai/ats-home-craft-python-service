@@ -10,8 +10,8 @@ from typing import Any
 import asyncpg
 from supabase import AsyncClient
 
-from apps.user_service.app.db.repositories.organisation_member_repository import (
-    OrganisationMemberRepository,
+from apps.user_service.app.db.repositories.organization_member_repository import (
+    OrganizationMemberRepository,
 )
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
 from apps.user_service.app.schemas.users import (
@@ -62,7 +62,7 @@ class UserService:
         """
         self.user_context = user_context
         # Initialize repositories with database connection
-        self.organisation_member_repository = OrganisationMemberRepository(
+        self.organization_member_repository = OrganizationMemberRepository(
             db_connection=db_connection
         )
         self.role_repository = RoleRepository(db_connection=db_connection)
@@ -87,7 +87,7 @@ class UserService:
             return None
 
         # Get user from organization_members
-        user_profile = await self.organisation_member_repository.get_user_profile_by_id(
+        user_profile = await self.organization_member_repository.get_user_profile_by_id(
             user_id=user_id, organization_id=organization_id
         )
 
@@ -124,7 +124,7 @@ class UserService:
             return []
 
         # Get user's role_id from organization_members
-        role_id = await self.organisation_member_repository.get_user_role_id(
+        role_id = await self.organization_member_repository.get_user_role_id(
             user_id=user_id, organization_id=organization_id
         )
 
@@ -167,7 +167,7 @@ class UserService:
             "isometrik_user_id": user_data.get("isometrik_user_id"),
         }
 
-        return await self.organisation_member_repository.add_member(
+        return await self.organization_member_repository.add_member(
             organization_id=organization_id, member_data=member_data
         )
 
@@ -184,7 +184,7 @@ class UserService:
         Returns:
             dict containing the updated user or None if not found
         """
-        return await self.organisation_member_repository.update_user_info(
+        return await self.organization_member_repository.update_user_info(
             user_id=user_id, organization_id=organization_id, update_data=update_data
         )
 
@@ -198,7 +198,7 @@ class UserService:
         Returns:
             bool: True if user was deleted successfully, False otherwise
         """
-        return await self.organisation_member_repository.delete_user(
+        return await self.organization_member_repository.delete_user(
             user_id=user_id, organization_id=organization_id
         )
 
@@ -212,7 +212,7 @@ class UserService:
         Returns:
             bool: True if user exists, False otherwise
         """
-        return await self.organisation_member_repository.check_user_exists(
+        return await self.organization_member_repository.check_user_exists(
             email=email, organization_id=organization_id
         )
 
@@ -229,7 +229,7 @@ class UserService:
         Returns:
             bool: True if phone number exists for another user, False otherwise
         """
-        return await self.organisation_member_repository.check_phone_exists_for_other_user(
+        return await self.organization_member_repository.check_phone_exists_for_other_user(
             phone=phone, organization_id=organization_id, user_id=user_id
         )
 
@@ -255,12 +255,12 @@ class UserService:
             dict with 'users' (list of UserListItem) and 'total_count' (int)
         """
         # Get users list from repository
-        users_data = await self.organisation_member_repository.get_users_details_list(
+        users_data = await self.organization_member_repository.get_users_details_list(
             organization_id=organization_id, search=search, limit=limit, offset=offset
         )
 
         # Get total count
-        total_count = await self.organisation_member_repository.get_users_total_count(
+        total_count = await self.organization_member_repository.get_users_total_count(
             organization_id=organization_id, search=search
         )
 
@@ -279,7 +279,7 @@ class UserService:
         Returns:
             int: Total count of users
         """
-        return await self.organisation_member_repository.get_users_total_count(
+        return await self.organization_member_repository.get_users_total_count(
             organization_id=organization_id, search=search
         )
 
@@ -290,7 +290,7 @@ class UserService:
             user_id: User ID
             organization_id: Organization ID
         """
-        await self.organisation_member_repository.update_user_activity(
+        await self.organization_member_repository.update_user_activity(
             user_id=user_id, organization_id=organization_id
         )
 
@@ -304,7 +304,7 @@ class UserService:
         Returns:
             bool: True if user was suspended successfully, False otherwise
         """
-        return await self.organisation_member_repository.suspend_user(
+        return await self.organization_member_repository.suspend_user(
             user_id=user_id, organization_id=organization_id
         )
 
@@ -318,7 +318,7 @@ class UserService:
         Returns:
             bool: True if user was revoked successfully, False otherwise
         """
-        return await self.organisation_member_repository.revoke_suspended_user(
+        return await self.organization_member_repository.revoke_suspended_user(
             user_id=user_id, organization_id=organization_id
         )
 
@@ -345,7 +345,7 @@ class UserService:
             NotFoundException: If user not found in organization
         """
         # Get current user data for audit (before update)
-        current_user_data = await self.organisation_member_repository.get_user_profile_by_id(
+        current_user_data = await self.organization_member_repository.get_user_profile_by_id(
             user_id=user_id, organization_id=organization_id
         )
 
@@ -356,7 +356,7 @@ class UserService:
             )
 
         # Update in organization_members table
-        result = await self.organisation_member_repository.update_user_email(
+        result = await self.organization_member_repository.update_user_email(
             user_id=user_id, organization_id=organization_id, new_email=new_email
         )
 
@@ -371,7 +371,7 @@ class UserService:
             user_id,
             organization_id,
             new_email,
-            self.organisation_member_repository,
+            self.organization_member_repository,
             self.supabase_client,
         )
 
@@ -386,7 +386,7 @@ class UserService:
         Returns:
             str: Organization member status or None if not found
         """
-        return await self.organisation_member_repository.get_organization_member_status_by_email(
+        return await self.organization_member_repository.get_organization_member_status_by_email(
             email=email
         )
 
@@ -723,7 +723,7 @@ class UserService:
             )
 
         # Get current user data for audit (before ban)
-        current_user_data = await self.organisation_member_repository.get_user_profile_by_id(
+        current_user_data = await self.organization_member_repository.get_user_profile_by_id(
             user_id=user_id, organization_id=organization_id
         )
 
@@ -798,7 +798,7 @@ class UserService:
             )
 
         # Get current user data for audit (before unban)
-        current_user_data = await self.organisation_member_repository.get_user_profile_by_id(
+        current_user_data = await self.organization_member_repository.get_user_profile_by_id(
             user_id=user_id, organization_id=organization_id
         )
 
@@ -905,7 +905,7 @@ class UserService:
             dict[str, Any]: Current profile
         """
         if organization_id:
-            profile = await self.organisation_member_repository.get_user_profile_by_id(
+            profile = await self.organization_member_repository.get_user_profile_by_id(
                 user_id=user_id, organization_id=organization_id
             )
             if profile:

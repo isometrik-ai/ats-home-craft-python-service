@@ -18,7 +18,7 @@ from typing import Any
 import asyncpg
 from fastapi import HTTPException, Request
 
-from apps.user_service.app.db.repositories import OrganisationMemberRepository
+from apps.user_service.app.db.repositories import OrganizationMemberRepository
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.http_exceptions import (
@@ -152,7 +152,7 @@ async def extract_user_context(
             )
 
         # Get organization_id from organization_members table
-        org_member_repo = OrganisationMemberRepository(db_connection)
+        org_member_repo = OrganizationMemberRepository(db_connection)
         organization_id = await org_member_repo.get_organization_id_by_user_id(user_id)
 
         user_type = "organization_member" if organization_id else None
@@ -211,7 +211,7 @@ async def require_permission(
         has_permission = await check_user_access_async(
             permission_code=permission_codes,
             user_id=user_context.user_id,
-            organisation_id=organization_id,
+            organization_id=organization_id,
         )
 
         if not has_permission:
@@ -447,3 +447,21 @@ def set_audit_old_data_from_user(request: Request, current_user_data: dict) -> N
 def hash_token(token: str) -> str:
     """Hash token using SHA256 for secure storage"""
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def parse_json_field(field_value: str | dict[str, Any] | None) -> dict[str, Any]:
+    """Parse a JSON field that may be a string or dict.
+
+    Args:
+        field_value: The field value that may be a JSON string or dict
+
+    Returns:
+        dict[str, Any]: Parsed dictionary, empty dict if None or invalid
+    """
+    if field_value is None:
+        return {}
+    if isinstance(field_value, dict):
+        return field_value
+    if isinstance(field_value, str):
+        return json.loads(field_value) if field_value else {}
+    return {}

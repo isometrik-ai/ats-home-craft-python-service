@@ -13,11 +13,11 @@ Usage:
 """
 
 from apps.user_service.app.db.repositories.invite_repository import InviteRepository
-from apps.user_service.app.db.repositories.organisation_member_repository import (
-    OrganisationMemberRepository,
+from apps.user_service.app.db.repositories.organization_member_repository import (
+    OrganizationMemberRepository,
 )
-from apps.user_service.app.db.repositories.organisation_repository import (
-    OrganisationRepository,
+from apps.user_service.app.db.repositories.organization_repository import (
+    OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.permission_repository import (
     PermissionsRepository,
@@ -35,8 +35,8 @@ from apps.user_service.app.db.repositories.verification_code_repository import (
 __all__ = [
     "TeamRepository",
     "PermissionsRepository",
-    "OrganisationRepository",
-    "OrganisationMemberRepository",
+    "OrganizationRepository",
+    "OrganizationMemberRepository",
     "RoleRepository",
     "SessionRepository",
     "UserRepository",

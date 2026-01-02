@@ -35,19 +35,20 @@
       "invitation_deleted": "Invitation deleted successfully."
     }
   },
-  "organisations": {
+  "organizations": {
     "errors": {
-      "invalid_organisation_status": "Status must be one of: {allowed_statuses}",
+      "invalid_organization_status": "Status must be one of: {allowed_statuses}",
       "forbidden": "You don't have permission to perform this action",
       "conflict": "You already belong to an organization.",
       "slug_conflict": "The slug you provided is already in use. Please choose a different one.",
-      "not_found": "The organisation you are trying to access does not exist.",
-      "user_not_a_member_of_any_organization": "You are not part of any organization yet. Please join one to proceed."
+      "not_found": "The organization you are trying to access does not exist.",
+      "user_not_a_member_of_any_organization": "You are not part of any organization yet. Please join one to proceed.",
+      "organization_not_active": "The organization you are trying to access is currently inactive. Please contact the administrator for assistance."
     },
     "success": {
-      "organisation_created": "Organisation created successfully.",
-      "organisation_updated": "Organisation updated successfully.",
-      "organisation_deleted": "Organisation deleted successfully."
+      "organization_created": "Organization created successfully.",
+      "organization_updated": "Organization updated successfully.",
+      "organization_deleted": "Organization deleted successfully."
     }
   },
   "auth": {

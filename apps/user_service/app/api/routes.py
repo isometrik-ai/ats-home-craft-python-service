@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from apps.user_service.app.api.audit_logs import router as audit_logs_router
 from apps.user_service.app.api.auth import router as auth_router
 from apps.user_service.app.api.invites import router as invites_router
-from apps.user_service.app.api.organisation import router as organisation_router
+from apps.user_service.app.api.organization import router as organization_router
 from apps.user_service.app.api.permissions import router as permissions_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
 from apps.user_service.app.api.roles import router as roles_router
@@ -19,7 +19,7 @@ from apps.user_service.app.api.verification_codes import (
 router = APIRouter(prefix="/v1")
 
 router.include_router(auth_router)
-router.include_router(organisation_router)
+router.include_router(organization_router)
 router.include_router(users_router)
 router.include_router(roles_router)
 router.include_router(sessions_router)
@@ -38,7 +38,7 @@ async def api_status():
         "message": "API routes are active",
         "status": "success",
         "available_endpoints": [
-            "/organisation",
+            "/organization",
             "/users",
             "/roles",
             "/sessions",

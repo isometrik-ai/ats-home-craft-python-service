@@ -1,5 +1,7 @@
 """FastAPI exception handlers."""
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
@@ -19,6 +21,8 @@ from libs.shared_utils.http_exceptions import (
 from libs.shared_utils.response_factory import error_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
+logger = logging.getLogger(__name__)
+
 
 def _handle_http_exception(request: Request, exc: StarletteHTTPException):
     """Handle StarletteHTTPException."""
@@ -28,7 +32,7 @@ def _handle_http_exception(request: Request, exc: StarletteHTTPException):
         401: ("errors.unauthorized", CustomStatusCode.UNAUTHORIZED),
         405: ("errors.method_not_allowed", CustomStatusCode.BAD_REQUEST),
         429: ("errors.rate_limit_exceeded", CustomStatusCode.RATE_LIMIT_EXCEEDED),
-        500: ("errors.server_error", CustomStatusCode.SERVER_ERROR),
+        500: ("errors.internal_server_error", CustomStatusCode.INTERNAL_SERVER_ERROR),
     }
 
     key, custom_code = status_map.get(
@@ -305,6 +309,20 @@ def _register_bad_request_exception_handler(app: FastAPI) -> None:
         )
 
 
+def _register_unhandled_exception_handler(app: FastAPI) -> None:
+    """Register catch-all handler to keep error responses formatted."""
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        logger.exception("Unhandled exception: %s", exc)
+        return error_response(
+            request=request,
+            message_key="errors.internal_server_error",
+            status_code=500,
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Register all exception handlers with the FastAPI app."""
     handlers = [
@@ -321,6 +339,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         _register_unauthorized_exception_handler,
         _register_forbidden_exception_handler,
         _register_bad_request_exception_handler,
+        _register_unhandled_exception_handler,
     ]
 
     for handler in handlers:

@@ -328,7 +328,7 @@ class CreatePermissionRequest(BaseModel):
     Attributes
     ----------
     code : str
-        Short, unique code for this permission **within an organisation**
+        Short, unique code for this permission **within an organization**
         (must match the `UNIQUE(organization_id, code)` constraint in the DB).
 
     name : str
