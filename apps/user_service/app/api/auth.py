@@ -23,8 +23,6 @@ from apps.user_service.app.schemas.auth import (
     AuthResponse,
     ChangePasswordRequest,
     ChangePasswordResponse,
-    Check2FAStatusRequest,
-    Check2FAStatusResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     PasswordResponse,
@@ -32,8 +30,8 @@ from apps.user_service.app.schemas.auth import (
     ResetPasswordRequest,
     SetPasswordRequest,
     SignupRequest,
-    VerifyEmailRequest,
-    VerifyEmailResponse,
+    ValidateAccountRequest,
+    ValidateAccountResponse,
 )
 from apps.user_service.app.services.auth_service import AuthService
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
@@ -331,40 +329,6 @@ async def signup(
     )
 
 
-@handle_api_exceptions("verify email")
-@router.post(
-    "/email/verify",
-    response_model=VerifyEmailResponse,
-    status_code=http_status.HTTP_200_OK,
-    description="Verify user email and status by determining user type from auth.users metadata.",
-    summary="Verify user email and status by determining user type from auth.users metadata.",
-    responses={
-        http_status.HTTP_200_OK: {"description": "Email verified and active"},
-        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
-        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
-        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
-        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
-    },
-)
-@limiter.limit("100/minute")
-async def verify_email(
-    request: Request,
-    body: VerifyEmailRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-):
-    """Verify user email and status by determining user type from auth.users metadata
-    and checking the corresponding table for status."""
-    auth_service = AuthService(db_connection=db_connection)
-    result = await auth_service.verify_email(body.email)
-    return success_response(
-        request=request,
-        message_key="auth.success.email_verified",
-        custom_code=CustomStatusCode.SUCCESS,
-        status_code=http_status.HTTP_200_OK,
-        data=result,
-    )
-
-
 @handle_api_exceptions("delete user")
 @router.delete(
     "/user",
@@ -405,15 +369,15 @@ async def delete_user(
     )
 
 
-@handle_api_exceptions("check_2fa_status")
+@handle_api_exceptions("validate_account")
 @router.post(
-    "/verify/account",
-    response_model=Check2FAStatusResponse,
-    description="Check if 2FA is enabled for a user account.",
-    summary="Check if 2FA is enabled for a user account.",
+    "/validate/account",
+    response_model=ValidateAccountResponse,
+    description="Validate user account credentials and check if 2FA is enabled.",
+    summary="Validate user account credentials and check if 2FA is enabled.",
     status_code=http_status.HTTP_200_OK,
     responses={
-        http_status.HTTP_200_OK: {"description": "2FA is enabled"},
+        http_status.HTTP_200_OK: {"description": "User account validated and 2FA is enabled"},
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
         http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
         http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
@@ -421,15 +385,16 @@ async def delete_user(
     },
 )
 @limiter.limit("10/minute")
-async def check_2fa_status(
+async def validate_account(
     request: Request,
-    data: Check2FAStatusRequest = Body(...),
+    data: ValidateAccountRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     sb_client: AsyncClient = Depends(supabase_anon),
 ):
-    """Check if 2FA is enabled for a user account."""
+    """Validate user account credentials and check if 2FA is enabled."""
     auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
-    result = await auth_service.check_2fa_status(
+    result = await auth_service.validate_account(
+        trigger=data.trigger,
         email=data.email,
         password=data.password,
     )

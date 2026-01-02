@@ -2,10 +2,6 @@
 
 This module provides authentication business logic operations.
 All business logic for authentication endpoints is centralized here.
-
-Author: AI Assistant
-Date: 2024-12-19
-Last Updated: 2024-12-19
 """
 
 # Standard library imports
@@ -32,13 +28,13 @@ from apps.user_service.app.schemas.auth import (
     AuthLogin,
     AuthResponse,
     ChangePasswordResponse,
-    Check2FAStatusResponse,
     ForgotPasswordResponse,
     PasswordResponse,
     RefreshSessionResponse,
     SignupRequest,
     UserInfo,
-    VerifyEmailResponse,
+    ValidateAccountResponse,
+    ValidateAccountTrigger,
 )
 from apps.user_service.app.schemas.verification_codes import (
     VerificationType,
@@ -70,7 +66,7 @@ from libs.shared_middleware.jwt_auth import get_user_from_token
 # Shared exceptions and status codes
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
-    ForbiddenException,
+    ConflictException,
     InternalServerErrorException,
     NotFoundException,
     ServiceUnavailableException,
@@ -913,45 +909,6 @@ class AuthService:
             ),
         )
 
-    async def verify_email(self, email: str) -> VerifyEmailResponse:
-        """Verify user email and status by determining user type from auth.users metadata
-        and checking the corresponding table for status.
-
-        Returns email_found=True if email exists in auth.users, regardless of user type or status.
-
-        Args:
-            email: Email to verify
-
-        Returns:
-            VerifyEmailResponse: Verification result
-
-        Raises:
-            NotFoundException: If email not found
-            ForbiddenException: If account not active
-        """
-        auth_user = await self.user_repository.get_auth_user_by_email(email)
-        if not auth_user:
-            raise NotFoundException(
-                message_key="auth.errors.email_not_found_in_system",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-
-        status_value = await self.user_repository.get_organization_member_status_by_email(email)
-        if status_value is None:
-            raise NotFoundException(
-                message_key="auth.errors.email_not_found_in_system",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        if status_value != "active":
-            raise ForbiddenException(
-                message_key="auth.errors.account_not_active",
-                custom_code=CustomStatusCode.FORBIDDEN,
-            )
-
-        return VerifyEmailResponse(
-            message="Email verified and active.", email_found=True, status="active", can_login=True
-        )
-
     async def delete_user(self, user_id: str) -> None:
         """Delete user directly from auth.users table without validation.
 
@@ -1040,58 +997,60 @@ class AuthService:
 
         return ChangePasswordResponse(message="Password changed successfully")
 
-    async def _validate_credentials_for_2fa_check(self, email: str, password: str) -> None:
-        """Validate user credentials for 2FA status check.
-
-        Args:
-            email: User email
-            password: User password
-
-        Raises:
-            BadRequestException: If credentials are invalid
-        """
-        is_valid = await self.user_repository._verify_credentials_by_email(
-            email=email, password=password
-        )
-        # Convert authentication failures to BadRequestException
-        # Other exceptions will bubble up to the decorator
-        if not is_valid:
-            raise BadRequestException(
-                message_key="auth.errors.authentication_failed",
-                custom_code=CustomStatusCode.BAD_REQUEST,
-            )
-
-    async def check_2fa_status(self, email: str, password: str) -> Check2FAStatusResponse:
+    async def validate_account(
+        self,
+        trigger: ValidateAccountTrigger,
+        email: str,
+        password: str | None = None,
+    ) -> ValidateAccountResponse | None:
         """Check if 2FA is enabled for a user account.
 
         This method validates the user's credentials (email and password) and
         returns whether 2FA is enabled for their account.
 
         Args:
+            trigger: Trigger for authentication
             email: User email
             password: User password
 
         Returns:
-            Check2FAStatusResponse: Response containing two_fa_enabled boolean
+            ValidateAccountResponse: Response containing two_fa_enabled boolean
 
         Raises:
             NotFoundException: If email not registered
             BadRequestException: If credentials are invalid
             InternalServerErrorException: For internal server errors
+            ConflictException: If email already registered
         """
         # Step 1: Check if user account exists
         auth_user = await self.user_repository.get_auth_user_by_email(email)
-        if auth_user is None:
-            raise NotFoundException(
-                message_key="auth.errors.email_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
+        if trigger == ValidateAccountTrigger.LOGIN:
+            if auth_user is None:
+                raise NotFoundException(
+                    message_key="auth.errors.email_not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+        else:
+            if auth_user is not None:
+                raise ConflictException(
+                    message_key="auth.errors.email_already_registered",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+
+        # Step 2: Validate email and password are correct for LOGIN trigger
+        if trigger == ValidateAccountTrigger.LOGIN and password is not None:
+            is_valid = await self.user_repository._verify_credentials_by_email(
+                email=email, password=password
             )
+            if not is_valid:
+                raise BadRequestException(
+                    message_key="auth.errors.invalid_credentials",
+                    custom_code=CustomStatusCode.BAD_REQUEST,
+                )
 
-        # Step 2: Validate email and password are correct
-        await self._validate_credentials_for_2fa_check(email, password)
-
-        # Step 3: Check if 2FA is enabled
-        raw_user_metadata = auth_user.get("raw_user_meta_data")
-        is_enabled, _ = self._is_2fa_enabled(raw_user_metadata)
-
-        return Check2FAStatusResponse(two_fa_enabled=is_enabled)
+        # Step 3: Check if 2FA is enabled for LOGIN trigger
+        if trigger == ValidateAccountTrigger.LOGIN:
+            raw_user_metadata = auth_user.get("raw_user_meta_data")
+            is_enabled, _ = self._is_2fa_enabled(raw_user_metadata)
+            return ValidateAccountResponse(two_fa_enabled=is_enabled)
+        return None

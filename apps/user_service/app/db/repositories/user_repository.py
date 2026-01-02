@@ -82,7 +82,6 @@ class UserRepository:
             # Convert asyncpg Record to standard dict
             return dict(row)
 
-        logger.warning("User with email '%s' not found.", email)
         return None
 
     async def phone_exists_for_other_user(self, phone: str, user_id: str | None = None) -> bool:

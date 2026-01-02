@@ -238,43 +238,27 @@ async def test_signup(monkeypatch, client):
 
 
 @pytest.mark.asyncio
-async def test_verify_email(monkeypatch, client):
-    """Test that the verify email endpoint verifies an email."""
+async def test_validate_account(monkeypatch, client):
+    """Test that the validate account endpoint validates credentials and 2FA status."""
 
-    async def fake_verify(_self, email: str):
+    async def fake_validate(_self, trigger: str, email: str, password: str | None):
         del _self
-        assert email == "user@example.com"
-        return {"email_found": True, "can_login": True, "status": "active", "message": "ok"}
-
-    monkeypatch.setattr(
-        "apps.user_service.app.services.auth_service.AuthService.verify_email",
-        fake_verify,
-    )
-
-    res = await client.post("/v1/auth/email/verify", json={"email": "user@example.com"})
-    assert_success(res, 200)
-
-
-@pytest.mark.asyncio
-async def test_check_2fa_status(monkeypatch, client):
-    """Test that the check 2fa status endpoint checks the 2fa status."""
-
-    async def fake_check(_self, email: str, password: str):
-        del _self
+        assert trigger == "LOGIN"
         assert email == "user@example.com"
         assert password == "StrongPass123!"
-        return {"enabled": True}
+        return {"two_fa_enabled": True}
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.auth_service.AuthService.check_2fa_status",
-        fake_check,
+        "apps.user_service.app.services.auth_service.AuthService.validate_account",
+        fake_validate,
     )
 
     res = await client.post(
-        "/v1/auth/verify/account",
-        json={"email": "user@example.com", "password": "StrongPass123!"},
+        "/v1/auth/validate/account",
+        json={"trigger": "LOGIN", "email": "user@example.com", "password": "StrongPass123!"},
     )
-    assert_success(res, 200)
+    body = assert_success(res, 200)
+    assert body["data"]["two_fa_enabled"] is True
 
 
 @pytest.mark.asyncio

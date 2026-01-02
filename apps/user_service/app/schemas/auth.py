@@ -49,11 +49,25 @@ class AuthLogin(BaseModel):
     )
 
 
-class Check2FAStatusRequest(BaseModel):
-    """Request model for checking 2FA status"""
+class ValidateAccountTrigger(str, Enum):
+    """Trigger for validating user account credentials"""
 
-    email: EmailStr = Field(..., examples=["test@example.com"])
-    password: str
+    LOGIN = "LOGIN"
+    SIGNUP = "SIGNUP"
+
+
+class ValidateAccountRequest(BaseModel):
+    """Request model for validating user account credentials and checking 2FA status"""
+
+    trigger: ValidateAccountTrigger = Field(..., description="Trigger for authentication")
+    email: EmailStr = Field(..., description="Email for authentication")
+    password: str | None = Field(None, description="Password for authentication")
+
+
+class ValidateAccountResponse(BaseModel):
+    """Response model for validating user account credentials and checking 2FA status"""
+
+    two_fa_enabled: bool = Field(..., description="Whether 2FA is enabled for the user")
 
 
 class MemberBody(BaseModel):
@@ -231,12 +245,6 @@ class ChangePasswordResponse(BaseModel):
     """Response model for change password operations"""
 
     message: str = Field(..., description="Response message describing the operation result")
-
-
-class Check2FAStatusResponse(BaseModel):
-    """Response model for checking 2FA status"""
-
-    two_fa_enabled: bool = Field(..., description="Whether 2FA is enabled for the user")
 
 
 class FirmSize(str, Enum):

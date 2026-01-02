@@ -62,6 +62,7 @@
       "2fa_credentials_required": "2FA credentials are required",
       "two_fa_verification_failed": "2FA verification failed",
       "email_not_found": "Email not found for the given credentials. Please sign up before logging in.",
+      "email_already_registered": "Email already registered. Please login instead.",
       "authentication_failed": "Authentication failed. Please try again.",
       "token_not_expired": "Token is still valid and cannot be refreshed yet.",
       "failed_to_set_password": "Failed to set password. Please try again.",
