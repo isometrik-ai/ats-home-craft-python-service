@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from dotenv import load_dotenv
 from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 
@@ -14,6 +15,9 @@ from httpx import ASGITransport, AsyncClient
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+# Load test env if present (non-fatal). Tests rely only on .env.test.
+load_dotenv(_PROJECT_ROOT / ".env.test", override=False)
 
 # Import app modules after path setup using importlib to avoid E402
 _lifespan = importlib.import_module("apps.user_service.app.lifespan")
