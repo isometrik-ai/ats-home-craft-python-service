@@ -110,6 +110,7 @@ async def create_team_endpoint(
     # Check permissions and get user context (includes organization_id)
     user_context = await check_permissions(
         current_user,
+        db_connection,
         TEAMS_MANAGEMENT_CREATE,
     )
 
@@ -185,6 +186,7 @@ async def list_teams_endpoint(
     # Validate permissions and get organization context
     user_context = await check_permissions(
         current_user,
+        db_connection,
         TEAMS_MANAGEMENT_VIEW,
     )
 
@@ -268,6 +270,7 @@ async def get_team_detail_endpoint(
     # Validate permissions
     user_context = await check_permissions(
         current_user,
+        db_connection,
         TEAMS_MANAGEMENT_VIEW,
     )
 
@@ -348,6 +351,7 @@ async def delete_team(
     # Permission checks
     user_context = await check_permissions(
         current_user,
+        db_connection,
         TEAMS_MANAGEMENT_DELETE,
     )
 
@@ -434,6 +438,7 @@ async def update_team_endpoint(
     # Check permissions and get user context
     user_context = await check_permissions(
         current_user,
+        db_connection,
         TEAMS_MANAGEMENT_EDIT,
     )
     # Set audit metadata

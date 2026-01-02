@@ -55,7 +55,7 @@ async def get_audit_logs(
 ):
     """Get all audit logs for the current organization"""
     # Extract and validate user context from JWT token & check permission
-    user_context = await check_permissions(current_user, SETTINGS_SYSTEM_MANAGE)
+    user_context = await check_permissions(current_user, db_connection, SETTINGS_SYSTEM_MANAGE)
 
     # Create service and delegate to service
     audit_log_service = AuditLogService(user_context=user_context, db_connection=db_connection)
@@ -117,6 +117,7 @@ async def get_audit_log_from_id(
     # Extract and validate user context from JWT token & check permission
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
     )
 
@@ -160,6 +161,7 @@ async def delete_all_audit_logs_data(
     # Extract and validate user context from JWT token & check permission
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
     )
 

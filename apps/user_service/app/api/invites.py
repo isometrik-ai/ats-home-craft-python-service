@@ -150,6 +150,7 @@ async def create_invitation(
     # Extract user context & Check permissions
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_USERS_MANAGE,
         organization_id=organization_id,
     )
@@ -211,6 +212,7 @@ async def get_organization_invitations(
     # Extract user context
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
         organization_id=organization_id,
     )
@@ -292,6 +294,7 @@ async def resend_invitation(
     # Extract user context
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
     )
 
@@ -368,6 +371,7 @@ async def delete_invitation(
     # Extract user context
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
     )
 

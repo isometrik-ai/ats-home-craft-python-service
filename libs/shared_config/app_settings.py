@@ -40,7 +40,7 @@ class DatabaseSettings(BaseSettings):
     host: str = config("DB_HOST", default="localhost")
     port: int = config("DB_PORT", default=5432)
     database: str = config("DB_DATABASE")
-    user: str = config("DB_USER")
+    db_user: str = config("DB_USER")
     password: str = config("DB_PASSWORD")
     url: str | None = config("DATABASE_URL", default=None)
     ssl_mode: str = config("DB_SSL_MODE", default="disable")

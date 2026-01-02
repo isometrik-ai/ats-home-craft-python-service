@@ -44,7 +44,7 @@ def _build_dsn() -> str:
     host = shared_settings.database.host
     port = shared_settings.database.port
     name = shared_settings.database.database
-    user = shared_settings.database.user
+    user = shared_settings.database.db_user
     password = shared_settings.database.password
 
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"

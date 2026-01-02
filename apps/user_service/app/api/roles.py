@@ -69,7 +69,7 @@ async def get_roles(
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
 ):
     """Get all roles for the current organization"""
-    user_context = await check_permissions(current_user, ROLES_MANAGEMENT_VIEW)
+    user_context = await check_permissions(current_user, db_connection, ROLES_MANAGEMENT_VIEW)
 
     role_service = RoleService(db_connection=db_connection, user_context=user_context)
     roles, total_count = await role_service.list_roles(
@@ -119,7 +119,7 @@ async def get_role_from_id(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Get role by ID with all associated permissions"""
-    user_context = await check_permissions(current_user, ROLES_MANAGEMENT_VIEW)
+    user_context = await check_permissions(current_user, db_connection, ROLES_MANAGEMENT_VIEW)
 
     role_service = RoleService(db_connection=db_connection, user_context=user_context)
     role_detail: RoleDetailItem = await role_service.get_role_details(str(role_id))
@@ -178,6 +178,7 @@ async def create_new_role(
 
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=ROLES_MANAGEMENT_CREATE,
     )
 
@@ -249,7 +250,7 @@ async def update_role_data(
     """Update an existing role's properties and permissions"""
     request.state.audit_requested_id = role_id
 
-    user_context = await check_permissions(current_user, ROLES_MANAGEMENT_EDIT)
+    user_context = await check_permissions(current_user, db_connection, ROLES_MANAGEMENT_EDIT)
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
@@ -334,7 +335,7 @@ async def delete_role_data(
     """Delete an existing role"""
     request.state.audit_requested_id = role_id
 
-    user_context = await check_permissions(current_user, ROLES_MANAGEMENT_DELETE)
+    user_context = await check_permissions(current_user, db_connection, ROLES_MANAGEMENT_DELETE)
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
