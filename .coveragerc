@@ -1,0 +1,17 @@
+[run]
+branch = true
+source =
+    apps
+omit =
+    */tests/*
+    */__init__.py
+    venv/*
+
+[report]
+fail_under = 85
+show_missing = true
+skip_covered = False
+precision = 2
+
+[html]
+directory = htmlcov

@@ -1,0 +1,296 @@
+"""Integration tests for auth endpoints."""
+
+import datetime as dt
+
+import pytest
+
+from apps.user_service.app.schemas.auth import RefreshSessionResponse
+from apps.user_service.tests.factories import user_payload
+from apps.user_service.tests.utils.assertions import assert_success
+
+
+@pytest.mark.asyncio
+async def test_login_returns_tokens(monkeypatch, client):
+    """Test that the login endpoint returns tokens."""
+    fake_result = {
+        "access_token": "atk",
+        "refresh_token": "rtk",
+        "expires_in": 3600,
+        "expires_at": dt.datetime(2024, 1, 1, 0, 0, 0),
+        "user": {
+            "id": "user-1",
+            "email": "user@example.com",
+            "first_name": "Test",
+            "last_name": "User",
+            "timezone": "UTC",
+            "org_setup_status_completed": True,
+            "organization_id": "org-123",
+        },
+    }
+
+    async def fake_login(_self, data):
+        del _self, data
+        return fake_result
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.login",
+        fake_login,
+    )
+
+    payload = {"email": "user@example.com", "password": "StrongPass123!"}
+    res = await client.post("/v1/auth/login", json=payload)
+
+    body = assert_success(res, 200)
+    assert body["data"]["access_token"] == "atk"
+    assert body["data"]["user"]["email"] == "user@example.com"
+
+
+@pytest.mark.asyncio
+async def test_refresh_returns_new_tokens(monkeypatch, client):
+    """Test that the refresh endpoint returns new tokens."""
+    fake_result = {
+        "access_token": "new-atk",
+        "refresh_token": "new-rtk",
+        "expires_in": 3600,
+        "expires_at": dt.datetime(2024, 1, 1, 1, 0, 0),
+        "token_refreshed": True,
+    }
+
+    async def fake_refresh(_self, access_token: str, refresh_token: str):
+        del _self
+        assert access_token == "old-atk"
+        assert refresh_token == "old-rtk"
+        return RefreshSessionResponse(**fake_result)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.refresh_session",
+        fake_refresh,
+    )
+
+    res = await client.put(
+        "/v1/auth/refresh",
+        headers={"Access-Token": "old-atk", "Refresh-Token": "old-rtk"},
+    )
+
+    body = assert_success(res, 200)
+    assert body["data"]["token_refreshed"] is True
+    assert body["data"]["access_token"] == "new-atk"
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_not_expired(monkeypatch, client):
+    """Test that the refresh endpoint returns new tokens if the refresh token is not expired."""
+    fake_result = {
+        "access_token": None,
+        "refresh_token": None,
+        "expires_in": None,
+        "expires_at": None,
+        "token_refreshed": False,
+    }
+
+    async def fake_refresh(_self, access_token: str, refresh_token: str):
+        del _self
+        assert access_token == "still-valid"
+        assert refresh_token == "rtk"
+        return RefreshSessionResponse(**fake_result)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.refresh_session",
+        fake_refresh,
+    )
+
+    res = await client.put(
+        "/v1/auth/refresh",
+        headers={"Access-Token": "still-valid", "Refresh-Token": "rtk"},
+    )
+
+    body = assert_success(res, 200)
+    assert body["data"]["token_refreshed"] is False
+    assert "access_token" not in body["data"]
+
+
+@pytest.mark.asyncio
+async def test_set_password_for_authenticated_user(monkeypatch, client):
+    """Test that the set password endpoint sets the password for an authenticated user."""
+
+    async def fake_set_password(_self, user_id: str, password: str):
+        del _self
+        assert user_id == "test-user-id"
+        assert password == "NewPass123!"
+        return {"message": "ok"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.set_password",
+        fake_set_password,
+    )
+
+    res = await client.post(
+        "/v1/auth/set-password",
+        json={"password": "NewPass123!"},
+    )
+
+    assert_success(res, 202)
+
+
+@pytest.mark.asyncio
+async def test_forgot_password(monkeypatch, client):
+    """Test that the forgot password endpoint sends a forgot password email."""
+
+    async def fake_forgot(_self, email: str):
+        del _self
+        assert email == "user@example.com"
+        return {"message": "sent"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.forgot_password",
+        fake_forgot,
+    )
+
+    res = await client.post("/v1/auth/forgot-password", json={"email": "user@example.com"})
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_reset_password(monkeypatch, client):
+    """Test that the reset password endpoint resets the password."""
+
+    async def fake_reset(_self, token: str, new_password: str):
+        del _self
+        assert token == "tok123"
+        assert new_password == "NewPass123!"
+        return {"message": "reset"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.reset_password",
+        fake_reset,
+    )
+
+    res = await client.post(
+        "/v1/auth/reset-password",
+        json={"token": "tok123", "new_password": "NewPass123!"},
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_change_password(monkeypatch, client):
+    """Test that the change password endpoint changes the password."""
+
+    async def fake_change(
+        _self,
+        *,
+        user_id=None,
+        user_email=None,
+        current_password=None,
+        new_password=None,
+        user_metadata=None,
+    ):
+        del _self, user_metadata
+        assert user_id == "test-user-id"
+        assert user_email == "test@example.com"
+        assert current_password == "OldPass123!"
+        assert new_password == "NewPass123!"
+        return {"message": "changed"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.change_password",
+        fake_change,
+    )
+
+    res = await client.post(
+        "/v1/auth/change-password",
+        json={"current_password": "OldPass123!", "new_password": "NewPass123!"},
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_signup(monkeypatch, client):
+    """Test that the signup endpoint signs up a user."""
+    fake_result = {
+        "access_token": "atk",
+        "refresh_token": "rtk",
+        "expires_in": 3600,
+        "expires_at": dt.datetime(2024, 1, 1, 0, 0, 0),
+        "user": {
+            "id": "user-1",
+            "email": "user@example.com",
+            "first_name": "Test",
+            "last_name": "User",
+            "timezone": "UTC",
+            "org_setup_status_completed": True,
+            "organization_id": "org-123",
+        },
+    }
+
+    async def fake_signup(_self, _signup_data):
+        del _self, _signup_data
+        return fake_result
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.signup",
+        fake_signup,
+    )
+
+    payload = user_payload(email="user@example.com")
+    res = await client.post("/v1/auth/signup", json=payload)
+    assert_success(res, 201)
+
+
+@pytest.mark.asyncio
+async def test_verify_email(monkeypatch, client):
+    """Test that the verify email endpoint verifies an email."""
+
+    async def fake_verify(_self, email: str):
+        del _self
+        assert email == "user@example.com"
+        return {"email_found": True, "can_login": True, "status": "active", "message": "ok"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.verify_email",
+        fake_verify,
+    )
+
+    res = await client.post("/v1/auth/email/verify", json={"email": "user@example.com"})
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_check_2fa_status(monkeypatch, client):
+    """Test that the check 2fa status endpoint checks the 2fa status."""
+
+    async def fake_check(_self, email: str, password: str):
+        del _self
+        assert email == "user@example.com"
+        assert password == "StrongPass123!"
+        return {"enabled": True}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.check_2fa_status",
+        fake_check,
+    )
+
+    res = await client.post(
+        "/v1/auth/verify/account",
+        json={"email": "user@example.com", "password": "StrongPass123!"},
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_delete_user(monkeypatch, client):
+    """Test that the delete user endpoint deletes a user."""
+
+    async def fake_delete(_self, user_id: str):
+        del _self
+        assert user_id == "test-user-id"
+        return None
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.delete_user",
+        fake_delete,
+    )
+
+    res = await client.delete("/v1/auth/user")
+    body = assert_success(res, 200)
+    assert body["code"]  # ensure custom code present
