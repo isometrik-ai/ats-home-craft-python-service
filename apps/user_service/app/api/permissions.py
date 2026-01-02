@@ -79,6 +79,7 @@ async def get_permissions(
     # Extract and validate user context from JWT token
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=PERMISSIONS_MANAGEMENT_VIEW,
     )
 
@@ -125,6 +126,7 @@ async def get_permission_by_id(
     """Get permission by ID"""
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=PERMISSIONS_MANAGEMENT_VIEW,
     )
     # Create service with user context and delegate to service
@@ -178,6 +180,7 @@ async def create_permission(
     # Extract and validate user context from JWT token
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=PERMISSIONS_MANAGEMENT_CREATE,
     )
 
@@ -250,6 +253,7 @@ async def delete_permission_by_id(
     # Extract and validate user context from JWT token
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=PERMISSIONS_MANAGEMENT_DELETE,
     )
 

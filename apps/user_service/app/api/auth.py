@@ -146,9 +146,9 @@ async def refresh(
 @limiter.limit("100/minute")
 async def set_password(
     request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
     data: SetPasswordRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_uow),
     sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Set password for user Signed Up from Google or Magic Link."""
@@ -263,8 +263,8 @@ async def reset_password(
 async def change_password(
     request: Request,
     data: ChangePasswordRequest = Body(...),
-    current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Change user password endpoint."""
@@ -389,8 +389,8 @@ async def verify_email(
 )
 async def delete_user(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Delete user directly from auth.users table without validation."""

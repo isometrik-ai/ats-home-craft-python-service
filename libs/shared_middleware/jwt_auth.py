@@ -13,10 +13,13 @@ The module integrates with Supabase for user authentication and
 permission management, using environment variables for configuration.
 """
 
+import asyncpg
 import jwt
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from apps.user_service.app.db.repositories import OrganisationMemberRepository
+from apps.user_service.app.dependencies.db import db_conn
 from libs.shared_config.app_settings import shared_settings
 from libs.shared_db.supabase_db.client import get_supabase_client
 from libs.shared_utils.http_exceptions import (
@@ -32,18 +35,16 @@ logger = get_logger(__name__)
 
 def extract_user_data(
     user: dict,
-) -> tuple[str | None, str | None, str | None, str | None]:
+) -> tuple[str | None, str | None, str | None]:
     """Extract user data from JWT token."""
     if not user:
-        return None, None, None, None
+        return None, None, None
 
     user_id = user.get("sub")
-    user_metadata = user.get("user_metadata", {})
-    organization_id = user_metadata.get("organization_id")
     user_email = user.get("email")
     session_id = user.get("session_id")
 
-    return user_id, organization_id, user_email, session_id
+    return user_id, user_email, session_id
 
 
 def setup_audit_context(
@@ -119,7 +120,10 @@ async def check_user_access_async(permission_code: list[str], user_id, organisat
         ) from error
 
 
-def get_user_from_auth(request: Request) -> dict:
+async def get_user_from_auth(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+) -> dict:
     """Validate user from JWT, check org membership and role.
 
     Sets audit context in request.state.
@@ -128,7 +132,10 @@ def get_user_from_auth(request: Request) -> dict:
     user = getattr(request.state, "user", None)
 
     # Extract user data from JWT token
-    user_id, organization_id, user_email, session_id = extract_user_data(user)
+    user_id, user_email, session_id = extract_user_data(user)
+
+    org_member_repo = OrganisationMemberRepository(db_connection=db_connection)
+    organization_id = await org_member_repo.get_organization_id_by_user_id(user_id)
 
     # Setup audit context
     setup_audit_context(request, user_id, user_email, organization_id, session_id)

@@ -63,11 +63,12 @@ async def get_sessions_list(
 ):
     """Get all sessions for the current organization."""
     # Extract user context from JWT token
-    user_context = await extract_user_context(current_user)
+    user_context = await extract_user_context(current_user, db_connection)
 
     if user_context.organization_id:
         await check_permissions(
             current_user=current_user,
+            db_connection=db_connection,
             permission_codes=SETTINGS_SYSTEM_MANAGE,
         )
 
@@ -140,6 +141,7 @@ async def get_organization_sessions(
     # Extract context and enforce permissions
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_USERS_VIEW,
     )
 

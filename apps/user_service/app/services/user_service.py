@@ -1099,7 +1099,7 @@ class UserService:
             user_type=user_type,
             role=role_info,
             permissions=permissions or [],
-            identities=user_profile["identities"],
+            identities=user_profile.get("identities", []),
             verification_preference=verification_preference,
         )
 

@@ -46,7 +46,7 @@ router = APIRouter(prefix="/verification-code", tags=["Verification Codes"])
 logger = get_logger("verification-codes-api")
 
 
-def get_optional_user(request: Request) -> dict | None:
+async def get_optional_user(request: Request) -> dict | None:
     """Get user from auth if available, return None if not authenticated.
     Allows endpoints to work with or without authentication.
 
@@ -60,7 +60,7 @@ def get_optional_user(request: Request) -> dict | None:
     if not user:
         return None
 
-    return get_user_from_auth(request)
+    return await get_user_from_auth(request)
 
 
 @handle_api_exceptions("send verification code")

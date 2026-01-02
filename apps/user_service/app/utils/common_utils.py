@@ -15,11 +15,11 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
+import asyncpg
 from fastapi import HTTPException, Request
 
+from apps.user_service.app.db.repositories import OrganisationMemberRepository
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
-from libs.shared_db.supabase_db.auth_repository import get_user_by_id, update_metadata
-from libs.shared_db.supabase_db.client import get_supabase_service_client
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.http_exceptions import (
     ForbiddenException,
@@ -106,7 +106,9 @@ def format_permissions_data(
 # ============================================================================
 
 
-async def extract_user_context(current_user: dict) -> UserContext:
+async def extract_user_context(
+    current_user: dict, db_connection: asyncpg.Connection
+) -> UserContext:
     """Extract and validate user context from JWT token.
 
     This function performs comprehensive validation of JWT token data including:
@@ -117,6 +119,7 @@ async def extract_user_context(current_user: dict) -> UserContext:
 
     Args:
         current_user (dict): Decoded JWT token containing user information
+        db_connection (asyncpg.Connection): Database connection (required)
 
     Returns:
         UserContext: Validated user context object
@@ -131,10 +134,7 @@ async def extract_user_context(current_user: dict) -> UserContext:
     """
     try:
         user_id = current_user.get("sub")
-        user_metadata = current_user.get("user_metadata", {})
-        organization_id = user_metadata.get("organization_id", None)
         email = current_user.get("email")
-        user_type = user_metadata.get("type", None)  # Extract type from JWT
 
         # Validation: Ensure required fields are present
         if not user_id:
@@ -150,40 +150,12 @@ async def extract_user_context(current_user: dict) -> UserContext:
                 custom_code=CustomStatusCode.INVALID_DATA,
                 params={"error": "email not found"},
             )
-        supabase_client = await get_supabase_service_client()
-        if not organization_id:
-            user_data = await get_user_by_id(supabase_client, user_id)
-            organization_id = user_data.user.user_metadata.get("organization_id", None)
 
-            # If organization_id is still None, try to get it from organization_members table
-            if not organization_id:
-                # Query organization_members table to find user's organization
-                # supabase = await get_supabase_admin_client()
-                result = (
-                    await supabase_client.table("organization_members")
-                    .select("organization_id")
-                    .eq("user_id", user_id)
-                    .limit(1)
-                    .execute()
-                )
+        # Get organization_id from organization_members table
+        org_member_repo = OrganisationMemberRepository(db_connection)
+        organization_id = await org_member_repo.get_organization_id_by_user_id(user_id)
 
-                if result.data and len(result.data) > 0:
-                    # Use the first organization found
-                    organization_id = result.data[0]["organization_id"]
-
-                    # Update user metadata with the found organization_id
-                    await update_metadata(
-                        supabase_client,
-                        user_id,
-                        {
-                            "organization_id": organization_id,
-                            "type": "organization_member",
-                        },
-                    )
-                else:
-                    # Organization ID not found, but allow user to proceed
-                    # This is normal for new users creating their first organization
-                    organization_id = None
+        user_type = "organization_member" if organization_id else None
 
         return UserContext(
             user_id=user_id,
@@ -264,6 +236,7 @@ async def require_permission(
 
 async def check_permissions(
     current_user: dict,
+    db_connection: asyncpg.Connection,
     permission_codes: list[str] | str,
     organization_id: str | None = None,
 ) -> UserContext:
@@ -271,13 +244,14 @@ async def check_permissions(
 
     Args:
         current_user (dict): Current user data
+        db_connection (asyncpg.Connection): Database connection
         permission_codes (list[str] | str): Permission codes to check
         organization_id (str | None): Organization ID
 
     Returns:
         UserContext: User context
     """
-    user_context = await extract_user_context(current_user)
+    user_context = await extract_user_context(current_user, db_connection)
     await require_permission(
         permission_code=permission_codes,
         user_context=user_context,
