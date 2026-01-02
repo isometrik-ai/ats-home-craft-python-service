@@ -22,7 +22,10 @@ from supabase import AsyncClient, AuthApiError
 from apps.user_service.app.config.app_settings import shared_settings
 
 # repositories
-from apps.user_service.app.db.repositories import UserRepository
+from apps.user_service.app.db.repositories import (
+    OrganisationMemberRepository,
+    UserRepository,
+)
 
 # Schema imports
 from apps.user_service.app.schemas.auth import (
@@ -547,6 +550,11 @@ class AuthService:
             user_phone=user_phone,
         )
 
+        # Get organization_id from organization_members table
+        user_id = getattr(user, "id", None)
+        org_member_repo = OrganisationMemberRepository(self.db_connection)
+        organization_id = await org_member_repo.get_organization_id_by_user_id(user_id)
+
         return AuthResponse(
             access_token=session.access_token,
             refresh_token=getattr(session, "refresh_token", None),
@@ -559,8 +567,8 @@ class AuthService:
                 last_name=user_metadata.get("last_name", None),
                 phone=user_metadata.get("phone", None),
                 timezone=user_metadata.get("timezone", None),
-                org_setup_status_completed=bool(user_metadata.get("organization_id", False)),
-                organization_id=user_metadata.get("organization_id", None),
+                org_setup_status_completed=bool(organization_id),
+                organization_id=organization_id,
             ),
         )
 

@@ -55,8 +55,8 @@ logger = get_logger("users-api")
 @limiter.limit("100/minute")
 async def get_users_list(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
     search: str | None = Query(
         None, description="Search term to filter Users by name (case-insensitive)"
     ),
@@ -65,7 +65,7 @@ async def get_users_list(
 ):
     """List all users in the current organization (paginated, sequential)"""
     # Check permissions
-    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
+    user_context = await check_permissions(current_user, db_connection, SETTINGS_USERS_MANAGE)
 
     # Create service and delegate all business logic to service
     user_service = UserService(user_context=user_context, db_connection=db_connection)
@@ -121,14 +121,17 @@ async def get_users_list(
 @limiter.limit("100/minute")
 async def get_user_profile(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
 ):
     """Retrieve the authenticated user's profile."""
-    user_context = await extract_user_context(current_user)
+    user_context = await extract_user_context(current_user, db_connection)
 
     # Create service and delegate all business logic to service
-    user_service = UserService(user_context=user_context, db_connection=db_connection)
+    user_service = UserService(
+        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+    )
     result = await user_service.get_user_profile_with_metadata(
         user_context.user_id, user_context.organization_id
     )
@@ -137,7 +140,7 @@ async def get_user_profile(
     if not user_context.organization_id:
         return success_response(
             request=request,
-            message_key="users.success.user_profile_retrieved",
+            message_key="success.retrieved",
             custom_code=CustomStatusCode.NO_CONTENT,
             status_code=http_status.HTTP_200_OK,
             data=[],
@@ -148,7 +151,7 @@ async def get_user_profile(
 
     return success_response(
         request=request,
-        message_key="users.success.user_profile_retrieved",
+        message_key="success.retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=result["profile_data"],
@@ -186,14 +189,18 @@ async def get_user_profile(
 )
 async def update_user_email(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
     body: UpdateUserEmailRequest = Body(...),
     user_id: str = Path(..., description="The ID of the user to update"),
 ):
     """Update user email."""
-    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
+    user_context = await check_permissions(
+        current_user,
+        db_connection,
+        SETTINGS_USERS_MANAGE,
+    )
 
     # Create service and delegate all business logic to service
     user_service = UserService(
@@ -243,13 +250,17 @@ async def update_user_email(
 )
 async def ban_user(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
     sb_client=Depends(supabase_service),
     user_id: str = Path(..., description="The ID of the user to ban"),
 ):
     """Ban a user for a specified duration."""
-    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
+    user_context = await check_permissions(
+        current_user,
+        db_connection,
+        SETTINGS_USERS_MANAGE,
+    )
 
     # Set audit context
     request.state.audit_risk_level = "high"
@@ -306,13 +317,17 @@ async def ban_user(
 )
 async def unban_user(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
     sb_client=Depends(supabase_service),
     user_id: str = Path(..., description="The ID of the user to unban"),
 ):
     """Unban a user by user ID."""
-    user_context = await check_permissions(current_user, SETTINGS_USERS_MANAGE)
+    user_context = await check_permissions(
+        current_user,
+        db_connection,
+        SETTINGS_USERS_MANAGE,
+    )
 
     # Set audit context
     request.state.audit_table = "organization_members"
@@ -369,13 +384,13 @@ async def unban_user(
 )
 async def update_user_profile(
     request: Request,
-    current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
     sb_client=Depends(supabase_service),
     body: UpdateUserProfileRequest = Body(...),
 ):
     """Update authenticated user's own profile information."""
-    user_context = await extract_user_context(current_user)
+    user_context = await extract_user_context(current_user, db_connection)
 
     # Set audit context
     request.state.audit_risk_level = "low"

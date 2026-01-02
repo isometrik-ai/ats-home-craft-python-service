@@ -488,3 +488,21 @@ class OrganisationMemberRepository:
         """
         row = await self.db_connection.fetchrow(query, user_id, organization_id)
         return row is not None
+
+    async def get_organization_id_by_user_id(self, user_id: str) -> str | None:
+        """Get organization_id for a user from organization_members table.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            organization_id as string or None if user is not a member of any organization
+        """
+        query = """
+            SELECT organization_id
+            FROM organization_members
+            WHERE user_id = $1
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(query, user_id)
+        return str(row["organization_id"]) if row and row.get("organization_id") else None

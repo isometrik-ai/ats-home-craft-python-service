@@ -82,7 +82,7 @@ async def get_organisations_list(
     org_status: str | None = Query(None, description="The status of the organisation"),
 ):
     """Get list of all organisations in the system (Requires: organization.appscrip.manage)"""
-    user_context = await extract_user_context(current_user)
+    user_context = await extract_user_context(current_user, db_connection)
     # Check permissions
     await require_permission(
         permission_code="organization.appscrip.manage",
@@ -153,6 +153,7 @@ async def get_organisation_by_id(
     # Check permissions and get user context
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
         organization_id=str(organisation_id),
     )
@@ -221,7 +222,7 @@ async def create_organisation(
     request.state.audit_risk_level = "high"
 
     # Extract user context from JWT token
-    user_context = await extract_user_context(current_user)
+    user_context = await extract_user_context(current_user, db_connection)
 
     # Create service with user context and delegate to service
     organisation_service = OrganisationService(
@@ -294,6 +295,7 @@ async def update_organisation(
     # Check permissions and get user context
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
         organization_id=str(organisation_id),
     )
@@ -371,6 +373,7 @@ async def delete_organisation_by_id(
     # Check permissions and get user context
     user_context = await check_permissions(
         current_user=current_user,
+        db_connection=db_connection,
         permission_codes=SETTINGS_SYSTEM_MANAGE,
         organization_id=str(organisation_id),
     )
