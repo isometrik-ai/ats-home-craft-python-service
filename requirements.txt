@@ -20,6 +20,7 @@ openai==1.91.0
 slowapi==0.1.9
 
 supabase==2.18.1
+gotrue>=2.0.0,<3.0  # explicit for invite_service AuthApiError import
 psycopg2-binary==2.9.10
 SQLAlchemy==2.0.41
 
