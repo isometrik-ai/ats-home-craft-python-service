@@ -97,8 +97,8 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:development
-            # ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            # ${{ env.IMAGE_NAME }}:${{ github.sha }}:development
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}:development
             ${{ env.IMAGE_NAME }}:dev-${{ github.run_number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -111,8 +111,8 @@ jobs:
           echo "✅ Development deployment completed!"
           echo "📦 Images tagged:"
           echo "   - ${{ env.IMAGE_NAME }}:development"
-          # echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          # echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}:development"
+          echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}:development"
           echo "   - ${{ env.IMAGE_NAME }}:dev-${{ github.run_number }}"
           echo "🔗 Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
 
@@ -142,8 +142,8 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:latest
-            # ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            # ${{ env.IMAGE_NAME }}:${{ github.sha }}:production
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}:production
             ${{ env.IMAGE_NAME }}:prod-${{ github.run_number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -156,7 +156,7 @@ jobs:
           echo "✅ Production deployment completed!"
           echo "📦 Images tagged:"
           echo "   - ${{ env.IMAGE_NAME }}:latest"
-          # echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          # echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}:production"
+          echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "   - ${{ env.IMAGE_NAME }}:${{ github.sha }}:production"
           echo "   - ${{ env.IMAGE_NAME }}:prod-${{ github.run_number }}"
           echo "🔗 Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
