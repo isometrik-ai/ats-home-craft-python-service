@@ -25,7 +25,7 @@ class UserRepository:
         """
         self.db_connection = db_connection
 
-    def _normalize_phone(phone: str) -> str:
+    def _normalize_phone(self, phone: str) -> str:
         """Normalize phone number by removing '+' sign for comparison.
         Supabase phone field may not preserve '+' sign, so we normalize for matching.
 

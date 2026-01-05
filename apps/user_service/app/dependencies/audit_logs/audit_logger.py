@@ -19,7 +19,6 @@ Features:
 
 import asyncio
 import hashlib
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -211,9 +210,7 @@ class AuditLogger:
             except (
                 OSError,
                 RuntimeError,
-                IOError,
-                json.JSONDecodeError,
-                UnicodeError,
+                ValueError,
                 AttributeError,
                 LookupError,
             ):
@@ -232,11 +229,8 @@ class AuditLogger:
             except (
                 OSError,
                 RuntimeError,
-                json.JSONDecodeError,
-                UnicodeError,
                 LookupError,
                 AttributeError,
-                KeyError,
                 ValueError,
                 TypeError,
             ):

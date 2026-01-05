@@ -34,6 +34,9 @@ router = APIRouter(prefix="/users", tags=["Users Management"])
 
 logger = get_logger("users-api")
 
+# Reusable message keys
+SUCCESS_RETRIEVED_KEY = "success.retrieved"
+
 
 @handle_api_exceptions("get users list")
 @router.get(
@@ -93,7 +96,7 @@ async def get_users_list(
         request=request,
         items=users,
         total=total_count,
-        message_key="success.retrieved",
+        message_key=SUCCESS_RETRIEVED_KEY,
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         page=page,
@@ -140,7 +143,7 @@ async def get_user_profile(
     if not user_context.organization_id:
         return success_response(
             request=request,
-            message_key="success.retrieved",
+            message_key=SUCCESS_RETRIEVED_KEY,
             custom_code=CustomStatusCode.NO_CONTENT,
             status_code=http_status.HTTP_200_OK,
             data=[],
@@ -151,7 +154,7 @@ async def get_user_profile(
 
     return success_response(
         request=request,
-        message_key="success.retrieved",
+        message_key=SUCCESS_RETRIEVED_KEY,
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=result["profile_data"],

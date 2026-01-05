@@ -12,7 +12,7 @@ from libs.shared_config.app_settings import (
 )
 
 # Only load main .env if not in test environment
-if not os.environ.get("ENVIRONMENT") == "test":
+if os.environ.get("ENVIRONMENT") != "test":
     load_dotenv()  # Only affects local runs, safe in Docker too
 
 config = Config()
