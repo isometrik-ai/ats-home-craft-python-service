@@ -57,14 +57,17 @@ def _make_ssl_context() -> ssl.SSLContext | None:
         return None
     if mode == "require":
         ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        # Require TLS with hostname verification using system CAs
+        ctx.check_hostname = True
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         return ctx
     if mode == "verify-full":
         cafile = shared_settings.database.ssl_root_cert
         ctx = ssl.create_default_context(cafile=cafile)
         ctx.check_hostname = True
         ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         return ctx
     # Fallback to disable if unknown
     return None

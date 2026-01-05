@@ -517,10 +517,17 @@ class CompanyData(BaseModel):
     @classmethod
     @field_validator("company_website")
     def validate_website(cls, value):
-        """Ensure company website starts with http:// or https://."""
-        if value and not value.startswith(("http://", "https://")):
-            return f"https://{value}"
-        return value
+        """Enforce https scheme for company website."""
+        if not value:
+            return value
+
+        if value.startswith("https://"):
+            return value
+
+        if value.startswith("http://"):
+            return f"https://{value[len('http://') :]}"
+
+        return f"https://{value}"
 
     @model_validator(mode="after")
     def validate_enterprise_features_and_practice_areas(self):

@@ -34,10 +34,7 @@ from libs.shared_db.supabase_db.auth_repository import (
     update_metadata,
 )
 from libs.shared_utils.http_exceptions import BadRequestException, NotFoundException
-from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
-
-logger = get_logger("user_service")
 
 
 class UserService:
@@ -83,7 +80,6 @@ class UserService:
             dict containing the user profile with role information or None if not found
         """
         if not user_id or not user_id.strip():
-            logger.error("Invalid user_id provided: %s", user_id)
             return None
 
         # Get user from organization_members
@@ -120,7 +116,6 @@ class UserService:
             list of permissions
         """
         if not user_id or not user_id.strip():
-            logger.error("Invalid user_id provided: %s", user_id)
             return []
 
         # Get user's role_id from organization_members
