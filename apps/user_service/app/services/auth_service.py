@@ -231,7 +231,7 @@ class AuthService:
             return session
         return None
 
-    async def _get_session_after_signup(self, signup_result: Any) -> Any:
+    def _get_session_after_signup(self, signup_result: Any) -> Any:
         """Get session after signup, trying signup session first, then login if needed.
 
         Args:

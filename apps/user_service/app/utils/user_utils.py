@@ -210,7 +210,7 @@ async def get_isometrik_details(
     organization = await organization_repository.get_organization_by_id(organization_id)
     if not organization:
         return None
-    if organization and organization.get("status") != "active":
+    if organization.get("status") != "active":
         raise ForbiddenException(
             message_key="organizations.errors.organization_not_active",
             custom_code=CustomStatusCode.FORBIDDEN,

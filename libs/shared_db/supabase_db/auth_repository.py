@@ -242,7 +242,7 @@ async def generate_magic_link(sb_client: AsyncClient, email: str) -> str | None:
     Returns:
         Generated magic link URL or None if failed
     """
-    response = sb_client.auth.admin.generate_link(
+    response = await sb_client.auth.admin.generate_link(
         {
             "type": "magiclink",
             "email": email,

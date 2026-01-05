@@ -66,7 +66,6 @@ def _handle_validation_exception(request: Request, exc: RequestValidationError |
 
     if first_error and first_error.get("type") == "missing":
         param_name = first_error.get("loc", ["unknown"])[-1]
-        first_error_msg = f"Missing required parameter: {param_name}"
         message_key = "errors.missing_required_param"
         params = {"param_name": param_name}
     else:
