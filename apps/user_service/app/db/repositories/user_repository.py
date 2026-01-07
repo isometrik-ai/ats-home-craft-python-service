@@ -53,6 +53,7 @@ class UserRepository:
             SELECT status
             FROM organization_members
             WHERE email = $1
+            AND status != 'deleted'
             LIMIT 1
         """
         row = await self.db_connection.fetchrow(query, email)

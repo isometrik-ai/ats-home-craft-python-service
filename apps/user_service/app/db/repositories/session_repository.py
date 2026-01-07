@@ -136,7 +136,7 @@ class SessionRepository:
             query = f"""
                 SELECT DISTINCT {field_list}
                 FROM user_sessions us
-                INNER JOIN organization_members om ON us.user_id = om.user_id
+                INNER JOIN organization_members om ON us.user_id = om.user_id AND om.status != 'deleted'
                 WHERE {where_clause}
                 ORDER BY us.login_timestamp DESC
                 LIMIT ${limit_param} OFFSET ${offset_param}
@@ -144,7 +144,7 @@ class SessionRepository:
             count_query = f"""
                 SELECT COUNT(DISTINCT us.id)
                 FROM user_sessions us
-                INNER JOIN organization_members om ON us.user_id = om.user_id
+                INNER JOIN organization_members om ON us.user_id = om.user_id AND om.status != 'deleted'
                 WHERE {where_clause}
             """
         else:
@@ -263,6 +263,7 @@ class SessionRepository:
                 FROM user_sessions us
                 INNER JOIN organization_members om ON us.user_id = om.user_id
                     AND om.organization_id = $1
+                    AND om.status != 'deleted'
                 WHERE {where_clause}
                 ORDER BY us.login_timestamp DESC
                 LIMIT ${limit_param} OFFSET ${offset_param}
@@ -272,6 +273,7 @@ class SessionRepository:
                 FROM user_sessions us
                 INNER JOIN organization_members om ON us.user_id = om.user_id
                     AND om.organization_id = $1
+                    AND om.status != 'deleted'
                 WHERE {where_clause}
             """
         else:

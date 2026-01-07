@@ -90,6 +90,8 @@ class OrganizationMemberRepository:
             where_clause += " AND organization_id = $2"
             params.append(organization_id)
 
+        where_clause += " AND status != 'deleted'"
+
         query = f"""
             SELECT
                 id,
@@ -139,6 +141,8 @@ class OrganizationMemberRepository:
             where_clause += " AND organization_id = $2"
             params.append(organization_id)
 
+        where_clause += " AND status != 'deleted'"
+
         query = f"""
             SELECT role_id
             FROM organization_members
@@ -164,6 +168,7 @@ class OrganizationMemberRepository:
             FROM organization_members
             WHERE email = $1
             AND organization_id = $2
+            AND status != 'deleted'
             LIMIT 1
         """
         row = await self.db_connection.fetchrow(query, email, organization_id)
@@ -182,7 +187,7 @@ class OrganizationMemberRepository:
         Returns:
             bool: True if phone number exists for another user, False otherwise
         """
-        where_clause = "WHERE phone = $1 AND organization_id = $2"
+        where_clause = "WHERE phone = $1 AND organization_id = $2 AND status != 'deleted'"
         params: list[Any] = [phone, organization_id]
 
         if user_id:
@@ -207,7 +212,7 @@ class OrganizationMemberRepository:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Get paginated list of users with optional search."""
-        where_clause = "WHERE organization_id = $1"
+        where_clause = "WHERE organization_id = $1 AND status != 'deleted'"
         params: list[Any] = [organization_id]
         param_index = 2
 
@@ -261,7 +266,7 @@ class OrganizationMemberRepository:
         search: str | None = None,
     ) -> int:
         """Get total count of users matching search criteria."""
-        where_clause = "WHERE organization_id = $1"
+        where_clause = "WHERE organization_id = $1 AND status != 'deleted'"
         params: list[Any] = [organization_id]
 
         if search:
@@ -344,6 +349,7 @@ class OrganizationMemberRepository:
             SET {", ".join(set_clauses)}
             WHERE user_id = ${num_update_params + 1}
             AND organization_id = ${num_update_params + 2}
+            AND status != 'deleted'
             RETURNING *
         """
         row = await self.db_connection.fetchrow(query, *params)
@@ -426,6 +432,7 @@ class OrganizationMemberRepository:
             SET email = $1, updated_at = NOW()
             WHERE user_id = $2
             AND organization_id = $3
+            AND status != 'deleted'
             RETURNING id
         """
         row = await self.db_connection.fetchrow(query, new_email, user_id, organization_id)
@@ -502,7 +509,55 @@ class OrganizationMemberRepository:
             SELECT organization_id
             FROM organization_members
             WHERE user_id = $1
+            AND status != 'deleted'
             LIMIT 1
         """
         row = await self.db_connection.fetchrow(query, user_id)
         return str(row["organization_id"]) if row and row.get("organization_id") else None
+
+    async def get_all_members_by_organization_id(
+        self, organization_id: str
+    ) -> list[dict[str, Any]]:
+        """Get all members for an organization.
+
+        Args:
+            organization_id: Organization ID
+
+        Returns:
+            list[dict[str, Any]]: List of all organization members
+        """
+        query = """
+            SELECT
+                id,
+                user_id,
+                email,
+                first_name,
+                last_name,
+                salutation,
+                phone,
+                timezone,
+                role_id,
+                status,
+                created_at,
+                updated_at,
+                last_active_at
+            FROM organization_members
+            WHERE organization_id = $1
+            ORDER BY created_at DESC
+        """
+        rows = await self.db_connection.fetch(query, organization_id)
+        return [dict(row) for row in rows]
+
+    async def delete_all_members_by_organization_id(self, organization_id: str) -> None:
+        """Soft delete all members of an organization by setting status to 'deleted'.
+
+        Args:
+            organization_id: Organization ID
+        """
+        query = """
+            UPDATE organization_members
+            SET status = 'deleted', updated_at = NOW()
+            WHERE organization_id = $1
+            AND status != 'deleted'
+        """
+        await self.db_connection.execute(query, organization_id)

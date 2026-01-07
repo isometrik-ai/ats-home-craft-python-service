@@ -907,3 +907,284 @@ If you didn't request this, please ignore this email.
     except Exception as error:
         logger.error("Error sending verification code email: %s", str(error))
         return False
+
+
+def send_organization_delete_request_email(
+    email: str,
+    organization_name: str,
+    requester_email: str,
+    company_name: str = COMMON_COMPANY_NAME,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL,
+) -> bool:
+    """Send an organization delete request notification email to super admin users.
+
+    Args:
+        email (str): Super admin's email address
+        organization_name (str): Name of the organization requested for deletion
+        requester_email (str): Email of the user who requested the deletion
+        company_name (str): Company name (default: "House of App AI")
+        company_address (str): Company address for footer
+        privacy_policy_url (str): Privacy policy URL
+        terms_url (str): Terms of service URL
+
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    try:
+        current_year = datetime.now().year
+
+        subject = f"Organization Deletion Request: {organization_name}"
+
+        # Plain text message
+        message = f"""Hello,
+
+A deletion request has been submitted for the organization "{organization_name}".
+
+Requested by: {requester_email}
+
+Please review and take appropriate action.
+
+© {current_year} {company_name}. All rights reserved.
+{company_address}"""
+
+        # HTML message
+        html_message = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Organization Deletion Request</title>
+</head>
+<body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+
+    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee; background-color:#dc2626;">
+      <h2 style="margin:0; color:#ffffff;">Organization Deletion Request</h2>
+    </div>
+    <div style="padding:30px; font-size:15px; color:#444; line-height:1.6;">
+      <p>Hello,</p>
+      <p>A deletion request has been submitted for the organization:</p>
+      <div style="background-color:#f3f4f6; padding:16px; border-radius:6px; margin:20px 0;">
+        <p style="margin:0; font-size:18px; font-weight:bold; color:#1f2937;">
+          {organization_name}
+        </p>
+      </div>
+      <p><strong>Requested by:</strong> {requester_email}</p>
+      <p style="margin-top:25px; padding:12px; background-color:#fef2f2; border-left:4px solid #dc2626; border-radius:4px;">
+        Please review and take appropriate action.
+      </p>
+    </div>
+  </div>
+  <div style="max-width:600px; margin:20px auto; text-align:center; font-size:13px; color:#777;">
+    <p style="color:#aaa;">
+      © {current_year} {company_name}. All rights reserved.<br />
+      {company_address}
+    </p>
+    <p>
+      <a href="{privacy_policy_url}" style="color:#6c7ae0;">Privacy Policy</a> |
+      <a href="{terms_url}" style="color:#6c7ae0;">Terms of Service</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+        # Send the email with HTML content and sender name "Ross.Ai"
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
+
+        if email_sent:
+            logger.info("Organization delete request email sent successfully to %s", email)
+            return True
+        logger.error("Failed to send organization delete request email to %s", email)
+        return False
+
+    except Exception as error:
+        logger.error("Error sending organization delete request email: %s", str(error))
+        return False
+
+
+def send_organization_deletion_approved_email(
+    email: str,
+    organization_name: str,
+    company_name: str = COMMON_COMPANY_NAME,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL,
+) -> bool:
+    """Send an organization deletion approved notification email to organization members.
+
+    Args:
+        email (str): Organization member's email address
+        organization_name (str): Name of the organization that was deleted
+        company_name (str): Company name (default: "House of App AI")
+        company_address (str): Company address for footer
+        privacy_policy_url (str): Privacy policy URL
+        terms_url (str): Terms of service URL
+
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    try:
+        current_year = datetime.now().year
+
+        subject = f"Organization Deletion Confirmed: {organization_name}"
+
+        # Plain text message
+        message = f"""Hello,
+
+Your organization "{organization_name}" has been permanently deleted from our system.
+
+All associated data including user accounts, roles, permissions, and teams have been removed.
+
+If you have any questions or concerns, please contact our support team.
+
+© {current_year} {company_name}. All rights reserved.
+{company_address}"""
+
+        # HTML message
+        html_message = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Organization Deletion Confirmed</title>
+</head>
+<body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+
+    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee; background-color:#dc2626;">
+      <h2 style="margin:0; color:#ffffff;">Organization Deletion Confirmed</h2>
+    </div>
+    <div style="padding:30px; font-size:15px; color:#444; line-height:1.6;">
+      <p>Hello,</p>
+      <p>Your organization has been permanently deleted from our system:</p>
+      <div style="background-color:#f3f4f6; padding:16px; border-radius:6px; margin:20px 0;">
+        <p style="margin:0; font-size:18px; font-weight:bold; color:#1f2937;">
+          {organization_name}
+        </p>
+      </div>
+      <p style="margin-top:25px; padding:12px; background-color:#fef2f2; border-left:4px solid #dc2626; border-radius:4px;">
+        <strong>Important:</strong> All associated data including user accounts, roles, permissions, and teams have been permanently removed.
+      </p>
+      <p>If you have any questions or concerns, please contact our support team.</p>
+    </div>
+  </div>
+  <div style="max-width:600px; margin:20px auto; text-align:center; font-size:13px; color:#777;">
+    <p style="color:#aaa;">
+      © {current_year} {company_name}. All rights reserved.<br />
+      {company_address}
+    </p>
+    <p>
+      <a href="{privacy_policy_url}" style="color:#6c7ae0;">Privacy Policy</a> |
+      <a href="{terms_url}" style="color:#6c7ae0;">Terms of Service</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+        # Send the email with HTML content
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
+
+        if email_sent:
+            logger.info("Organization deletion approved email sent successfully to %s", email)
+            return True
+        logger.error("Failed to send organization deletion approved email to %s", email)
+        return False
+
+    except Exception as error:
+        logger.error("Error sending organization deletion approved email: %s", str(error))
+        return False
+
+
+def send_organization_deletion_rejected_email(
+    email: str,
+    organization_name: str,
+    rejection_reason: str,
+    company_name: str = COMMON_COMPANY_NAME,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL,
+) -> bool:
+    """Send an organization deletion rejection notification email to the requester.
+
+    Args:
+        email (str): Requester's email address
+        organization_name (str): Name of the organization
+        rejection_reason (str): Reason for rejection
+        company_name (str): Company name (default: "House of App AI")
+        company_address (str): Company address for footer
+        privacy_policy_url (str): Privacy policy URL
+        terms_url (str): Terms of service URL
+
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    try:
+        current_year = datetime.now().year
+
+        subject = f"Organization Deletion Request Rejected: {organization_name}"
+
+        # Plain text message
+        message = f"""Hello,
+
+Your request to delete the organization "{organization_name}" has been rejected.
+
+Reason: {rejection_reason}
+
+Your organization remains active. If you have any questions, please contact our support team.
+
+© {current_year} {company_name}. All rights reserved.
+{company_address}"""
+
+        # HTML message
+        html_message = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Organization Deletion Request Rejected</title>
+</head>
+<body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+
+    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee; background-color:#f59e0b;">
+      <h2 style="margin:0; color:#ffffff;">Deletion Request Rejected</h2>
+    </div>
+    <div style="padding:30px; font-size:15px; color:#444; line-height:1.6;">
+      <p>Hello,</p>
+      <p>Your request to delete the following organization has been rejected:</p>
+      <div style="background-color:#f3f4f6; padding:16px; border-radius:6px; margin:20px 0;">
+        <p style="margin:0; font-size:18px; font-weight:bold; color:#1f2937;">
+          {organization_name}
+        </p>
+      </div>
+      <div style="margin-top:25px; padding:12px; background-color:#fef3c7; border-left:4px solid #f59e0b; border-radius:4px;">
+        <p style="margin:0 0 8px 0;"><strong>Reason:</strong></p>
+        <p style="margin:0; color:#78350f;">{rejection_reason}</p>
+      </div>
+      <p style="margin-top:25px;">Your organization remains active. If you have any questions, please contact our support team.</p>
+    </div>
+  </div>
+  <div style="max-width:600px; margin:20px auto; text-align:center; font-size:13px; color:#777;">
+    <p style="color:#aaa;">
+      © {current_year} {company_name}. All rights reserved.<br />
+      {company_address}
+    </p>
+    <p>
+      <a href="{privacy_policy_url}" style="color:#6c7ae0;">Privacy Policy</a> |
+      <a href="{terms_url}" style="color:#6c7ae0;">Terms of Service</a>
+    </p>
+  </div>
+</body>
+</html>"""
+
+        # Send the email with HTML content
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
+
+        if email_sent:
+            logger.info("Organization deletion rejected email sent successfully to %s", email)
+            return True
+        logger.error("Failed to send organization deletion rejected email to %s", email)
+        return False
+
+    except Exception as error:
+        logger.error("Error sending organization deletion rejected email: %s", str(error))
+        return False

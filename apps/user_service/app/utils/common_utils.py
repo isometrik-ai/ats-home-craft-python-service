@@ -18,7 +18,10 @@ from typing import Any
 import asyncpg
 from fastapi import HTTPException, Request
 
-from apps.user_service.app.db.repositories import OrganizationMemberRepository
+from apps.user_service.app.db.repositories import (
+    OrganizationMemberRepository,
+    OrganizationRepository,
+)
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.http_exceptions import (
@@ -28,6 +31,7 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+from libs.shared_utils.super_admin_utils import is_system_super_admin
 
 logger = get_logger("common_utils")
 
@@ -258,6 +262,55 @@ async def check_permissions(
         organization_id=organization_id if organization_id else user_context.organization_id,
     )
     return user_context
+
+
+async def require_organization_creator(
+    user_context: UserContext,
+    organization_id: str,
+    db_connection: asyncpg.Connection,
+) -> None:
+    """Check if the user is the organization creator.
+
+    Args:
+        user_context (UserContext): Validated user context
+        organization_id (str): Organization ID to check
+        db_connection (asyncpg.Connection): Database connection
+
+    Raises:
+        ForbiddenException: If user is not the organization creator
+        NotFoundException: If organization is not found
+    """
+    org_repo = OrganizationRepository(db_connection)
+    is_owner = await org_repo.is_user_organization_owner(organization_id, user_context.user_id)
+    if not is_owner:
+        raise ForbiddenException(
+            message_key="organizations.errors.only_creator_can_request_deletion",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+
+async def require_super_admin(
+    current_user: dict,
+) -> None:
+    """Check if the current user is a system super admin.
+
+    Checks app_metadata.role for 'system_super_admin' value from JWT token.
+
+    Args:
+        current_user (dict): Decoded JWT token containing user information
+
+    Raises:
+        ForbiddenException: If user is not a system super admin
+
+    Usage:
+        await require_super_admin(current_user)
+    """
+    is_admin = await is_system_super_admin(current_user)
+    if not is_admin:
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
 
 
 # ============================================================================

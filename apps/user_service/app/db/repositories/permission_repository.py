@@ -121,6 +121,22 @@ class PermissionsRepository:
         row = await self.db_connection.fetchrow(query, permission_id, organization_id)
         return row is not None
 
+    async def delete_all_permissions_by_organization_id(self, organization_id: str) -> int:
+        """Delete all permissions for an organization.
+
+        Args:
+            organization_id: The organization ID
+
+        Returns:
+            int: Number of permissions deleted
+        """
+        query = """
+            DELETE FROM permissions
+            WHERE organization_id = $1
+        """
+        result = await self.db_connection.execute(query, organization_id)
+        return int(result.split()[-1]) if result else 0
+
     async def create_default_permissions(self, organization_id: str) -> list[str]:
         """Insert default permissions for a new organization and return their IDs."""
         if not DEFAULT_PERMISSIONS:

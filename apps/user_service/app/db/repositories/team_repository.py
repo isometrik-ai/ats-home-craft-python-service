@@ -288,6 +288,7 @@ class TeamRepository:
             LEFT JOIN organization_members om
                 ON tm.user_id = om.user_id
                 AND om.organization_id = $2
+                AND om.status != 'deleted'
             WHERE tm.team_id = $1
             ORDER BY tm.added_at ASC;
         """
@@ -501,3 +502,21 @@ class TeamRepository:
         """
         await self.db_connection.execute(delete_members_query, team_input.team_id)
         logger.info("Soft-deleted team %s successfully", team_input.team_id)
+
+    async def delete_all_teams_by_organization_id(self, organization_id: str) -> int:
+        """Delete all teams and their members for an organization.
+        team member deletion happens automatically by db constraint
+
+        Args:
+            organization_id: Organization ID
+
+        Returns:
+            int: Number of teams deleted
+        """
+        # Then delete all teams
+        delete_teams_query = """
+            DELETE FROM teams
+            WHERE organization_id = $1
+        """
+        result = await self.db_connection.execute(delete_teams_query, organization_id)
+        return int(result.split()[-1]) if result else 0

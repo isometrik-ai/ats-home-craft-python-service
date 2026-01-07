@@ -46,7 +46,7 @@ class OrganizationRepository:
     ) -> tuple[str, list[Any]]:
         """Build WHERE conditions for organization queries."""
 
-        conditions: list[str] = ["o.status != 'archived'"]
+        conditions: list[str] = ["o.status != 'deleted'"]
         params: list[Any] = []
         idx = 1
 
@@ -106,6 +106,7 @@ class OrganizationRepository:
                     organization_id,
                     COUNT(*) FILTER (WHERE status = 'active')::int AS member_count
                 FROM organization_members
+                WHERE status != 'deleted'
                 GROUP BY organization_id
             ) om ON om.organization_id = o.id
             WHERE {where_clause}
@@ -162,10 +163,11 @@ class OrganizationRepository:
                     organization_id,
                     COUNT(*) FILTER (WHERE status = 'active')::int AS member_count
                 FROM organization_members
+                WHERE status != 'deleted'
                 GROUP BY organization_id
             ) om ON om.organization_id = o.id
             WHERE o.id = $1
-            AND o.status != 'archived'
+            AND o.status != 'deleted'
             LIMIT 1
         """
 
@@ -188,7 +190,7 @@ class OrganizationRepository:
                 o.settings
             FROM organizations o
             WHERE o.id = $1
-            AND o.status != 'archived'
+            AND o.status != 'deleted'
             LIMIT 1
         """
         row = await self.db_connection.fetchrow(query, organization_id)
@@ -196,11 +198,11 @@ class OrganizationRepository:
 
     # VALIDATION OPERATIONS
     async def check_organization_exists(self, organization_id: str) -> bool:
-        """Check if organization exists and is not archived."""
+        """Check if organization exists and is not deleted."""
         query = """
             SELECT EXISTS(
                 SELECT 1 FROM organizations
-                WHERE id = $1 AND status != 'archived'
+                WHERE id = $1 AND status != 'deleted'
             )
         """
         return await self.db_connection.fetchval(query, organization_id)
@@ -219,7 +221,7 @@ class OrganizationRepository:
                 SELECT 1
                 FROM organizations
                 WHERE slug = $1
-                  AND status != 'archived'
+                  AND status != 'deleted'
                   {exclude_clause}
             )
         """
@@ -246,7 +248,7 @@ class OrganizationRepository:
         query = f"""
             UPDATE organizations
             SET {", ".join(set_clauses)}, updated_at = NOW()
-            WHERE id = ${len(params)} AND status != 'archived'
+            WHERE id = ${len(params)} AND status != 'deleted'
             RETURNING *
         """
         row = await self.db_connection.fetchrow(query, *params)
@@ -257,16 +259,41 @@ class OrganizationRepository:
             )
         return dict(row)
 
+    async def is_user_organization_owner(
+        self,
+        organization_id: str,
+        user_id: str,
+    ) -> bool:
+        """Check whether the given user is the owner (creator) of the organization."""
+
+        query = """
+            SELECT 1
+            FROM organizations
+            WHERE id = $1
+            AND created_by_id = $2
+            LIMIT 1
+        """
+
+        row = await self.db_connection.fetchrow(
+            query,
+            organization_id,
+            user_id,
+        )
+
+        return row is not None
+
     # DELETE OPERATIONS
     async def delete_organization(self, organization_id: str) -> None:
-        """Delete organization (hard delete)."""
+        """Soft delete organization by setting status to 'deleted'."""
         query = """
-            DELETE FROM organizations
+            UPDATE organizations
+            SET status = 'deleted', updated_at = NOW()
             WHERE id = $1
+            AND status != 'deleted'
             RETURNING id
         """
-        result = await self.db_connection.fetchval(query, organization_id)
-        if result is None:
+        row = await self.db_connection.fetchrow(query, organization_id)
+        if not row:
             raise NotFoundException(
                 message_key="organizations.errors.organization_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,

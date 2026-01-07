@@ -4,6 +4,7 @@ This module contains all Pydantic models and schemas related to organization man
 These schemas are used for request/response validation and API documentation.
 """
 
+from enum import Enum
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -21,6 +22,16 @@ from apps.user_service.app.schemas.auth import (
     TeamSetup,
     User,
 )
+
+
+class DeleteRequestStatus(str, Enum):
+    """Enumeration for organization delete request statuses."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    COMPLETED = "completed"
 
 
 class OrganizationInfo(BaseModel):
@@ -451,3 +462,100 @@ class OrganizationAdminUpdate(OrganizationUpdate):
                 detail="At least one field must have a non-None value",
             )
         return self
+
+
+class DeleteRequestInfo(BaseModel):
+    """Model for delete request information.
+
+    Attributes:
+        request_id (str): Unique identifier for the delete request
+        organization_id (str): Organization ID
+        requester_id (str): User ID of the requester
+        status (str): Request status (pending, approved, rejected, cancelled, completed)
+        requested_at (str): ISO timestamp when request was created
+        decision_at (str | None): ISO timestamp when decision was made
+        processed_at (str | None): ISO timestamp when request was processed
+        approver_id (str | None): User ID of the approver
+        decision_reason (str | None): Reason for the decision
+        created_at (str): ISO timestamp when record was created
+        updated_at (str): ISO timestamp when record was last updated
+    """
+
+    request_id: str = Field(..., description="Unique identifier for the delete request")
+    organization_id: str = Field(..., description="Organization ID")
+    requester_id: str = Field(..., description="User ID of the requester")
+    status: str = Field(..., description="Request status")
+    requested_at: str = Field(..., description="ISO timestamp when request was created")
+    decision_at: str | None = Field(None, description="ISO timestamp when decision was made")
+    processed_at: str | None = Field(None, description="ISO timestamp when request was processed")
+    approver_id: str | None = Field(None, description="User ID of the approver")
+    decision_reason: str | None = Field(None, description="Reason for the decision")
+    created_at: str = Field(..., description="ISO timestamp when record was created")
+    updated_at: str = Field(..., description="ISO timestamp when record was last updated")
+
+
+class DeleteRequestListResponse(BaseModel):
+    """Response model for delete request list operations.
+
+    Attributes:
+        message (str): Response message describing the operation result
+        data (list[DeleteRequestInfo]): List of delete requests
+        total_count (int): Total number of delete requests
+        page (int): Current page number
+        page_size (int): Number of items per page
+        total_pages (int): Total number of pages
+    """
+
+    message: str = Field(..., description="Response message describing the operation result")
+    data: list[DeleteRequestInfo] = Field(..., description="List of delete requests")
+    total_count: int = Field(..., description="Total number of delete requests")
+    page: int = Field(..., description="Current page number")
+    page_size: int = Field(..., description="Number of items per page")
+    total_pages: int = Field(..., description="Total number of pages")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "data": [
+                    {
+                        "request_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                        "organization_id": "550e8400-e29b-41d4-a716-446655440000",
+                        "requester_id": "660e8400-e29b-41d4-a716-446655440001",
+                        "status": "pending",
+                        "requested_at": "2024-12-19T10:00:00Z",
+                        "decision_at": None,
+                        "processed_at": None,
+                        "approver_id": None,
+                        "decision_reason": None,
+                        "created_at": "2024-12-19T10:00:00Z",
+                        "updated_at": "2024-12-19T10:00:00Z",
+                    }
+                ],
+                "total_count": 1,
+                "page": 1,
+                "page_size": 20,
+                "total_pages": 1,
+            }
+        }
+    )
+
+
+class ApproveRejectDeleteRequestBody(BaseModel):
+    """Request body for approving or rejecting a delete request.
+
+    Attributes:
+        is_accepted (bool): True to approve, False to reject
+        reason (str): Reason for the decision
+    """
+
+    is_accepted: bool = Field(..., description="True to approve deletion, False to reject")
+    reason: str = Field(..., min_length=1, max_length=1000, description="Reason for the decision")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "is_accepted": True,
+                "reason": "Organization deletion approved after review",
+            }
+        }
+    )
