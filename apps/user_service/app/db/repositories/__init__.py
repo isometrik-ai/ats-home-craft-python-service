@@ -13,6 +13,9 @@ Usage:
 """
 
 from apps.user_service.app.db.repositories.invite_repository import InviteRepository
+from apps.user_service.app.db.repositories.organization_delete_request_repository import (
+    OrganizationDeleteRequestRepository,
+)
 from apps.user_service.app.db.repositories.organization_member_repository import (
     OrganizationMemberRepository,
 )
@@ -37,6 +40,7 @@ __all__ = [
     "PermissionsRepository",
     "OrganizationRepository",
     "OrganizationMemberRepository",
+    "OrganizationDeleteRequestRepository",
     "RoleRepository",
     "SessionRepository",
     "UserRepository",

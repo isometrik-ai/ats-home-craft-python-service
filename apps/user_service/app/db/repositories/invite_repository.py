@@ -187,7 +187,7 @@ class InviteRepository:
             SELECT EXISTS(
                 SELECT 1
                 FROM organization_members
-                WHERE organization_id = $1 AND email = $2
+                WHERE organization_id = $1 AND email = $2 AND status != 'deleted'
             )
         """
         exists = await self.db_connection.fetchval(query, organization_id, email)

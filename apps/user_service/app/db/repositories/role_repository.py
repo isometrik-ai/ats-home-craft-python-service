@@ -313,6 +313,22 @@ class RoleRepository:
         """
         await self.db_connection.fetchval(query, role_id, organization_id)
 
+    async def delete_all_roles_by_organization_id(self, organization_id: str) -> int:
+        """Delete all roles for an organization.
+
+        Args:
+            organization_id: Organization ID
+
+        Returns:
+            int: Number of roles deleted
+        """
+        query = """
+            DELETE FROM roles
+            WHERE organization_id = $1
+        """
+        result = await self.db_connection.execute(query, organization_id)
+        return int(result.split()[-1]) if result else 0
+
     # VALIDATION OPERATIONS
     async def check_role_exists(self, role_id: str, organization_id: str) -> bool:
         """Check if role exists in organization.
@@ -397,6 +413,7 @@ class RoleRepository:
             FROM organization_members
             WHERE role_id = $1
               AND organization_id = $2
+              AND status != 'deleted'
         """
         return await self.db_connection.fetchval(query, role_id, organization_id)
 

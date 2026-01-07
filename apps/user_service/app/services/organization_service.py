@@ -13,13 +13,17 @@ import asyncpg
 from pydantic import BaseModel
 
 from apps.user_service.app.db.repositories import (
+    OrganizationDeleteRequestRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     PermissionsRepository,
     RoleRepository,
+    TeamRepository,
 )
 from apps.user_service.app.schemas.auth import AccountType, PlanType, Subscription
 from apps.user_service.app.schemas.organizations import (
+    DeleteRequestInfo,
+    DeleteRequestStatus,
     NewOrganizationBody,
     OrganizationAdminUpdate,
     OrganizationInfo,
@@ -30,16 +34,26 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     validate_uuid_format,
 )
+from apps.user_service.app.utils.email_utils import (
+    send_organization_delete_request_email,
+    send_organization_deletion_approved_email,
+    send_organization_deletion_rejected_email,
+)
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     ForbiddenException,
+    InternalServerErrorException,
     NotFoundException,
 )
 from libs.shared_utils.isometrik_service import (
     create_isometrik_application,
     create_isometrik_user,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+from libs.shared_utils.super_admin_utils import get_system_super_admin_emails
+
+logger = get_logger("organization_service")
 
 
 def _serialize_pydantic_models(value: Any) -> Any:
@@ -84,6 +98,10 @@ class OrganizationService:
         self.organization_member_repository = OrganizationMemberRepository(
             db_connection=db_connection
         )
+        self.delete_request_repository = OrganizationDeleteRequestRepository(
+            db_connection=db_connection
+        )
+        self.team_repository = TeamRepository(db_connection=db_connection)
 
     async def list_organizations(
         self,
@@ -620,3 +638,423 @@ class OrganizationService:
         await self.organization_member_repository.add_member(
             organization_id=organization_id, member_data=member_data
         )
+
+    async def _notify_super_admins(
+        self,
+        organization_name: str,
+        requester_email: str,
+    ) -> None:
+        """Notify all system super admin users about an organization delete request.
+
+        Args:
+            organization_name (str): Name of the organization requested for deletion
+            requester_email (str): Email of the user who requested the deletion
+
+        Raises:
+            InternalServerErrorException: If email notification fails
+        """
+        # Get all super admin emails using utility function
+        super_admin_emails = await get_system_super_admin_emails(self.db_connection)
+
+        if not super_admin_emails:
+            logger.warning("No system super admin users found to notify")
+            return
+
+        # Send email notifications to all super admins
+        email_failures = []
+        for super_admin_email in super_admin_emails:
+            email_sent = send_organization_delete_request_email(
+                email=super_admin_email,
+                organization_name=organization_name,
+                requester_email=requester_email,
+            )
+            if not email_sent:
+                email_failures.append(super_admin_email)
+
+        if email_failures:
+            logger.warning(
+                "Failed to send delete request emails to some super admins: %s",
+                email_failures,
+            )
+            # Only raise exception if all emails failed
+            if len(email_failures) == len(super_admin_emails):
+                raise InternalServerErrorException(
+                    message_key="organizations.errors.email_notification_failed",
+                    custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+                )
+
+        logger.info(
+            "Sent organization delete request notifications to %d super admin(s)",
+            len(super_admin_emails) - len(email_failures),
+        )
+
+    async def create_delete_request(
+        self,
+        organization_id: str,
+    ) -> dict[str, Any]:
+        """Create a delete request for an organization.
+
+        Business Rules:
+        - Only the organization creator can create a delete request
+        - User must be a member of the organization (validated in endpoint)
+        - Cannot create a duplicate pending request for the same organization
+        - Sends email notifications to all system super admin users
+
+        Args:
+            organization_id (str): Organization ID
+
+        Returns:
+            dict[str, Any]: Created delete request record
+
+        Raises:
+            NotFoundException: If organization is not found
+            ConflictException: If duplicate pending request exists
+            InternalServerErrorException: If email notification fails
+        """
+        validate_uuid_format(organization_id, "organization_id")
+
+        # Verify organization exists
+        # Fetch organization details to get name
+        organization = await self.organization_repository.get_organization_by_id(organization_id)
+        if not organization:
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        # Check for duplicate pending request
+        existing_request = (
+            await self.delete_request_repository.get_pending_request_by_organization_and_requester(
+                organization_id=organization_id,
+                requester_id=self.user_context.user_id,
+            )
+        )
+        if existing_request:
+            raise ConflictException(
+                message_key="organizations.errors.duplicate_delete_request",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        organization_name = organization.get("name")
+
+        # Create delete request
+        delete_request = await self.delete_request_repository.create_delete_request(
+            organization_id=organization_id,
+            requester_id=self.user_context.user_id,
+        )
+
+        # Get all super admin users and send email notifications
+        try:
+            await self._notify_super_admins(
+                organization_name=organization_name,
+                requester_email=self.user_context.email,
+            )
+        except Exception as error:
+            logger.error(
+                "Failed to send email notifications to super admins for delete request: %s",
+                str(error),
+            )
+
+        return delete_request
+
+    async def list_delete_requests(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        organization_id: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """Retrieve paginated list of delete requests.
+
+        Args:
+            page (int): Page number (1-indexed)
+            page_size (int): Number of items per page
+            organization_id (str | None): Optional organization ID to filter by
+            status (str | None): Optional status to filter by
+
+        Returns:
+            dict[str, Any]: Dictionary containing:
+                - data: List of delete request records
+                - total_count: Total number of delete requests
+                - page: Current page number
+                - page_size: Items per page
+                - total_pages: Total number of pages
+        """
+        # Validate organization_id format if provided
+        if organization_id:
+            validate_uuid_format(organization_id, "organization_id")
+
+        # Calculate offset
+        offset = (page - 1) * page_size
+
+        # Get paginated delete requests
+        delete_requests = await self.delete_request_repository.get_delete_requests_list(
+            organization_id=organization_id,
+            status=status,
+            limit=page_size,
+            offset=offset,
+        )
+
+        # Get total count
+        total_count = await self.delete_request_repository.get_delete_requests_count(
+            organization_id=organization_id,
+            status=status,
+        )
+
+        # Convert delete requests to models
+        formatted_requests = []
+        for request in delete_requests:
+            delete_request_info = DeleteRequestInfo(
+                request_id=str(request["id"]),
+                organization_id=str(request["organization_id"]),
+                requester_id=str(request["requester_id"]),
+                status=request["status"],
+                requested_at=format_iso_datetime(request["requested_at"]) or "",
+                decision_at=format_iso_datetime(request.get("decision_at")) or None,
+                processed_at=format_iso_datetime(request.get("processed_at")) or None,
+                approver_id=str(request["approver_id"]) if request.get("approver_id") else None,
+                decision_reason=request.get("decision_reason"),
+                created_at=format_iso_datetime(request.get("created_at")) or "",
+                updated_at=format_iso_datetime(request.get("updated_at")) or "",
+            )
+            formatted_requests.append(delete_request_info)
+
+        total_pages = math.ceil(total_count / page_size) if page_size > 0 else 0
+
+        return {
+            "data": formatted_requests,
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
+
+    async def process_delete_request(
+        self,
+        request_id: str,
+        is_accepted: bool,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Process (approve/reject) a delete request for an organization.
+
+        Business Rules:
+        - Only super admins can process delete requests (validated in endpoint)
+        - Request must be in pending status (DeleteRequestStatus.PENDING)
+        - If approved: Delete organization and all related data, send notifications
+        - If rejected: Update request status, send rejection notification
+
+        Args:
+            request_id (str): Delete request ID
+            is_accepted (bool): True to approve, False to reject
+            reason (str): Reason for the decision
+
+        Returns:
+            dict[str, Any]: Result containing request status and details
+
+        Raises:
+            NotFoundException: If organization or request not found
+            ForbiddenException: If request is not in pending status
+            InternalServerErrorException: If deletion or email notification fails
+        """
+        # Validate UUID format
+        validate_uuid_format(request_id, "request_id")
+
+        # Verify delete request exists and get organization_id from it
+        delete_request = await self.delete_request_repository.get_delete_request_by_id(request_id)
+        if not delete_request:
+            raise NotFoundException(
+                message_key="organizations.errors.delete_request_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        # Extract organization_id from the delete request
+        organization_id = str(delete_request["organization_id"])
+
+        # Verify organization exists
+        organization = await self.organization_repository.get_organization_by_id(organization_id)
+        if not organization:
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        organization_name = organization.get("name")
+
+        # Verify request is in pending status
+        if delete_request["status"] != DeleteRequestStatus.PENDING.value:
+            raise ForbiddenException(
+                message_key="organizations.errors.delete_request_already_processed",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+
+        if is_accepted:
+            return await self._approve_delete_request(
+                request_id=request_id,
+                organization_id=organization_id,
+                organization_name=organization_name,
+                reason=reason,
+            )
+
+        return await self._reject_delete_request(
+            request_id=request_id,
+            organization_id=organization_id,
+            organization_name=organization_name,
+            delete_request=delete_request,
+            reason=reason,
+        )
+
+    async def _approve_delete_request(
+        self,
+        request_id: str,
+        organization_id: str,
+        organization_name: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Handle the approval flow for a delete request.
+
+        This method:
+        1. Collects member emails before deletion
+        2. Deletes all related data in correct order
+        3. Updates delete request status to approved
+        4. Sends notification emails to all members
+
+        Args:
+            request_id (str): Delete request ID
+            organization_id (str): Organization ID
+            organization_name (str): Organization name
+            reason (str): Reason for approval
+
+        Returns:
+            dict[str, Any]: Result containing request status and details
+        """
+        # Get all organization members before deletion (for email notifications)
+        members = await self.organization_member_repository.get_all_members_by_organization_id(
+            organization_id
+        )
+        member_emails = [member.get("email") for member in members if member.get("email")]
+
+        # Delete all related data first (in correct order to respect foreign keys)
+        # 1. Delete team members and teams
+        await self.team_repository.delete_all_teams_by_organization_id(organization_id)
+
+        # 2. Delete roles
+        await self.role_repository.delete_all_roles_by_organization_id(organization_id)
+
+        # 3. Delete permissions
+        await self.permissions_repository.delete_all_permissions_by_organization_id(organization_id)
+
+        # 4. Delete organization members
+        await self.organization_member_repository.delete_all_members_by_organization_id(
+            organization_id
+        )
+
+        # 5. Delete organization
+        await self.organization_repository.delete_organization(organization_id)
+
+        # Update delete request status to approved
+        updated_request = await self.delete_request_repository.approve_delete_request(
+            request_id=request_id,
+            approver_id=self.user_context.user_id,
+            decision_reason=reason,
+        )
+
+        # Send deletion notification emails to all organization members
+        email_failures = []
+        for email in member_emails:
+            email_sent = send_organization_deletion_approved_email(
+                email=email,
+                organization_name=organization_name,
+            )
+            if not email_sent:
+                email_failures.append(email)
+
+        if email_failures:
+            logger.warning(
+                "Failed to send deletion notification emails to some members: %s",
+                email_failures,
+            )
+            # Don't fail the operation if some emails fail, but log it
+
+        logger.info(
+            "Approved and processed delete request %s for organization %s",
+            request_id,
+            organization_id,
+        )
+
+        return {
+            "request_id": str(updated_request["id"]),
+            "organization_id": str(updated_request["organization_id"]),
+            "status": updated_request["status"],
+            "decision_reason": updated_request.get("decision_reason"),
+            "decision_at": format_iso_datetime(updated_request.get("decision_at")) or "",
+        }
+
+    async def _reject_delete_request(
+        self,
+        request_id: str,
+        organization_id: str,
+        organization_name: str,
+        delete_request: dict[str, Any],
+        reason: str,
+    ) -> dict[str, Any]:
+        """Handle the rejection flow for a delete request.
+
+        This method:
+        1. Gets requester details
+        2. Updates delete request status to rejected
+        3. Sends rejection notification email to requester
+
+        Args:
+            request_id (str): Delete request ID
+            organization_id (str): Organization ID
+            organization_name (str): Organization name
+            delete_request (dict[str, Any]): Delete request record
+            reason (str): Reason for rejection
+
+        Returns:
+            dict[str, Any]: Result containing request status and details
+        """
+        # Get requester details from organization members
+        requester_id = delete_request["requester_id"]
+        requester = await self.organization_member_repository.get_user_profile_by_id(
+            requester_id, organization_id
+        )
+
+        # Update delete request status to rejected
+        updated_request = await self.delete_request_repository.reject_delete_request(
+            request_id=request_id,
+            approver_id=self.user_context.user_id,
+            decision_reason=reason,
+        )
+
+        # Send rejection notification email to requester
+        if requester and requester.get("email"):
+            email_sent = send_organization_deletion_rejected_email(
+                email=requester["email"],
+                organization_name=organization_name,
+                rejection_reason=reason,
+            )
+            if not email_sent:
+                logger.warning(
+                    "Failed to send rejection notification email to requester: %s",
+                    requester["email"],
+                )
+        else:
+            logger.warning(
+                "Requester not found or has no email for delete request %s",
+                request_id,
+            )
+
+        logger.info(
+            "Rejected delete request %s for organization %s",
+            request_id,
+            organization_id,
+        )
+
+        return {
+            "request_id": str(updated_request["id"]),
+            "organization_id": str(updated_request["organization_id"]),
+            "status": updated_request["status"],
+            "decision_reason": updated_request.get("decision_reason"),
+            "decision_at": format_iso_datetime(updated_request.get("decision_at")) or "",
+        }

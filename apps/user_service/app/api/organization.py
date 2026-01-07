@@ -20,7 +20,10 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 
 # Schema imports
 from apps.user_service.app.schemas.organizations import (
+    ApproveRejectDeleteRequestBody,
     CreateOrganizationWithUserResponse,
+    DeleteRequestListResponse,
+    DeleteRequestStatus,
     NewOrganizationBody,
     OrganizationAdminUpdate,
     OrganizationDetailResponse,
@@ -36,7 +39,9 @@ from apps.user_service.app.utils.common_utils import (
     check_permissions,
     extract_user_context,
     handle_api_exceptions,
+    require_organization_creator,
     require_permission,
+    require_super_admin,
 )
 
 # Permission imports
@@ -113,6 +118,85 @@ async def get_organizations_list(
         request=request,
         items=result.data,
         total=result.total_count,
+        message_key="success.retrieved",
+        page=page,
+        page_size=page_size,
+        status_code=http_status.HTTP_200_OK,
+        custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("get delete request list")
+@router.get(
+    "/delete-request-list",
+    response_model=DeleteRequestListResponse,
+    description="Get list of organization delete requests (Super Admin only)",
+    summary="Get list of organization delete requests",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        http_status.HTTP_200_OK: {"description": "Delete requests list retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {
+            "description": "Bad request - Invalid organization_id format"
+        },
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden - Only super admins can access"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("100/minute")
+async def get_delete_request_list(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    organization_id: str | None = Query(None, description="Optional organization ID to filter by"),
+    status: str | None = Query(
+        None,
+        description=(
+            f"Optional status to filter by ({', '.join([s.value for s in DeleteRequestStatus])})"
+        ),
+    ),
+    page: int = Query(1, ge=1, description="The page number for pagination"),
+    page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
+):
+    """Get list of organization delete requests (Super Admin only).
+
+    Only system super admins can view delete requests.
+    Can filter by specific organization or status, or view all requests.
+    Results are paginated.
+    """
+    # Validate user is a super admin
+    await require_super_admin(current_user)
+
+    # Extract user context (needed for service initialization)
+    user_context = await extract_user_context(current_user, db_connection)
+
+    # Create service and delegate to service
+    organization_service = OrganizationService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    result = await organization_service.list_delete_requests(
+        page=page,
+        page_size=page_size,
+        organization_id=organization_id,
+        status=status,
+    )
+
+    if not result["data"]:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            message_key="success.no_data",
+            page=page,
+            page_size=page_size,
+            status_code=http_status.HTTP_200_OK,
+            custom_code=CustomStatusCode.NO_CONTENT,
+        )
+
+    return list_response(
+        request=request,
+        items=result["data"],
+        total=result["total_count"],
         message_key="success.retrieved",
         page=page,
         page_size=page_size,
@@ -395,4 +479,186 @@ async def delete_organization_by_id(
         message_key="organizations.success.organization_deleted",
         custom_code=CustomStatusCode.DELETED,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("request organization deletion")
+@router.post(
+    "/request-to-delete/{organization_id}",
+    description="Request to delete an organization",
+    summary="Request to delete an organization (Organization Creator only)",
+    status_code=http_status.HTTP_201_CREATED,
+    response_model=None,
+    responses={
+        http_status.HTTP_201_CREATED: {"description": "Delete request created successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {
+            "description": "Forbidden - Only creator can request deletion"
+        },
+        http_status.HTTP_404_NOT_FOUND: {"description": "Organization not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",
+        "pii",
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="organization_delete_requests",
+    category="ORGANIZATION",
+)
+async def request_organization_deletion(
+    request: Request,
+    organization_id: str = Path(..., description="The UUID of the organization"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Request to delete an organization.
+
+    Only the organization creator can create a delete request.
+    Cannot create duplicate pending request.
+    """
+    # Set audit context
+    request.state.audit_table = "organization_delete_requests"
+    request.state.audit_description = f"Created delete request for organization: {organization_id}"
+    request.state.audit_risk_level = "high"
+
+    # Extract user context
+    user_context = await extract_user_context(current_user, db_connection)
+
+    # Verify user is the organization creator
+    await require_organization_creator(
+        user_context=user_context,
+        organization_id=organization_id,
+        db_connection=db_connection,
+    )
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": organization_id,
+    }
+
+    # Create service and delegate to service
+    organization_service = OrganizationService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    result = await organization_service.create_delete_request(organization_id=organization_id)
+
+    return success_response(
+        request=request,
+        message_key="organizations.success.delete_request_created",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data={
+            "request_id": str(result["id"]),
+            "organization_id": str(result["organization_id"]),
+            "status": result["status"],
+            "requested_at": (
+                result["requested_at"].isoformat()
+                if hasattr(result["requested_at"], "isoformat")
+                else str(result["requested_at"])
+            ),
+        },
+    )
+
+
+@handle_api_exceptions("process delete request")
+@router.patch(
+    "/delete-request/{request_id}",
+    description="Approve or reject an organization delete request (Super Admin only)",
+    summary="Process (approve/reject) an organization delete request",
+    status_code=http_status.HTTP_200_OK,
+    response_model=None,
+    responses={
+        http_status.HTTP_200_OK: {"description": "Delete request processed successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request - Invalid format"},
+        http_status.HTTP_403_FORBIDDEN: {
+            "description": (
+                "Forbidden - Only super admins can process requests or request already processed"
+            )
+        },
+        http_status.HTTP_404_NOT_FOUND: {"description": "Organization or delete request not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",
+        "pii",
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="organization_delete_requests",
+    category="ORGANIZATION",
+)
+async def process_delete_request(
+    request: Request,
+    request_id: str = Path(..., description="The UUID of the delete request"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: ApproveRejectDeleteRequestBody = Body(...),
+):
+    """Process (approve/reject) an organization delete request.
+
+    Only system super admins can approve or reject delete requests.
+    Request must be in pending status (DeleteRequestStatus.PENDING).
+
+    If approved:
+    - Organization and all related data are permanently deleted
+    - All organization members receive deletion notification emails
+
+    If rejected:
+    - Organization remains active
+    - Requester receives rejection notification email with reason
+    """
+    # Set audit context
+    request.state.audit_table = "organization_delete_requests"
+    request.state.audit_description = (
+        f"{'Approved' if body.is_accepted else 'Rejected'} delete request: {request_id}"
+    )
+    request.state.audit_risk_level = "high"
+
+    # Validate user is a super admin
+    await require_super_admin(current_user)
+
+    # Extract user context
+    user_context = await extract_user_context(current_user, db_connection)
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    # Create service and delegate to service
+    organization_service = OrganizationService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    result = await organization_service.process_delete_request(
+        request_id=request_id,
+        is_accepted=body.is_accepted,
+        reason=body.reason,
+    )
+
+    return success_response(
+        request=request,
+        message_key=(
+            "organizations.success.delete_request_approved"
+            if body.is_accepted
+            else "organizations.success.delete_request_rejected"
+        ),
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=result,
     )

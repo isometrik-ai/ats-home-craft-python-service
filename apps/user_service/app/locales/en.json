@@ -43,12 +43,19 @@
       "slug_conflict": "The slug you provided is already in use. Please choose a different one.",
       "not_found": "The organization you are trying to access does not exist.",
       "user_not_a_member_of_any_organization": "You are not part of any organization yet. Please join one to proceed.",
-      "organization_not_active": "The organization you are trying to access is currently inactive. Please contact the administrator for assistance."
+      "organization_not_active": "The organization you are trying to access is currently inactive. Please contact the administrator for assistance.",
+      "only_creator_can_request_deletion": "Only the organization creator can request deletion.",
+      "duplicate_delete_request": "A delete request for this organization already exists. Please wait for the previous request to be processed.",
+      "delete_request_not_found": "The delete request you are trying to access does not exist.",
+      "delete_request_already_processed": "This delete request has already been processed and cannot be modified."
     },
     "success": {
       "organization_created": "Organization created successfully.",
       "organization_updated": "Organization updated successfully.",
-      "organization_deleted": "Organization deleted successfully."
+      "organization_deleted": "Organization deleted successfully.",
+      "delete_request_created": "Delete request created successfully.",
+      "delete_request_approved": "Delete request approved successfully. Organization and all related data have been deleted.",
+      "delete_request_rejected": "Delete request rejected successfully. Organization remains active."
     }
   },
   "auth": {
