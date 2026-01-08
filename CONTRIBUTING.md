@@ -5,7 +5,7 @@ Thanks for considering a contribution! This monorepo hosts the FastAPI `user_ser
 ## Getting started
 
 1. Fork/clone the repo and create a branch (`feature/…` or `fix/…`).
-1. Python 3.11+; create a virtual environment:
+1. Python 3.13; create a virtual environment:
    ```bash
    python -m venv .venv
    .\.venv\Scripts\activate  # Windows

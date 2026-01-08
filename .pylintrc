@@ -13,7 +13,7 @@ extension-pkg-allow-list=pydantic
 unsafe-load-any-extension=no  # More secure setting
 
 # Python version
-py-version=3.11
+py-version=3.13
 
 # Files or directories to ignore
 ignore=CVS,.git,__pycache__,venv,htmlcov,build

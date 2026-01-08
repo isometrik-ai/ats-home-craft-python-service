@@ -18,7 +18,7 @@ FastAPI-based backend for the House of Apps Legal AI platform. The repo is organ
 
 ## Tech stack
 
-- Python 3.11, FastAPI, Pydantic Settings
+- Python 3.13, FastAPI, Pydantic Settings
 - asyncpg + PostgreSQL, optional Supabase Auth/DB
 - SlowAPI for rate limiting, JWT middleware, Datadog tracing (`ddtrace`)
 - OpenAI client, Typesense, pgvector; AWS S3 / Cloudflare R2 via `boto3`
@@ -26,7 +26,7 @@ FastAPI-based backend for the House of Apps Legal AI platform. The repo is organ
 
 ## Run locally (without Docker)
 
-1. Install Python 3.11+ and create a virtual env:
+1. Install Python 3.13 and create a virtual env:
 
 ```bash
 python -m venv .venv
