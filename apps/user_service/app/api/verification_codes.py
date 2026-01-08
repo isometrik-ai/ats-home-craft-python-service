@@ -46,12 +46,16 @@ router = APIRouter(prefix="/verification-code", tags=["Verification Codes"])
 logger = get_logger("verification-codes-api")
 
 
-async def get_optional_user(request: Request) -> dict | None:
+async def get_optional_user(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+) -> dict | None:
     """Get user from auth if available, return None if not authenticated.
     Allows endpoints to work with or without authentication.
 
     Args:
         request: FastAPI request object
+        db_connection: Database connection dependency
 
     Returns:
         User dict if authenticated, None otherwise
@@ -60,7 +64,7 @@ async def get_optional_user(request: Request) -> dict | None:
     if not user:
         return None
 
-    return await get_user_from_auth(request)
+    return await get_user_from_auth(request, db_connection=db_connection)
 
 
 @handle_api_exceptions("send verification code")
