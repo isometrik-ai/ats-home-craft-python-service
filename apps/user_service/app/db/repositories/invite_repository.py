@@ -11,6 +11,7 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.schemas.enums import InviteStatus, OrganizationMemberStatus
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -50,7 +51,7 @@ class InviteRepository:
             invite_data["role_id"],
             invite_data["token_hash"],
             invite_data["invited_by"],
-            invite_data.get("status", "pending"),
+            invite_data.get("status", InviteStatus.PENDING.value),
             invite_data["expires_at"],
             json.dumps(invite_data.get("metadata", {})),
         )
@@ -183,14 +184,15 @@ class InviteRepository:
 
     async def check_user_membership(self, organization_id: str, email: str) -> bool:
         """Check if user is already a member of the organization."""
+        deleted_status = OrganizationMemberStatus.DELETED.value
         query = """
             SELECT EXISTS(
                 SELECT 1
                 FROM organization_members
-                WHERE organization_id = $1 AND email = $2 AND status != 'deleted'
+                WHERE organization_id = $1 AND email = $2 AND status != $3
             )
         """
-        exists = await self.db_connection.fetchval(query, organization_id, email)
+        exists = await self.db_connection.fetchval(query, organization_id, email, deleted_status)
         return bool(exists)
 
     # UPDATE OPERATIONS

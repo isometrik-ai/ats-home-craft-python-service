@@ -5,6 +5,7 @@ import datetime
 import pytest
 
 from apps.user_service.app.schemas.auth import SessionFilter
+from apps.user_service.app.schemas.enums import SessionStatus
 from apps.user_service.app.services.session_service import SessionService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import BadRequestException
@@ -32,7 +33,7 @@ class _FakeSessionRepo:
                     "risk_score": 1,
                     "login_timestamp": datetime.datetime(2024, 1, 1),
                     "logout_timestamp": datetime.datetime(2024, 1, 2),
-                    "session_status": "active",
+                    "session_status": SessionStatus.ACTIVE.value,
                     "login_method": "pwd",
                     "accessed_phi": False,
                     "phi_access_purpose": None,
@@ -56,7 +57,7 @@ class _FakeSessionRepo:
                     "risk_score": 2,
                     "login_timestamp": datetime.datetime(2024, 2, 1),
                     "logout_timestamp": None,
-                    "session_status": "revoked",
+                    "session_status": SessionStatus.TERMINATED.value,
                     "login_method": "otp",
                     "accessed_phi": True,
                     "phi_access_purpose": "care",

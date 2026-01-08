@@ -7,6 +7,7 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("organization_member_repository")
@@ -44,12 +45,14 @@ class OrganizationMemberRepository:
                 invited_by
             )
             VALUES (
-                $1, $2, $3, $4, $5, COALESCE($6, 'active'),
+                $1, $2, $3, $4, $5, $6,
                 $7, NOW(), NOW(), NOW(),
                 $8, $9, $10, COALESCE($11, 'UTC'), $12, $13
             )
             RETURNING *
         """
+        # Set default status to ACTIVE if not provided
+        status = member_data.get("status") or OrganizationMemberStatus.ACTIVE.value
         row = await self.db_connection.fetchrow(
             query,
             member_data.get("user_id"),
@@ -57,7 +60,7 @@ class OrganizationMemberRepository:
             member_data.get("email"),
             member_data.get("role_id"),
             member_data.get("role"),
-            member_data.get("status"),
+            status,
             organization_id,
             member_data.get("first_name"),
             member_data.get("last_name"),
@@ -90,7 +93,9 @@ class OrganizationMemberRepository:
             where_clause += " AND organization_id = $2"
             params.append(organization_id)
 
-        where_clause += " AND status != 'deleted'"
+        param_idx = len(params) + 1
+        where_clause += f" AND status != ${param_idx}"
+        params.append(OrganizationMemberStatus.DELETED.value)
 
         query = f"""
             SELECT
@@ -141,7 +146,9 @@ class OrganizationMemberRepository:
             where_clause += " AND organization_id = $2"
             params.append(organization_id)
 
-        where_clause += " AND status != 'deleted'"
+        param_idx = len(params) + 1
+        where_clause += f" AND status != ${param_idx}"
+        params.append(OrganizationMemberStatus.DELETED.value)
 
         query = f"""
             SELECT role_id
@@ -168,10 +175,12 @@ class OrganizationMemberRepository:
             FROM organization_members
             WHERE email = $1
             AND organization_id = $2
-            AND status != 'deleted'
+            AND status != $3
             LIMIT 1
         """
-        row = await self.db_connection.fetchrow(query, email, organization_id)
+        row = await self.db_connection.fetchrow(
+            query, email, organization_id, OrganizationMemberStatus.DELETED.value
+        )
         return row is not None
 
     async def check_phone_exists_for_other_user(
@@ -187,11 +196,11 @@ class OrganizationMemberRepository:
         Returns:
             bool: True if phone number exists for another user, False otherwise
         """
-        where_clause = "WHERE phone = $1 AND organization_id = $2 AND status != 'deleted'"
-        params: list[Any] = [phone, organization_id]
+        where_clause = "WHERE phone = $1 AND organization_id = $2 AND status != $3"
+        params: list[Any] = [phone, organization_id, OrganizationMemberStatus.DELETED.value]
 
         if user_id:
-            where_clause += " AND user_id != $3"
+            where_clause += " AND user_id != $4"
             params.append(user_id)
 
         query = f"""
@@ -212,9 +221,9 @@ class OrganizationMemberRepository:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Get paginated list of users with optional search."""
-        where_clause = "WHERE organization_id = $1 AND status != 'deleted'"
-        params: list[Any] = [organization_id]
-        param_index = 2
+        where_clause = "WHERE organization_id = $1 AND status != $2"
+        params: list[Any] = [organization_id, OrganizationMemberStatus.DELETED.value]
+        param_index = 3
 
         if search:
             search_pattern = f"%{search}%"
@@ -266,8 +275,8 @@ class OrganizationMemberRepository:
         search: str | None = None,
     ) -> int:
         """Get total count of users matching search criteria."""
-        where_clause = "WHERE organization_id = $1 AND status != 'deleted'"
-        params: list[Any] = [organization_id]
+        where_clause = "WHERE organization_id = $1 AND status != $2"
+        params: list[Any] = [organization_id, OrganizationMemberStatus.DELETED.value]
 
         if search:
             search_pattern = f"%{search}%"
@@ -342,14 +351,14 @@ class OrganizationMemberRepository:
 
         # Store number of update parameters before adding WHERE clause params
         num_update_params = len(params)
-        params.extend([user_id, organization_id])
+        params.extend([user_id, organization_id, OrganizationMemberStatus.DELETED.value])
 
         query = f"""
             UPDATE organization_members
             SET {", ".join(set_clauses)}
             WHERE user_id = ${num_update_params + 1}
             AND organization_id = ${num_update_params + 2}
-            AND status != 'deleted'
+            AND status != ${num_update_params + 3}
             RETURNING *
         """
         row = await self.db_connection.fetchrow(query, *params)
@@ -367,9 +376,11 @@ class OrganizationMemberRepository:
             SET last_active_at = NOW(), updated_at = NOW()
             WHERE user_id = $1
             AND organization_id = $2
-            AND status = 'active'
+            AND status = $3
         """
-        await self.db_connection.execute(query, user_id, organization_id)
+        await self.db_connection.execute(
+            query, user_id, organization_id, OrganizationMemberStatus.ACTIVE.value
+        )
 
     async def update_user_status(self, user_id: str, organization_id: str, status: str) -> bool:
         """Update user status in the organization.
@@ -402,7 +413,9 @@ class OrganizationMemberRepository:
         Returns:
             bool: True if user was suspended successfully, False otherwise
         """
-        return await self.update_user_status(user_id, organization_id, "suspended")
+        return await self.update_user_status(
+            user_id, organization_id, OrganizationMemberStatus.SUSPENDED.value
+        )
 
     async def revoke_suspended_user(self, user_id: str, organization_id: str) -> bool:
         """Revoke a suspended user in the organization.
@@ -414,7 +427,9 @@ class OrganizationMemberRepository:
         Returns:
             bool: True if user was revoked successfully, False otherwise
         """
-        return await self.update_user_status(user_id, organization_id, "active")
+        return await self.update_user_status(
+            user_id, organization_id, OrganizationMemberStatus.ACTIVE.value
+        )
 
     async def update_user_email(self, user_id: str, organization_id: str, new_email: str) -> bool:
         """Update user's email address.
@@ -432,10 +447,16 @@ class OrganizationMemberRepository:
             SET email = $1, updated_at = NOW()
             WHERE user_id = $2
             AND organization_id = $3
-            AND status != 'deleted'
+            AND status != $4
             RETURNING id
         """
-        row = await self.db_connection.fetchrow(query, new_email, user_id, organization_id)
+        row = await self.db_connection.fetchrow(
+            query,
+            new_email,
+            user_id,
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+        )
         return row is not None
 
     async def update_user_email_by_user_id(self, user_id: str, new_email: str) -> int:
@@ -509,10 +530,12 @@ class OrganizationMemberRepository:
             SELECT organization_id
             FROM organization_members
             WHERE user_id = $1
-            AND status != 'deleted'
+            AND status != $2
             LIMIT 1
         """
-        row = await self.db_connection.fetchrow(query, user_id)
+        row = await self.db_connection.fetchrow(
+            query, user_id, OrganizationMemberStatus.DELETED.value
+        )
         return str(row["organization_id"]) if row and row.get("organization_id") else None
 
     async def get_all_members_by_organization_id(
@@ -556,8 +579,13 @@ class OrganizationMemberRepository:
         """
         query = """
             UPDATE organization_members
-            SET status = 'deleted', updated_at = NOW()
+            SET status = $2, updated_at = NOW()
             WHERE organization_id = $1
-            AND status != 'deleted'
+            AND status != $3
         """
-        await self.db_connection.execute(query, organization_id)
+        await self.db_connection.execute(
+            query,
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+            OrganizationMemberStatus.DELETED.value,
+        )

@@ -10,6 +10,7 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.schemas.auth import SessionFilter
+from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("session_repository")
@@ -126,28 +127,36 @@ class SessionRepository:
         )
 
         # Build query parameters
-        limit_param = len(params) + 1
-        offset_param = len(params) + 2
-        query_params = params + [filters.limit, filters.offset]
+        deleted_status_param = len(params) + 1
+        limit_param = len(params) + 2
+        offset_param = len(params) + 3
+        deleted_status = OrganizationMemberStatus.DELETED.value
 
         # Build main query dynamically
         if needs_search_join:
             field_list = ", ".join([f"us.{field.strip()}" for field in SESSION_FIELDS.split(",")])
+            query_params = params + [deleted_status, filters.limit, filters.offset]
             query = f"""
                 SELECT DISTINCT {field_list}
                 FROM user_sessions us
-                INNER JOIN organization_members om ON us.user_id = om.user_id AND om.status != 'deleted'
+                INNER JOIN organization_members om
+                    ON us.user_id = om.user_id
+                    AND om.status != ${deleted_status_param}
                 WHERE {where_clause}
                 ORDER BY us.login_timestamp DESC
                 LIMIT ${limit_param} OFFSET ${offset_param}
             """
+            count_query_params = params + [deleted_status]
             count_query = f"""
                 SELECT COUNT(DISTINCT us.id)
                 FROM user_sessions us
-                INNER JOIN organization_members om ON us.user_id = om.user_id AND om.status != 'deleted'
+                INNER JOIN organization_members om
+                    ON us.user_id = om.user_id
+                    AND om.status != ${deleted_status_param}
                 WHERE {where_clause}
             """
         else:
+            query_params = params + [filters.limit, filters.offset]
             query = f"""
                 SELECT {SESSION_FIELDS}
                 FROM user_sessions
@@ -155,6 +164,7 @@ class SessionRepository:
                 ORDER BY login_timestamp DESC
                 LIMIT ${limit_param} OFFSET ${offset_param}
             """
+            count_query_params = params
             count_query = f"""
                 SELECT COUNT(*)
                 FROM user_sessions
@@ -163,7 +173,7 @@ class SessionRepository:
 
         # Execute queries
         rows = await self.db_connection.fetch(query, *query_params)
-        total_count = await self.db_connection.fetchval(count_query, *params) or 0
+        total_count = await self.db_connection.fetchval(count_query, *count_query_params) or 0
         data = [dict(row) for row in rows]
 
         return {
@@ -251,32 +261,36 @@ class SessionRepository:
         )
 
         # Build query parameters
-        limit_param = len(params) + 1
-        offset_param = len(params) + 2
-        query_params = params + [filters.limit, filters.offset]
+        deleted_status_param = len(params) + 1
+        limit_param = len(params) + 2
+        offset_param = len(params) + 3
+        deleted_status = OrganizationMemberStatus.DELETED.value
 
         # Build main query dynamically
         if needs_search_join:
             field_list = ", ".join([f"us.{field.strip()}" for field in SESSION_FIELDS.split(",")])
+            query_params = params + [deleted_status, filters.limit, filters.offset]
             query = f"""
                 SELECT DISTINCT {field_list}
                 FROM user_sessions us
                 INNER JOIN organization_members om ON us.user_id = om.user_id
                     AND om.organization_id = $1
-                    AND om.status != 'deleted'
+                    AND om.status != ${deleted_status_param}
                 WHERE {where_clause}
                 ORDER BY us.login_timestamp DESC
                 LIMIT ${limit_param} OFFSET ${offset_param}
             """
+            count_query_params = params + [deleted_status]
             count_query = f"""
                 SELECT COUNT(DISTINCT us.id)
                 FROM user_sessions us
                 INNER JOIN organization_members om ON us.user_id = om.user_id
                     AND om.organization_id = $1
-                    AND om.status != 'deleted'
+                    AND om.status != ${deleted_status_param}
                 WHERE {where_clause}
             """
         else:
+            query_params = params + [filters.limit, filters.offset]
             query = f"""
                 SELECT {SESSION_FIELDS}
                 FROM user_sessions us
@@ -284,6 +298,7 @@ class SessionRepository:
                 ORDER BY us.login_timestamp DESC
                 LIMIT ${limit_param} OFFSET ${offset_param}
             """
+            count_query_params = params
             count_query = f"""
                 SELECT COUNT(*)
                 FROM user_sessions us
@@ -292,7 +307,7 @@ class SessionRepository:
 
         # Execute queries
         rows = await self.db_connection.fetch(query, *query_params)
-        total_count = await self.db_connection.fetchval(count_query, *params) or 0
+        total_count = await self.db_connection.fetchval(count_query, *count_query_params) or 0
         data = [dict(row) for row in rows]
 
         return {"data": data, "total_count": total_count}

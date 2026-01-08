@@ -7,6 +7,7 @@ transaction handling and efficient batch operations.
 
 import asyncpg
 
+from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("user_repository")
@@ -53,10 +54,12 @@ class UserRepository:
             SELECT status
             FROM organization_members
             WHERE email = $1
-            AND status != 'deleted'
+            AND status != $2
             LIMIT 1
         """
-        row = await self.db_connection.fetchrow(query, email)
+        row = await self.db_connection.fetchrow(
+            query, email, OrganizationMemberStatus.DELETED.value
+        )
 
         if row:
             return row["status"]

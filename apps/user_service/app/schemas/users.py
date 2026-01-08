@@ -5,17 +5,10 @@ These schemas are used for request/response validation and API documentation.
 """
 
 import datetime
-from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-
-class UserStatus(str, Enum):
-    """Enumeration for user account status"""
-
-    ACTIVE = "active"
-    INVITED = "invited"
-    SUSPENDED = "suspended"
+from apps.user_service.app.schemas.enums import OrganizationMemberStatus, UserStatus
 
 
 class RoleInfo(BaseModel):
@@ -154,7 +147,9 @@ class UserProfileData(BaseModel):
     phone: str | None = Field(None, description="User's phone number")
     timezone: str = Field(default="UTC", description="User's timezone setting")
     salutation: str | None = Field(None, description="User's salutation")
-    status: str = Field(..., description="User's membership status in organization")
+    status: OrganizationMemberStatus = Field(
+        ..., description="User's membership status in organization"
+    )
     joined_at: str | None = Field(None, description="ISO timestamp when user joined organization")
     last_active_at: str | None = Field(None, description="ISO timestamp of last activity")
     organization_id: str = Field(..., description="ID of the organization user belongs to")
@@ -192,7 +187,7 @@ class UserProfileData(BaseModel):
                 "phone": "+1234567890",
                 "timezone": "UTC",
                 "salutation": "Mr.",
-                "status": "active",
+                "status": OrganizationMemberStatus.ACTIVE.value,
                 "joined_at": "2024-12-19T10:00:00Z",
                 "last_active_at": "2024-12-19T15:30:00Z",
                 "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
@@ -343,7 +338,7 @@ class UserListItem(BaseModel):
     salutation: str | None = Field(None, description="Updated salutation")
     phone: str | None = Field(None, description="Updated phone number")
     # role_name: str = Field(..., description="Name of user's assigned role")
-    status: str = Field(..., description="User's membership status")
+    status: OrganizationMemberStatus = Field(..., description="User's membership status")
     joined_at: str = Field(..., description="ISO timestamp when user joined")
     last_active_at: str | None = Field(None, description="ISO timestamp of last activity")
     permissions_count: int = Field(0, description="Number of permissions assigned to the user")
@@ -356,7 +351,7 @@ class UserListItem(BaseModel):
                 "email": "john@example.com",
                 "full_name": "J Jonnah Jamison",
                 "role_name": "Administrator",
-                "status": "active",
+                "status": OrganizationMemberStatus.ACTIVE.value,
                 "joined_at": "2024-12-19T10:00:00Z",
                 "last_active_at": "2024-12-19T15:30:00Z",
                 "permissions_count": 10,

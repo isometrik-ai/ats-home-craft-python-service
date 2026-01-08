@@ -480,10 +480,6 @@ class VerificationCodeService:
         # Calculate expires_in
         expires_in = max(exp - current_time, 3600) if exp > 0 else 3600
         expires_at = exp if exp > 0 else current_time + expires_in
-
-        # Get user_id from decoded token
-        user_id = decoded.get("sub")
-
         # Create session with access token and a placeholder refresh token
         # The refresh token won't be used if the access token is still valid
         session = SupabaseSession(
@@ -506,8 +502,6 @@ class VerificationCodeService:
         # Save to storage if persist_session is enabled
         if supabase.auth._persist_session:
             await supabase.auth._storage.set_item(storage_key, session_json)
-
-        logger.info("Session manually created and saved for user %s", user_id)
 
     async def _update_user_email(self, user_id: str, email: str) -> bool:
         """Update user email using Supabase admin API.
@@ -646,7 +640,6 @@ class VerificationCodeService:
             if triggered_text == VerificationTrigger.PHONE_NUMBER_UPDATE.value:
                 phone_updated = await self._update_user_phone(user_id, given_input)
                 return False, phone_updated
-            logger.warning("Unknown trigger type: %s", triggered_text)
             return False, False
 
         except (UnauthorizedException, InternalServerErrorException):
@@ -885,7 +878,6 @@ class VerificationCodeService:
             verification_data
         )
 
-        logger.info("Verification code created: %s", inserted_record["id"])
         return inserted_record
 
     # MAIN SERVICE METHODS
@@ -979,8 +971,6 @@ class VerificationCodeService:
         await self._verify_code_and_update_record(
             verification_record, data.verification_code, data.verification_id
         )
-
-        logger.info("Verification code verified successfully: %s", data.verification_id)
 
         # After successful verification, check if we need to update email/phone
         triggered_text = verification_record.get("triggered_text", "")

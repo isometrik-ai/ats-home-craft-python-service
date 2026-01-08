@@ -4,7 +4,6 @@ This module contains all Pydantic models and schemas related to organization man
 These schemas are used for request/response validation and API documentation.
 """
 
-from enum import Enum
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -22,16 +21,10 @@ from apps.user_service.app.schemas.auth import (
     TeamSetup,
     User,
 )
-
-
-class DeleteRequestStatus(str, Enum):
-    """Enumeration for organization delete request statuses."""
-
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
+from apps.user_service.app.schemas.enums import (
+    DeleteRequestStatus,
+    OrganizationStatus,
+)
 
 
 class OrganizationInfo(BaseModel):
@@ -64,7 +57,7 @@ class OrganizationInfo(BaseModel):
         default=None,
         description="Subscription information stored in the dedicated column",
     )
-    status: str = Field(..., description="Organization's current status (active, suspended, trial)")
+    status: OrganizationStatus = Field(..., description="Organization's current status")
     timezone: str = Field(default="UTC", description="Organization's timezone setting")
     created_at: str | None = Field(None, description="ISO timestamp when organization was created")
     updated_at: str | None = Field(
@@ -109,7 +102,7 @@ class OrganizationInfo(BaseModel):
                 "domain": "acme.com",
                 "logo_url": "example.com/logo.png",
                 "plan_type": "professional",
-                "status": "active",
+                "status": OrganizationStatus.ACTIVE.value,
                 "max_users": 100,
                 "timezone": "UTC",
                 "created_at": "2024-12-19T10:00:00Z",
@@ -153,7 +146,7 @@ class OrganizationListResponse(BaseModel):
                         "domain": "apple.com",
                         "logo_url": "https://example.com/logo.png",
                         "plan_type": "professional",
-                        "status": "active",
+                        "status": OrganizationStatus.ACTIVE.value,
                         "max_users": 100,
                         "timezone": "UTC",
                         "created_at": "2024-12-19T10:00:00Z",
@@ -279,7 +272,7 @@ class UpdateOrganizationResponse(BaseModel):
                     "slug": "acme-corp",
                     "domain": "newacme.com",
                     "plan_type": "enterprise",
-                    "status": "active",
+                    "status": OrganizationStatus.ACTIVE.value,
                     "max_users": 200,
                     "timezone": "UTC",
                 },
@@ -309,7 +302,7 @@ class OrganizationDetailResponse(BaseModel):
                     "slug": "acme-corp",
                     "domain": "sony.com",
                     "plan_type": "professional",
-                    "status": "active",
+                    "status": OrganizationStatus.ACTIVE.value,
                     "max_users": 100,
                     "timezone": "UTC",
                     "user_role": "Administrator",
@@ -447,7 +440,7 @@ class OrganizationAdminUpdate(OrganizationUpdate):
         max_length=255,
         description="Primary domain name associated with the organization",
     )
-    status: str | None = Field(
+    status: OrganizationStatus | None = Field(
         None,
         description="Organization's account status (active, suspended, trial)",
     )
@@ -484,7 +477,7 @@ class DeleteRequestInfo(BaseModel):
     request_id: str = Field(..., description="Unique identifier for the delete request")
     organization_id: str = Field(..., description="Organization ID")
     requester_id: str = Field(..., description="User ID of the requester")
-    status: str = Field(..., description="Request status")
+    status: DeleteRequestStatus = Field(..., description="Request status")
     requested_at: str = Field(..., description="ISO timestamp when request was created")
     decision_at: str | None = Field(None, description="ISO timestamp when decision was made")
     processed_at: str | None = Field(None, description="ISO timestamp when request was processed")
@@ -521,7 +514,7 @@ class DeleteRequestListResponse(BaseModel):
                         "request_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                         "organization_id": "550e8400-e29b-41d4-a716-446655440000",
                         "requester_id": "660e8400-e29b-41d4-a716-446655440001",
-                        "status": "pending",
+                        "status": DeleteRequestStatus.PENDING.value,
                         "requested_at": "2024-12-19T10:00:00Z",
                         "decision_at": None,
                         "processed_at": None,

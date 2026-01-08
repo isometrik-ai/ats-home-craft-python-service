@@ -3,6 +3,7 @@
 import pytest
 
 from apps.user_service.app.db.repositories.invite_repository import InviteRepository
+from apps.user_service.app.schemas.enums import InviteStatus
 
 
 class _FakeConn:
@@ -62,7 +63,9 @@ async def test_check_existing_invite_builds_params():
 
     conn.fetchrow_calls.clear()
     conn.row = None
-    res2 = await repo.check_existing_invite("org1", "e@example.com", status="pending")
+    res2 = await repo.check_existing_invite(
+        "org1", "e@example.com", status=InviteStatus.PENDING.value
+    )
     assert res2 is None
     assert len(conn.fetchrow_calls[0][1]) == 3
 
@@ -81,7 +84,7 @@ async def test_update_invite_status_calls_execute():
     conn.execute = fake_execute
     repo = InviteRepository(db_connection=conn)
 
-    await repo.update_invite_status("id1", "accepted", accepted_by="u1")
+    await repo.update_invite_status("id1", InviteStatus.ACCEPTED.value, accepted_by="u1")
 
     assert "UPDATE organization_invites" in executed["call"][0]
-    assert executed["call"][1][0] == "accepted"
+    assert executed["call"][1][0] == InviteStatus.ACCEPTED.value

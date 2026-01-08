@@ -84,9 +84,11 @@ def send_password_reset_confirmation_email(email: str, user_name: str = None) ->
         # Plain text message
         message = f"""Hello {greeting},
 
-We wanted to let you know that your password for your House of App AI account was successfully updated.
+We wanted to let you know that your password for your House of App AI account
+was successfully updated.
 
-If you did not make this change, please reset your password immediately and contact our support team.
+If you did not make this change, please reset your password immediately and
+contact our support team.
 
 For security, we recommend you:
 - Use a strong, unique password
@@ -476,17 +478,23 @@ font-family: Arial, Helvetica, sans-serif;">
     </div>
 
     <!-- Email Container -->
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f9fafb;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%"
+        style="background-color: #f9fafb;">
         <tr>
             <td style="padding: 40px 20px;">
 
                 <!-- Main Email Table -->
-                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" class="email-container" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600"
+                    class="email-container"
+                    style="margin: 0 auto; background-color: #ffffff; border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
 
                     <!-- Header -->
                     <tr>
-                        <td style="padding: 30px 40px; text-align: center; border-bottom: 1px solid #e5e7eb;">
-                            <h1 style="margin: 0; color: #1e3a8a; font-size: 24px; font-weight: bold;">
+                        <td style="padding: 30px 40px; text-align: center;
+                            border-bottom: 1px solid #e5e7eb;">
+                            <h1 style="margin: 0; color: #1e3a8a; font-size: 24px;
+                                font-weight: bold;">
                                 Welcome to {company_name}
                             </h1>
                         </td>
@@ -497,7 +505,8 @@ font-family: Arial, Helvetica, sans-serif;">
                         <td style="padding: 40px;" class="mobile-padding">
 
                             <!-- Greeting -->
-                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px;
+                                line-height: 1.6;">
                                 Hello {first_name},
                             </p>
 
@@ -528,8 +537,10 @@ font-family: Arial, Helvetica, sans-serif;">
                             </table>
 
                             <!-- Additional Information -->
-                            <p style="margin: 20px 0 0 0; color: #6b7280; font-size: 14px; line-height: 1.6;">
-                                If you have any questions or need assistance, feel free to reach out to our support team.
+                            <p style="margin: 20px 0 0 0; color: #6b7280; font-size: 14px;
+                                line-height: 1.6;">
+                                If you have any questions or need assistance, feel free to
+                                reach out to our support team.
                             </p>
 
                         </td>
@@ -537,12 +548,14 @@ font-family: Arial, Helvetica, sans-serif;">
 
                     <!-- Support Section -->
                     <tr>
-                        <td style="padding: 30px 40px; background-color: #f9fafb; border-top: 1px solid #e5e7eb;">
-                            <p style="margin: 0 0 10px 0; color: #6b7280; font-size: 14px; line-height: 1.5;">
+                        <td style="padding: 30px 40px; background-color: #f9fafb;
+                            border-top: 1px solid #e5e7eb;">
+                            <p style="margin: 0 0 10px 0; color: #6b7280; font-size: 14px;
+                                line-height: 1.5;">
                                 Questions or need assistance?
                             </p>
                             <p style="margin: 0; color: #6b7280; font-size: 14px;
-                            line-height: 1.5;">
+                                line-height: 1.5;">
                                 Contact our support team at
                                 <a href="mailto:{support_email}"
                                 style="color: #3b82f6; text-decoration: none;">
@@ -553,11 +566,14 @@ font-family: Arial, Helvetica, sans-serif;">
 
                     <!-- Footer -->
                     <tr>
-                        <td style="padding: 30px 40px; text-align: center; border-top: 1px solid #e5e7eb;">
-                            <p style="margin: 0 0 10px 0; color: #9ca3af; font-size: 13px; line-height: 1.5;">
+                        <td style="padding: 30px 40px; text-align: center;
+                            border-top: 1px solid #e5e7eb;">
+                            <p style="margin: 0 0 10px 0; color: #9ca3af; font-size: 13px;
+                                line-height: 1.5;">
                                 © {current_year} {company_name}. All rights reserved.
                             </p>
-                            <p style="margin: 0 0 15px 0; color: #9ca3af; font-size: 12px; line-height: 1.5;">
+                            <p style="margin: 0 0 15px 0; color: #9ca3af; font-size: 12px;
+                                line-height: 1.5;">
                                 {company_address}
                             </p>
                             <p style="margin: 0; color: #9ca3af; font-size: 12px;">
@@ -627,11 +643,13 @@ def send_password_change_success_email(
         # Plain text message
         message = f"""Hello {name},
 
-This is a confirmation that your password for {company_name} has been successfully updated.
+This is a confirmation that your password for {company_name} has been
+successfully updated.
 
 If you made this change, no further action is needed.
 
-If you did not update your password, please contact us immediately for assistance.
+If you did not update your password, please contact us immediately
+for assistance.
 
 Contact Support: {support_email}
 
@@ -646,7 +664,8 @@ Contact Support: {support_email}
   <title>Password Updated</title>
 </head>
 <body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
-  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.04);">
 
     <div style="padding:30px; text-align:center; border-bottom:1px solid #eee;">
       <h2 style="margin:0; color:#1f3a93;">Password Updated Successfully</h2>
@@ -656,7 +675,8 @@ Contact Support: {support_email}
       <p>This is a confirmation that your password for
       <strong>{company_name}</strong> has been successfully updated.</p>
       <p>If you made this change, no further action is needed.</p>
-      <p>If you did <strong>not</strong> update your password, please contact us immediately for assistance.</p>
+      <p>If you did <strong>not</strong> update your password, please contact us
+      immediately for assistance.</p>
       <p style="margin-top:25px;">
         📩 <strong>Contact Support:</strong><br />
         <a href="mailto:{support_email}" style="color:#2f76ff;">{support_email}</a>
@@ -727,7 +747,8 @@ Your password for {company_name} has been reset successfully.
 
 If you requested this reset, you're all set.
 
-If you didn't request a password reset, your account may be at risk. Please reach out to us immediately.
+If you didn't request a password reset, your account may be at risk.
+Please reach out to us immediately.
 
 Contact Support: {support_email}
 
@@ -742,7 +763,8 @@ Contact Support: {support_email}
   <title>Password Reset Completed</title>
 </head>
 <body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
-  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.04);">
 
     <div style="padding:30px; text-align:center; border-bottom:1px solid #eee;">
       <h2 style="margin:0; color:#1f3a93;">Your Password Has Been Reset</h2>
@@ -845,10 +867,13 @@ If you didn't request this, please ignore this email.
     <title>Your Verification Code</title>
   </head>
   <body style="background-color: #f8f9fb; padding: 0; margin: 0;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fb; padding: 40px 0;">
+    <table width="100%" cellpadding="0" cellspacing="0"
+        style="background-color: #f8f9fb; padding: 40px 0;">
       <tr>
         <td align="center">
-          <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.05);">
+          <table width="600" cellpadding="0" cellspacing="0"
+              style="background-color: #ffffff; border-radius: 12px; overflow: hidden;
+              box-shadow: 0 4px 8px rgba(0,0,0,0.05);">
             <!-- Header -->
             <tr>
               <td style="background-color: #1d4ed8; padding: 30px 40px; text-align: center;">
@@ -862,10 +887,13 @@ If you didn't request this, please ignore this email.
                   Hello 👋,
                 </p>
                 <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">
-                  Use the following One-Time Password (OTP) to verify your email or complete your signup:
+                  Use the following One-Time Password (OTP) to verify your email or
+                  complete your signup:
                 </p>
                 <div style="margin: 30px 0;">
-                  <div style="display: inline-block; background-color: #f3f4f6; padding: 16px 40px; border-radius: 8px; font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #1d4ed8;">
+                  <div style="display: inline-block; background-color: #f3f4f6;
+                      padding: 16px 40px; border-radius: 8px; font-size: 28px;
+                      font-weight: bold; letter-spacing: 6px; color: #1d4ed8;">
                     {otp_code}
                   </div>
                 </div>
@@ -877,8 +905,10 @@ If you didn't request this, please ignore this email.
             </tr>
             <!-- Footer -->
             <tr>
-              <td style="background-color: #f3f4f6; text-align: center; padding: 20px; font-size: 13px; color: #6b7280;">
-                <p style="margin: 0;">&copy; {current_year} {company_name}. All rights reserved.</p>
+              <td style="background-color: #f3f4f6; text-align: center; padding: 20px;
+                  font-size: 13px; color: #6b7280;">
+                <p style="margin: 0;">&copy; {current_year} {company_name}.
+                All rights reserved.</p>
                 <p style="margin: 4px 0;">{company_address}</p>
                 <p style="margin: 0;">
                   <a href="{privacy_policy_url}"
@@ -957,9 +987,11 @@ Please review and take appropriate action.
   <title>Organization Deletion Request</title>
 </head>
 <body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
-  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.04);">
 
-    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee; background-color:#dc2626;">
+    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee;
+        background-color:#dc2626;">
       <h2 style="margin:0; color:#ffffff;">Organization Deletion Request</h2>
     </div>
     <div style="padding:30px; font-size:15px; color:#444; line-height:1.6;">
@@ -971,7 +1003,8 @@ Please review and take appropriate action.
         </p>
       </div>
       <p><strong>Requested by:</strong> {requester_email}</p>
-      <p style="margin-top:25px; padding:12px; background-color:#fef2f2; border-left:4px solid #dc2626; border-radius:4px;">
+      <p style="margin-top:25px; padding:12px; background-color:#fef2f2;
+          border-left:4px solid #dc2626; border-radius:4px;">
         Please review and take appropriate action.
       </p>
     </div>
@@ -1049,9 +1082,11 @@ If you have any questions or concerns, please contact our support team.
   <title>Organization Deletion Confirmed</title>
 </head>
 <body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
-  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.04);">
 
-    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee; background-color:#dc2626;">
+    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee;
+        background-color:#dc2626;">
       <h2 style="margin:0; color:#ffffff;">Organization Deletion Confirmed</h2>
     </div>
     <div style="padding:30px; font-size:15px; color:#444; line-height:1.6;">
@@ -1062,8 +1097,10 @@ If you have any questions or concerns, please contact our support team.
           {organization_name}
         </p>
       </div>
-      <p style="margin-top:25px; padding:12px; background-color:#fef2f2; border-left:4px solid #dc2626; border-radius:4px;">
-        <strong>Important:</strong> All associated data including user accounts, roles, permissions, and teams have been permanently removed.
+      <p style="margin-top:25px; padding:12px; background-color:#fef2f2;
+          border-left:4px solid #dc2626; border-radius:4px;">
+        <strong>Important:</strong> All associated data including user accounts, roles,
+        permissions, and teams have been permanently removed.
       </p>
       <p>If you have any questions or concerns, please contact our support team.</p>
     </div>
@@ -1143,9 +1180,11 @@ Your organization remains active. If you have any questions, please contact our 
   <title>Organization Deletion Request Rejected</title>
 </head>
 <body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
-  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.04);">
 
-    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee; background-color:#f59e0b;">
+    <div style="padding:30px; text-align:center; border-bottom:1px solid #eee;
+        background-color:#f59e0b;">
       <h2 style="margin:0; color:#ffffff;">Deletion Request Rejected</h2>
     </div>
     <div style="padding:30px; font-size:15px; color:#444; line-height:1.6;">
@@ -1156,11 +1195,13 @@ Your organization remains active. If you have any questions, please contact our 
           {organization_name}
         </p>
       </div>
-      <div style="margin-top:25px; padding:12px; background-color:#fef3c7; border-left:4px solid #f59e0b; border-radius:4px;">
+      <div style="margin-top:25px; padding:12px; background-color:#fef3c7;
+          border-left:4px solid #f59e0b; border-radius:4px;">
         <p style="margin:0 0 8px 0;"><strong>Reason:</strong></p>
         <p style="margin:0; color:#78350f;">{rejection_reason}</p>
       </div>
-      <p style="margin-top:25px;">Your organization remains active. If you have any questions, please contact our support team.</p>
+      <p style="margin-top:25px;">Your organization remains active. If you have any
+      questions, please contact our support team.</p>
     </div>
   </div>
   <div style="max-width:600px; margin:20px auto; text-align:center; font-size:13px; color:#777;">

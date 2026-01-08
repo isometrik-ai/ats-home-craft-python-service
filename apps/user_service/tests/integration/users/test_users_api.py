@@ -2,6 +2,7 @@
 
 import pytest
 
+from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.tests.utils.assertions import assert_success
 
@@ -95,7 +96,7 @@ async def test_update_user_email(monkeypatch, client):
                 "phone": None,
                 "timezone": "UTC",
                 "avatar_url": None,
-                "status": "active",
+                "status": OrganizationMemberStatus.ACTIVE.value,
                 "role_id": "",
                 "organization_id": "org-1",
             }
@@ -135,7 +136,7 @@ async def test_update_user_profile(monkeypatch, client):
                 "full_name": "New User",
                 "email": "u1@example.com",
                 "timezone": "UTC",
-                "status": "active",
+                "status": OrganizationMemberStatus.ACTIVE.value,
                 "organization_id": "org-1",
                 "identities": [],
                 "permissions": [],
@@ -151,7 +152,7 @@ async def test_update_user_profile(monkeypatch, client):
                 "phone": None,
                 "timezone": "UTC",
                 "avatar_url": None,
-                "status": "active",
+                "status": OrganizationMemberStatus.ACTIVE.value,
                 "role_id": "",
                 "organization_id": "org-1",
             },
@@ -194,7 +195,7 @@ async def test_ban_unban_user(monkeypatch, client):
                 "phone": None,
                 "timezone": "UTC",
                 "avatar_url": None,
-                "status": "active",
+                "status": OrganizationMemberStatus.ACTIVE.value,
                 "role_id": "",
                 "organization_id": "org-1",
             },
@@ -215,7 +216,7 @@ async def test_ban_unban_user(monkeypatch, client):
                 "phone": None,
                 "timezone": "UTC",
                 "avatar_url": None,
-                "status": "active",
+                "status": OrganizationMemberStatus.ACTIVE.value,
                 "role_id": "",
                 "organization_id": "org-1",
             },

@@ -450,11 +450,6 @@ def safe_json_loads(json_str: str | None, default: Any = None) -> Any:
 # VALIDATION CONSTANTS
 # ============================================================================
 
-# Common validation patterns
-ROLE_TYPES = ["system", "custom"]
-ORG_STATUSES = ["active", "suspended", "trial"]
-USER_STATUSES = ["active", "inactive", "pending", "invited"]
-
 # Default pagination limits
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100

@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from apps.user_service.app.schemas.enums import InviteStatus
+
 
 class InviteDetailsResponse(BaseModel):
     """Response model for invitation details operations."""
@@ -97,7 +99,7 @@ class InviteListItem(BaseModel):
     invite_id: str = Field(..., description="Unique identifier for the invitation")
     email: str = Field(..., description="Email address of the invitee")
     role_id: uuid.UUID = Field(..., description="Role assigned to the invitee")
-    status: str = Field(..., description="Current status of the invitation")
+    status: InviteStatus = Field(..., description="Current status of the invitation")
     invited_by: str = Field(..., description="User ID who sent the invitation")
     expires_at: str = Field(..., description="ISO timestamp when invitation expires")
     created_at: str = Field(..., description="ISO timestamp when invitation was created")
@@ -115,7 +117,7 @@ class InviteListItem(BaseModel):
                 "invite_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                 "email": "newuser@example.com",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
-                "status": "pending",
+                "status": InviteStatus.PENDING.value,
                 "invited_by": "550e8400-e29b-41d4-a716-446655440000",
                 "expires_at": "2024-12-26T10:00:00Z",
                 "created_at": "2024-12-19T10:00:00Z",
@@ -144,7 +146,7 @@ class InviteListResponse(BaseModel):
                         "invite_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
                         "email": "newuser@example.com",
                         "role_id": "550e8400-e29b-41d4-a716-446655440000",
-                        "status": "pending",  # pending, accepted, rejected, expired, revoked
+                        "status": InviteStatus.PENDING.value,
                         "invited_by": "550e8400-e29b-41d4-a716-446655440000",
                         "expires_at": "2024-12-26T10:00:00Z",
                         "created_at": "2024-12-19T10:00:00Z",
@@ -164,8 +166,14 @@ class InviteListQueryParams(BaseModel):
 
     page: int = Field(default=1, ge=1, description="Page number for pagination")
     page_size: int = Field(default=20, ge=1, le=100, description="Number of items per page")
-    status: str | None = Field(None, description="Filter by invitation status")
+    status: InviteStatus | None = Field(None, description="Filter by invitation status")
 
     model_config = ConfigDict(
-        json_schema_extra={"example": {"page": 1, "page_size": 20, "status": "pending"}}
+        json_schema_extra={
+            "example": {
+                "page": 1,
+                "page_size": 20,
+                "status": InviteStatus.PENDING.value,
+            }
+        }
     )
