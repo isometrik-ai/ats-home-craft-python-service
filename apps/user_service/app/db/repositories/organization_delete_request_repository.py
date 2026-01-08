@@ -9,7 +9,7 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.schemas.organizations import DeleteRequestStatus
+from apps.user_service.app.schemas.enums import DeleteRequestStatus
 
 
 class OrganizationDeleteRequestRepository:

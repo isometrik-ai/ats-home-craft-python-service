@@ -5,17 +5,10 @@ These schemas are used for request/response validation and API documentation.
 """
 
 import re
-from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
-class TeamRoles(str, Enum):
-    """Team member roles"""
-
-    LEAD = "LEAD"
-    MEMBER = "MEMBER"
-
+from apps.user_service.app.schemas.enums import TeamRoles
 
 SAFE_NAME_REGEX = re.compile(r"^[A-Za-z0-9 _-]+$")
 

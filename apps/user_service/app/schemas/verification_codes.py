@@ -3,10 +3,9 @@
 This module contains Pydantic schemas for verification code operations.
 """
 
-from enum import Enum
-
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
+from apps.user_service.app.schemas.enums import VerificationTrigger, VerificationType
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -19,22 +18,6 @@ __all__ = [
     "VerifyVerificationCodeRequest",
     "VerifyVerificationCodeResponse",
 ]
-
-
-class VerificationType(str, Enum):
-    """Verification type enumeration"""
-
-    EMAIL = "EMAIL"
-    PHONE_NUMBER = "PHONE_NUMBER"
-
-
-class VerificationTrigger(str, Enum):
-    """Verification trigger/purpose enumeration"""
-
-    SIGNUP_EMAIL_VERIFICATION = "SIGNUP_EMAIL_VERIFICATION"
-    SIGNUP_PHONE_VERIFICATION = "SIGNUP_PHONE_VERIFICATION"
-    EMAIL_UPDATE = "EMAIL_UPDATE"
-    PHONE_NUMBER_UPDATE = "PHONE_NUMBER_UPDATE"
 
 
 # ============================================================================

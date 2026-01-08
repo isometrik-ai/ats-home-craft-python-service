@@ -9,6 +9,10 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.schemas.enums import OrganizationMemberStatus
+from apps.user_service.app.schemas.organizations import (
+    OrganizationStatus,
+)
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -46,9 +50,10 @@ class OrganizationRepository:
     ) -> tuple[str, list[Any]]:
         """Build WHERE conditions for organization queries."""
 
-        conditions: list[str] = ["o.status != 'deleted'"]
-        params: list[Any] = []
-        idx = 1
+        deleted_status = OrganizationStatus.DELETED.value
+        conditions: list[str] = ["o.status != $1"]
+        params: list[Any] = [deleted_status]
+        idx = 2
 
         if search:
             search_term = f"%{search.strip()}%"
@@ -78,11 +83,26 @@ class OrganizationRepository:
     ) -> list[dict[str, Any]]:
         """Retrieve paginated list of organizations with active member counts."""
 
-        where_clause, params = self._build_organization_conditions(search, status)
+        where_clause, where_params = self._build_organization_conditions(search, status)
 
-        params.extend([limit, offset])
-        limit_idx = len(params) - 1
-        offset_idx = len(params)
+        # Build params in order: where conditions, then enum values for subquery, then pagination
+        active_status = OrganizationMemberStatus.ACTIVE.value
+        deleted_status = OrganizationMemberStatus.DELETED.value
+
+        # Calculate parameter indices based on where_params length
+        base_idx = len(where_params)
+        active_idx = base_idx + 1
+        deleted_idx = base_idx + 2
+        limit_idx = base_idx + 3
+        offset_idx = base_idx + 4
+
+        params = [
+            *where_params,
+            active_status,
+            deleted_status,
+            limit,
+            offset,
+        ]
 
         query = f"""
             SELECT
@@ -104,9 +124,9 @@ class OrganizationRepository:
             LEFT JOIN (
                 SELECT
                     organization_id,
-                    COUNT(*) FILTER (WHERE status = 'active')::int AS member_count
+                    COUNT(*) FILTER (WHERE status = ${active_idx})::int AS member_count
                 FROM organization_members
-                WHERE status != 'deleted'
+                WHERE status != ${deleted_idx}
                 GROUP BY organization_id
             ) om ON om.organization_id = o.id
             WHERE {where_clause}
@@ -141,6 +161,10 @@ class OrganizationRepository:
     ) -> dict[str, Any] | None:
         """Get organization by ID with active member count."""
 
+        active_status = OrganizationMemberStatus.ACTIVE.value
+        deleted_member_status = OrganizationMemberStatus.DELETED.value
+        deleted_org_status = OrganizationStatus.DELETED.value
+
         query = """
             SELECT
                 o.id,
@@ -161,17 +185,19 @@ class OrganizationRepository:
             LEFT JOIN (
                 SELECT
                     organization_id,
-                    COUNT(*) FILTER (WHERE status = 'active')::int AS member_count
+                    COUNT(*) FILTER (WHERE status = $2)::int AS member_count
                 FROM organization_members
-                WHERE status != 'deleted'
+                WHERE status != $3
                 GROUP BY organization_id
             ) om ON om.organization_id = o.id
             WHERE o.id = $1
-            AND o.status != 'deleted'
+            AND o.status != $4
             LIMIT 1
         """
 
-        row = await self.db_connection.fetchrow(query, organization_id)
+        row = await self.db_connection.fetchrow(
+            query, organization_id, active_status, deleted_member_status, deleted_org_status
+        )
         return dict(row) if row else None
 
     async def get_organization_for_update(
@@ -182,6 +208,7 @@ class OrganizationRepository:
 
         Returns id, name, slug, and settings.
         """
+        deleted_status = OrganizationStatus.DELETED.value
         query = """
             SELECT
                 o.id,
@@ -190,38 +217,41 @@ class OrganizationRepository:
                 o.settings
             FROM organizations o
             WHERE o.id = $1
-            AND o.status != 'deleted'
+            AND o.status != $2
             LIMIT 1
         """
-        row = await self.db_connection.fetchrow(query, organization_id)
+        row = await self.db_connection.fetchrow(query, organization_id, deleted_status)
         return dict(row) if row else None
 
     # VALIDATION OPERATIONS
     async def check_organization_exists(self, organization_id: str) -> bool:
         """Check if organization exists and is not deleted."""
+        deleted_status = OrganizationStatus.DELETED.value
         query = """
             SELECT EXISTS(
                 SELECT 1 FROM organizations
-                WHERE id = $1 AND status != 'deleted'
+                WHERE id = $1 AND status != $2
             )
         """
-        return await self.db_connection.fetchval(query, organization_id)
+        return await self.db_connection.fetchval(query, organization_id, deleted_status)
 
     async def check_slug_unique(self, slug: str, exclude_id: str | None = None) -> bool:
         """Check if organization slug is unique, optionally excluding an ID."""
-        exclude_clause = ""
-        params = [slug]
+        deleted_status = OrganizationStatus.DELETED.value
+        params = [slug, deleted_status]
 
         if exclude_id:
-            exclude_clause = "AND id != $2"
+            exclude_clause = "AND id != $3"
             params.append(exclude_id)
+        else:
+            exclude_clause = ""
 
         query = f"""
             SELECT NOT EXISTS(
                 SELECT 1
                 FROM organizations
                 WHERE slug = $1
-                  AND status != 'deleted'
+                  AND status != $2
                   {exclude_clause}
             )
         """
@@ -243,12 +273,15 @@ class OrganizationRepository:
             set_clauses.append(f"{field} = ${idx}")
             params.append(value)
 
-        params.extend([organization_id])
+        deleted_status = OrganizationStatus.DELETED.value
+        org_id_param = len(params) + 1
+        deleted_status_param = len(params) + 2
+        params.extend([organization_id, deleted_status])
 
         query = f"""
             UPDATE organizations
             SET {", ".join(set_clauses)}, updated_at = NOW()
-            WHERE id = ${len(params)} AND status != 'deleted'
+            WHERE id = ${org_id_param} AND status != ${deleted_status_param}
             RETURNING *
         """
         row = await self.db_connection.fetchrow(query, *params)
@@ -285,14 +318,15 @@ class OrganizationRepository:
     # DELETE OPERATIONS
     async def delete_organization(self, organization_id: str) -> None:
         """Soft delete organization by setting status to 'deleted'."""
+        deleted_status = OrganizationStatus.DELETED.value
         query = """
             UPDATE organizations
-            SET status = 'deleted', updated_at = NOW()
+            SET status = $2, updated_at = NOW()
             WHERE id = $1
-            AND status != 'deleted'
+            AND status != $2
             RETURNING id
         """
-        row = await self.db_connection.fetchrow(query, organization_id)
+        row = await self.db_connection.fetchrow(query, organization_id, deleted_status)
         if not row:
             raise NotFoundException(
                 message_key="organizations.errors.organization_not_found",

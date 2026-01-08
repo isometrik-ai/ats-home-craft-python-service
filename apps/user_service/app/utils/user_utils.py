@@ -8,6 +8,7 @@ from apps.user_service.app.db.repositories import (
     OrganizationRepository,
 )
 from apps.user_service.app.schemas.auth import IsometrikDetails
+from apps.user_service.app.schemas.enums import OrganizationStatus
 from apps.user_service.app.utils.common_utils import parse_json_field
 from apps.user_service.app.utils.email_utils import send_email
 from libs.shared_db.supabase_db.auth_repository import generate_magic_link, update_email
@@ -107,7 +108,9 @@ def create_admin_update_email_content(user: dict, magic_link: str) -> tuple[str,
     subject = "Your Email Has Been Updated - XQtiv"
 
     html_message = f"""
-    <div style="font-family: Arial, sans-serif !important; font-size: 14px !important; color: #333333 !important; line-height: 1.6 !important; max-width: 600px !important;">
+    <div style="font-family: Arial, sans-serif !important; font-size: 14px !important;
+        color: #333333 !important; line-height: 1.6 !important;
+        max-width: 600px !important;">
         <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
             Hello {full_name},
         </p>
@@ -122,7 +125,10 @@ def create_admin_update_email_content(user: dict, magic_link: str) -> tuple[str,
 
         <div style="text-align: center !important; margin: 24px 0 !important;">
             <a href="{magic_link}"
-               style="background-color: #3498db !important; color: white !important; padding: 12px 24px !important; text-decoration: none !important; border-radius: 6px !important; display: inline-block !important; font-weight: bold !important;">
+               style="background-color: #3498db !important; color: white !important;
+               padding: 12px 24px !important; text-decoration: none !important;
+               border-radius: 6px !important; display: inline-block !important;
+               font-weight: bold !important;">
                 Magic Link
             </a>
         </div>
@@ -131,7 +137,8 @@ def create_admin_update_email_content(user: dict, magic_link: str) -> tuple[str,
             If the button doesn't work, you can copy and paste this link into your browser:
         </p>
 
-        <p style="margin: 0 0 16px 0 !important; color: #3498db !important; word-break: break-all !important;">
+        <p style="margin: 0 0 16px 0 !important; color: #3498db !important;
+           word-break: break-all !important;">
             {magic_link}
         </p>
 
@@ -140,7 +147,8 @@ def create_admin_update_email_content(user: dict, magic_link: str) -> tuple[str,
             Team XQtiv
         </p>
 
-        <hr style="border: none !important; border-top: 1px solid #dee2e6 !important; margin: 24px 0 !important;">
+        <hr style="border: none !important; border-top: 1px solid #dee2e6 !important;
+            margin: 24px 0 !important;">
 
         <p style="font-size: 11px !important; color: #868e96 !important; margin: 0 !important;">
             This is an automated notification from XQtiv. Please do not reply to this email.
@@ -210,7 +218,7 @@ async def get_isometrik_details(
     organization = await organization_repository.get_organization_by_id(organization_id)
     if not organization:
         return None
-    if organization.get("status") != "active":
+    if organization.get("status") != OrganizationStatus.ACTIVE.value:
         raise ForbiddenException(
             message_key="organizations.errors.organization_not_active",
             custom_code=CustomStatusCode.FORBIDDEN,

@@ -20,10 +20,16 @@ from apps.user_service.app.db.repositories import (
     RoleRepository,
     TeamRepository,
 )
-from apps.user_service.app.schemas.auth import AccountType, PlanType, Subscription
+from apps.user_service.app.schemas.auth import Subscription
+from apps.user_service.app.schemas.enums import (
+    AccountType,
+    DeleteRequestStatus,
+    OrganizationMemberStatus,
+    OrganizationStatus,
+    PlanType,
+)
 from apps.user_service.app.schemas.organizations import (
     DeleteRequestInfo,
-    DeleteRequestStatus,
     NewOrganizationBody,
     OrganizationAdminUpdate,
     OrganizationInfo,
@@ -568,7 +574,7 @@ class OrganizationService:
             "slug": resolved_slug,
             "domain": body.company_data.company_website,
             "logo_url": body.company_data.logo_url,
-            "status": "active",
+            "status": OrganizationStatus.ACTIVE.value,
             "description": body.company_data.description,
             "company_size": body.company_data.company_size,
             "settings": serialized_settings,
@@ -618,7 +624,7 @@ class OrganizationService:
             "phone": getattr(body.user_data, "phone", None) if body.user_data else None,
             "timezone": getattr(body.user_data, "timezone", None) or "UTC",
             "role_id": role_id,
-            "status": "active",
+            "status": OrganizationMemberStatus.ACTIVE.value,
         }
 
         # Create Isometrik user if enabled and credentials are provided
@@ -657,7 +663,6 @@ class OrganizationService:
         super_admin_emails = await get_system_super_admin_emails(self.db_connection)
 
         if not super_admin_emails:
-            logger.warning("No system super admin users found to notify")
             return
 
         # Send email notifications to all super admins
@@ -672,21 +677,12 @@ class OrganizationService:
                 email_failures.append(super_admin_email)
 
         if email_failures:
-            logger.warning(
-                "Failed to send delete request emails to some super admins: %s",
-                email_failures,
-            )
             # Only raise exception if all emails failed
             if len(email_failures) == len(super_admin_emails):
                 raise InternalServerErrorException(
                     message_key="organizations.errors.email_notification_failed",
                     custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
                 )
-
-        logger.info(
-            "Sent organization delete request notifications to %d super admin(s)",
-            len(super_admin_emails) - len(email_failures),
-        )
 
     async def create_delete_request(
         self,
@@ -968,19 +964,6 @@ class OrganizationService:
             if not email_sent:
                 email_failures.append(email)
 
-        if email_failures:
-            logger.warning(
-                "Failed to send deletion notification emails to some members: %s",
-                email_failures,
-            )
-            # Don't fail the operation if some emails fail, but log it
-
-        logger.info(
-            "Approved and processed delete request %s for organization %s",
-            request_id,
-            organization_id,
-        )
-
         return {
             "request_id": str(updated_request["id"]),
             "organization_id": str(updated_request["organization_id"]),
@@ -1029,27 +1012,11 @@ class OrganizationService:
 
         # Send rejection notification email to requester
         if requester and requester.get("email"):
-            email_sent = send_organization_deletion_rejected_email(
+            send_organization_deletion_rejected_email(
                 email=requester["email"],
                 organization_name=organization_name,
                 rejection_reason=reason,
             )
-            if not email_sent:
-                logger.warning(
-                    "Failed to send rejection notification email to requester: %s",
-                    requester["email"],
-                )
-        else:
-            logger.warning(
-                "Requester not found or has no email for delete request %s",
-                request_id,
-            )
-
-        logger.info(
-            "Rejected delete request %s for organization %s",
-            request_id,
-            organization_id,
-        )
 
         return {
             "request_id": str(updated_request["id"]),
