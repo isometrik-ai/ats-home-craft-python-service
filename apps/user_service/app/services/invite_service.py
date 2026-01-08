@@ -22,6 +22,7 @@ from apps.user_service.app.schemas.auth import (
     SignupRequest,
     UserInfo,
 )
+from apps.user_service.app.schemas.enums import InviteStatus, OrganizationMemberStatus
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
     InviteCreateRequest,
@@ -200,7 +201,7 @@ class InviteService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        if invitation_data.get("status") != "pending":
+        if invitation_data.get("status") != InviteStatus.PENDING.value:
             raise NotFoundException(
                 message_key="invitations.errors.invitation_invalid_or_expired",
                 custom_code=CustomStatusCode.NOT_FOUND,
@@ -324,7 +325,7 @@ class InviteService:
 
         # Update invitation status
         await self.invite_repository.update_invite_status(
-            invitation_data["id"], "accepted", user.id
+            invitation_data["id"], InviteStatus.ACCEPTED.value, user.id
         )
 
         return AuthResponse(
@@ -402,7 +403,7 @@ class InviteService:
             "role_id": str(body.role_id),
             "token_hash": token_hash,
             "invited_by": self.user_context.user_id,
-            "status": "pending",
+            "status": InviteStatus.PENDING.value,
             "expires_at": expires_at,
             "metadata": {
                 "first_name": body.first_name,
@@ -604,7 +605,7 @@ class InviteService:
             "salutation": invite_data.get("salutation", None),
             "role_id": role_id,
             "role": role_name,
-            "status": "active",
+            "status": OrganizationMemberStatus.ACTIVE.value,
             "invited_by": invited_by,
             "isometrik_user_id": invite_data.get("isometrik_user_id", None),
         }

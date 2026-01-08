@@ -122,7 +122,6 @@ class AuthService:
         try:
             return json.loads(raw_metadata)
         except json.JSONDecodeError:
-            logger.warning("Failed to parse user metadata JSON: %s", raw_metadata)
             return {}
 
     # PASSWORD VALIDATION METHODS
@@ -255,9 +254,7 @@ class AuthService:
             first_name: User first name
         """
         try:
-            email_sent = send_welcome_email(email=email, first_name=first_name)
-            if not email_sent:
-                logger.warning("Failed to send welcome email to %s", email)
+            send_welcome_email(email=email, first_name=first_name)
         except Exception as email_error:
             logger.error("Error sending welcome email: %s", str(email_error))
 
@@ -714,11 +711,6 @@ class AuthService:
             UnauthorizedException: If tokens don't belong to same user
         """
         if access_token_user_id != refresh_user_id:
-            logger.warning(
-                "Token mismatch detected: access_token user_id=%s, refresh_token user_id=%s",
-                access_token_user_id,
-                refresh_user_id,
-            )
             raise UnauthorizedException(
                 message_key="auth.errors.authentication_failed",
                 custom_code=CustomStatusCode.UNAUTHORIZED,
@@ -861,9 +853,7 @@ class AuthService:
         )
 
         try:
-            email_sent = send_password_reset_success_email(email=user_email, user_name=user_name)
-            if not email_sent:
-                logger.warning("Failed to send password reset success email to %s", user_email)
+            send_password_reset_success_email(email=user_email, user_name=user_name)
         except Exception as email_error:
             logger.error("Error sending password reset success email: %s", str(email_error))
 
@@ -998,9 +988,7 @@ class AuthService:
             or user_email.split("@")[0]
         )
         try:
-            email_sent = send_password_change_success_email(email=user_email, user_name=user_name)
-            if not email_sent:
-                logger.warning("Failed to send password change success email to %s", user_email)
+            send_password_change_success_email(email=user_email, user_name=user_name)
         except Exception as email_error:
             logger.error("Error sending password change success email: %s", str(email_error))
             # Don't fail the operation if email fails

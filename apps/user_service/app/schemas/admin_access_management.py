@@ -6,6 +6,7 @@ These schemas are used for request/response validation and API documentation.
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from apps.user_service.app.schemas.enums import SessionStatus
 from libs.shared_utils.common_query import SETTINGS_ROLES_MANAGE
 
 
@@ -409,7 +410,7 @@ class SessionItem(BaseModel):
     logout_timestamp: str | None = Field(
         None, description="ISO timestamp when session was logged out"
     )
-    session_status: str = Field(..., description="Current session status")
+    session_status: SessionStatus = Field(..., description="Current session status")
     login_method: str = Field(..., description="Method used for login")
     accessed_phi: bool = Field(..., description="Whether PHI was accessed during session")
     phi_access_purpose: str | None = Field(None, description="Purpose of PHI access if applicable")
@@ -460,7 +461,7 @@ class CreateSessionResponse(BaseModel):
                     "risk_score": 25,
                     "login_timestamp": "2024-12-19T10:30:00Z",
                     "logout_timestamp": None,
-                    "session_status": "active",
+                    "session_status": SessionStatus.ACTIVE.value,
                     "login_method": "password",
                     "accessed_phi": False,
                     "phi_access_purpose": None,
@@ -485,7 +486,7 @@ class UpdateSessionRequest(BaseModel):
              (user_logout, timeout, admin_terminated, etc.)
     """
 
-    session_status: str | None = Field(
+    session_status: SessionStatus | None = Field(
         None, description="New session status (inactive, terminated)"
     )
     accessed_phi: bool | None = Field(None, description="Whether PHI was accessed during session")
@@ -532,7 +533,7 @@ class UpdateSessionResponse(BaseModel):
                     "risk_score": 25,
                     "login_timestamp": "2024-12-19T10:30:00Z",
                     "logout_timestamp": "2024-12-19T11:30:00Z",
-                    "session_status": "inactive",
+                    "session_status": SessionStatus.INACTIVE.value,
                     "login_method": "password",
                     "accessed_phi": False,
                     "phi_access_purpose": None,

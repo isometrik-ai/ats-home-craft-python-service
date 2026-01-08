@@ -29,6 +29,7 @@ from apps.user_service.app.schemas.organizations import (
     OrganizationDetailResponse,
     OrganizationListResponse,
     OrganizationResponse,
+    OrganizationStatus,
 )
 
 # Service import
@@ -84,7 +85,9 @@ async def get_organizations_list(
     page: int = Query(1, ge=1, description="The page number for pagination"),
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
     name: str | None = Query(None, description="The name of the organization"),
-    org_status: str | None = Query(None, description="The status of the organization"),
+    org_status: OrganizationStatus | None = Query(
+        None, description="The status of the organization"
+    ),
 ):
     """Get list of all organizations in the system (Requires: organization.appscrip.manage)"""
     user_context = await extract_user_context(current_user, db_connection)

@@ -14,6 +14,7 @@ from apps.user_service.app.db.repositories.organization_member_repository import
     OrganizationMemberRepository,
 )
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
+from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from apps.user_service.app.schemas.users import (
     PermissionInfo,
     RoleInfo,
@@ -158,7 +159,7 @@ class UserService:
             "phone": user_data.get("phone"),
             "timezone": user_data.get("timezone", "UTC"),
             "role_id": user_data.get("role_id"),
-            "status": user_data.get("status", "active"),
+            "status": user_data.get("status", OrganizationMemberStatus.ACTIVE.value),
             "isometrik_user_id": user_data.get("isometrik_user_id"),
         }
 
@@ -511,7 +512,7 @@ class UserService:
                 "timezone": user_metadata.get("timezone", "UTC"),
                 "salutation": user_metadata.get("salutation"),
                 "role_id": None,
-                "status": "active",
+                "status": OrganizationMemberStatus.ACTIVE.value,
                 "created_at": None,
                 "updated_at": None,
                 "last_active_at": None,
@@ -677,7 +678,7 @@ class UserService:
                 last_name=u.get("last_name"),
                 phone=u.get("phone"),
                 role_id=str(u["role_id"]) if u.get("role_id") else "",
-                status=u.get("status", "active"),
+                status=u.get("status", OrganizationMemberStatus.ACTIVE.value),
                 joined_at=(
                     format_iso_datetime(u["joined_at"])
                     if u.get("joined_at")
@@ -749,7 +750,7 @@ class UserService:
             "user_id": str(current_user_data["user_id"]),
             "email": current_user_data["email"],
             "full_name": current_user_data.get("full_name", ""),
-            "status": "suspended",
+            "status": OrganizationMemberStatus.SUSPENDED.value,
             "organization_id": str(current_user_data["organization_id"]),
             "banned_by_user_id": self.user_context.user_id,
             "banned_by_email": self.user_context.email,
@@ -824,7 +825,7 @@ class UserService:
             "user_id": str(current_user_data["user_id"]),
             "email": current_user_data["email"],
             "full_name": current_user_data.get("full_name", ""),
-            "status": "active",
+            "status": OrganizationMemberStatus.ACTIVE.value,
             "organization_id": str(current_user_data["organization_id"]),
             "unbanned_by_user_id": self.user_context.user_id,
             "unbanned_by_email": self.user_context.email,

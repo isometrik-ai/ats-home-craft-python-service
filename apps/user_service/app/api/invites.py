@@ -23,6 +23,7 @@ from apps.user_service.app.schemas.invites import (
     InviteCreateRequest,
     InviteListResponse,
     InviteResponse,
+    InviteStatus,
 )
 
 # Service import
@@ -207,7 +208,7 @@ async def get_organization_invitations(
     organization_id: str = Path(..., description="The UUID of the organization"),
     page: int = Query(1, ge=1, description="The page number for pagination"),
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
-    status: str | None = Query(None, description="The status of the invitations"),
+    status: InviteStatus | None = Query(None, description="The status of the invitations"),
 ):
     """Get list of all invitations for an organization with pagination"""
     # Extract user context

@@ -9,6 +9,7 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -131,7 +132,7 @@ class RoleRepository:
                 COUNT(*)::int AS user_count
             FROM organization_members om
             WHERE om.organization_id = $1
-            AND om.status = 'active'
+            AND om.status = $2
             AND om.role_id IN (SELECT id FROM base_roles)
             GROUP BY om.role_id
         """
@@ -188,6 +189,7 @@ class RoleRepository:
         Returns:
             List of role dictionaries with detailed information
         """
+        active_status = OrganizationMemberStatus.ACTIVE.value
         query = f"""
         WITH base_roles AS ({self._get_base_roles_query()}),
         member_counts AS ({self._get_member_counts_query()}),
@@ -208,7 +210,9 @@ class RoleRepository:
         LEFT JOIN perm_agg pa ON pa.role_id = br.id
         ORDER BY br.updated_at DESC
         """
-        return await self.db_connection.fetch(query, organization_id, search, limit, offset)
+        return await self.db_connection.fetch(
+            query, organization_id, active_status, search, limit, offset
+        )
 
     async def get_roles_count(self, organization_id: str, search: str | None = None) -> int:
         """Get total count of roles matching search criteria.
@@ -408,14 +412,15 @@ class RoleRepository:
         Returns:
             int: Number of users using this role
         """
+        deleted_status = OrganizationMemberStatus.DELETED.value
         query = """
             SELECT COUNT(*)::int AS user_count
             FROM organization_members
             WHERE role_id = $1
               AND organization_id = $2
-              AND status != 'deleted'
+              AND status != $3
         """
-        return await self.db_connection.fetchval(query, role_id, organization_id)
+        return await self.db_connection.fetchval(query, role_id, organization_id, deleted_status)
 
     async def remove_permissions_from_role(
         self, role_id: str, organization_id: str, permission_ids: list[str]
