@@ -9,12 +9,12 @@ from apps.user_service.tests.utils.assertions import assert_success
 async def test_send_verification_code(monkeypatch, client):
     """Send verification code."""
 
-    async def fake_get_optional_user(request):
-        del request
+    async def fake_get_optional_user(request, db_connection=None):
+        del request, db_connection
         return None
 
-    async def fake_get_user_from_auth(request):
-        del request
+    async def fake_get_user_from_auth(request, db_connection=None):
+        del request, db_connection
         return None
 
     async def fake_send(self, request, data, current_user):
@@ -55,12 +55,12 @@ async def test_send_verification_code(monkeypatch, client):
 async def test_verify_verification_code(monkeypatch, client):
     """Verify verification code."""
 
-    async def fake_get_optional_user(request):
-        del request
+    async def fake_get_optional_user(request, db_connection=None):
+        del request, db_connection
         return None
 
-    async def fake_get_user_from_auth(request):
-        del request
+    async def fake_get_user_from_auth(request, db_connection=None):
+        del request, db_connection
         return None
 
     async def fake_verify(self, request, data, current_user):
