@@ -164,7 +164,12 @@ async def test_admin_update_organization(monkeypatch, client):
         del self
         assert organization_id == "550e8400-e29b-41d4-a716-446655440000"
         assert update_data.name == "Updated Org"
-        return {"id": organization_id, "name": "Updated Org"}
+        return {
+            "organization_id": organization_id,
+            "organization_name": "Updated Org",
+            "slug": "updated-org-slug",
+            "old_data": {"name": "Original Org", "slug": "original-slug"},
+        }
 
     monkeypatch.setattr(
         "apps.user_service.app.api.organization.check_permissions",
@@ -181,7 +186,9 @@ async def test_admin_update_organization(monkeypatch, client):
         json={"name": "Updated Org"},
     )
     body = assert_success(res, 200)
-    assert body["data"]["name"] == "Updated Org"
+    assert body["data"]["organization_id"] == "550e8400-e29b-41d4-a716-446655440000"
+    assert body["data"]["organization_name"] == "Updated Org"
+    assert body["data"]["slug"] == "updated-org-slug"
 
 
 @pytest.mark.asyncio
