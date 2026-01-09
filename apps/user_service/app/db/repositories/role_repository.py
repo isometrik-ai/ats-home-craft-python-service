@@ -132,7 +132,7 @@ class RoleRepository:
                 COUNT(*)::int AS user_count
             FROM organization_members om
             WHERE om.organization_id = $1
-            AND om.status = $2
+            AND om.status = $5
             AND om.role_id IN (SELECT id FROM base_roles)
             GROUP BY om.role_id
         """
@@ -211,7 +211,12 @@ class RoleRepository:
         ORDER BY br.updated_at DESC
         """
         return await self.db_connection.fetch(
-            query, organization_id, active_status, search, limit, offset
+            query,
+            organization_id,  # $1
+            search,  # $2
+            limit,  # $3
+            offset,  # $4
+            active_status,  # $5
         )
 
     async def get_roles_count(self, organization_id: str, search: str | None = None) -> int:

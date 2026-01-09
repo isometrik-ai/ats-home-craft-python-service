@@ -308,11 +308,11 @@ class EnterpriseFeatures(BaseModel):
 class Address(BaseModel):
     """Address information."""
 
-    address_line: str | None = Field(None, min_length=1, max_length=100)
-    city: str | None = Field(None, min_length=1, max_length=100)
-    state: str | None = Field(None, min_length=1, max_length=100)
-    zip_code: str | None = Field(None, min_length=1, max_length=7)
-    country: str = Field(..., min_length=1, max_length=100)
+    address_line: str | None = Field(None, description="Address line")
+    city: str | None = Field(None, description="City")
+    state: str | None = Field(None, description="State")
+    zip_code: str | None = Field(None, description="Zip code")
+    country: str = Field(..., description="Country name")
 
 
 class Subscription(BaseModel):

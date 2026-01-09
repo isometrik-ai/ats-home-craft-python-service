@@ -88,6 +88,18 @@ async def get_sessions_list(
     sessions = result["sessions"]
     total_count = result["total_count"]
 
+    if not sessions:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+        )
+
     return list_response(
         request=request,
         items=sessions,

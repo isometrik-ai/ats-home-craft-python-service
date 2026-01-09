@@ -156,6 +156,8 @@ class SessionRepository:
                 WHERE {where_clause}
             """
         else:
+            limit_param = len(params) + 1
+            offset_param = len(params) + 2
             query_params = params + [filters.limit, filters.offset]
             query = f"""
                 SELECT {SESSION_FIELDS}
@@ -290,6 +292,8 @@ class SessionRepository:
                 WHERE {where_clause}
             """
         else:
+            limit_param = len(params) + 1
+            offset_param = len(params) + 2
             query_params = params + [filters.limit, filters.offset]
             query = f"""
                 SELECT {SESSION_FIELDS}
