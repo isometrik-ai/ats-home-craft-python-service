@@ -90,6 +90,7 @@ async def create_isometrik_application(
                 ) from e
 
     except httpx.HTTPStatusError as e:
+        logger.error("Isometrik API status code error: %s", str(e))
         status_code = e.response.status_code
 
         if 400 <= status_code < 500:
@@ -197,6 +198,7 @@ async def create_isometrik_user(
                 ) from e
 
     except httpx.HTTPStatusError as e:
+        logger.error("Isometrik API status code error: %s", str(e))
         status_code = e.response.status_code
         if 400 <= status_code < 500:
             raise BadRequestException(
@@ -279,6 +281,7 @@ async def login_to_isometrik(
                 ) from e
 
     except httpx.HTTPStatusError as e:
+        logger.error("Isometrik API status code error: %s", str(e))
         status_code = e.response.status_code
         if 400 <= status_code < 500:
             raise BadRequestException(
