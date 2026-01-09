@@ -511,5 +511,7 @@ def parse_json_field(field_value: str | dict[str, Any] | None) -> dict[str, Any]
     if isinstance(field_value, dict):
         return field_value
     if isinstance(field_value, str):
-        return json.loads(field_value) if field_value else {}
+        if not field_value:
+            return {}
+        return json.loads(field_value)
     return {}

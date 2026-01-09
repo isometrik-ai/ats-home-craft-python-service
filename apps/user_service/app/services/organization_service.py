@@ -38,6 +38,7 @@ from apps.user_service.app.schemas.organizations import (
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
+    parse_json_field,
     validate_uuid_format,
 )
 from apps.user_service.app.utils.email_utils import (
@@ -216,11 +217,17 @@ class OrganizationService:
     async def update_organization(
         self, organization_id: str, update_data: OrganizationAdminUpdate
     ) -> dict:
-        """Update organization fields with slug validation when provided."""
+        """Update organization fields with slug validation when provided.
+
+        Supports partial updates for all fields.
+
+        Returns:
+            dict: Update result containing organization_id, organization_name, and slug
+        """
         validate_uuid_format(organization_id, "organization_id")
 
-        # Get only the minimal fields needed for update (id, name, slug, settings)
-        existing = await self.organization_repository.get_organization_for_update(organization_id)
+        # Get existing organization data (full data for audit logging)
+        existing = await self.organization_repository.get_organization_by_id(organization_id)
         if not existing:
             raise NotFoundException(
                 message_key="organizations.errors.not_found",
@@ -235,33 +242,38 @@ class OrganizationService:
                 "organization_id": organization_id,
                 "organization_name": existing.get("name"),
                 "slug": existing.get("slug"),
+                "old_data": self._format_organization_for_audit(existing),
             }
 
         # Validate slug uniqueness if slug is being updated
         if "slug" in update_payload:
             await self._validate_slug_unique(update_payload["slug"], exclude_id=organization_id)
 
-        # Transform update payload to database structure
-        # Only pass existing settings for comparison, not the entire organization object
-        existing_settings = existing.get("settings") or {}
-        db_payload = self._transform_update_to_db_format(existing_settings, update_payload)
+        # Parse existing settings from JSON string to dict
+        existing_settings = parse_json_field(existing.get("settings"))
 
-        # Convert any Pydantic models to dicts and serialize JSON fields for asyncpg
-        if "settings" in db_payload and isinstance(db_payload["settings"], dict):
+        # Build database payload with simplified logic
+        db_payload = self._build_update_payload(existing_settings, update_payload)
+
+        # Serialize JSON fields for asyncpg
+        # _serialize_pydantic_models handles all types (dict, BaseModel, list, None, etc.)
+        if "settings" in db_payload:
             serialized_settings = _serialize_pydantic_models(db_payload["settings"])
             db_payload["settings"] = json.dumps(serialized_settings)
-        if "subscription" in db_payload and isinstance(db_payload["subscription"], dict):
-            serialized_subscription = _serialize_pydantic_models(db_payload["subscription"])
-            db_payload["subscription"] = json.dumps(serialized_subscription)
 
         # Perform the update
         updated = await self.organization_repository.update_organization(
             organization_id=organization_id, update_data=db_payload
         )
+
+        # Format old data for audit logging before returning
+        old_data = self._format_organization_for_audit(existing)
+
         return {
             "organization_id": organization_id,
             "organization_name": updated.get("name", existing.get("name")),
             "slug": updated.get("slug", existing.get("slug")),
+            "old_data": old_data,
         }
 
     async def delete_organization(self, organization_id: str) -> None:
@@ -278,28 +290,44 @@ class OrganizationService:
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
-    @staticmethod
-    def _transform_update_to_db_format(
-        existing_settings: dict[str, Any], update_data: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Transform update payload to database structure.
-
-        Update Rules:
-        1. Settings fields (address, practice_areas, etc.): UI sends entire objects,
-           so we replace them entirely in the database.
-        2. Direct fields (name, slug, etc.): Only changed fields are sent,
-           so we update only what's provided.
+    def _deep_merge_dict(self, base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
+        """Deep merge two dictionaries, preserving existing values when update has None.
 
         Args:
-            existing_settings: Existing settings from organization (only settings field)
+            base: Base dictionary with existing values
+            update: Dictionary with updates (None values are skipped)
+
+        Returns:
+            Merged dictionary
+        """
+        result = base.copy()
+        for key, value in update.items():
+            if value is None:
+                # Skip None values - don't overwrite existing data
+                continue
+
+            # Note: value is already a dict from model_dump() which recursively converts BaseModels
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                # Recursively merge nested dictionaries
+                result[key] = self._deep_merge_dict(result[key], value)
+            else:
+                # Replace or add the value
+                result[key] = value
+        return result
+
+    def _categorize_update_fields(
+        self, update_data: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """Categorize update fields into different types.
+
+        Args:
             update_data: Update payload with only fields being updated
 
         Returns:
-            Transformed payload ready for database update
+            Tuple of (direct_columns, nested_settings, simple_settings, practice_areas)
         """
-        # Top-level database columns (not in settings)
-        # These are only updated if present in payload
-        top_level_fields = {
+        # Direct database columns (not stored in settings JSON)
+        direct_columns = {
             "name",
             "slug",
             "domain",
@@ -312,81 +340,140 @@ class OrganizationService:
             "referral_source",
         }
 
-        # Settings fields that are replaced entirely when provided
-        # UI always sends complete objects for these fields
-        settings_object_fields = {
+        # Nested JSON objects in settings that support partial updates (deep merge)
+        nested_settings_fields = {
             "address",
-            "preferred_integration",
             "compliance_security",
             "enterprise_features",
             "team_setup",
+        }
+
+        # Simple settings fields (lists, booleans) that are replaced entirely
+        simple_settings_fields = {
+            "preferred_integration",
             "need_help_importing_data",
             "need_migration_assistance",
         }
 
-        # Practice area fields map to nested settings.practice_areas structure
-        practice_area_field_map = {
-            "primary_practice_areas": "primary",
-            "secondary_practice_areas": "secondary",
-            "specializations": "specializations",
+        # Practice area fields (replaced entirely, not merged)
+        practice_area_fields = {
+            "primary_practice_areas",
+            "secondary_practice_areas",
+            "specializations",
         }
 
-        # Separate fields by type
         db_payload = {}
-        settings_updates = {}
-        practice_areas_data = {}
+        nested_settings_updates = {}
+        simple_settings_updates = {}
+        practice_areas_updates = {}
 
+        # Separate fields by type
         for field, value in update_data.items():
-            if field in top_level_fields:
-                # Direct fields: only update if present in payload
+            if field in direct_columns:
                 db_payload[field] = value
-            elif field in settings_object_fields:
-                # Settings objects: replace entirely (UI sends complete objects)
-                settings_updates[field] = value
-            elif field in practice_area_field_map:
-                # Practice areas: map to nested structure (treated same as other settings)
-                practice_areas_data[practice_area_field_map[field]] = value
+            elif field in practice_area_fields:
+                practice_areas_updates[field] = value
+            elif field in nested_settings_fields:
+                nested_settings_updates[field] = value
+            elif field in simple_settings_fields:
+                simple_settings_updates[field] = value
+
+        return db_payload, nested_settings_updates, simple_settings_updates, practice_areas_updates
+
+    def _merge_nested_settings(
+        self, merged_settings: dict[str, Any], nested_settings_updates: dict[str, Any]
+    ) -> None:
+        """Apply partial updates to nested JSON objects (deep merge subfields).
+
+        Args:
+            merged_settings: Settings dictionary to update in-place
+            nested_settings_updates: Dictionary of nested settings to merge
+        """
+        for field, value in nested_settings_updates.items():
+            if value is not None:
+                existing_value = merged_settings.get(field, {})
+
+                # Deep merge nested dictionaries for partial updates
+                if isinstance(existing_value, dict) and isinstance(value, dict):
+                    merged_settings[field] = self._deep_merge_dict(existing_value, value)
+                else:
+                    # If existing is not a dict, replace it
+                    merged_settings[field] = value
+
+    def _update_practice_areas(
+        self, merged_settings: dict[str, Any], practice_areas_updates: dict[str, Any]
+    ) -> None:
+        """Update practice areas in merged settings.
+
+        Args:
+            merged_settings: Settings dictionary to update in-place
+            practice_areas_updates: Dictionary of practice area updates
+        """
+        # Get existing practice_areas or initialize empty dict
+        existing_practice_areas = merged_settings.get("practice_areas")
+        if existing_practice_areas is None or not isinstance(existing_practice_areas, dict):
+            practice_areas = {}
+        else:
+            # Copy existing practice areas to preserve fields not being updated
+            practice_areas = existing_practice_areas.copy()
+
+        # Update only the practice area lists that are provided in the update
+        if "primary_practice_areas" in practice_areas_updates:
+            practice_areas["primary"] = practice_areas_updates["primary_practice_areas"]
+        if "secondary_practice_areas" in practice_areas_updates:
+            practice_areas["secondary"] = practice_areas_updates["secondary_practice_areas"]
+        if "specializations" in practice_areas_updates:
+            practice_areas["specializations"] = practice_areas_updates["specializations"]
+
+        merged_settings["practice_areas"] = practice_areas
+
+    def _build_update_payload(
+        self, existing_settings: dict[str, Any], update_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Build database update payload with simplified logic.
+
+        Rules:
+        - Direct database columns: Update directly
+        - Nested JSON objects in settings (address, compliance_security,
+          enterprise_features, team_setup):
+          Partial merge - only updated subfields are merged
+        - Simple settings fields (preferred_integration, need_help_importing_data, etc.):
+          Replace entirely
+        - Practice areas: Replace entirely (come as final lists from UI)
+
+        Args:
+            existing_settings: Existing settings JSON from database
+            update_data: Update payload with only fields being updated
+
+        Returns:
+            Database payload ready for update
+        """
+        (
+            db_payload,
+            nested_settings_updates,
+            simple_settings_updates,
+            practice_areas_updates,
+        ) = self._categorize_update_fields(update_data)
 
         # Build settings object if any settings fields are being updated
-        if settings_updates or practice_areas_data:
+        if nested_settings_updates or simple_settings_updates or practice_areas_updates:
             # Start with existing settings to preserve fields not being updated
-            merged_settings = (
-                existing_settings.copy() if isinstance(existing_settings, dict) else {}
-            )
+            merged_settings = existing_settings.copy()
 
-            # Replace entire settings object fields (no sub-field merging)
-            # UI sends complete objects, so we replace them entirely
-            for field, value in settings_updates.items():
+            # Apply partial updates to nested JSON objects (deep merge subfields)
+            self._merge_nested_settings(merged_settings, nested_settings_updates)
+
+            # Replace simple settings fields entirely (no merging)
+            for field, value in simple_settings_updates.items():
                 merged_settings[field] = value
 
-            # Replace entire practice_areas object (same as other settings fields)
-            if practice_areas_data:
-                merged_settings["practice_areas"] = {
-                    "primary": practice_areas_data.get("primary"),
-                    "secondary": practice_areas_data.get("secondary"),
-                    "specializations": practice_areas_data.get("specializations"),
-                }
+            # Update practice areas
+            if practice_areas_updates:
+                self._update_practice_areas(merged_settings, practice_areas_updates)
 
             db_payload["settings"] = merged_settings
 
         return db_payload
-
-    @staticmethod
-    def _parse_settings(settings_raw: Any) -> dict[str, Any]:
-        """Parse settings from raw database value.
-
-        Args:
-            settings_raw: Settings value from database (can be str, dict, or None)
-
-        Returns:
-            Parsed settings dictionary, empty dict if invalid
-        """
-        if isinstance(settings_raw, str):
-            try:
-                return json.loads(settings_raw)
-            except (json.JSONDecodeError, TypeError):
-                return {}
-        return settings_raw or {}
 
     @staticmethod
     def _parse_subscription(subscription_raw: Any) -> Subscription | None:
@@ -443,9 +530,67 @@ class OrganizationService:
         }
 
     @staticmethod
+    def _format_organization_for_audit(org_data: dict[str, Any]) -> dict[str, Any]:
+        """Format organization data for audit logging.
+
+        Extracts and formats all organization fields including nested settings
+        into a flat structure suitable for audit log comparison.
+
+        Args:
+            org_data: Raw organization data from database
+
+        Returns:
+            Dictionary with formatted organization data for audit logging
+        """
+        existing_settings = parse_json_field(org_data.get("settings"))
+        is_settings_dict = isinstance(existing_settings, dict)
+        practice_areas = existing_settings.get("practice_areas", {}) if is_settings_dict else {}
+        is_practice_areas_dict = isinstance(practice_areas, dict)
+
+        return {
+            "organization_id": str(org_data["id"]),
+            "name": org_data.get("name"),
+            "slug": org_data.get("slug"),
+            "domain": org_data.get("domain"),
+            "logo_url": org_data.get("logo_url"),
+            "status": org_data.get("status"),
+            "timezone": org_data.get("timezone"),
+            "description": org_data.get("description"),
+            "company_size": org_data.get("company_size"),
+            "industry": org_data.get("industry"),
+            "referral_source": org_data.get("referral_source"),
+            "address": existing_settings.get("address") if is_settings_dict else None,
+            "preferred_integration": (
+                existing_settings.get("preferred_integration") if is_settings_dict else None
+            ),
+            "need_help_importing_data": (
+                existing_settings.get("need_help_importing_data") if is_settings_dict else None
+            ),
+            "need_migration_assistance": (
+                existing_settings.get("need_migration_assistance") if is_settings_dict else None
+            ),
+            "compliance_security": (
+                existing_settings.get("compliance_security") if is_settings_dict else None
+            ),
+            "enterprise_features": (
+                existing_settings.get("enterprise_features") if is_settings_dict else None
+            ),
+            "team_setup": (existing_settings.get("team_setup") if is_settings_dict else None),
+            "primary_practice_areas": (
+                practice_areas.get("primary") if is_practice_areas_dict else None
+            ),
+            "secondary_practice_areas": (
+                practice_areas.get("secondary") if is_practice_areas_dict else None
+            ),
+            "specializations": (
+                practice_areas.get("specializations") if is_practice_areas_dict else None
+            ),
+        }
+
+    @staticmethod
     def _map_to_organization_info(org_data: dict[str, Any]) -> OrganizationInfo:
         """Map raw DB row to OrganizationInfo schema."""
-        settings = OrganizationService._parse_settings(org_data.get("settings"))
+        settings = parse_json_field(org_data.get("settings"))
         subscription_obj = OrganizationService._parse_subscription(org_data.get("subscription"))
         settings_fields = OrganizationService._extract_settings_fields(settings)
 
