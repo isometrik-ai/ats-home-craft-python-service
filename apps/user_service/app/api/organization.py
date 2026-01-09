@@ -401,14 +401,23 @@ async def update_organization(
         organization_id=str(organization_id), update_data=body
     )
 
-    request.state.audit_new_values = body.model_dump(exclude_unset=True, exclude_none=True)
+    # Set audit data from service result
+    request.state.raw_audit_old_data = result.get("old_data")
+    request.state.raw_audit_new_data = body.model_dump(exclude_unset=True, exclude_none=True)
+
+    # Remove old_data from response (only needed for audit logging)
+    response_data = {
+        "organization_id": result["organization_id"],
+        "organization_name": result["organization_name"],
+        "slug": result["slug"],
+    }
 
     return success_response(
         request=request,
         message_key="organizations.success.organization_updated",
         custom_code=CustomStatusCode.UPDATED,
         status_code=http_status.HTTP_200_OK,
-        data=result,
+        data=response_data,
     )
 
 
