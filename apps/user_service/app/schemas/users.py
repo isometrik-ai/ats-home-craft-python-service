@@ -9,6 +9,7 @@ import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from apps.user_service.app.schemas.enums import OrganizationMemberStatus, UserStatus
+from apps.user_service.app.schemas.organizations import OrganizationBasicDetails
 
 
 class RoleInfo(BaseModel):
@@ -130,7 +131,6 @@ class UserProfileData(BaseModel):
         status (str): User's membership status in organization
         joined_at (str): ISO timestamp when user joined organization
         last_active_at (Optional[str]): ISO timestamp of last activity
-        organization_id (str): ID of the organization user belongs to
         user_type (str): Type of user (organization_member, client, candidate)
         role (Optional[RoleInfoWithDescription]): User's assigned role information
             (only for organization_member)
@@ -152,10 +152,6 @@ class UserProfileData(BaseModel):
     )
     joined_at: str | None = Field(None, description="ISO timestamp when user joined organization")
     last_active_at: str | None = Field(None, description="ISO timestamp of last activity")
-    organization_id: str = Field(..., description="ID of the organization user belongs to")
-    # user_type: str = Field(
-    #     ..., description="Type of user (organization_member, client, candidate)"
-    # )
     role: RoleInfoWithDescription | None = Field(
         None,
         description="User's assigned role information (only for organization_member)",
@@ -176,6 +172,10 @@ class UserProfileData(BaseModel):
         None,
         description="Verification preference settings (enabled/disabled and type: PHONE or EMAIL)",
     )
+    organization_details: OrganizationBasicDetails | None = Field(
+        None,
+        description="Organization details",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -190,8 +190,14 @@ class UserProfileData(BaseModel):
                 "status": OrganizationMemberStatus.ACTIVE.value,
                 "joined_at": "2024-12-19T10:00:00Z",
                 "last_active_at": "2024-12-19T15:30:00Z",
-                "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-                "user_type": "organization_member",
+                "organization_details": {
+                    "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                    "name": "Organization 1",
+                    "domain": "organization1.com",
+                    "logo_url": "https://example.com/logo.jpg",
+                    "description": "Organization 1 description",
+                    "company_size": "100",
+                },
                 "role": {
                     "role_id": "550e8400-e29b-41d4-a716-446655440000",
                     "role_name": "Administrator",

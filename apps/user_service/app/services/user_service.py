@@ -13,8 +13,12 @@ from supabase import AsyncClient
 from apps.user_service.app.db.repositories.organization_member_repository import (
     OrganizationMemberRepository,
 )
+from apps.user_service.app.db.repositories.organization_repository import (
+    OrganizationRepository,
+)
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
 from apps.user_service.app.schemas.enums import OrganizationMemberStatus
+from apps.user_service.app.schemas.organizations import OrganizationBasicDetails
 from apps.user_service.app.schemas.users import (
     PermissionInfo,
     RoleInfo,
@@ -24,6 +28,7 @@ from apps.user_service.app.schemas.users import (
     UserProfileData,
     VerificationPreference,
 )
+from apps.user_service.app.services.organization_service import OrganizationService
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.user_utils import (
     update_supabase_user_email,
@@ -63,6 +68,7 @@ class UserService:
         self.organization_member_repository = OrganizationMemberRepository(
             db_connection=db_connection
         )
+        self.organization_repository = OrganizationRepository(db_connection=db_connection)
         self.role_repository = RoleRepository(db_connection=db_connection)
         self.supabase_client = sb_client
 
@@ -431,19 +437,33 @@ class UserService:
         role_info = self._build_role_info(user_profile)
         permissions = self._format_permissions(permissions_data)
 
+        organization_details = await self._build_organization_details(organization_id)
+
         profile_data = self._create_user_profile_data(
             user_profile=user_profile,
-            user_type=self.user_context.user_type or "organization_member",
             role_info=role_info,
             permissions=permissions,
+            organization_details=organization_details,
         )
+
+        profile_response = profile_data.model_dump(exclude_none=True)
 
         audit_data = self._build_audit_data(user_profile, permissions)
 
         return {
-            "profile_data": profile_data,
+            "profile_data": profile_response,
             "audit_data": audit_data,
         }
+
+    async def _build_organization_details(
+        self, organization_id: str
+    ) -> OrganizationBasicDetails | None:
+        """Fetch and normalize organization details for profile responses."""
+        organization = await self.organization_repository.get_organization_details(organization_id)
+        if not organization:
+            return None
+
+        return OrganizationService._map_to_organization_basic_details(organization)
 
     @staticmethod
     def _extract_auth_user_contact(
@@ -1044,18 +1064,18 @@ class UserService:
     def _create_user_profile_data(
         self,
         user_profile: dict[str, Any],
-        user_type: str = "organization_member",
         role_info: RoleInfo | RoleInfoWithDescription | None = None,
         permissions: list[PermissionInfo] | None = None,
+        organization_details: OrganizationBasicDetails | None = None,
     ) -> UserProfileData:
         """Creates a UserProfileData object from user profile data.
         This is the single source of truth for creating user profile responses.
 
         Args:
             user_profile: User profile data from database
-            user_type: Type of user (default: organization_member)
             role_info: Optional role information
             permissions: Optional list of permissions
+            organization_details: Optional organization details
 
         Returns:
             UserProfileData object with formatted user profile
@@ -1091,12 +1111,11 @@ class UserService:
                 and isinstance(user_profile["last_active_at"], datetime)
                 else user_profile["last_active_at"]
             ),
-            organization_id=str(user_profile["organization_id"]),
-            user_type=user_type,
             role=role_info,
             permissions=permissions or [],
             identities=user_profile.get("identities", []),
             verification_preference=verification_preference,
+            organization_details=organization_details,
         )
 
     def _build_full_name(self, *parts: str) -> str:

@@ -32,6 +32,7 @@ from apps.user_service.app.schemas.organizations import (
     DeleteRequestInfo,
     NewOrganizationBody,
     OrganizationAdminUpdate,
+    OrganizationBasicDetails,
     OrganizationInfo,
     OrganizationListResponse,
 )
@@ -220,7 +221,7 @@ class OrganizationService:
         validate_uuid_format(organization_id, "organization_id")
 
         # Get only the minimal fields needed for update (id, name, slug, settings)
-        existing = await self.organization_repository.get_organization_for_update(organization_id)
+        existing = await self.organization_repository.get_organization_details(organization_id)
         if not existing:
             raise NotFoundException(
                 message_key="organizations.errors.not_found",
@@ -473,6 +474,24 @@ class OrganizationService:
             primary_practice_areas=settings_fields["primary_practice_areas"],
             secondary_practice_areas=settings_fields["secondary_practice_areas"],
             specializations=settings_fields["specializations"],
+        )
+
+    @staticmethod
+    def _map_to_organization_basic_details(org_data: dict[str, Any]) -> OrganizationBasicDetails:
+        """Map raw DB row to organization basic details schema."""
+        settings = OrganizationService._parse_settings(org_data.get("settings"))
+        settings_fields = OrganizationService._extract_settings_fields(settings)
+
+        return OrganizationBasicDetails(
+            id=str(org_data["id"]),
+            name=org_data.get("name"),
+            domain=org_data.get("domain"),
+            logo_url=org_data.get("logo_url"),
+            description=org_data.get("description"),
+            company_size=org_data.get("company_size"),
+            address=settings_fields["address"],
+            primary_practice_areas=settings_fields["primary_practice_areas"],
+            secondary_practice_areas=settings_fields["secondary_practice_areas"],
         )
 
     @staticmethod

@@ -200,27 +200,34 @@ class OrganizationRepository:
         )
         return dict(row) if row else None
 
-    async def get_organization_for_update(
+    async def get_organization_details(
         self,
         organization_id: str,
+        status: OrganizationStatus = OrganizationStatus.ACTIVE,
     ) -> dict[str, Any] | None:
-        """Get minimal organization fields needed for update operations.
+        """Get organization basic details."""
 
-        Returns id, name, slug, and settings.
-        """
-        deleted_status = OrganizationStatus.DELETED.value
         query = """
             SELECT
                 o.id,
                 o.name,
                 o.slug,
-                o.settings
+                o.domain,
+                o.logo_url,
+                o.status,
+                o.timezone,
+                o.settings,
+                o.subscription,
+                o.description,
+                o.company_size,
+                o.created_at,
+                o.updated_at
             FROM organizations o
             WHERE o.id = $1
-            AND o.status != $2
+            AND o.status = $2
             LIMIT 1
         """
-        row = await self.db_connection.fetchrow(query, organization_id, deleted_status)
+        row = await self.db_connection.fetchrow(query, organization_id, status.value)
         return dict(row) if row else None
 
     # VALIDATION OPERATIONS
