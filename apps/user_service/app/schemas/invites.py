@@ -63,7 +63,8 @@ class InviteCreateRequest(BaseModel):
     first_name: str = Field(..., min_length=2)
     last_name: str | None = Field(None, min_length=2)
     email: EmailStr = Field(..., description="Email address to invite")
-    phone: str | None = None
+    phone_number: str | None = None
+    phone_isd_code: str | None = None
     role_id: uuid.UUID = Field(default="member", description="Role: owner, admin, or member")
 
     model_config = ConfigDict(

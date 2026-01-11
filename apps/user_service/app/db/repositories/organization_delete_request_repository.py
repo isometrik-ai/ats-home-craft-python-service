@@ -190,7 +190,7 @@ class OrganizationDeleteRequestRepository:
         request_id: str,
         status: str,
         approver_id: str,
-        decision_reason: str,
+        review_reason: str,
     ) -> dict[str, Any]:
         """Update delete request status (approve or reject).
 
@@ -202,7 +202,7 @@ class OrganizationDeleteRequestRepository:
             request_id (str): Delete request ID
             status (str): New status ('approved' or 'rejected')
             approver_id (str): User ID of the approver
-            decision_reason (str): Reason for the decision
+            review_reason (str): Reason for the review
 
         Returns:
             dict[str, Any]: Updated delete request record
@@ -214,14 +214,14 @@ class OrganizationDeleteRequestRepository:
             UPDATE organization_delete_requests
             SET status = $1,
                 approver_id = $2,
-                decision_reason = $3,
-                decision_at = NOW()
+                review_reason = $3,
+                reviewed_at = NOW()
             WHERE id = $4
             RETURNING *
         """
 
         row = await self.db_connection.fetchrow(
-            query, status, approver_id, decision_reason, request_id
+            query, status, approver_id, review_reason, request_id
         )
         if not row:
             raise ValueError("Delete request not found or already processed. Cannot update status.")
@@ -231,14 +231,14 @@ class OrganizationDeleteRequestRepository:
         self,
         request_id: str,
         approver_id: str,
-        decision_reason: str,
+        review_reason: str,
     ) -> dict[str, Any]:
         """Approve a delete request.
 
         Args:
             request_id (str): Delete request ID
             approver_id (str): User ID of the approver
-            decision_reason (str): Reason for approval
+            review_reason (str): Reason for approval
 
         Returns:
             dict[str, Any]: Updated delete request record
@@ -247,21 +247,21 @@ class OrganizationDeleteRequestRepository:
             request_id=request_id,
             status=DeleteRequestStatus.APPROVED.value,
             approver_id=approver_id,
-            decision_reason=decision_reason,
+            review_reason=review_reason,
         )
 
     async def reject_delete_request(
         self,
         request_id: str,
         approver_id: str,
-        decision_reason: str,
+        review_reason: str,
     ) -> dict[str, Any]:
         """Reject a delete request.
 
         Args:
             request_id (str): Delete request ID
             approver_id (str): User ID of the approver
-            decision_reason (str): Reason for rejection
+            review_reason (str): Reason for rejection
 
         Returns:
             dict[str, Any]: Updated delete request record
@@ -270,5 +270,5 @@ class OrganizationDeleteRequestRepository:
             request_id=request_id,
             status=DeleteRequestStatus.REJECTED.value,
             approver_id=approver_id,
-            decision_reason=decision_reason,
+            review_reason=review_reason,
         )

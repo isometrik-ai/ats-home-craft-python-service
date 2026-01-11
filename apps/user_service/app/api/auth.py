@@ -218,7 +218,7 @@ async def reset_password(
     request: Request,
     data: ResetPasswordRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
-    sb_client: AsyncClient = Depends(supabase_service),
+    sb_client: AsyncClient = Depends(supabase_anon),
 ):
     """Reset user password using token from email"""
     auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)

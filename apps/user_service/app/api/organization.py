@@ -95,6 +95,7 @@ async def get_organizations_list(
     await require_permission(
         permission_code="organization.appscrip.manage",
         user_context=user_context,
+        db_connection=db_connection,
     )
 
     # Create service with user context and delegate to service

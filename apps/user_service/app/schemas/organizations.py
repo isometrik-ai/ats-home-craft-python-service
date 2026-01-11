@@ -466,10 +466,10 @@ class DeleteRequestInfo(BaseModel):
         requester_id (str): User ID of the requester
         status (str): Request status (pending, approved, rejected, cancelled, completed)
         requested_at (str): ISO timestamp when request was created
-        decision_at (str | None): ISO timestamp when decision was made
+        reviewed_at (str | None): ISO timestamp when review was made
         processed_at (str | None): ISO timestamp when request was processed
         approver_id (str | None): User ID of the approver
-        decision_reason (str | None): Reason for the decision
+        review_reason (str | None): Reason for the review
         created_at (str): ISO timestamp when record was created
         updated_at (str): ISO timestamp when record was last updated
     """
@@ -479,10 +479,10 @@ class DeleteRequestInfo(BaseModel):
     requester_id: str = Field(..., description="User ID of the requester")
     status: DeleteRequestStatus = Field(..., description="Request status")
     requested_at: str = Field(..., description="ISO timestamp when request was created")
-    decision_at: str | None = Field(None, description="ISO timestamp when decision was made")
+    reviewed_at: str | None = Field(None, description="ISO timestamp when review was made")
     processed_at: str | None = Field(None, description="ISO timestamp when request was processed")
     approver_id: str | None = Field(None, description="User ID of the approver")
-    decision_reason: str | None = Field(None, description="Reason for the decision")
+    review_reason: str | None = Field(None, description="Reason for the review")
     created_at: str = Field(..., description="ISO timestamp when record was created")
     updated_at: str = Field(..., description="ISO timestamp when record was last updated")
 
@@ -516,10 +516,10 @@ class DeleteRequestListResponse(BaseModel):
                         "requester_id": "660e8400-e29b-41d4-a716-446655440001",
                         "status": DeleteRequestStatus.PENDING.value,
                         "requested_at": "2024-12-19T10:00:00Z",
-                        "decision_at": None,
+                        "reviewed_at": None,
                         "processed_at": None,
                         "approver_id": None,
-                        "decision_reason": None,
+                        "review_reason": None,
                         "created_at": "2024-12-19T10:00:00Z",
                         "updated_at": "2024-12-19T10:00:00Z",
                     }

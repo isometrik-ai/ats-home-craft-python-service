@@ -100,7 +100,8 @@ class SignupRequest(BaseModel):
     first_name: str = Field(..., min_length=2)
     last_name: str | None = Field(None, min_length=2)
     # job_title: Optional[str] = None
-    phone: str | None = None
+    phone_number: str | None = Field(None, min_length=1, max_length=20)
+    phone_isd_code: str | None = Field(None, min_length=1, max_length=5)
     timezone: str | None = Field(default="UTC", max_length=3)
     verification_id: str = Field(
         ..., description="Verification code ID from verification-code/send endpoint"
@@ -126,7 +127,8 @@ class UserInfo(BaseModel):
     email: str
     first_name: str | None = None
     last_name: str | None = None
-    phone: str | None = None
+    phone_number: str | None = None
+    phone_isd_code: str | None = None
     timezone: str | None = Field(alias="timezone")
     org_setup_status_completed: bool = False
     organization_id: str | None = None
@@ -258,7 +260,8 @@ class User(BaseModel):
 
     first_name: str = Field(..., min_length=1, max_length=50)
     last_name: str | None = Field(None, min_length=1, max_length=50)
-    phone: str | None = Field(None, min_length=1, max_length=20)
+    phone_number: str | None = Field(None, min_length=1, max_length=20)
+    phone_isd_code: str | None = Field(None, min_length=1, max_length=5)
     timezone: str | None = Field(None, min_length=1, max_length=50)
 
 

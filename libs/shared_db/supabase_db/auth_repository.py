@@ -6,6 +6,7 @@ Use with the service client for admin operations on auth users.
 from typing import Any
 
 from supabase import AsyncClient
+from supabase_auth.types import VerifyOtpParams
 
 from apps.user_service.app.schemas.auth import SignupRequest
 from libs.shared_utils.http_exceptions import BadRequestException
@@ -173,18 +174,24 @@ async def update_phone(
     client: AsyncClient,
     user_id: str,
     existing_metadata: dict[str, Any],
-    phone: str,
+    phone_number: str,
+    phone_isd_code: str,
 ) -> bool:
     """Update phone number of user in auth.users table user_metadata.
     Args:
         client: Supabase client
         user_id: User's ID
         existing_metadata: User's existing metadata
-        phone: User's phone number
+        phone_number: Phone number (without ISD code)
+        phone_isd_code: Phone ISD code (e.g., '+91')
     Returns:
         bool: True if phone updated successfully, False otherwise
     """
-    updated_metadata = {**(existing_metadata or {}), "phone": phone}
+    updated_metadata = {
+        **(existing_metadata or {}),
+        "phone_number": phone_number,
+        "phone_isd_code": phone_isd_code,
+    }
     result = await client.auth.admin.update_user_by_id(
         user_id,
         {"user_metadata": updated_metadata},
@@ -273,7 +280,8 @@ async def sign_up_supabase_user(body: SignupRequest, sb_client: AsyncClient):
                 "data": {
                     "first_name": body.first_name,
                     "last_name": body.last_name,
-                    "phone": body.phone,
+                    "phone_number": body.phone_number,
+                    "phone_isd_code": body.phone_isd_code,
                     "timezone": body.timezone,
                     "salutation": body.salutation,
                 }
@@ -319,18 +327,32 @@ async def send_password_reset_email(email: str, sb_client: AsyncClient):
     return await sb_client.auth.reset_password_email(email)
 
 
-async def update_password_with_token(
-    token: str, new_password: str, sb_admin_client: AsyncClient
-) -> dict:
-    """Update password with token using Supabase Auth Admin API
+async def update_password_with_token(token: str, new_password: str, sb_client: AsyncClient) -> dict:
+    """Update password with recovery token using standard Supabase flow.
+
+    This follows the standard Supabase password reset flow:
+    1. Verify the recovery token using verify_otp
+    2. Update password using update_user (which uses the verified session)
+
     Args:
-        token: User's token
+        token: Recovery token from password reset email URL (use the token parameter,
+               not the access_token from the URL hash)
         new_password: New password
-        sb_admin_client: Supabase admin client
+        sb_client: Supabase anon client (not admin client)
     Returns:
         dict: Supabase auth response containing user and session information
     """
-    return await sb_admin_client.auth.admin.update_user_by_id(token, {"password": new_password})
+    # Step 1: Verify the recovery token - this establishes a session
+    verify_params: VerifyOtpParams = {"token_hash": token, "type": "recovery"}
+    verify_response = await sb_client.auth.verify_otp(verify_params)
+
+    if not verify_response.session:
+        raise ValueError("Token verification failed - no session established")
+
+    # Step 2: Update password using the verified session
+    update_response = await sb_client.auth.update_user({"password": new_password})
+
+    return update_response
 
 
 async def refresh_session(refresh_token: str, supabase_client: AsyncClient) -> dict:

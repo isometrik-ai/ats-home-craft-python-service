@@ -12,10 +12,7 @@ from typing import Any
 
 # Third-party imports
 import asyncpg
-import jwt
 from supabase import AsyncClient, AuthApiError
-
-from apps.user_service.app.config.app_settings import shared_settings
 
 # repositories
 from apps.user_service.app.db.repositories import (
@@ -63,7 +60,9 @@ from libs.shared_db.supabase_db.auth_repository import (
     update_password_with_link_identity,
     update_password_with_token,
 )
-from libs.shared_middleware.jwt_auth import get_user_from_token
+
+# Internal utility imports
+from libs.shared_middleware.jwt_auth import get_claims_from_token
 
 # Shared exceptions and status codes
 from libs.shared_utils.http_exceptions import (
@@ -76,8 +75,6 @@ from libs.shared_utils.http_exceptions import (
     UnauthorizedException,
     ValidationException,
 )
-
-# Internal utility imports
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -364,6 +361,8 @@ class AuthService:
         verification_code: str,
         stored_given_input: str,
         email: str,
+        phone_number: str | None = None,
+        phone_isd_code: str | None = None,
     ) -> VerifyVerificationCodeRequest:
         """Create VerifyVerificationCodeRequest based on verification type.
 
@@ -371,8 +370,11 @@ class AuthService:
             verification_preference: Verification preference dict
             verification_id: Verification code ID
             verification_code: Verification code
-            stored_given_input: Stored email or phone
+            stored_given_input: Stored email (for EMAIL type) or
+                phone (for PHONE type, used for validation only)
             email: User email
+            phone_number: Phone number from user_metadata (for PHONE type)
+            phone_isd_code: Phone ISD code from user_metadata (for PHONE type)
 
         Returns:
             VerifyVerificationCodeRequest object
@@ -383,11 +385,17 @@ class AuthService:
         verification_method = verification_preference.get("type", "EMAIL").upper()
 
         if verification_method == "PHONE":
+            if not phone_number or not phone_isd_code:
+                raise BadRequestException(
+                    message_key="auth.errors.phone_number_missing",
+                    custom_code=CustomStatusCode.BAD_REQUEST,
+                )
             return VerifyVerificationCodeRequest(
                 type=VerificationType.PHONE_NUMBER,
                 verification_id=verification_id,
                 verification_code=verification_code,
-                phoneNumber=stored_given_input,
+                phone_number=phone_number,
+                phone_isd_code=phone_isd_code,
             )
         # For email verification, verify that stored_given_input matches user's email
         if stored_given_input.lower() != email.lower():
@@ -439,6 +447,8 @@ class AuthService:
         verification_code: str | None,
         email: str,
         user_phone: str | None = None,
+        phone_number: str | None = None,
+        phone_isd_code: str | None = None,
     ) -> None:
         """Check if user has 2FA enabled and verify the code if required.
 
@@ -447,7 +457,10 @@ class AuthService:
             verification_id: Optional verification code ID
             verification_code: Optional verification code
             email: User email for verification
-            user_phone: Optional user phone number (for PHONE type verification)
+            user_phone: Optional user phone number
+             (for PHONE type verification, used for validation only)
+            phone_number: Phone number from user_metadata (for PHONE type verification)
+            phone_isd_code: Phone ISD code from user_metadata (for PHONE type verification)
 
         Raises:
             BadRequestException: If 2FA verification fails
@@ -465,10 +478,17 @@ class AuthService:
         # Validate phone match if PHONE type
         verification_method = verification_preference.get("type", "EMAIL").upper()
         if verification_method == "PHONE":
+            # Validate phone match using stored_given_input
             self._validate_phone_match(stored_given_input, user_phone)
 
         verify_data = self._create_verification_request(
-            verification_preference, verification_id, verification_code, stored_given_input, email
+            verification_preference,
+            verification_id,
+            verification_code,
+            stored_given_input,
+            email,
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
         )
 
         await self._verify_2fa_code(
@@ -535,7 +555,12 @@ class AuthService:
 
         # Get user metadata for 2FA check
         user_metadata = getattr(user, "user_metadata", {}) or {}
-        user_phone = getattr(user, "phone", None) or user_metadata.get("phone")
+        # Get phone for 2FA check (combine phone_number and phone_isd_code)
+        phone_number = user_metadata.get("phone_number")
+        phone_isd_code = user_metadata.get("phone_isd_code")
+        user_phone = None
+        if phone_number and phone_isd_code:
+            user_phone = f"{phone_isd_code}{phone_number}"
 
         # Check 2FA after password verification (security best practice)
         await self._check_and_verify_2fa(
@@ -544,6 +569,8 @@ class AuthService:
             verification_code=data.verification_code,
             email=data.email,
             user_phone=user_phone,
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
         )
 
         # Get organization_id from organization_members table
@@ -567,7 +594,8 @@ class AuthService:
                 email=getattr(user, "email", None),
                 first_name=user_metadata.get("first_name", None),
                 last_name=user_metadata.get("last_name", None),
-                phone=user_metadata.get("phone", None),
+                phone_number=phone_number,
+                phone_isd_code=phone_isd_code,
                 timezone=user_metadata.get("timezone", None),
                 org_setup_status_completed=bool(organization_id),
                 organization_id=organization_id,
@@ -606,26 +634,24 @@ class AuthService:
 
         return access_token.strip(), refresh_token.strip()
 
-    def _decode_and_validate_access_token(self, access_token: str) -> tuple[str, bool]:
+    async def _decode_and_validate_access_token(
+        self, access_token: str, supabase_client: AsyncClient
+    ) -> tuple[str | None, bool]:
         """Decode access token and check if it's expired.
 
         Args:
             access_token: Access token to decode
+            supabase_client: Supabase client instance
 
         Returns:
-            Tuple of (user_id, is_expired) where is_expired is True if token is expired
+            Tuple of (user_id, is_expired) where is_expired is True if token is expired.
+            user_id will be None if token is expired.
 
         Raises:
-            UnauthorizedException: If access token is invalid
+            UnauthorizedException: If access token is invalid (but not if it's just expired)
         """
         try:
-            decoded_access_token = jwt.decode(
-                access_token,
-                shared_settings.supabase.jwt_secret,
-                algorithms=["HS256"],
-                audience="authenticated",
-                options={"verify_exp": False},
-            )
+            decoded_access_token = await get_claims_from_token(access_token, supabase_client)
             access_token_user_id = decoded_access_token.get("sub")
 
             # Check if token is expired (required for refresh)
@@ -633,11 +659,12 @@ class AuthService:
             is_expired = not (exp and exp > int(time.time()))
 
             return access_token_user_id, is_expired
-        except jwt.InvalidTokenError as exc:
-            raise UnauthorizedException(
-                message_key="auth.errors.authentication_failed",
-                custom_code=CustomStatusCode.UNAUTHORIZED,
-            ) from exc
+        except UnauthorizedException as e:
+            # Allow expired tokens for refresh flows
+            if e.message_key == "errors.token_expired":
+                return None, True
+            # Re-raise for invalid tokens
+            raise
 
     async def _refresh_user_session_with_error_handling(self, refresh_token: str) -> Any:
         """Refresh user session with comprehensive error handling.
@@ -740,7 +767,9 @@ class AuthService:
         access_token, refresh_token = self._validate_tokens_present(access_token, refresh_token)
 
         # Decode access token and check expiration
-        access_token_user_id, is_expired = self._decode_and_validate_access_token(access_token)
+        access_token_user_id, is_expired = await self._decode_and_validate_access_token(
+            access_token, self.supabase_client
+        )
 
         # If token is not expired, return without refreshing
         if not is_expired:
@@ -749,8 +778,9 @@ class AuthService:
         # Refresh the session
         res = await self._refresh_user_session_with_error_handling(refresh_token)
 
-        # Verify tokens belong to same user
-        self._validate_token_user_match(access_token_user_id, res.user.id)
+        # Verify tokens belong to same user (skip if access token was expired)
+        if access_token_user_id is not None:
+            self._validate_token_user_match(access_token_user_id, res.user.id)
 
         return RefreshSessionResponse(
             access_token=res.session.access_token,
@@ -823,17 +853,21 @@ class AuthService:
         Raises:
             NotFoundException: If user not found
             BadRequestException: If password is weak or update fails
+            InternalServerErrorException: If supabase client is not configured
         """
-        user = get_user_from_token(token)
-        if not user:
+        self._validate_password_strength(new_password)
+
+        # Use anon client for recovery token operations (standard Supabase flow)
+        try:
+            result = await update_password_with_token(token, new_password, self.supabase_client)
+        except (AuthApiError, ValueError, Exception) as exc:
+            # Convert to NotFoundException to maintain same behavior
+            logger.error("Password reset token validation failed: %s", str(exc))
             raise NotFoundException(
                 message_key="auth.errors.email_not_found_in_system",
                 custom_code=CustomStatusCode.NOT_FOUND,
-            )
+            ) from exc
 
-        self._validate_password_strength(new_password)
-
-        result = await update_password_with_token(user["sub"], new_password, self.supabase_client)
         if not result.user:
             logger.error("Password update failed - no user in result")
             raise BadRequestException(
@@ -842,14 +876,16 @@ class AuthService:
             )
 
         # Send password reset success email to user
-        user_email = user.get("email", "")
-        user_metadata = user.get("user_metadata", {})
+        user_email = result.user.email if result.user else ""
+        user_metadata = result.user.user_metadata or {}
         user_name = (
             user_metadata.get("full_name", "")
             or (
                 f"{user_metadata.get('first_name', '')} {user_metadata.get('last_name', '')}"
             ).strip()
             or user_email.split("@")[0]
+            if user_email
+            else ""
         )
 
         try:
@@ -884,16 +920,17 @@ class AuthService:
 
         signup_result = await sign_up_supabase_user(signup_data, self.supabase_client)
 
-        session = await self._get_session_after_signup(signup_result=signup_result)
+        session = self._get_session_after_signup(signup_result=signup_result)
 
         if not session:
             raise InternalServerErrorException(
-                message_key="auth.errors.failed_to_create_session",
+                message_key="auth.errors.session_not_created_after_signup",
                 custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
 
         self._send_welcome_email_safely(email=signup_data.email, first_name=signup_data.first_name)
 
+        user_metadata = signup_result.user.user_metadata or {}
         return AuthResponse(
             access_token=session.access_token,
             refresh_token=session.refresh_token,
@@ -902,10 +939,11 @@ class AuthService:
             user=UserInfo(
                 id=signup_result.user.id,
                 email=signup_result.user.email,
-                first_name=signup_result.user.user_metadata.get("first_name", None),
-                last_name=signup_result.user.user_metadata.get("last_name", None),
-                phone=signup_result.user.user_metadata.get("phone", None),
-                timezone=signup_result.user.user_metadata.get("timezone", None),
+                first_name=user_metadata.get("first_name", None),
+                last_name=user_metadata.get("last_name", None),
+                phone_number=user_metadata.get("phone_number", None),
+                phone_isd_code=user_metadata.get("phone_isd_code", None),
+                timezone=user_metadata.get("timezone", None),
             ),
         )
 

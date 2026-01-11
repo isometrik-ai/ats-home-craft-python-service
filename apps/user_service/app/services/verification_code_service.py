@@ -15,7 +15,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
-import jwt
 import supabase
 from fastapi import Request
 from supabase.lib.client_options import AsyncClientOptions
@@ -42,6 +41,7 @@ from apps.user_service.app.utils.email_utils import send_verification_code_email
 
 # Shared library imports
 from libs.shared_db.supabase_db.auth_repository import get_user_by_id
+from libs.shared_middleware.jwt_auth import get_claims_from_token
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     ConflictException,
@@ -149,6 +149,21 @@ class VerificationCodeService:
         # Remove '+' sign if present for comparison
         return phone.lstrip("+")
 
+    @staticmethod
+    def _combine_phone(phone_number: str | None, phone_isd_code: str | None) -> str | None:
+        """Combine phone_number and phone_isd_code into full phone number.
+
+        Args:
+            phone_number: Phone number without ISD code
+            phone_isd_code: ISD code (e.g., '+91')
+
+        Returns:
+            Combined phone number or None if either is missing
+        """
+        if not phone_number or not phone_isd_code:
+            return None
+        return f"{phone_isd_code}{phone_number}"
+
     # VALIDATION METHODS
     async def _validate_email_for_update(
         self, email: str, user_id: str, current_user_email: str
@@ -242,10 +257,15 @@ class VerificationCodeService:
         """
         user_data = await get_user_by_id(self.supabase_client, user_id)
         if user_data and hasattr(user_data, "user") and user_data.user:
-            # Check the actual phone field, not user_metadata
+            # Get phone from user_metadata
+            user_metadata = user_data.user.user_metadata or {}
+            current_phone_number = user_metadata.get("phone_number")
+            current_phone_isd_code = user_metadata.get("phone_isd_code")
+
+            # Combine current phone if available
             current_user_phone = None
-            if hasattr(user_data.user, "phone") and user_data.user.phone:
-                current_user_phone = user_data.user.phone
+            if current_phone_number and current_phone_isd_code:
+                current_user_phone = f"{current_phone_isd_code}{current_phone_number}"
 
             # Normalize both phones for comparison (remove '+' if present)
             normalized_input_phone = self._normalize_phone(phone)
@@ -307,7 +327,7 @@ class VerificationCodeService:
         if data.type == VerificationType.EMAIL:
             given_input = data.email
         else:  # PHONE_NUMBER
-            given_input = data.phoneNumber
+            given_input = self._combine_phone(data.phone_number, data.phone_isd_code)
 
         stored_given_input = verification_record.get("given_input")
         if stored_given_input != given_input:
@@ -453,21 +473,14 @@ class VerificationCodeService:
                 custom_code=CustomStatusCode.UNAUTHORIZED,
             )
 
-        # Decode JWT to get expiration time
-        supabase_jwt_secret = app_settings.shared_settings.supabase.jwt_secret
-        if not supabase_jwt_secret:
+        # Decode JWT to get expiration time using get_claims
+        if not self.supabase_client:
             raise InternalServerErrorException(
                 message_key="errors.missing_configuration",
                 custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
 
-        decoded = jwt.decode(
-            access_token,
-            supabase_jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-            options={"verify_exp": False},
-        )
+        decoded = await get_claims_from_token(access_token, self.supabase_client)
         exp = decoded.get("exp", 0)
         current_time = int(time.time())
 
@@ -553,12 +566,15 @@ class VerificationCodeService:
             custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         )
 
-    async def _update_user_phone(self, user_id: str, phone: str) -> bool:
+    async def _update_user_phone(
+        self, user_id: str, phone_number: str, phone_isd_code: str
+    ) -> bool:
         """Update user phone number using Supabase admin API.
 
         Args:
             user_id: User ID to update
-            phone: New phone number
+            phone_number: New phone number (without ISD code)
+            phone_isd_code: New phone ISD code (e.g., '+91')
 
         Returns:
             True if phone was updated successfully
@@ -566,45 +582,38 @@ class VerificationCodeService:
         Raises:
             InternalServerErrorException: If update fails
         """
-        current_time = datetime.now(timezone.utc).isoformat()
         user_data = await self.supabase_client.auth.admin.get_user_by_id(user_id)
         existing_metadata = {}
         if user_data and user_data.user:
             existing_metadata = user_data.user.user_metadata or {}
 
         updated_metadata = dict(existing_metadata)
-        updated_metadata["phone"] = phone
+        # Store phone_number and phone_isd_code separately in user_metadata
+        updated_metadata["phone_number"] = phone_number
+        updated_metadata["phone_isd_code"] = phone_isd_code
 
         response = await self.supabase_client.auth.admin.update_user_by_id(
-            user_id,
-            {"phone": phone, "phone_confirmed_at": current_time},
-        )
-
-        await self.supabase_client.auth.admin.update_user_by_id(
             user_id,
             {"user_metadata": updated_metadata},
         )
 
         if response and response.user:
-            # Verify the phone was actually updated in both places
-            updated_phone = response.user.phone if hasattr(response.user, "phone") else None
-            updated_metadata_phone = None
-            if hasattr(response.user, "user_metadata") and response.user.user_metadata:
-                updated_metadata_phone = response.user.user_metadata.get("phone")
+            # Verify the phone was actually updated in user_metadata
+            updated_metadata_check = response.user.user_metadata or {}
+            updated_phone_number = updated_metadata_check.get("phone_number")
+            updated_phone_isd_code = updated_metadata_check.get("phone_isd_code")
 
-            # Verify both phone field and user_metadata were updated
-            if updated_phone != phone or updated_metadata_phone != phone:
+            # Verify both phone_number and phone_isd_code were updated
+            if updated_phone_number != phone_number or updated_phone_isd_code != phone_isd_code:
                 # Retry update if phone doesn't match
                 await self.supabase_client.auth.admin.update_user_by_id(
                     user_id,
-                    {
-                        "phone": phone,
-                        "phone_confirmed_at": current_time,
-                        "user_metadata": updated_metadata,
-                    },
+                    {"user_metadata": updated_metadata},
                 )
-            # Also update organization_members table
-            await self.organization_member_repository.update_user_phone_by_user_id(user_id, phone)
+            # Also update organization_members table with separate phone_number and phone_isd_code
+            await self.organization_member_repository.update_user_phone_by_user_id(
+                user_id, phone_number, phone_isd_code
+            )
             return True
 
         raise InternalServerErrorException(
@@ -613,7 +622,13 @@ class VerificationCodeService:
         )
 
     async def _update_email_or_phone(
-        self, user_id: str, given_input: str, triggered_text: str, access_token: str
+        self,
+        user_id: str,
+        given_input: str,
+        triggered_text: str,
+        access_token: str,
+        phone_number: str | None = None,
+        phone_isd_code: str | None = None,
     ) -> tuple[bool, bool]:
         """Update email or phone number using Supabase auth.update_user() with user's token.
 
@@ -625,6 +640,8 @@ class VerificationCodeService:
             given_input: Email or phone number to set
             triggered_text: The trigger type from verification record
             access_token: User's JWT access token for authentication
+            phone_number: Phone number without ISD code (required for PHONE_NUMBER_UPDATE)
+            phone_isd_code: Phone ISD code (required for PHONE_NUMBER_UPDATE)
 
         Returns:
             Tuple of (email_updated, phone_updated)
@@ -638,7 +655,12 @@ class VerificationCodeService:
                 email_updated = await self._update_user_email(user_id, given_input)
                 return email_updated, False
             if triggered_text == VerificationTrigger.PHONE_NUMBER_UPDATE.value:
-                phone_updated = await self._update_user_phone(user_id, given_input)
+                if not phone_number or not phone_isd_code:
+                    raise BadRequestException(
+                        message_key="verification_codes.errors.phoneNumber_required",
+                        custom_code=CustomStatusCode.BAD_REQUEST,
+                    )
+                phone_updated = await self._update_user_phone(user_id, phone_number, phone_isd_code)
                 return False, phone_updated
             return False, False
 
@@ -706,7 +728,13 @@ class VerificationCodeService:
             await self._validate_email_for_update(data.email, user_id, current_user_email)
             triggered_text = VerificationTrigger.EMAIL_UPDATE.value
         else:  # PHONE_NUMBER
-            await self._validate_phone_for_update(data.phoneNumber, user_id)
+            full_phone = self._combine_phone(data.phone_number, data.phone_isd_code)
+            if not full_phone:
+                raise BadRequestException(
+                    message_key="verification_codes.errors.phoneNumber_required",
+                    custom_code=CustomStatusCode.BAD_REQUEST,
+                )
+            await self._validate_phone_for_update(full_phone, user_id)
             triggered_text = VerificationTrigger.PHONE_NUMBER_UPDATE.value
 
         return user_id, triggered_text
@@ -736,7 +764,13 @@ class VerificationCodeService:
                     custom_code=CustomStatusCode.BAD_REQUEST,
                 )
         else:  # PHONE_NUMBER
-            phone_exists = await self._check_auth_user_exists_by_phone(data.phoneNumber)
+            full_phone = self._combine_phone(data.phone_number, data.phone_isd_code)
+            if not full_phone:
+                raise BadRequestException(
+                    message_key="verification_codes.errors.phoneNumber_required",
+                    custom_code=CustomStatusCode.BAD_REQUEST,
+                )
+            phone_exists = await self._check_auth_user_exists_by_phone(full_phone)
             if phone_exists:
                 raise BadRequestException(
                     message_key="verification_codes.errors.phone_already_registered",
@@ -898,9 +932,13 @@ class VerificationCodeService:
             BadRequestException: For validation errors
             ConflictException: If email/phone already registered
             TooManyRequestsException: For rate limiting
+            InternalServerErrorException: If email not sent
         """
         # Extract given input (email or phone number)
-        given_input = data.email if data.type == VerificationType.EMAIL else data.phoneNumber
+        if data.type == VerificationType.EMAIL:
+            given_input = data.email
+        else:  # PHONE_NUMBER
+            given_input = self._combine_phone(data.phone_number, data.phone_isd_code)
 
         # Determine user context (user_id and triggered_text) and validate input
         user_id, triggered_text = await self._determine_user_context(data, current_user)
@@ -923,11 +961,16 @@ class VerificationCodeService:
         # Send verification code email if type is EMAIL
         if data.type == VerificationType.EMAIL:
             verification_code = verification_record.get("verification_code")
-            send_verification_code_email(
+            email_sent = send_verification_code_email(
                 email=given_input,
                 otp_code=verification_code,
                 expiry_minutes=app_settings.two_fa_settings.verification_code_expiry_minutes,
             )
+            if not email_sent:
+                raise InternalServerErrorException(
+                    message_key="errors.internal_server_error",
+                    custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+                )
 
         # Return response data
         return {
@@ -1001,7 +1044,20 @@ class VerificationCodeService:
                     custom_code=CustomStatusCode.UNAUTHORIZED,
                 )
 
-            await self._update_email_or_phone(user_id, given_input, triggered_text, access_token)
+            # For phone updates, pass phone_number and phone_isd_code separately
+            if triggered_text == VerificationTrigger.PHONE_NUMBER_UPDATE.value:
+                await self._update_email_or_phone(
+                    user_id,
+                    given_input,
+                    triggered_text,
+                    access_token,
+                    phone_number=data.phone_number,
+                    phone_isd_code=data.phone_isd_code,
+                )
+            else:
+                await self._update_email_or_phone(
+                    user_id, given_input, triggered_text, access_token
+                )
 
         # Return success response
         return {"verified": True}

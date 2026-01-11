@@ -39,7 +39,8 @@ class OrganizationMemberRepository:
                 joined_at,
                 first_name,
                 last_name,
-                phone,
+                phone_number,
+                phone_isd_code,
                 timezone,
                 salutation,
                 invited_by
@@ -47,7 +48,7 @@ class OrganizationMemberRepository:
             VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, NOW(), NOW(), NOW(),
-                $8, $9, $10, COALESCE($11, 'UTC'), $12, $13
+                $8, $9, $10, $11, COALESCE($12, 'UTC'), $13, $14
             )
             RETURNING *
         """
@@ -64,7 +65,8 @@ class OrganizationMemberRepository:
             organization_id,
             member_data.get("first_name"),
             member_data.get("last_name"),
-            member_data.get("phone"),
+            member_data.get("phone_number"),
+            member_data.get("phone_isd_code"),
             member_data.get("timezone"),
             member_data.get("salutation"),
             member_data.get("invited_by"),
@@ -102,12 +104,12 @@ class OrganizationMemberRepository:
                 id,
                 user_id,
                 email,
-                full_name,
                 first_name,
                 last_name,
                 avatar_url,
                 salutation,
-                phone,
+                phone_number,
+                phone_isd_code,
                 timezone,
                 role_id,
                 status,
@@ -184,23 +186,36 @@ class OrganizationMemberRepository:
         return row is not None
 
     async def check_phone_exists_for_other_user(
-        self, phone: str, organization_id: str, user_id: str | None = None
+        self,
+        phone_number: str,
+        phone_isd_code: str,
+        organization_id: str,
+        user_id: str | None = None,
     ) -> bool:
-        """Check if phone number exists for another user.
+        """Check if phone number with ISD code exists for another user.
 
         Args:
-            phone: Phone number
+            phone_number: Phone number (without ISD code)
+            phone_isd_code: Phone ISD code (e.g., '+91')
             organization_id: Organization ID
             user_id: Optional user ID to exclude from check
 
         Returns:
-            bool: True if phone number exists for another user, False otherwise
+            bool: True if phone number with ISD code exists for another user, False otherwise
         """
-        where_clause = "WHERE phone = $1 AND organization_id = $2 AND status != $3"
-        params: list[Any] = [phone, organization_id, OrganizationMemberStatus.DELETED.value]
+        where_clause = (
+            "WHERE phone_number = $1 AND phone_isd_code = $2 "
+            "AND organization_id = $3 AND status != $4"
+        )
+        params: list[Any] = [
+            phone_number,
+            phone_isd_code,
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+        ]
 
         if user_id:
-            where_clause += " AND user_id != $4"
+            where_clause += " AND user_id != $5"
             params.append(user_id)
 
         query = f"""
@@ -234,7 +249,7 @@ class OrganizationMemberRepository:
                     OR first_name ILIKE {search_param}
                     OR last_name ILIKE {search_param}
                     OR salutation ILIKE {search_param}
-                    OR phone ILIKE {search_param}
+                    OR phone_number ILIKE {search_param}
                 )
             """
             params.append(search_pattern)
@@ -252,7 +267,8 @@ class OrganizationMemberRepository:
                 first_name,
                 last_name,
                 salutation,
-                phone,
+                phone_number,
+                phone_isd_code,
                 timezone,
                 role_id,
                 status,
@@ -282,11 +298,11 @@ class OrganizationMemberRepository:
             search_pattern = f"%{search}%"
             where_clause += """
                 AND (
-                    email ILIKE $2
-                    OR first_name ILIKE $2
-                    OR last_name ILIKE $2
-                    OR salutation ILIKE $2
-                    OR phone ILIKE $2
+                    email ILIKE $3
+                    OR first_name ILIKE $3
+                    OR last_name ILIKE $3
+                    OR salutation ILIKE $3
+                    OR phone_number ILIKE $3
                 )
             """
             params.append(search_pattern)
@@ -478,22 +494,25 @@ class OrganizationMemberRepository:
         # asyncpg execute returns status string like "UPDATE 3", extract number
         return int(result.split()[-1]) if result else 0
 
-    async def update_user_phone_by_user_id(self, user_id: str, new_phone: str) -> int:
-        """Update user's phone number across all organizations.
+    async def update_user_phone_by_user_id(
+        self, user_id: str, phone_number: str, phone_isd_code: str
+    ) -> int:
+        """Update user's phone number and ISD code across all organizations.
 
         Args:
             user_id: User ID
-            new_phone: New phone number
+            phone_number: New phone number (without ISD code)
+            phone_isd_code: New phone ISD code (e.g., '+91')
 
         Returns:
             int: Number of rows updated
         """
         query = """
             UPDATE organization_members
-            SET phone = $1, updated_at = NOW()
-            WHERE user_id = $2
+            SET phone_number = $1, phone_isd_code = $2, updated_at = NOW()
+            WHERE user_id = $3
         """
-        result = await self.db_connection.execute(query, new_phone, user_id)
+        result = await self.db_connection.execute(query, phone_number, phone_isd_code, user_id)
         # asyncpg execute returns status string like "UPDATE 3", extract number
         return int(result.split()[-1]) if result else 0
 
@@ -557,7 +576,8 @@ class OrganizationMemberRepository:
                 first_name,
                 last_name,
                 salutation,
-                phone,
+                phone_number,
+                phone_isd_code,
                 timezone,
                 role_id,
                 status,
