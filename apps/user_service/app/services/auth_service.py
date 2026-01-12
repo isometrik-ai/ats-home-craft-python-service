@@ -48,7 +48,10 @@ from apps.user_service.app.utils.email_utils import (
     send_password_reset_success_email,
     send_welcome_email,
 )
-from apps.user_service.app.utils.user_utils import get_isometrik_details
+from apps.user_service.app.utils.user_utils import (
+    build_full_name,
+    get_isometrik_details,
+)
 
 # Shared library imports
 from libs.shared_db.supabase_db.auth_repository import (
@@ -878,15 +881,13 @@ class AuthService:
         # Send password reset success email to user
         user_email = result.user.email if result.user else ""
         user_metadata = result.user.user_metadata or {}
-        user_name = (
-            user_metadata.get("full_name", "")
-            or (
-                f"{user_metadata.get('first_name', '')} {user_metadata.get('last_name', '')}"
-            ).strip()
-            or user_email.split("@")[0]
-            if user_email
-            else ""
+
+        user_name = build_full_name(
+            user_metadata.get("salutation"),
+            user_metadata.get("first_name"),
+            user_metadata.get("last_name"),
         )
+        user_name = user_name or user_email.split("@")[0] if user_email else ""
 
         try:
             send_password_reset_success_email(email=user_email, user_name=user_name)
@@ -1021,9 +1022,14 @@ class AuthService:
 
         # Send password change success email
         user_name = (
-            user_metadata.get("first_name")
-            or user_metadata.get("full_name")
+            build_full_name(
+                user_metadata.get("salutation"),
+                user_metadata.get("first_name"),
+                user_metadata.get("last_name"),
+            )
             or user_email.split("@")[0]
+            if user_email
+            else ""
         )
         try:
             send_password_change_success_email(email=user_email, user_name=user_name)

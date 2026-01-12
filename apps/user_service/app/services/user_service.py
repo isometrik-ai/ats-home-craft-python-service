@@ -531,14 +531,9 @@ class UserService:
         if not base_profile:
             first_name = user_metadata.get("first_name", "")
             last_name = user_metadata.get("last_name", "")
-            # Compute full_name from first_name and last_name
-            full_name = f"{first_name} {last_name}".strip() or user_metadata.get(
-                "full_name", current_email.split("@")[0]
-            )
             return {
                 "user_id": user_id,
                 "email": current_email,
-                "full_name": full_name,
                 "first_name": first_name,
                 "last_name": last_name,
                 "avatar_url": user_metadata.get("avatar_url"),
@@ -564,12 +559,6 @@ class UserService:
         if phone_number is not None or phone_isd_code is not None:
             base_profile["phone_number"] = phone_number
             base_profile["phone_isd_code"] = phone_isd_code
-
-        # Compute full_name from first_name and last_name if not present
-        if "full_name" not in base_profile or not base_profile.get("full_name"):
-            first_name = base_profile.get("first_name", "")
-            last_name = base_profile.get("last_name", "")
-            base_profile["full_name"] = f"{first_name} {last_name}".strip()
 
         return base_profile
 
@@ -676,7 +665,8 @@ class UserService:
         return {
             "user_id": str(user_profile["user_id"]),
             "email": user_profile["email"],
-            "full_name": user_profile["full_name"],
+            "first_name": user_profile["first_name"],
+            "last_name": user_profile["last_name"],
             "organization_id": str(user_profile.get("organization_id", "")),
             "role_id": str(user_profile.get("role_id", "")),
             "status": user_profile["status"],
@@ -788,16 +778,12 @@ class UserService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # Compute full_name from first_name and last_name
-        first_name = current_user_data.get("first_name", "")
-        last_name = current_user_data.get("last_name", "")
-        full_name = f"{first_name} {last_name}".strip() or None
-
         # Prepare audit data
         audit_data = {
             "user_id": str(current_user_data["user_id"]),
             "email": current_user_data["email"],
-            "full_name": full_name,
+            "first_name": current_user_data.get("first_name", ""),
+            "last_name": current_user_data.get("last_name", ""),
             "status": OrganizationMemberStatus.SUSPENDED.value,
             "organization_id": str(current_user_data["organization_id"]),
             "banned_by_user_id": self.user_context.user_id,
@@ -868,16 +854,12 @@ class UserService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # Compute full_name from first_name and last_name
-        first_name = current_user_data.get("first_name", "")
-        last_name = current_user_data.get("last_name", "")
-        full_name = f"{first_name} {last_name}".strip() or ""
-
         # Prepare audit data
         audit_data = {
             "user_id": str(current_user_data["user_id"]),
             "email": current_user_data["email"],
-            "full_name": full_name,
+            "first_name": current_user_data.get("first_name", ""),
+            "last_name": current_user_data.get("last_name", ""),
             "status": OrganizationMemberStatus.ACTIVE.value,
             "organization_id": str(current_user_data["organization_id"]),
             "unbanned_by_user_id": self.user_context.user_id,
@@ -917,7 +899,7 @@ class UserService:
         """
         current_user_data = await self._fetch_profile_for_update(user_id, organization_id)
 
-        update_data, metadata_update = self._build_update_payload(body, current_user_data)
+        update_data, metadata_update = self._build_update_payload(body)
 
         if not update_data and not metadata_update:
             raise BadRequestException(
@@ -965,53 +947,38 @@ class UserService:
         if user_data and getattr(user_data, "user", None):
             user_metadata = user_data.user.user_metadata or {}
 
-        # Compute full_name from first_name and last_name
         first_name = user_metadata.get("first_name", "")
         last_name = user_metadata.get("last_name", "")
-        full_name = f"{first_name} {last_name}".strip() or user_metadata.get("full_name", "")
 
         return {
             "user_id": user_id,
             "email": self.user_context.email,
             "first_name": first_name,
             "last_name": last_name,
-            "full_name": full_name,
             "timezone": user_metadata.get("timezone", "UTC"),
             "avatar_url": user_metadata.get("avatar_url"),
             "organization_id": organization_id,
         }
 
     def _build_update_payload(
-        self, body: UpdateUserProfileRequest, current_user_data: dict[str, Any]
+        self, body: UpdateUserProfileRequest
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Create update payloads for DB and auth metadata.
         Args:
             body: Update user profile request body
-            current_user_data: Current user data
         Returns:
             tuple[dict[str, Any], dict[str, Any]]: Update data and metadata update
         """
         update_data: dict[str, Any] = {}
         metadata_update: dict[str, Any] = {}
 
-        current_first_name = current_user_data.get("first_name") or ""
-        current_last_name = current_user_data.get("last_name") or ""
-
         if body.first_name is not None:
             update_data["first_name"] = body.first_name
             metadata_update["first_name"] = body.first_name
-            current_first_name = body.first_name
 
         if body.last_name is not None:
             update_data["last_name"] = body.last_name
             metadata_update["last_name"] = body.last_name
-            current_last_name = body.last_name
-
-        if body.first_name is not None or body.last_name is not None:
-            # Compute full_name for Supabase metadata (not stored in organization_members)
-            full_name = self._compute_full_name(current_first_name, current_last_name)
-            if full_name:
-                metadata_update["full_name"] = full_name
 
         if body.timezone is not None:
             update_data["timezone"] = body.timezone
@@ -1028,18 +995,6 @@ class UserService:
         metadata_update |= self._build_verification_metadata(body)
 
         return update_data, metadata_update
-
-    @staticmethod
-    def _compute_full_name(first_name: str, last_name: str) -> str:
-        """Compute full name from first and last name.
-        Args:
-            first_name: First name
-            last_name: Last name
-        Returns:
-            str: Full name
-        """
-        full_name_parts = [part.strip() for part in [first_name, last_name] if part.strip()]
-        return " ".join(full_name_parts) if full_name_parts else ""
 
     def _build_verification_metadata(self, body: UpdateUserProfileRequest) -> dict[str, Any]:
         """Validate and construct verification preference metadata.
@@ -1090,10 +1045,6 @@ class UserService:
             "first_name": profile.get("first_name"),
             "last_name": profile.get("last_name"),
             "salutation": profile.get("salutation"),
-            "full_name": (
-                f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
-                or profile.get("full_name")
-            ),
             "timezone": profile.get("timezone"),
             "avatar_url": profile.get("avatar_url"),
             "organization_id": str(organization_id) if organization_id else None,
@@ -1133,17 +1084,9 @@ class UserService:
         phone_number = user_profile.get("phone_number", None)
         phone_isd_code = user_profile.get("phone_isd_code", None)
 
-        # Compute full_name from first_name and last_name if not present
-        full_name = user_profile.get("full_name")
-        if not full_name:
-            first_name = user_profile.get("first_name", "")
-            last_name = user_profile.get("last_name", "")
-            full_name = f"{first_name} {last_name}".strip()
-
         return UserProfileData(
             user_id=str(user_profile["user_id"]),
             email=user_profile["email"],
-            full_name=full_name,
             first_name=user_profile["first_name"],
             last_name=user_profile["last_name"],
             avatar_url=user_profile["avatar_url"],
@@ -1169,14 +1112,3 @@ class UserService:
             verification_preference=verification_preference,
             organization_details=organization_details,
         )
-
-    def _build_full_name(self, *parts: str) -> str:
-        """Build a full name from parts.
-
-        Args:
-            *parts: Parts of the full name
-
-        Returns:
-            str: Full name
-        """
-        return " ".join(filter(None, parts))

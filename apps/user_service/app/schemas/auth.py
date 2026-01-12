@@ -65,21 +65,6 @@ class ValidateAccountResponse(BaseModel):
     two_fa_enabled: bool = Field(..., description="Whether 2FA is enabled for the user")
 
 
-class MemberBody(BaseModel):
-    """Request model"""
-
-    email: EmailStr
-    full_name: str
-    phone: str | None = None
-    timezone: str = "UTC"
-
-
-class VerifyEmailRequest(BaseModel):
-    """Request model for Verify Email operations"""
-
-    email: EmailStr
-
-
 class VerifyEmailResponse(BaseModel):
     """Response model for Verify Email operations"""
 

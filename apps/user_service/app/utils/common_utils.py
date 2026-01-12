@@ -478,15 +478,9 @@ def set_audit_old_data_from_user(request: Request, current_user_data: dict) -> N
         request (Request): FastAPI request object for setting audit state
         current_user_data (dict): User profile data from database
     """
-    # Compute full_name from first_name and last_name
-    first_name = current_user_data.get("first_name", "")
-    last_name = current_user_data.get("last_name", "")
-    full_name = f"{first_name} {last_name}".strip() or current_user_data.get("full_name")
-
     audit_data = {
         "user_id": str(current_user_data["user_id"]),
         "email": current_user_data["email"],
-        "full_name": full_name,
         "first_name": current_user_data.get("first_name"),
         "last_name": current_user_data.get("last_name"),
         "phone_number": current_user_data.get("phone_number"),

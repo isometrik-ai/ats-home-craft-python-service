@@ -124,7 +124,8 @@ class UserProfileData(BaseModel):
     Attributes:
         user_id (str): Unique identifier for the user
         email (str): User's email address
-        full_name (Optional[str]): User's full name
+        first_name (Optional[str]): User's first name
+        last_name (Optional[str]): User's last name
         avatar_url (Optional[str]): URL to user's profile picture
         phone_number (Optional[str]): User's phone number (without ISD code)
         phone_isd_code (Optional[str]): User's phone ISD code (e.g., '+91')
@@ -141,7 +142,6 @@ class UserProfileData(BaseModel):
 
     user_id: str = Field(..., description="Unique identifier for the user")
     email: str = Field(..., description="User's email address")
-    full_name: str | None = Field(None, description="full name of the user")
     first_name: str | None = Field(None, description="User's first name")
     last_name: str | None = Field(None, description="User's last name")
     avatar_url: str | None = Field(None, description="URL to user's profile picture")
@@ -184,7 +184,8 @@ class UserProfileData(BaseModel):
             "example": {
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "email": "john.doe@example.com",
-                "full_name": "John Jani janardhan",
+                "first_name": "John",
+                "last_name": "Jani janardhan",
                 "avatar_url": "https://example.com/avatar.jpg",
                 "phone": "+1234567890",
                 "timezone": "UTC",
@@ -247,7 +248,8 @@ class CreateUserRequest(BaseModel):
 
     Attributes:
         email (EmailStr): User's email address (required)
-        full_name (str): User's full name (required)
+        first_name (str): User's first name (required)
+        last_name (str): User's last name (required)
         phone_number (Optional[str]): User's phone number (without ISD code)
         phone_isd_code (Optional[str]): User's phone ISD code (e.g., '+91')
         timezone (str): User's timezone preference
@@ -256,7 +258,8 @@ class CreateUserRequest(BaseModel):
     """
 
     email: EmailStr = Field(..., description="User's New email address")
-    full_name: str = Field(..., min_length=2, max_length=255, description="User's full name")
+    first_name: str = Field(..., min_length=2, max_length=255, description="User's first name")
+    last_name: str = Field(..., min_length=2, max_length=255, description="User's last name")
     phone_number: str | None = Field(None, description="User's phone number (without ISD code)")
     phone_isd_code: str | None = Field(None, description="User's phone ISD code (e.g., '+91')")
     timezone: str | None = Field(default="UTC", description="User's timezone preference")
@@ -267,7 +270,8 @@ class CreateUserRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "email": "new.user@example.com",
-                "full_name": "New User",
+                "first_name": "New",
+                "last_name": "User",
                 "phone_number": "1234567890",
                 "phone_isd_code": "+1",
                 "timezone": "UTC",
@@ -284,7 +288,8 @@ class UpdateUserRequest(BaseModel):
     All fields are optional for partial updates.
 
     Attributes:
-        full_name (Optional[str]): Updated full name
+        first_name (Optional[str]): Updated first name
+        last_name (Optional[str]): Updated last name
         phone_number (Optional[str]): Updated phone number (without ISD code)
         phone_isd_code (Optional[str]): Updated phone ISD code (e.g., '+91')
         timezone (Optional[str]): Updated timezone preference
@@ -292,9 +297,6 @@ class UpdateUserRequest(BaseModel):
         role_id (Optional[str]): Updated role assignment
     """
 
-    full_name: str | None = Field(
-        None, min_length=2, max_length=255, description="Updated full name"
-    )
     first_name: str | None = Field(None, description="Updated first name")
     last_name: str | None = Field(None, description="Updated last name")
     phone_number: str | None = Field(None, description="Updated phone number (without ISD code)")
@@ -312,7 +314,8 @@ class UpdateUserRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "full_name": "Updated Name",
+                "first_name": "Updated",
+                "last_name": "Name",
                 "phone_number": "987654321",
                 "phone_isd_code": "+91",
                 "timezone": "America/New_York",
@@ -338,7 +341,8 @@ class UserListItem(BaseModel):
     Attributes:
         user_id (str): Unique identifier for the user
         email (str): User's email address
-        full_name (Optional[str]): User's full name
+        first_name (Optional[str]): User's first name
+        last_name (Optional[str]): User's last name
         role_name (str): Name of user's assigned role
         status (str): User's membership status
         joined_at (str): ISO timestamp when user joined
@@ -364,7 +368,8 @@ class UserListItem(BaseModel):
             "example": {
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "email": "john@example.com",
-                "full_name": "J Jonnah Jamison",
+                "first_name": "J",
+                "last_name": "Jonnah Jamison",
                 "role_name": "Administrator",
                 "status": OrganizationMemberStatus.ACTIVE.value,
                 "joined_at": "2024-12-19T10:00:00Z",
@@ -420,7 +425,7 @@ class UpdateUserProfileRequest(BaseModel):
     - two_fa_enabled: Enable or disable verification preference
     - verification_method: Type of verification preference (PHONE or EMAIL, defaults to EMAIL)
 
-    full_name will be automatically calculated from first_name + last_name.
+    first_name and last_name will be automatically calculated from first_name + last_name.
     """
 
     first_name: str | None = Field(None, description="Updated first name")

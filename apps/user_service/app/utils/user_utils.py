@@ -75,7 +75,8 @@ async def update_supabase_user_email(
         # Prepare user data for email notification
         user_data = {
             "id": user_id,
-            "full_name": user_info.get("full_name", ""),
+            "first_name": user_info.get("first_name", ""),
+            "last_name": user_info.get("last_name", ""),
             "email": email,  # Use the new email
         }
 
@@ -92,18 +93,19 @@ async def update_supabase_user_email(
 def create_admin_update_email_content(user: dict, magic_link: str) -> tuple[str, str]:
     """Create email subject and content for admin update notification with magic link
     Args:
-        user: User information containing full_name, email
+        user: User information containing first_name, last_name, email
         magic_link: Generated magic link for authentication
     Returns:
         tuple[str, str]: Email subject and HTML message content
 
     Args:
-        user: User information containing full_name, email
+        user: User information containing first_name, last_name, email
         magic_link: Generated magic link for authentication
     Returns:
         tuple[str, str]: Email subject and HTML message content
     """
-    full_name = user.get("full_name", "")
+    first_name = user.get("first_name", "")
+    last_name = user.get("last_name", "")
 
     subject = "Your Email Has Been Updated - XQtiv"
 
@@ -112,7 +114,7 @@ def create_admin_update_email_content(user: dict, magic_link: str) -> tuple[str,
         color: #333333 !important; line-height: 1.6 !important;
         max-width: 600px !important;">
         <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
-            Hello {full_name},
+            Hello {first_name} {last_name},
         </p>
 
         <p style="margin: 0 0 16px 0 !important; color: #333333 !important;">
@@ -162,7 +164,7 @@ def create_admin_update_email_content(user: dict, magic_link: str) -> tuple[str,
 async def send_admin_update_email(sb_client: AsyncClient, user: dict) -> bool:
     """Send admin update notification email with magic link
     Args:
-        user: User information containing id, full_name, email
+        user: User information containing id, first_name, last_name, email
         sb_client: Supabase client
     Returns:
         bool: True if email was sent successfully, False otherwise

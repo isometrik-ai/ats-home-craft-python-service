@@ -147,40 +147,6 @@ class InviteService:
             )
         return dict(role_row)
 
-    def _build_full_name_from_metadata(self, metadata: dict[str, Any] | None) -> str:
-        """Build full name from user metadata dictionary.
-
-        Args:
-            metadata: User metadata dictionary containing salutation, first_name, last_name
-
-        Returns:
-            str: Full name string
-        """
-        if not metadata:
-            return ""
-        return build_full_name(
-            metadata.get("salutation"),
-            metadata.get("first_name"),
-            metadata.get("last_name"),
-        )
-
-    def _build_full_name_from_user_metadata(self, user_metadata: dict[str, Any] | None) -> str:
-        """Build full name from user's user_metadata field.
-
-        Args:
-            user_metadata: User's user_metadata field
-
-        Returns:
-            str: Full name string
-        """
-        if not user_metadata:
-            return ""
-        return build_full_name(
-            user_metadata.get("salutation"),
-            user_metadata.get("first_name"),
-            user_metadata.get("last_name"),
-        )
-
     def _validate_invitation_for_acceptance(
         self, invitation_data: dict[str, Any] | None
     ) -> dict[str, Any]:
@@ -431,7 +397,11 @@ class InviteService:
 
         # Access user_metadata from the returned dictionary
         inviter_user_metadata = inviter.get("user_metadata", {})
-        inviter_full_name = self._build_full_name_from_user_metadata(inviter_user_metadata)
+        inviter_full_name = build_full_name(
+            inviter_user_metadata.get("salutation"),
+            inviter_user_metadata.get("first_name"),
+            inviter_user_metadata.get("last_name"),
+        )
 
         # Send invitation email
         expires_at_str = self._format_datetime_iso(created_invite["expires_at"])
@@ -522,11 +492,17 @@ class InviteService:
         inviter = await get_user_by_id(self.supabase_client, str(invitation_data["invited_by"]))
 
         inv_meta = self._parse_json_field(invitation_data.get("metadata"))
-        invitee_full_name = self._build_full_name_from_metadata(inv_meta)
+        invitee_full_name = build_full_name(
+            inv_meta.get("salutation"), inv_meta.get("first_name"), inv_meta.get("last_name")
+        )
 
         # Access user_metadata from the returned dictionary
         inviter_user_metadata = inviter.get("user_metadata", {})
-        inviter_full_name = self._build_full_name_from_user_metadata(inviter_user_metadata)
+        inviter_full_name = build_full_name(
+            inviter_user_metadata.get("salutation"),
+            inviter_user_metadata.get("first_name"),
+            inviter_user_metadata.get("last_name"),
+        )
 
         # Generate fresh token and extend expiration date when resending
         invite_token, token_hash = self._generate_invite_token()

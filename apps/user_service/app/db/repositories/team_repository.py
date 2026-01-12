@@ -236,12 +236,12 @@ class TeamRepository:
         """Extract member data from database row."""
         first_name = row.get("first_name") or ""
         last_name = row.get("last_name") or ""
-        full_name = f"{first_name} {last_name}".strip() or None
 
         return {
             "id": row["user_id"],
-            "name": full_name,
             "email": row["email"],
+            "first_name": first_name,
+            "last_name": last_name,
             "role": row["role"],
             "added_at": row["added_at"],
         }
