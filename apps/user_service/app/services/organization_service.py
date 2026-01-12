@@ -624,7 +624,7 @@ class OrganizationService:
     @staticmethod
     def _map_to_organization_basic_details(org_data: dict[str, Any]) -> OrganizationBasicDetails:
         """Map raw DB row to organization basic details schema."""
-        settings = OrganizationService._parse_settings(org_data.get("settings"))
+        settings = parse_json_field(org_data.get("settings"))
         settings_fields = OrganizationService._extract_settings_fields(settings)
 
         return OrganizationBasicDetails(
