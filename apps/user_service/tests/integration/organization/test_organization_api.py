@@ -24,8 +24,10 @@ async def test_get_organizations_list(monkeypatch, client):
         del current_user, db_connection
         return _ctx()
 
-    async def fake_require_permission(permission_code, user_context, organization_id=None):
-        del permission_code, user_context, organization_id
+    async def fake_require_permission(
+        permission_code, user_context, db_connection, organization_id=None
+    ):
+        del permission_code, user_context, db_connection, organization_id
         return None
 
     async def fake_list(self, page, page_size, search=None, status=None):
