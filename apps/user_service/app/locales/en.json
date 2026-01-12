@@ -82,7 +82,8 @@
       "invalid_credentials": "Invalid email or password. Please check your credentials and try again.",
       "invalid_refresh_token": "Invalid or expired refresh token. Please login again.",
       "authentication_service_unavailable": "Authentication service is temporarily unavailable.",
-      "session_not_created_after_signup": "Your account was created successfully, but we couldn't create a session. Please try logging in with your email and password."
+      "session_not_created_after_signup": "Your account was created successfully, but we couldn't create a session. Please try logging in with your email and password.",
+      "user_already_registered": "User already registered with this email."
     },
     "success": {
       "login_successful": "Login successful.",

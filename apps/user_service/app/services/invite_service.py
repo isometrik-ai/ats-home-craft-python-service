@@ -6,8 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
-from gotrue.errors import AuthApiError
-from supabase import AsyncClient
+from supabase import AsyncClient, AuthApiError
 
 from apps.user_service.app.config.app_settings import app_settings
 from apps.user_service.app.db.repositories import (
@@ -36,7 +35,6 @@ from apps.user_service.app.utils.email_utils import send_organization_invitation
 from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_db.supabase_db.auth_repository import (
     get_user_by_id,
-    login_user,
     sign_up_supabase_user,
 )
 from libs.shared_utils.http_exceptions import (
@@ -241,19 +239,23 @@ class InviteService:
             )
         except AuthApiError as exc:
             # Supabase returns AuthApiError when user already exists
-            if not (exc.status == 422 or exc.code == "user_already_exists"):
-                raise
+            # if not (exc.status == 422 or exc.code == "user_already_exists"):
+            #     raise
 
-            auth_result = await login_user(
-                email=invitation_data["email"],
-                password=body.password,
-                sb_client=self.supabase_client,
-            )
-            if not auth_result or not auth_result.user:
-                raise ConflictException(
-                    message_key="auth.errors.user_already_registered",
-                    custom_code=CustomStatusCode.CONFLICT,
-                ) from exc
+            # auth_result = await login_user(
+            #     email=invitation_data["email"],
+            #     password=body.password,
+            #     sb_client=self.supabase_client,
+            # )
+            # if not auth_result or not auth_result.user:
+            #     raise ConflictException(
+            #         message_key="auth.errors.user_already_registered",
+            #         custom_code=CustomStatusCode.CONFLICT,
+            #     ) from exc
+            raise ConflictException(
+                message_key="auth.errors.user_already_registered",
+                custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
 
         if not auth_result:
             raise InternalServerErrorException(
