@@ -40,7 +40,7 @@
       "invalid_organization_status": "Status must be one of: {allowed_statuses}",
       "forbidden": "You don't have permission to perform this action",
       "conflict": "You already belong to an organization.",
-      "slug_conflict": "The slug you provided is already in use. Please choose a different one.",
+      "name_conflict": "The organization name you provided is already in use. Please choose a different one.",
       "not_found": "The organization you are trying to access does not exist.",
       "user_not_a_member_of_any_organization": "You are not part of any organization yet. Please join one to proceed.",
       "organization_not_active": "The organization you are trying to access is currently inactive. Please contact the administrator for assistance.",
@@ -81,7 +81,8 @@
       "new_password_must_be_different_from_current_password": "New password must be different from current password",
       "invalid_credentials": "Invalid email or password. Please check your credentials and try again.",
       "invalid_refresh_token": "Invalid or expired refresh token. Please login again.",
-      "authentication_service_unavailable": "Authentication service is temporarily unavailable."
+      "authentication_service_unavailable": "Authentication service is temporarily unavailable.",
+      "session_not_created_after_signup": "Your account was created successfully, but we couldn't create a session. Please try logging in with your email and password."
     },
     "success": {
       "login_successful": "Login successful.",

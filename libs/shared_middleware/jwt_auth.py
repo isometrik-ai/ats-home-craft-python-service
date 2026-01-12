@@ -14,16 +14,14 @@ permission management, using environment variables for configuration.
 """
 
 import asyncpg
-import jwt
 from fastapi import Depends, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from supabase import AsyncClient, AuthError
 
 from apps.user_service.app.db.repositories import OrganizationMemberRepository
 from apps.user_service.app.dependencies.db import db_conn
-from libs.shared_config.app_settings import shared_settings
 from libs.shared_db.supabase_db.client import get_supabase_client
 from libs.shared_utils.http_exceptions import (
-    BadRequestException,
     InternalServerErrorException,
     UnauthorizedException,
 )
@@ -66,8 +64,79 @@ def setup_audit_context(
     }
 
 
-async def check_user_access_async(permission_code: list[str], user_id, organization_id):
-    """Check if a user has the specified role permission using Supabase SDK.
+async def get_claims_from_token(
+    token: str,
+    supabase_client: AsyncClient | None = None,
+) -> dict:
+    """Get JWT claims from token using Supabase auth.
+
+    This is a common method for extracting claims from JWT tokens.
+    It handles all error cases consistently across the codebase.
+
+    Args:
+        token (str): The JWT token to decode
+        supabase_client (AsyncClient | None): Optional Supabase client.
+            If None, will get client from get_supabase_client()
+
+    Returns:
+        dict: The claims payload from the token
+
+    Raises:
+        UnauthorizedException: If token is invalid, expired, or authentication fails
+    """
+    try:
+        if supabase_client is None:
+            supabase_client = await get_supabase_client()
+
+        claims_response = await supabase_client.auth.get_claims(jwt=token)
+
+        if not claims_response or not claims_response.get("claims"):
+            raise UnauthorizedException(
+                message_key="errors.invalid_token",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            )
+
+        return claims_response["claims"]
+    except AuthError as e:
+        logger.error("Supabase auth error during token validation: %s", str(e))
+        error_message = str(e).lower()
+        status = getattr(e, "status", None)
+
+        # Check for expired tokens first (by error message or status code)
+        # AuthInvalidJwtError with "expired" message should be treated as expired
+        if "expired" in error_message or status == 401:
+            raise UnauthorizedException(
+                message_key="errors.token_expired",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            ) from e
+
+        # Handle invalid JWT errors (status 400) - but not expired ones
+        if status == 400:
+            raise UnauthorizedException(
+                message_key="errors.invalid_token",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            ) from e
+
+        # Fallback for other auth errors
+        raise UnauthorizedException(
+            message_key="errors.authentication_failed",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        ) from e
+    except Exception as e:
+        logger.error("JWT validation error: %s", str(e))
+        raise UnauthorizedException(
+            message_key="errors.authentication_failed",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        ) from e
+
+
+async def check_user_access_async(
+    permission_code: list[str],
+    user_id: str,
+    organization_id: str,
+    db_connection: asyncpg.Connection,
+) -> bool:
+    """Check if a user has the specified role permission using asyncpg.
 
     This function provides a truly async alternative for permission checking
     that doesn't block the event loop.
@@ -77,37 +146,48 @@ async def check_user_access_async(permission_code: list[str], user_id, organizat
         (e.g., ["settings.roles.manage", "business.dashboard.view", etc])
         user_id (str): The ID of the user to check permissions for
         organization_id (str): The ID of the Organization to check permissions for
+        db_connection (asyncpg.Connection): Database connection to use
 
     Returns:
         bool: True if user has permission, False otherwise
 
     Note:
-        This function uses Supabase SDK to check permissions,
+        This function uses asyncpg to check permissions,
         providing true non-blocking database operations.
     """
 
     try:
-        # Get global Supabase client
-        supabase = await get_supabase_client()
+        # Handle NULL or empty input
+        if user_id is None or organization_id is None or permission_code is None:
+            return False
 
-        if not organization_id:
-            raise BadRequestException(
-                message_key="organizations.errors.user_not_a_member_of_any_organization",
-                custom_code=CustomStatusCode.BAD_REQUEST,
-            )
+        if len(permission_code) == 0:
+            return False
 
-        # Use Supabase RPC function for permission checking
-        rpc_result = supabase.rpc(
-            "check_permission",
-            {
-                "user_id": user_id,
-                "organization_id": organization_id,
-                "permission_code": permission_code,
-            },
-        )
-        response = await rpc_result.execute()
+        # Get all permission codes that the user has for this organization
+        # Query: organization_members -> role_permissions -> permissions where status='active'
+        query = """
+            SELECT ARRAY_AGG(DISTINCT p.code) as user_permissions
+            FROM organization_members om
+            INNER JOIN role_permissions rp ON om.role_id = rp.role_id
+            INNER JOIN permissions p ON rp.permission_id = p.id
+            WHERE om.user_id = $1
+                AND om.organization_id = $2
+                AND om.status = 'active'
+        """
+        row = await db_connection.fetchrow(query, user_id, organization_id)
 
-        return response.data if response.data is not None else False
+        # If user has no permissions, return FALSE
+        user_permissions = row["user_permissions"] if row and row.get("user_permissions") else None
+        if user_permissions is None:
+            return False
+
+        # Check if all required permissions are in user's permissions
+        # Using PostgreSQL <@ operator (contained in)
+        check_query = "SELECT ($1::text[]) <@ ($2::text[]) as has_all_permissions"
+        result = await db_connection.fetchrow(check_query, permission_code, user_permissions)
+
+        return result["has_all_permissions"] if result else False
 
     except HTTPException as error:
         raise error
@@ -157,7 +237,7 @@ async def get_user_from_auth(
     return user
 
 
-def get_user_from_token(token: str) -> dict:
+async def get_user_from_token(token: str) -> dict:
     """Get user from token.
 
     Args:
@@ -166,26 +246,7 @@ def get_user_from_token(token: str) -> dict:
     Returns:
         dict: The user data from the token
     """
-    try:
-        payload = jwt.decode(
-            token,
-            shared_settings.supabase.jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-        return payload
-    except jwt.ExpiredSignatureError as exc:
-        logger.error("JWT token expired: %s", str(exc))
-        raise UnauthorizedException(
-            message_key="errors.token_expired",
-            custom_code=CustomStatusCode.UNAUTHORIZED,
-        ) from exc
-    except jwt.InvalidTokenError as exc:
-        logger.error("Invalid JWT token: %s", str(exc))
-        raise UnauthorizedException(
-            message_key="errors.invalid_token",
-            custom_code=CustomStatusCode.UNAUTHORIZED,
-        ) from exc
+    return await get_claims_from_token(token)
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
@@ -232,32 +293,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         token = auth_header.split(" ")[1]
-        try:
-            payload = jwt.decode(
-                token,
-                shared_settings.supabase.jwt_secret,
-                algorithms=["HS256"],
-                audience="authenticated",
-            )
-            request.state.user = payload
-            request.state.access_token = token
-        except jwt.ExpiredSignatureError as e:
-            logger.error("JWT token expired: %s", str(e))
-            raise UnauthorizedException(
-                message_key="errors.token_expired",
-                custom_code=CustomStatusCode.UNAUTHORIZED,
-            ) from e
-        except jwt.InvalidTokenError as e:
-            logger.error("Invalid JWT token: %s", str(e))
-            raise UnauthorizedException(
-                message_key="errors.invalid_token",
-                custom_code=CustomStatusCode.UNAUTHORIZED,
-            ) from e
-        except Exception as e:
-            logger.error("JWT validation error: %s", str(e))
-            raise UnauthorizedException(
-                message_key="errors.authentication_failed",
-                custom_code=CustomStatusCode.UNAUTHORIZED,
-            ) from e
+        payload = await get_claims_from_token(token)
+        request.state.user = payload
+        request.state.access_token = token
 
         return await call_next(request)

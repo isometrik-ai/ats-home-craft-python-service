@@ -126,7 +126,8 @@ class UserProfileData(BaseModel):
         email (str): User's email address
         full_name (Optional[str]): User's full name
         avatar_url (Optional[str]): URL to user's profile picture
-        phone (Optional[str]): User's phone number
+        phone_number (Optional[str]): User's phone number (without ISD code)
+        phone_isd_code (Optional[str]): User's phone ISD code (e.g., '+91')
         timezone (str): User's timezone setting
         status (str): User's membership status in organization
         joined_at (str): ISO timestamp when user joined organization
@@ -144,7 +145,8 @@ class UserProfileData(BaseModel):
     first_name: str | None = Field(None, description="User's first name")
     last_name: str | None = Field(None, description="User's last name")
     avatar_url: str | None = Field(None, description="URL to user's profile picture")
-    phone: str | None = Field(None, description="User's phone number")
+    phone_number: str | None = Field(None, description="User's phone number (without ISD code)")
+    phone_isd_code: str | None = Field(None, description="User's phone ISD code (e.g., '+91')")
     timezone: str = Field(default="UTC", description="User's timezone setting")
     salutation: str | None = Field(None, description="User's salutation")
     status: OrganizationMemberStatus = Field(
@@ -246,7 +248,8 @@ class CreateUserRequest(BaseModel):
     Attributes:
         email (EmailStr): User's email address (required)
         full_name (str): User's full name (required)
-        phone (Optional[str]): User's phone number
+        phone_number (Optional[str]): User's phone number (without ISD code)
+        phone_isd_code (Optional[str]): User's phone ISD code (e.g., '+91')
         timezone (str): User's timezone preference
         role_id (str): ID of the role to assign to the user
         organization_id (str): ID of the organization to add user to
@@ -254,7 +257,8 @@ class CreateUserRequest(BaseModel):
 
     email: EmailStr = Field(..., description="User's New email address")
     full_name: str = Field(..., min_length=2, max_length=255, description="User's full name")
-    phone: str | None = Field(None, description="User's phone number")
+    phone_number: str | None = Field(None, description="User's phone number (without ISD code)")
+    phone_isd_code: str | None = Field(None, description="User's phone ISD code (e.g., '+91')")
     timezone: str | None = Field(default="UTC", description="User's timezone preference")
     role_id: str = Field(..., description="ID of the role to assign to the user")
     organization_id: str | None = Field(None, description="ID of the organization to add user to")
@@ -264,7 +268,8 @@ class CreateUserRequest(BaseModel):
             "example": {
                 "email": "new.user@example.com",
                 "full_name": "New User",
-                "phone": "+1234567890",
+                "phone_number": "1234567890",
+                "phone_isd_code": "+1",
                 "timezone": "UTC",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "organization_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
@@ -280,7 +285,8 @@ class UpdateUserRequest(BaseModel):
 
     Attributes:
         full_name (Optional[str]): Updated full name
-        phone (Optional[str]): Updated phone number
+        phone_number (Optional[str]): Updated phone number (without ISD code)
+        phone_isd_code (Optional[str]): Updated phone ISD code (e.g., '+91')
         timezone (Optional[str]): Updated timezone preference
         avatar_url (Optional[str]): Updated avatar URL
         role_id (Optional[str]): Updated role assignment
@@ -291,7 +297,8 @@ class UpdateUserRequest(BaseModel):
     )
     first_name: str | None = Field(None, description="Updated first name")
     last_name: str | None = Field(None, description="Updated last name")
-    phone: str | None = Field(None, description="Updated phone number")
+    phone_number: str | None = Field(None, description="Updated phone number (without ISD code)")
+    phone_isd_code: str | None = Field(None, description="Updated phone ISD code (e.g., '+91')")
     timezone: str | None = Field(None, description="Updated timezone preference")
     avatar_url: str | None = Field(
         None,
@@ -306,7 +313,8 @@ class UpdateUserRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "full_name": "Updated Name",
-                "phone": "+0987654321",
+                "phone_number": "987654321",
+                "phone_isd_code": "+91",
                 "timezone": "America/New_York",
                 "avatar_url": "house-of-apps-legal-ai/user-id/new-avatar.jpg",
                 "role_id": "new-role-id",
@@ -342,7 +350,8 @@ class UserListItem(BaseModel):
     first_name: str | None = Field(None, description="Updated first name")
     last_name: str | None = Field(None, description="Updated last name")
     salutation: str | None = Field(None, description="Updated salutation")
-    phone: str | None = Field(None, description="Updated phone number")
+    phone_number: str | None = Field(None, description="Phone number (without ISD code)")
+    phone_isd_code: str | None = Field(None, description="Phone ISD code (e.g., '+91')")
     # role_name: str = Field(..., description="Name of user's assigned role")
     status: OrganizationMemberStatus = Field(..., description="User's membership status")
     joined_at: str = Field(..., description="ISO timestamp when user joined")

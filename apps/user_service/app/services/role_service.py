@@ -287,7 +287,7 @@ class RoleService:
                 is_default=role["is_default"],
                 created_at=format_iso_datetime(role["created_at"]) or "",
                 user_count=role.get("user_count", 0),
-                permission_count=role.get("permission_count", 0),
+                permission_count=len(all_permissions.get(str(role["id"]), [])),
                 permission_ids=all_permissions.get(str(role["id"]), []),
                 permission_categories=safe_json_loads(role.get("permission_categories", "{}"), {}),
             )

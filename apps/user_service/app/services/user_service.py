@@ -162,7 +162,8 @@ class UserService:
             "first_name": user_data.get("first_name"),
             "last_name": user_data.get("last_name"),
             "salutation": user_data.get("salutation"),
-            "phone": user_data.get("phone"),
+            "phone_number": user_data.get("phone_number"),
+            "phone_isd_code": user_data.get("phone_isd_code"),
             "timezone": user_data.get("timezone", "UTC"),
             "role_id": user_data.get("role_id"),
             "status": user_data.get("status", OrganizationMemberStatus.ACTIVE.value),
@@ -219,20 +220,28 @@ class UserService:
         )
 
     async def check_phone_exists_for_other_user(
-        self, phone: str, organization_id: str, user_id: str | None = None
+        self,
+        phone_number: str,
+        phone_isd_code: str,
+        organization_id: str,
+        user_id: str | None = None,
     ) -> bool:
-        """Check if phone number exists for another user.
+        """Check if phone number with ISD code exists for another user.
 
         Args:
-            phone: Phone number
+            phone_number: Phone number (without ISD code)
+            phone_isd_code: Phone ISD code (e.g., '+91')
             organization_id: Organization ID
             user_id: Optional user ID to exclude from check
 
         Returns:
-            bool: True if phone number exists for another user, False otherwise
+            bool: True if phone number with ISD code exists for another user, False otherwise
         """
         return await self.organization_member_repository.check_phone_exists_for_other_user(
-            phone=phone, organization_id=organization_id, user_id=user_id
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
+            organization_id=organization_id,
+            user_id=user_id,
         )
 
     async def get_users_list(
@@ -407,16 +416,20 @@ class UserService:
         # Get user data from Supabase Auth
         user_data = await get_user_by_id(self.supabase_client, user_id)
 
-        current_email, user_metadata, current_phone = self._extract_auth_user_contact(
-            user_data, fallback_email=self.user_context.email
-        )
+        (
+            current_email,
+            user_metadata,
+            phone_number,
+            phone_isd_code,
+        ) = self._extract_auth_user_contact(user_data, fallback_email=self.user_context.email)
 
         user_profile = self._build_or_update_profile(
             base_profile=user_profile,
             user_metadata=user_metadata,
             user_id=user_id,
             current_email=current_email,
-            current_phone=current_phone,
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
         )
 
         user_profile["verification_preference"] = self._extract_verification_preference(
@@ -468,33 +481,32 @@ class UserService:
     @staticmethod
     def _extract_auth_user_contact(
         user_data: Any, fallback_email: str
-    ) -> tuple[str, dict[str, Any], str | None]:
+    ) -> tuple[str, dict[str, Any], str | None, str | None]:
         """Pull email, metadata, and phone info from Supabase auth payload.
         Args:
             user_data: User data
             fallback_email: Fallback email
         Returns:
-            tuple[str, dict[str, Any], str | None]: Email, metadata, and phone info
+            tuple[str, dict[str, Any], str | None, str | None]: Email, metadata,
+                phone_number, phone_isd_code
         """
         email = fallback_email
-        phone = None
+        phone_number = None
+        phone_isd_code = None
         metadata: dict[str, Any] = {}
 
         user_obj = getattr(user_data, "user", None)
         if not user_obj:
-            return email, metadata, phone
+            return email, metadata, phone_number, phone_isd_code
 
         email = getattr(user_obj, "email_change", None) or getattr(user_obj, "email", email)
         metadata = getattr(user_obj, "user_metadata", {}) or {}
 
-        if metadata.get("phone"):
-            phone = metadata.get("phone")
-        elif getattr(user_obj, "phone", None):
-            phone = user_obj.phone
-        elif getattr(user_obj, "phone_change", None):
-            phone = user_obj.phone_change
+        # Get phone_number and phone_isd_code from user_metadata
+        phone_number = metadata.get("phone_number")
+        phone_isd_code = metadata.get("phone_isd_code")
 
-        return email, metadata, phone
+        return email, metadata, phone_number, phone_isd_code
 
     def _build_or_update_profile(
         self,
@@ -502,7 +514,8 @@ class UserService:
         user_metadata: dict[str, Any],
         user_id: str,
         current_email: str,
-        current_phone: str | None,
+        phone_number: str | None,
+        phone_isd_code: str | None,
     ) -> dict[str, Any]:
         """Create profile from metadata or refresh email/phone on an existing profile.
         Args:
@@ -510,16 +523,17 @@ class UserService:
             user_metadata: User metadata
             user_id: User ID
             current_email: Current email
-            current_phone: Current phone
+            phone_number: Phone number from user_metadata
+            phone_isd_code: Phone ISD code from user_metadata
         Returns:
             dict[str, Any]: Profile data
         """
         if not base_profile:
             first_name = user_metadata.get("first_name", "")
             last_name = user_metadata.get("last_name", "")
-            full_name = user_metadata.get(
-                "full_name",
-                f"{first_name} {last_name}".strip() or current_email.split("@")[0],
+            # Compute full_name from first_name and last_name
+            full_name = f"{first_name} {last_name}".strip() or user_metadata.get(
+                "full_name", current_email.split("@")[0]
             )
             return {
                 "user_id": user_id,
@@ -528,7 +542,8 @@ class UserService:
                 "first_name": first_name,
                 "last_name": last_name,
                 "avatar_url": user_metadata.get("avatar_url"),
-                "phone": current_phone or user_metadata.get("phone"),
+                "phone_number": phone_number,
+                "phone_isd_code": phone_isd_code,
                 "timezone": user_metadata.get("timezone", "UTC"),
                 "salutation": user_metadata.get("salutation"),
                 "role_id": None,
@@ -541,13 +556,20 @@ class UserService:
                 "roles": None,
             }
 
-        # Update email and phone from Supabase Auth if different
+        # Update email from Supabase Auth if different
         if base_profile.get("email", "").lower() != current_email.lower():
             base_profile["email"] = current_email
 
-        profile_phone = base_profile.get("phone")
-        if current_phone and profile_phone != current_phone:
-            base_profile["phone"] = current_phone
+        # Update phone_number and phone_isd_code from user_metadata if available
+        if phone_number is not None or phone_isd_code is not None:
+            base_profile["phone_number"] = phone_number
+            base_profile["phone_isd_code"] = phone_isd_code
+
+        # Compute full_name from first_name and last_name if not present
+        if "full_name" not in base_profile or not base_profile.get("full_name"):
+            first_name = base_profile.get("first_name", "")
+            last_name = base_profile.get("last_name", "")
+            base_profile["full_name"] = f"{first_name} {last_name}".strip()
 
         return base_profile
 
@@ -696,7 +718,8 @@ class UserService:
                 salutation=u.get("salutation"),
                 first_name=u.get("first_name"),
                 last_name=u.get("last_name"),
-                phone=u.get("phone"),
+                phone_number=u.get("phone_number"),
+                phone_isd_code=u.get("phone_isd_code"),
                 role_id=str(u["role_id"]) if u.get("role_id") else "",
                 status=u.get("status", OrganizationMemberStatus.ACTIVE.value),
                 joined_at=(
@@ -765,11 +788,16 @@ class UserService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+        # Compute full_name from first_name and last_name
+        first_name = current_user_data.get("first_name", "")
+        last_name = current_user_data.get("last_name", "")
+        full_name = f"{first_name} {last_name}".strip() or None
+
         # Prepare audit data
         audit_data = {
             "user_id": str(current_user_data["user_id"]),
             "email": current_user_data["email"],
-            "full_name": current_user_data.get("full_name", ""),
+            "full_name": full_name,
             "status": OrganizationMemberStatus.SUSPENDED.value,
             "organization_id": str(current_user_data["organization_id"]),
             "banned_by_user_id": self.user_context.user_id,
@@ -840,11 +868,16 @@ class UserService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+        # Compute full_name from first_name and last_name
+        first_name = current_user_data.get("first_name", "")
+        last_name = current_user_data.get("last_name", "")
+        full_name = f"{first_name} {last_name}".strip() or ""
+
         # Prepare audit data
         audit_data = {
             "user_id": str(current_user_data["user_id"]),
             "email": current_user_data["email"],
-            "full_name": current_user_data.get("full_name", ""),
+            "full_name": full_name,
             "status": OrganizationMemberStatus.ACTIVE.value,
             "organization_id": str(current_user_data["organization_id"]),
             "unbanned_by_user_id": self.user_context.user_id,
@@ -932,12 +965,17 @@ class UserService:
         if user_data and getattr(user_data, "user", None):
             user_metadata = user_data.user.user_metadata or {}
 
+        # Compute full_name from first_name and last_name
+        first_name = user_metadata.get("first_name", "")
+        last_name = user_metadata.get("last_name", "")
+        full_name = f"{first_name} {last_name}".strip() or user_metadata.get("full_name", "")
+
         return {
             "user_id": user_id,
             "email": self.user_context.email,
-            "first_name": user_metadata.get("first_name", ""),
-            "last_name": user_metadata.get("last_name", ""),
-            "full_name": user_metadata.get("full_name", ""),
+            "first_name": first_name,
+            "last_name": last_name,
+            "full_name": full_name,
             "timezone": user_metadata.get("timezone", "UTC"),
             "avatar_url": user_metadata.get("avatar_url"),
             "organization_id": organization_id,
@@ -970,9 +1008,9 @@ class UserService:
             current_last_name = body.last_name
 
         if body.first_name is not None or body.last_name is not None:
+            # Compute full_name for Supabase metadata (not stored in organization_members)
             full_name = self._compute_full_name(current_first_name, current_last_name)
             if full_name:
-                update_data["full_name"] = full_name
                 metadata_update["full_name"] = full_name
 
         if body.timezone is not None:
@@ -1052,7 +1090,10 @@ class UserService:
             "first_name": profile.get("first_name"),
             "last_name": profile.get("last_name"),
             "salutation": profile.get("salutation"),
-            "full_name": profile.get("full_name"),
+            "full_name": (
+                f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
+                or profile.get("full_name")
+            ),
             "timezone": profile.get("timezone"),
             "avatar_url": profile.get("avatar_url"),
             "organization_id": str(organization_id) if organization_id else None,
@@ -1088,15 +1129,26 @@ class UserService:
                 two_fa_enabled=verification_pref_data.get("enabled", False),
                 verification_method=verification_pref_data.get("type", ""),
             )
+        # Get phone_number and phone_isd_code from user_profile
+        phone_number = user_profile.get("phone_number", None)
+        phone_isd_code = user_profile.get("phone_isd_code", None)
+
+        # Compute full_name from first_name and last_name if not present
+        full_name = user_profile.get("full_name")
+        if not full_name:
+            first_name = user_profile.get("first_name", "")
+            last_name = user_profile.get("last_name", "")
+            full_name = f"{first_name} {last_name}".strip()
 
         return UserProfileData(
             user_id=str(user_profile["user_id"]),
             email=user_profile["email"],
-            full_name=user_profile["full_name"],
+            full_name=full_name,
             first_name=user_profile["first_name"],
             last_name=user_profile["last_name"],
             avatar_url=user_profile["avatar_url"],
-            phone=user_profile["phone"],
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
             timezone=user_profile["timezone"] or "UTC",
             salutation=user_profile.get("salutation", None),
             status=user_profile["status"],

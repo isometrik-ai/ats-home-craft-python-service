@@ -287,7 +287,7 @@ class OrganizationService:
         is_unique = await self.organization_repository.check_slug_unique(slug, exclude_id)
         if not is_unique:
             raise ConflictException(
-                message_key="organizations.errors.slug_conflict",
+                message_key="organizations.errors.name_conflict",
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
@@ -785,7 +785,13 @@ class OrganizationService:
             "email": self.user_context.email,
             "first_name": getattr(body.user_data, "first_name", None) if body.user_data else None,
             "last_name": getattr(body.user_data, "last_name", None) if body.user_data else None,
-            "phone": getattr(body.user_data, "phone", None) if body.user_data else None,
+            "phone_number": (
+                getattr(body.user_data, "phone_number", None) if body.user_data else None
+            ),
+            "phone_isd_code": (
+                getattr(body.user_data, "phone_isd_code", None) if body.user_data else None
+            ),
+            "role": "admin",
             "timezone": getattr(body.user_data, "timezone", None) or "UTC",
             "role_id": role_id,
             "status": OrganizationMemberStatus.ACTIVE.value,
@@ -970,10 +976,10 @@ class OrganizationService:
                 requester_id=str(request["requester_id"]),
                 status=request["status"],
                 requested_at=format_iso_datetime(request["requested_at"]) or "",
-                decision_at=format_iso_datetime(request.get("decision_at")) or None,
+                reviewed_at=format_iso_datetime(request.get("reviewed_at")) or None,
                 processed_at=format_iso_datetime(request.get("processed_at")) or None,
                 approver_id=str(request["approver_id"]) if request.get("approver_id") else None,
-                decision_reason=request.get("decision_reason"),
+                review_reason=request.get("review_reason"),
                 created_at=format_iso_datetime(request.get("created_at")) or "",
                 updated_at=format_iso_datetime(request.get("updated_at")) or "",
             )
@@ -1115,7 +1121,7 @@ class OrganizationService:
         updated_request = await self.delete_request_repository.approve_delete_request(
             request_id=request_id,
             approver_id=self.user_context.user_id,
-            decision_reason=reason,
+            review_reason=reason,
         )
 
         # Send deletion notification emails to all organization members
@@ -1132,8 +1138,8 @@ class OrganizationService:
             "request_id": str(updated_request["id"]),
             "organization_id": str(updated_request["organization_id"]),
             "status": updated_request["status"],
-            "decision_reason": updated_request.get("decision_reason"),
-            "decision_at": format_iso_datetime(updated_request.get("decision_at")) or "",
+            "review_reason": updated_request.get("review_reason"),
+            "reviewed_at": format_iso_datetime(updated_request.get("reviewed_at")) or "",
         }
 
     async def _reject_delete_request(
@@ -1171,7 +1177,7 @@ class OrganizationService:
         updated_request = await self.delete_request_repository.reject_delete_request(
             request_id=request_id,
             approver_id=self.user_context.user_id,
-            decision_reason=reason,
+            review_reason=reason,
         )
 
         # Send rejection notification email to requester
@@ -1186,6 +1192,6 @@ class OrganizationService:
             "request_id": str(updated_request["id"]),
             "organization_id": str(updated_request["organization_id"]),
             "status": updated_request["status"],
-            "decision_reason": updated_request.get("decision_reason"),
-            "decision_at": format_iso_datetime(updated_request.get("decision_at")) or "",
+            "review_reason": updated_request.get("review_reason"),
+            "reviewed_at": format_iso_datetime(updated_request.get("reviewed_at")) or "",
         }

@@ -254,6 +254,9 @@ class InviteService:
 
         inv_meta = self._parse_json_field(invitation_data.get("metadata"))
 
+        phone_number = inv_meta.get("phone_number", None)
+        phone_isd_code = inv_meta.get("phone_isd_code", None)
+
         try:
             auth_result = await sign_up_supabase_user(
                 SignupRequest(
@@ -261,7 +264,8 @@ class InviteService:
                     password=body.password,
                     first_name=inv_meta.get("first_name", None),
                     last_name=inv_meta.get("last_name", None),
-                    phone=inv_meta.get("phone", None),
+                    phone_number=phone_number,
+                    phone_isd_code=phone_isd_code,
                     timezone="UTC",
                     salutation=inv_meta.get("salutation", None),
                     verification_id="",
@@ -312,7 +316,8 @@ class InviteService:
                 "user_id": user.id,
                 "first_name": inv_meta.get("first_name", None),
                 "last_name": inv_meta.get("last_name", None),
-                "phone": inv_meta.get("phone", None),
+                "phone_number": phone_number,
+                "phone_isd_code": phone_isd_code,
                 "timezone": "UTC",
                 "salutation": inv_meta.get("salutation", None),
             },
@@ -338,7 +343,8 @@ class InviteService:
                 email=getattr(user, "email", None),
                 first_name=user_metadata.get("first_name", None),
                 last_name=user_metadata.get("last_name", None),
-                phone=user_metadata.get("phone", None),
+                phone_number=user_metadata.get("phone_number", None),
+                phone_isd_code=user_metadata.get("phone_isd_code", None),
                 timezone=user_metadata.get("timezone", None),
                 organization_id=str(organization_data.get("id", None)),
             ),
@@ -408,7 +414,8 @@ class InviteService:
             "metadata": {
                 "first_name": body.first_name,
                 "last_name": body.last_name,
-                "phone": body.phone,
+                "phone_number": body.phone_number,
+                "phone_isd_code": body.phone_isd_code,
                 "salutation": body.salutation,
             },
         }
@@ -600,7 +607,8 @@ class InviteService:
             "email": email,
             "first_name": invite_data.get("first_name", None),
             "last_name": invite_data.get("last_name", None),
-            "phone": invite_data.get("phone", None),
+            "phone_number": invite_data.get("phone_number", None),
+            "phone_isd_code": invite_data.get("phone_isd_code", None),
             "timezone": invite_data.get("timezone", "UTC"),
             "salutation": invite_data.get("salutation", None),
             "role_id": role_id,
@@ -711,6 +719,13 @@ class InviteService:
         elif not isinstance(metadata, dict):
             metadata = {}
 
+        # Get phone_number and phone_isd_code from metadata and merge for output
+        phone_number_db = metadata.get("phone_number", None)
+        phone_isd_code = metadata.get("phone_isd_code")
+        phone_full = None
+        if phone_number_db and phone_isd_code:
+            phone_full = f"{phone_isd_code}{phone_number_db}"
+
         return {
             "invite_id": str(invite_data.get("id")),
             "email": invite_data.get("email"),
@@ -723,5 +738,5 @@ class InviteService:
             "salutation": metadata.get("salutation", None),
             "first_name": metadata.get("first_name", None),
             "last_name": metadata.get("last_name", None),
-            "phone": metadata.get("phone", None),
+            "phone": phone_full,
         }

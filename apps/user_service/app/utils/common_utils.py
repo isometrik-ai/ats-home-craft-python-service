@@ -185,6 +185,7 @@ async def extract_user_context(
 async def require_permission(
     permission_code: str | list[str],
     user_context: UserContext,
+    db_connection: asyncpg.Connection,
     organization_id: str | None = None,
 ) -> None:
     """Check user permission with performance timing and detailed error handling.
@@ -197,6 +198,7 @@ async def require_permission(
     Args:
         permission_code (str): Permission code to check (e.g., "settings.roles.manage")
         user_context (UserContext): Validated user context
+        db_connection (asyncpg.Connection): Database connection
         organization_id (str): Organization ID
 
     Raises:
@@ -204,7 +206,12 @@ async def require_permission(
         InternalServerErrorException: If internal error occurs
 
     Usage:
-        await require_permission("settings.roles.manage", user_context, organization_id)
+        await require_permission(
+            "settings.roles.manage",
+            user_context,
+            db_connection,
+            organization_id
+        )
     """
     try:
         if isinstance(permission_code, str):
@@ -216,6 +223,7 @@ async def require_permission(
             permission_code=permission_codes,
             user_id=user_context.user_id,
             organization_id=organization_id,
+            db_connection=db_connection,
         )
 
         if not has_permission:
@@ -259,6 +267,7 @@ async def check_permissions(
     await require_permission(
         permission_code=permission_codes,
         user_context=user_context,
+        db_connection=db_connection,
         organization_id=organization_id if organization_id else user_context.organization_id,
     )
     return user_context
@@ -469,13 +478,19 @@ def set_audit_old_data_from_user(request: Request, current_user_data: dict) -> N
         request (Request): FastAPI request object for setting audit state
         current_user_data (dict): User profile data from database
     """
+    # Compute full_name from first_name and last_name
+    first_name = current_user_data.get("first_name", "")
+    last_name = current_user_data.get("last_name", "")
+    full_name = f"{first_name} {last_name}".strip() or current_user_data.get("full_name")
+
     audit_data = {
         "user_id": str(current_user_data["user_id"]),
         "email": current_user_data["email"],
-        "full_name": current_user_data["full_name"],
+        "full_name": full_name,
         "first_name": current_user_data.get("first_name"),
         "last_name": current_user_data.get("last_name"),
-        "phone": current_user_data.get("phone"),
+        "phone_number": current_user_data.get("phone_number"),
+        "phone_isd_code": current_user_data.get("phone_isd_code"),
         "timezone": current_user_data.get("timezone"),
         "avatar_url": current_user_data.get("avatar_url"),
         "status": current_user_data.get("status"),

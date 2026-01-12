@@ -30,7 +30,8 @@ class SendVerificationCodeRequest(BaseModel):
 
     type: VerificationType = Field(..., description="Type of verification: EMAIL or PHONE_NUMBER")
     email: EmailStr | None = Field(None, description="Email address for verification")
-    phoneNumber: str | None = Field(None, description="Phone number for verification")
+    phone_number: str | None = Field(None, description="Phone number for verification")
+    phone_isd_code: str | None = Field(None, description="Phone ISD code (e.g., '+91')")
     verification_method: str | None = Field(
         None,
         description="Optional verification method field (e.g., 'signup_verification')",
@@ -38,22 +39,28 @@ class SendVerificationCodeRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_email_or_phone(self):
-        """Validate that either email or phoneNumber is provided based on type"""
+        """Validate that either email or phone_number with phone_isd_code
+        is provided based on type"""
         if self.type == VerificationType.EMAIL:
             if not self.email:
                 raise ValidationException(
                     message_key="verification_codes.errors.email_required",
                     custom_code=CustomStatusCode.INVALID_DATA,
                 )
-            if self.phoneNumber:
+            if self.phone_number or self.phone_isd_code:
                 raise ValidationException(
                     message_key="verification_codes.errors.phoneNumber_provided",
                     custom_code=CustomStatusCode.INVALID_DATA,
                 )
         elif self.type == VerificationType.PHONE_NUMBER:
-            if not self.phoneNumber:
+            if not self.phone_number:
                 raise ValidationException(
                     message_key="verification_codes.errors.phoneNumber_required",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
+            if not self.phone_isd_code:
+                raise ValidationException(
+                    message_key="verification_codes.errors.phone_isd_code_required",
                     custom_code=CustomStatusCode.INVALID_DATA,
                 )
             if self.email:
@@ -71,26 +78,33 @@ class VerifyVerificationCodeRequest(BaseModel):
     verification_id: str = Field(..., description="ID of the verification code record")
     verification_code: str = Field(..., description="The verification code to verify")
     email: EmailStr | None = Field(None, description="Email address for verification")
-    phoneNumber: str | None = Field(None, description="Phone number for verification")
+    phone_number: str | None = Field(None, description="Phone number for verification")
+    phone_isd_code: str | None = Field(None, description="Phone ISD code (e.g., '+91')")
 
     @model_validator(mode="after")
     def validate_email_or_phone(self):
-        """Validate that either email or phoneNumber is provided based on type"""
+        """Validate that either email or phone_number with phone_isd_code
+        is provided based on type"""
         if self.type == VerificationType.EMAIL:
             if not self.email:
                 raise ValidationException(
                     message_key="verification_codes.errors.email_required",
                     custom_code=CustomStatusCode.INVALID_DATA,
                 )
-            if self.phoneNumber:
+            if self.phone_number or self.phone_isd_code:
                 raise ValidationException(
                     message_key="verification_codes.errors.phoneNumber_provided",
                     custom_code=CustomStatusCode.INVALID_DATA,
                 )
         elif self.type == VerificationType.PHONE_NUMBER:
-            if not self.phoneNumber:
+            if not self.phone_number:
                 raise ValidationException(
                     message_key="verification_codes.errors.phoneNumber_required",
+                    custom_code=CustomStatusCode.INVALID_DATA,
+                )
+            if not self.phone_isd_code:
+                raise ValidationException(
+                    message_key="verification_codes.errors.phone_isd_code_required",
                     custom_code=CustomStatusCode.INVALID_DATA,
                 )
             if self.email:
