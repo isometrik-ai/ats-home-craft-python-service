@@ -10,6 +10,7 @@ import httpx
 from libs.shared_config.app_settings import shared_settings
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
+    ConflictException,
     InternalServerErrorException,
     RateLimitExceededException,
     ServiceUnavailableException,
@@ -18,6 +19,50 @@ from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("isometrik_service")
+
+
+def _handle_isometrik_application_creation_exception(e: httpx.HTTPStatusError) -> None:
+    """Raise appropriate exception based on Isometrik API HTTP status error.
+
+    Args:
+        e: HTTPStatusError exception from httpx
+
+    Raises:
+        ConflictException: If status code is 409
+        BadRequestException: If status code is 400-499 (except 409, 429)
+        RateLimitExceededException: If status code is 429
+        ServiceUnavailableException: If status code is 5xx
+    """
+    logger.error("Isometrik API status code error: %s", str(e))
+    status_code = e.response.status_code
+
+    if status_code == 409:
+        # Extract message from Isometrik response
+        response_json = e.response.json()
+        isometrik_message = response_json.get("message", "errors.isometrik.conflict")
+
+        raise ConflictException(
+            message_key=isometrik_message,
+            custom_code=CustomStatusCode.CONFLICT,
+        ) from e
+
+    if 400 <= status_code < 500:
+        raise BadRequestException(
+            message_key="errors.external_api_bad_request",
+            custom_code=CustomStatusCode.EXTERNAL_SERVICE_BAD_REQUEST,
+        ) from e
+
+    if status_code == 429:
+        raise RateLimitExceededException(
+            message_key="errors.external_api_rate_limited",
+            custom_code=CustomStatusCode.EXTERNAL_SERVICE_RATE_LIMIT,
+        ) from e
+
+    # 5xx errors
+    raise ServiceUnavailableException(
+        message_key="errors.external_service_unavailable",
+        custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+    ) from e
 
 
 def get_isometrik_data_from_settings(
@@ -48,6 +93,7 @@ async def create_isometrik_application(
         dict[str, Any]: Response from Isometrik API containing application details
 
     Raises:
+        ConflictException: If API call returns 409 status code
         BadRequestException: If API call returns 400 status code
         RateLimitExceededException: If API call returns 429 status code
         ServiceUnavailableException: If API call returns 5xx status code
@@ -90,26 +136,7 @@ async def create_isometrik_application(
                 ) from e
 
     except httpx.HTTPStatusError as e:
-        logger.error("Isometrik API status code error: %s", str(e))
-        status_code = e.response.status_code
-
-        if 400 <= status_code < 500:
-            raise BadRequestException(
-                message_key="errors.external_api_bad_request",
-                custom_code=CustomStatusCode.EXTERNAL_SERVICE_BAD_REQUEST,
-            ) from e
-
-        if status_code == 429:
-            raise RateLimitExceededException(
-                message_key="errors.external_api_rate_limited",
-                custom_code=CustomStatusCode.EXTERNAL_SERVICE_RATE_LIMIT,
-            ) from e
-
-        # 5xx errors
-        raise ServiceUnavailableException(
-            message_key="errors.external_service_unavailable",
-            custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
-        ) from e
+        _handle_isometrik_application_creation_exception(e)
     except httpx.RequestError as e:
         logger.error("Isometrik API connection error: %s", str(e))
         raise ServiceUnavailableException(

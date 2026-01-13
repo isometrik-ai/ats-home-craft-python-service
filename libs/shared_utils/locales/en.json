@@ -23,7 +23,8 @@
         "password_strength": "Password must be at least 6 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character",
         "isometrik": {
             "failed_to_create_application": "Failed to create Isometrik application",
-            "failed_to_create_user": "Failed to create Isometrik user"
+            "failed_to_create_user": "Failed to create Isometrik user",
+            "conflict": "Invalid account status or projects limit reached or another project exists with same name."
         },
         "external_service_unavailable": "The external service is currently unavailable. Please try again later.",
         "service_unavailable": "Service unavailable",
