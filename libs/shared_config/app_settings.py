@@ -82,6 +82,7 @@ class CloudflareR2Settings(BaseSettings):
     access_key: str = config("R2_ACCESS_KEY")
     secret_key: str = config("R2_SECRET_KEY")
     bucket_name: str = config("R2_BUCKET_NAME")
+    media_url: str = config("R2_MEDIA_URL")
 
 
 class SharedAppSettings(BaseSettings):

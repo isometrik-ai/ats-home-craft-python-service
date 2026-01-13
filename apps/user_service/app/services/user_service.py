@@ -29,10 +29,16 @@ from apps.user_service.app.schemas.users import (
     VerificationPreference,
 )
 from apps.user_service.app.services.organization_service import OrganizationService
-from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    format_iso_datetime,
+    parse_json_field,
+)
 from apps.user_service.app.utils.user_utils import (
+    build_full_name,
     update_supabase_user_email,
 )
+from libs.shared_config.app_settings import shared_settings
 from libs.shared_db.supabase_db.auth_repository import (
     ban_user,
     get_user_by_id,
@@ -40,7 +46,15 @@ from libs.shared_db.supabase_db.auth_repository import (
     update_metadata,
 )
 from libs.shared_utils.http_exceptions import BadRequestException, NotFoundException
+from libs.shared_utils.isometrik_service import (
+    get_isometrik_data_from_settings,
+    login_to_isometrik,
+    update_isometrik_user,
+)
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger("user_service")
 
 
 class UserService:
@@ -911,11 +925,18 @@ class UserService:
             await self.update_user_info(user_id, organization_id, update_data)
 
         if metadata_update:
-            merged_metadata = await self._merge_metadata(user_id, metadata_update)
-            await update_metadata(self.supabase_client, user_id, merged_metadata)
+            await update_metadata(self.supabase_client, user_id, metadata_update)
 
         updated_profile = await self.get_user_profile_by_id(user_id, organization_id)
         profile_for_audit = updated_profile or current_user_data
+
+        # Update Isometrik user if name or avatar_url changed
+        await self._update_isometrik_user_if_needed(
+            user_id=user_id,
+            organization_id=organization_id,
+            body=body,
+            updated_profile=updated_profile,
+        )
 
         return {
             "updated_profile": updated_profile,
@@ -1025,17 +1046,6 @@ class UserService:
 
         return {}
 
-    async def _merge_metadata(
-        self, user_id: str, metadata_update: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Merge incoming metadata with existing Supabase metadata."""
-        existing_metadata: dict[str, Any] = {}
-        user_data = await get_user_by_id(self.supabase_client, user_id)
-        if user_data and getattr(user_data, "user", None):
-            existing_metadata = user_data.user.user_metadata or {}
-
-        return {**existing_metadata, **metadata_update}
-
     def _build_update_audit_data(
         self, profile: dict[str, Any], organization_id: str | None, user_id: str
     ) -> dict[str, Any]:
@@ -1112,3 +1122,79 @@ class UserService:
             verification_preference=verification_preference,
             organization_details=organization_details,
         )
+
+    async def _update_isometrik_user_if_needed(
+        self,
+        user_id: str,
+        organization_id: str | None,
+        body: UpdateUserProfileRequest,
+        updated_profile: UserProfileData,
+    ) -> None:
+        """Update Isometrik user if name or profile image changed.
+
+        This method is designed to be non-blocking - if Isometrik update fails,
+        it logs the error but does not propagate the exception to avoid breaking
+        the main user profile update flow.
+
+        Args:
+            user_id: User ID
+            organization_id: Optional organization ID
+            body: Update profile request body
+            updated_profile: Updated user profile data (contains complete current state)
+        """
+        name_updated = body.first_name is not None or body.last_name is not None
+        avatar_updated = body.avatar_url is not None
+
+        if not name_updated and not avatar_updated:
+            return
+
+        try:
+            # Get organization settings
+            organization = await self.organization_repository.get_organization_by_id(
+                organization_id
+            )
+
+            org_settings = parse_json_field(organization.get("settings"))
+            isometrik_credentials = get_isometrik_data_from_settings(org_settings)
+
+            # Login to Isometrik to get userToken
+            login_response = await login_to_isometrik(
+                user_id=user_id,
+                isometrik_credentials=isometrik_credentials,
+            )
+
+            # Prepare credentials with userToken
+            isometrik_update_credentials = {
+                "userToken": login_response.get("userToken", ""),
+                "licenseKey": isometrik_credentials.get("licenseKey", ""),
+                "appSecret": isometrik_credentials.get("appSecret", ""),
+            }
+
+            # Build user name from updated profile
+            user_name = None
+            if name_updated:
+                first_name = updated_profile.get("first_name", "")
+                last_name = updated_profile.get("last_name", "")
+                user_name = build_full_name(first_name, last_name).strip() or None
+
+            # Get avatar URL from updated profile or request body
+            user_profile_image_url = None
+            if avatar_updated:
+                user_profile_image_url = (
+                    f"{shared_settings.cloudflare_r2.media_url}/{body.avatar_url}"
+                )
+
+            # Update Isometrik user
+            await update_isometrik_user(
+                isometrik_credentials=isometrik_update_credentials,
+                user_name=user_name,
+                user_profile_image_url=user_profile_image_url,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to update Isometrik user: user_id=%s, organization_id=%s, error=%s",
+                user_id,
+                organization_id,
+                str(e),
+                exc_info=True,
+            )
