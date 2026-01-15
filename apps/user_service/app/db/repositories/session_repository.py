@@ -64,12 +64,13 @@ class SessionRepository:
         param_index = 2
 
         # Apply organization filter
-        if organization_id is None:
-            conditions.append(f"{table_prefix}organization_id IS NULL")
-        else:
-            conditions.append(f"{table_prefix}organization_id = ${param_index}")
-            params.append(organization_id)
-            param_index += 1
+        # Temporarily commented out - organization_id check disabled
+        # if organization_id is None:
+        #     conditions.append(f"{table_prefix}organization_id IS NULL")
+        # else:
+        #     conditions.append(f"{table_prefix}organization_id = ${param_index}")
+        #     params.append(organization_id)
+        #     param_index += 1
 
         # Apply session status filter
         if filters.session_status:
