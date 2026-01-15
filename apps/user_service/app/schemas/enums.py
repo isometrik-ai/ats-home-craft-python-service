@@ -103,6 +103,7 @@ class SessionStatus(str, Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     TERMINATED = "terminated"
+    LOGGED_OUT = "logged_out"
 
 
 class RoleType(str, Enum):
