@@ -8,6 +8,7 @@ import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.enums import OrganizationMemberStatus, UserStatus
 from apps.user_service.app.schemas.organizations import OrganizationBasicDetails
 
@@ -177,6 +178,10 @@ class UserProfileData(BaseModel):
     organization_details: OrganizationBasicDetails | None = Field(
         None,
         description="Organization details",
+    )
+    isometrik_details: IsometrikDetails | None = Field(
+        None,
+        description="Isometrik integration details",
     )
 
     model_config = ConfigDict(
