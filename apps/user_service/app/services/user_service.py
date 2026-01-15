@@ -17,6 +17,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
+from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from apps.user_service.app.schemas.organizations import OrganizationBasicDetails
 from apps.user_service.app.schemas.users import (
@@ -36,6 +37,7 @@ from apps.user_service.app.utils.common_utils import (
 )
 from apps.user_service.app.utils.user_utils import (
     build_full_name,
+    get_isometrik_details,
     update_supabase_user_email,
 )
 from libs.shared_config.app_settings import shared_settings
@@ -466,11 +468,21 @@ class UserService:
 
         organization_details = await self._build_organization_details(organization_id)
 
+        # Get isometrik_details if organization_id is available
+        isometrik_details = None
+        if organization_id:
+            isometrik_details = await get_isometrik_details(
+                user_id=user_id,
+                organization_id=organization_id,
+                organization_repository=self.organization_repository,
+            )
+
         profile_data = self._create_user_profile_data(
             user_profile=user_profile,
             role_info=role_info,
             permissions=permissions,
             organization_details=organization_details,
+            isometrik_details=isometrik_details,
         )
 
         profile_response = profile_data.model_dump(exclude_none=True)
@@ -498,7 +510,7 @@ class UserService:
     ) -> tuple[str, dict[str, Any], str | None, str | None]:
         """Pull email, metadata, and phone info from Supabase auth payload.
         Args:
-            user_data: User data
+            user_data: User data (dict from model_dump())
             fallback_email: Fallback email
         Returns:
             tuple[str, dict[str, Any], str | None, str | None]: Email, metadata,
@@ -509,12 +521,13 @@ class UserService:
         phone_isd_code = None
         metadata: dict[str, Any] = {}
 
-        user_obj = getattr(user_data, "user", None)
-        if not user_obj:
+        # user_data is a dict from get_user_by_id (model_dump() result)
+        if not user_data or not isinstance(user_data, dict):
             return email, metadata, phone_number, phone_isd_code
 
-        email = getattr(user_obj, "email_change", None) or getattr(user_obj, "email", email)
-        metadata = getattr(user_obj, "user_metadata", {}) or {}
+        # Get email - check new_email first (for email changes), then email, then use fallback
+        email = user_data.get("new_email") or user_data.get("email") or email
+        metadata = user_data.get("user_metadata", {}) or {}
 
         # Get phone_number and phone_isd_code from user_metadata
         phone_number = metadata.get("phone_number")
@@ -596,22 +609,39 @@ class UserService:
             list[dict[str, Any]]: Identities
         """
         identities: list[dict[str, Any]] = []
-        user_obj = getattr(user_data, "user", None)
-        if not user_obj or not hasattr(user_obj, "identities"):
+
+        # user_data is a dict from get_user_by_id (model_dump() result)
+        if not user_data or not isinstance(user_data, dict):
             return identities
 
-        for identity in user_obj.identities:
-            provider_id = (
-                identity.identity_data.get("provider_id")
-                if identity.provider != "email"
-                else identity.identity_data.get("email")
-            ) or identity.identity_data.get("sub")
+        identities_list = user_data.get("identities", [])
+        if not identities_list:
+            return identities
+
+        for identity in identities_list:
+            # identity is already a dict
+            identity_data = identity.get("identity_data", {})
+            provider = identity.get("provider", "")
+
+            # Get provider_id based on provider type
+            if provider != "email":
+                provider_id = identity_data.get("provider_id")
+            else:
+                provider_id = identity_data.get("email")
+
+            # Fallback to sub if provider_id not found
+            if not provider_id:
+                provider_id = identity_data.get("sub")
+
+            # Convert datetime objects to ISO strings if needed
+            created_at = identity.get("created_at")
+            updated_at = identity.get("updated_at")
 
             identities.append(
                 {
-                    "provider": identity.provider,
-                    "created_at": identity.created_at,
-                    "updated_at": identity.updated_at,
+                    "provider": provider,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
                     "provider_id": provider_id,
                 }
             )
@@ -1069,6 +1099,7 @@ class UserService:
         role_info: RoleInfo | RoleInfoWithDescription | None = None,
         permissions: list[PermissionInfo] | None = None,
         organization_details: OrganizationBasicDetails | None = None,
+        isometrik_details: IsometrikDetails | None = None,
     ) -> UserProfileData:
         """Creates a UserProfileData object from user profile data.
         This is the single source of truth for creating user profile responses.
@@ -1078,6 +1109,7 @@ class UserService:
             role_info: Optional role information
             permissions: Optional list of permissions
             organization_details: Optional organization details
+            isometrik_details: Optional Isometrik integration details
 
         Returns:
             UserProfileData object with formatted user profile
@@ -1089,6 +1121,10 @@ class UserService:
             verification_preference = VerificationPreference(
                 two_fa_enabled=verification_pref_data.get("enabled", False),
                 verification_method=verification_pref_data.get("type", ""),
+            )
+        else:
+            verification_preference = VerificationPreference(
+                two_fa_enabled=False, verification_method="EMAIL"
             )
         # Get phone_number and phone_isd_code from user_profile
         phone_number = user_profile.get("phone_number", None)
@@ -1121,6 +1157,7 @@ class UserService:
             identities=user_profile.get("identities", []),
             verification_preference=verification_preference,
             organization_details=organization_details,
+            isometrik_details=isometrik_details,
         )
 
     async def _update_isometrik_user_if_needed(
