@@ -17,15 +17,15 @@ from apps.user_service.app.db.repositories import (
     UserRepository,
 )
 from apps.user_service.app.schemas.auth import (
-    AuthResponse,
     IsometrikDetails,
     SignupRequest,
-    UserInfo,
 )
 from apps.user_service.app.schemas.enums import InviteStatus, OrganizationMemberStatus
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
+    InviteAcceptResponse,
     InviteCreateRequest,
+    InvitedUserInfo,
 )
 from apps.user_service.app.services.session_management_service import (
     SessionManagementService,
@@ -344,15 +344,15 @@ class InviteService:
         )
         return await self._signup_new_user(signup_request)
 
-    def _build_auth_response(
+    def _build_invite_accept_response(
         self,
         session: Any,
         user: Any,
         user_metadata: dict[str, Any],
         organization_data: dict[str, Any],
         isometrik_details: IsometrikDetails,
-    ) -> AuthResponse:
-        """Build AuthResponse from authentication data.
+    ) -> InviteAcceptResponse:
+        """Build InviteAcceptResponse from authentication data.
 
         Args:
             session: Supabase session
@@ -362,14 +362,14 @@ class InviteService:
             isometrik_details: Isometrik details
 
         Returns:
-            AuthResponse: Authentication response
+            InviteAcceptResponse: Authentication response
         """
-        return AuthResponse(
+        return InviteAcceptResponse(
             access_token=session.access_token,
             refresh_token=getattr(session, "refresh_token", None),
             expires_in=getattr(session, "expires_in", None),
             expires_at=getattr(session, "expires_at", None),
-            user=UserInfo(
+            user=InvitedUserInfo(
                 id=getattr(user, "id", None),
                 email=getattr(user, "email", None),
                 first_name=user_metadata.get("first_name", None),
@@ -384,7 +384,7 @@ class InviteService:
 
     async def accept_and_set_password(
         self, body: InviteAcceptBySettingPasswordRequest
-    ) -> AuthResponse:
+    ) -> InviteAcceptResponse:
         """Accept an organization invitation by setting password."""
         # Get invitation details by token with row locking for atomic acceptance
         token_hash = hash_token(body.token)
@@ -479,7 +479,7 @@ class InviteService:
             invitation_data["id"], InviteStatus.ACCEPTED.value, user.id
         )
 
-        return self._build_auth_response(
+        return self._build_invite_accept_response(
             session=session,
             user=user,
             user_metadata=user_metadata,

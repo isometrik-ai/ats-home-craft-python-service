@@ -30,11 +30,13 @@ from apps.user_service.app.schemas.auth import (
     ForgotPasswordResponse,
     PasswordResponse,
     RefreshSessionResponse,
+    SelectOrganizationResponse,
     SignupRequest,
     UserInfo,
     ValidateAccountResponse,
     ValidateAccountTrigger,
 )
+from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.verification_codes import (
     VerificationType,
     VerifyVerificationCodeRequest,
@@ -577,16 +579,21 @@ class AuthService:
             phone_isd_code=phone_isd_code,
         )
 
-        # Get organization_id from organization_members table
+        # Get user's active organizations
         user_id = getattr(user, "id", None)
-        org_member_repo = OrganizationMemberRepository(self.db_connection)
-        organization_id = await org_member_repo.get_organization_id_by_user_id(user_id)
-
-        isometrik_details = await get_isometrik_details(
-            user_id=user_id,
-            organization_id=organization_id,
-            organization_repository=self.organization_repository,
+        organizations_data = await self.organization_repository.get_user_active_organizations(
+            user_id
         )
+        organizations = [
+            OrganizationBasicDetails(
+                id=str(org["id"]),
+                name=org["name"],
+                domain=org.get("domain"),
+                logo_url=org.get("logo_url"),
+                description=org.get("description"),
+            )
+            for org in organizations_data
+        ]
 
         return AuthResponse(
             access_token=session.access_token,
@@ -601,10 +608,9 @@ class AuthService:
                 phone_number=phone_number,
                 phone_isd_code=phone_isd_code,
                 timezone=user_metadata.get("timezone", None),
-                org_setup_status_completed=bool(organization_id),
-                organization_id=organization_id,
+                org_setup_status_completed=bool(organizations),
             ),
-            isometrik_details=isometrik_details,
+            organizations=organizations,
         )
 
     def _validate_tokens_present(
@@ -1103,19 +1109,22 @@ class AuthService:
         user_id: str,
         session_id: str,
         organization_id: str,
-    ) -> None:
+    ) -> SelectOrganizationResponse:
         """Select organization for a user session.
 
         This method validates that:
         1. User is a member of the organization
         2. Session is not already linked with an organization
         3. Updates the session with the selected organization_id
+        4. Returns isometrik details for the organization
 
         Args:
             user_id: User ID from JWT token
             session_id: Session ID from JWT token
             organization_id: Organization ID to select
 
+        Returns:
+            SelectOrganizationResponse: Response containing isometrik details
 
         Raises:
             NotFoundException: If user is not a member of the organization
@@ -1154,3 +1163,12 @@ class AuthService:
             user_id=user_id,
             organization_id=organization_id,
         )
+
+        # Get isometrik details for the organization
+        isometrik_details = await get_isometrik_details(
+            user_id=user_id,
+            organization_id=organization_id,
+            organization_repository=self.organization_repository,
+        )
+
+        return SelectOrganizationResponse(isometrik_details=isometrik_details)

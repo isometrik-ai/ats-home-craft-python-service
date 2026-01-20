@@ -5,10 +5,12 @@ These schemas are used for request/response validation and API documentation.
 """
 
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.enums import InviteStatus
 
 
@@ -34,24 +36,29 @@ class InviteResponse(BaseModel):
     expires_at: str | None = None
 
 
+class InvitedUserInfo(BaseModel):
+    """User information model"""
+
+    id: str
+    email: str
+    first_name: str | None = None
+    last_name: str | None = None
+    phone_number: str | None = None
+    phone_isd_code: str | None = None
+    timezone: str | None = Field(alias="timezone")
+    org_setup_status_completed: bool = False
+    organization_id: str | None = None
+
+
 class InviteAcceptResponse(BaseModel):
     """Response model for invitation acceptance operations."""
 
-    status: str = Field(..., description="Response status")
-    message: str = Field(..., description="Response message")
-    statusCode: int = Field(..., description="HTTP status code")
-    code: str = Field(..., description="Custom status code")
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "status": "success",
-                "message": "Invitation accepted successfully",
-                "statusCode": 202,
-                "code": "2006",
-            }
-        }
-    )
+    access_token: str
+    refresh_token: str
+    expires_in: int
+    expires_at: datetime
+    user: InvitedUserInfo
+    isometrik_details: IsometrikDetails | None = None
 
 
 class InviteCreateRequest(BaseModel):

@@ -21,6 +21,7 @@ from apps.user_service.app.db.repositories import (
     TeamRepository,
 )
 from apps.user_service.app.schemas.auth import Subscription
+from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
     AccountType,
     DeleteRequestStatus,
@@ -32,7 +33,6 @@ from apps.user_service.app.schemas.organizations import (
     DeleteRequestInfo,
     NewOrganizationBody,
     OrganizationAdminUpdate,
-    OrganizationBasicDetails,
     OrganizationInfo,
     OrganizationListResponse,
 )

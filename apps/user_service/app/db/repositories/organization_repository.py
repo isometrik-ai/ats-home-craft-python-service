@@ -299,6 +299,41 @@ class OrganizationRepository:
             )
         return dict(row)
 
+    async def get_user_active_organizations(self, user_id: str) -> list[dict[str, Any]]:
+        """Get user's active organizations with basic details.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            list[dict[str, Any]]: List of organizations with id, name, domain, logo_url, description
+        """
+        active_member_status = OrganizationMemberStatus.ACTIVE.value
+        active_org_status = OrganizationStatus.ACTIVE.value
+
+        query = """
+            SELECT
+                o.id,
+                o.name,
+                o.domain,
+                o.logo_url,
+                o.description
+            FROM organizations o
+            INNER JOIN organization_members om ON om.organization_id = o.id
+            WHERE om.user_id = $1
+                AND om.status = $2
+                AND o.status = $3
+            ORDER BY o.created_at DESC
+        """
+
+        rows = await self.db_connection.fetch(
+            query,
+            user_id,
+            active_member_status,
+            active_org_status,
+        )
+        return [dict(row) for row in rows]
+
     async def is_user_organization_owner(
         self,
         organization_id: str,

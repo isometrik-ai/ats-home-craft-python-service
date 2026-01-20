@@ -9,8 +9,8 @@ import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from apps.user_service.app.schemas.auth import IsometrikDetails
+from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import OrganizationMemberStatus, UserStatus
-from apps.user_service.app.schemas.organizations import OrganizationBasicDetails
 
 
 class RoleInfo(BaseModel):

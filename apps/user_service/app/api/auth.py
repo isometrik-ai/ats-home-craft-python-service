@@ -29,6 +29,7 @@ from apps.user_service.app.schemas.auth import (
     RefreshSessionResponse,
     ResetPasswordRequest,
     SelectOrganizationRequest,
+    SelectOrganizationResponse,
     SetPasswordRequest,
     SignupRequest,
     ValidateAccountRequest,
@@ -411,12 +412,12 @@ async def validate_account(
 @handle_api_exceptions("select_organization")
 @router.post(
     "/select-org",
-    response_model=None,
-    status_code=http_status.HTTP_204_NO_CONTENT,
+    response_model=SelectOrganizationResponse,
+    status_code=http_status.HTTP_200_OK,
     description="Select organization for the current user session",
     summary="Select organization for the current user session",
     responses={
-        http_status.HTTP_204_NO_CONTENT: {"description": "Organization selected successfully"},
+        http_status.HTTP_200_OK: {"description": "Organization selected successfully"},
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
         http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
         http_status.HTTP_404_NOT_FOUND: {"description": "User is not a member of the organization"},
@@ -440,13 +441,14 @@ async def select_organization(
     1. The user is a member of the organization
     2. The session is not already linked with an organization
     3. Updates the session with the selected organization_id
+    4. Returns isometrik details for the organization
     """
     auth_service = AuthService(db_connection=db_connection)
 
     user_id = current_user.get("sub")
     session_id = current_user.get("session_id")
 
-    await auth_service.select_organization(
+    result = await auth_service.select_organization(
         user_id=user_id,
         session_id=session_id,
         organization_id=data.organization_id,
@@ -454,7 +456,8 @@ async def select_organization(
 
     return success_response(
         request=request,
-        message_key="success.no_data",
-        custom_code=CustomStatusCode.NO_CONTENT,
-        status_code=http_status.HTTP_204_NO_CONTENT,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=result.model_dump(exclude_none=True),
     )
