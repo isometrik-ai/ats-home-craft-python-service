@@ -28,6 +28,7 @@ from apps.user_service.app.schemas.auth import (
     PasswordResponse,
     RefreshSessionResponse,
     ResetPasswordRequest,
+    SelectOrganizationRequest,
     SetPasswordRequest,
     SignupRequest,
     ValidateAccountRequest,
@@ -404,4 +405,56 @@ async def validate_account(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=result,
+    )
+
+
+@handle_api_exceptions("select_organization")
+@router.post(
+    "/select-org",
+    response_model=None,
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    description="Select organization for the current user session",
+    summary="Select organization for the current user session",
+    responses={
+        http_status.HTTP_204_NO_CONTENT: {"description": "Organization selected successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "User is not a member of the organization"},
+        http_status.HTTP_409_CONFLICT: {
+            "description": "Session already has an organization linked"
+        },
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("10/minute")
+async def select_organization(
+    request: Request,
+    data: SelectOrganizationRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Select organization for the current user session.
+
+    This endpoint allows a user to select an organization for their session.
+    It validates that:
+    1. The user is a member of the organization
+    2. The session is not already linked with an organization
+    3. Updates the session with the selected organization_id
+    """
+    auth_service = AuthService(db_connection=db_connection)
+
+    user_id = current_user.get("sub")
+    session_id = current_user.get("session_id")
+
+    await auth_service.select_organization(
+        user_id=user_id,
+        session_id=session_id,
+        organization_id=data.organization_id,
+    )
+
+    return success_response(
+        request=request,
+        message_key="success.no_data",
+        custom_code=CustomStatusCode.NO_CONTENT,
+        status_code=http_status.HTTP_204_NO_CONTENT,
     )

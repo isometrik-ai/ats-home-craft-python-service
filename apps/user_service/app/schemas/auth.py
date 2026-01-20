@@ -14,6 +14,7 @@ from apps.user_service.app.schemas.enums import (
     EncryptionRequirement,
     ExpectedMembers,
     FirmSize,
+    LoginMethod,
     PlanType,
     PracticeArea,
     PreferredIntegration,
@@ -33,7 +34,7 @@ class SessionFilter(BaseModel):
 
     search: str | None = None
     session_status: SessionStatus | None = None
-    login_method: str | None = None
+    login_method: LoginMethod | None = None
     limit: int = 20
     offset: int = 0
 
@@ -238,6 +239,12 @@ class ChangePasswordResponse(BaseModel):
     """Response model for change password operations"""
 
     message: str = Field(..., description="Response message describing the operation result")
+
+
+class SelectOrganizationRequest(BaseModel):
+    """Request model for selecting organization"""
+
+    organization_id: str = Field(..., description="Organization ID to select")
 
 
 class User(BaseModel):

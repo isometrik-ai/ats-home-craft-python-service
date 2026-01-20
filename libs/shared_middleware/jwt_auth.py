@@ -18,7 +18,9 @@ from fastapi import Depends, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from supabase import AsyncClient, AuthError
 
-from apps.user_service.app.db.repositories import OrganizationMemberRepository
+from apps.user_service.app.db.repositories import (
+    SessionRepository,
+)
 from apps.user_service.app.dependencies.db import db_conn
 from libs.shared_db.supabase_db.client import get_supabase_client
 from libs.shared_utils.http_exceptions import (
@@ -133,7 +135,7 @@ async def get_claims_from_token(
 async def check_user_access_async(
     permission_code: list[str],
     user_id: str,
-    organization_id: str,
+    organization_id: str | None,
     db_connection: asyncpg.Connection,
 ) -> bool:
     """Check if a user has the specified role permission using asyncpg.
@@ -204,20 +206,24 @@ async def get_user_from_auth(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
 ) -> dict:
-    """Validate user from JWT, check org membership and role.
+    """Validate user from JWT, get organization_id from session.
 
     Sets audit context in request.state.
     Ensures audit context is populated even during authentication/authorization failures.
+
+    Raises:
+        UnauthorizedException: If user is not authenticated
     """
     user = getattr(request.state, "user", None)
 
     # Extract user data from JWT token
     user_id, user_email, session_id = extract_user_data(user)
 
-    org_member_repo = OrganizationMemberRepository(db_connection=db_connection)
-    organization_id = await org_member_repo.get_organization_id_by_user_id(user_id)
+    # Setup audit context (before validation to ensure audit trail)
+    organization_id = None
+    session_repo = SessionRepository(db_connection=db_connection)
+    organization_id = await session_repo.get_session_organization_id(session_id)
 
-    # Setup audit context
     setup_audit_context(request, user_id, user_email, organization_id, session_id)
 
     # Validate basic authentication
@@ -228,9 +234,6 @@ async def get_user_from_auth(
             params={"user_id": user_id},
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    # ✅ User is valid, update audit context and success markers
-    # request.state.audit_user_context["user_role"] = role_name
     request.state.audit_risk_level = "low"
     request.state.audit_description = "Successfully authenticated and authorized user"
 

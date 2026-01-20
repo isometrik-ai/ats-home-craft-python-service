@@ -10,7 +10,10 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.schemas.auth import SessionFilter
-from apps.user_service.app.schemas.enums import OrganizationMemberStatus
+from apps.user_service.app.schemas.enums import (
+    OrganizationMemberStatus,
+    SessionStatus,
+)
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("session_repository")
@@ -64,13 +67,12 @@ class SessionRepository:
         param_index = 2
 
         # Apply organization filter
-        # Temporarily commented out - organization_id check disabled
-        # if organization_id is None:
-        #     conditions.append(f"{table_prefix}organization_id IS NULL")
-        # else:
-        #     conditions.append(f"{table_prefix}organization_id = ${param_index}")
-        #     params.append(organization_id)
-        #     param_index += 1
+        if organization_id is None:
+            conditions.append(f"{table_prefix}organization_id IS NULL")
+        else:
+            conditions.append(f"{table_prefix}organization_id = ${param_index}")
+            params.append(organization_id)
+            param_index += 1
 
         # Apply session status filter
         if filters.session_status:
@@ -316,3 +318,66 @@ class SessionRepository:
         data = [dict(row) for row in rows]
 
         return {"data": data, "total_count": total_count}
+
+    # SESSION LIFECYCLE OPERATIONS
+    async def get_session_organization_id(self, session_id: str) -> str | None:
+        """Get organization_id for a session.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Organization ID or None if not found or session is inactive
+        """
+        query = """
+            SELECT organization_id
+            FROM user_sessions
+            WHERE id = $1 AND session_status = $2
+        """
+        result = await self.db_connection.fetchval(query, session_id, SessionStatus.ACTIVE.value)
+        return str(result) if result else None
+
+    async def check_session_has_organization(self, session_id: str) -> bool:
+        """Check if session already has an organization_id linked.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            bool: True if session has organization_id, False otherwise
+        """
+        query = """
+            SELECT EXISTS(
+                SELECT 1
+                FROM user_sessions
+                WHERE id = $1
+                    AND session_status = $2
+                    AND organization_id IS NOT NULL
+            )
+        """
+        exists = await self.db_connection.fetchval(query, session_id, SessionStatus.ACTIVE.value)
+        return bool(exists)
+
+    async def update_session_organization_context(
+        self,
+        session_id: str,
+        user_id: str,
+        organization_id: str,
+    ) -> None:
+        """Update session organization context.
+
+        Args:
+            session_id: Session ID to update
+            user_id: User ID (for validation)
+            organization_id: Organization ID to set as active context
+        """
+        query = """
+            UPDATE user_sessions
+            SET organization_id = $1
+            WHERE id = $2
+                AND user_id = $3
+                AND session_status = $4
+        """
+        await self.db_connection.execute(
+            query, organization_id, session_id, user_id, SessionStatus.ACTIVE.value
+        )

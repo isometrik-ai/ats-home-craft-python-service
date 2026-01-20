@@ -18,6 +18,7 @@ from supabase import AsyncClient, AuthApiError
 from apps.user_service.app.db.repositories import (
     OrganizationMemberRepository,
     OrganizationRepository,
+    SessionRepository,
     UserRepository,
 )
 
@@ -1096,3 +1097,60 @@ class AuthService:
             is_enabled, _ = self._is_2fa_enabled(raw_user_metadata)
             return ValidateAccountResponse(two_fa_enabled=is_enabled)
         return None
+
+    async def select_organization(
+        self,
+        user_id: str,
+        session_id: str,
+        organization_id: str,
+    ) -> None:
+        """Select organization for a user session.
+
+        This method validates that:
+        1. User is a member of the organization
+        2. Session is not already linked with an organization
+        3. Updates the session with the selected organization_id
+
+        Args:
+            user_id: User ID from JWT token
+            session_id: Session ID from JWT token
+            organization_id: Organization ID to select
+
+
+        Raises:
+            NotFoundException: If user is not a member of the organization
+            ConflictException: If session already has an organization linked
+            BadRequestException: If session is invalid or inactive
+            InternalServerErrorException: For internal server errors
+        """
+        # Initialize repositories
+        organization_member_repository = OrganizationMemberRepository(
+            db_connection=self.db_connection
+        )
+        session_repository = SessionRepository(db_connection=self.db_connection)
+
+        # Check if user is a member of the organization
+        is_member = await organization_member_repository.check_user_membership_by_user_id(
+            user_id=user_id, organization_id=organization_id
+        )
+        if not is_member:
+            raise NotFoundException(
+                message_key="auth.errors.user_not_member_of_organization",
+                custom_code=CustomStatusCode.NOT_FOUND,
+                params={"organization_id": organization_id},
+            )
+
+        # Check if session already has an organization linked
+        has_org = await session_repository.check_session_has_organization(session_id=session_id)
+        if has_org:
+            raise ConflictException(
+                message_key="auth.errors.session_already_has_organization",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        # Update session with organization_id
+        await session_repository.update_session_organization_context(
+            session_id=session_id,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
