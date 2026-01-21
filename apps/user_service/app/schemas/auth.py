@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from apps.user_service.app.schemas.common import Address, OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
     AuditingFrequency,
     ComplianceStandard,
@@ -14,6 +15,7 @@ from apps.user_service.app.schemas.enums import (
     EncryptionRequirement,
     ExpectedMembers,
     FirmSize,
+    LoginMethod,
     PlanType,
     PracticeArea,
     PreferredIntegration,
@@ -33,7 +35,7 @@ class SessionFilter(BaseModel):
 
     search: str | None = None
     session_status: SessionStatus | None = None
-    login_method: str | None = None
+    login_method: LoginMethod | None = None
     limit: int = 20
     offset: int = 0
 
@@ -116,7 +118,6 @@ class UserInfo(BaseModel):
     phone_isd_code: str | None = None
     timezone: str | None = Field(alias="timezone")
     org_setup_status_completed: bool = False
-    organization_id: str | None = None
 
 
 class OrganizationInfo(BaseModel):
@@ -148,7 +149,9 @@ class AuthResponse(BaseModel):
     expires_in: int
     expires_at: datetime
     user: UserInfo
-    isometrik_details: IsometrikDetails | None = None
+    organizations: list[OrganizationBasicDetails] = Field(
+        default_factory=list, description="List of user's active organizations"
+    )
 
 
 class RefreshSessionResponse(BaseModel):
@@ -240,6 +243,20 @@ class ChangePasswordResponse(BaseModel):
     message: str = Field(..., description="Response message describing the operation result")
 
 
+class SelectOrganizationRequest(BaseModel):
+    """Request model for selecting organization"""
+
+    organization_id: str = Field(..., description="Organization ID to select")
+
+
+class SelectOrganizationResponse(BaseModel):
+    """Response model for selecting organization"""
+
+    isometrik_details: IsometrikDetails | None = Field(
+        None, description="Isometrik details for the organization"
+    )
+
+
 class User(BaseModel):
     """User information."""
 
@@ -291,16 +308,6 @@ class EnterpriseFeatures(BaseModel):
     custom_integration: list[CustomIntegration]
     custom_reporting: list[CustomReporting]
     primary_contact_information: PrimaryContactInformation
-
-
-class Address(BaseModel):
-    """Address information."""
-
-    address_line: str | None = Field(None, description="Address line")
-    city: str | None = Field(None, description="City")
-    state: str | None = Field(None, description="State")
-    zip_code: str | None = Field(None, description="Zip code")
-    country: str = Field(..., description="Country name")
 
 
 class Subscription(BaseModel):

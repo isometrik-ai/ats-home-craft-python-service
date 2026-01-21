@@ -21,6 +21,7 @@ from apps.user_service.app.db.repositories import (
     TeamRepository,
 )
 from apps.user_service.app.schemas.auth import Subscription
+from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
     AccountType,
     DeleteRequestStatus,
@@ -32,9 +33,11 @@ from apps.user_service.app.schemas.organizations import (
     DeleteRequestInfo,
     NewOrganizationBody,
     OrganizationAdminUpdate,
-    OrganizationBasicDetails,
     OrganizationInfo,
     OrganizationListResponse,
+)
+from apps.user_service.app.services.session_management_service import (
+    SessionManagementService,
 )
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -48,6 +51,7 @@ from apps.user_service.app.utils.email_utils import (
     send_organization_deletion_rejected_email,
 )
 from libs.shared_utils.http_exceptions import (
+    BadRequestException,
     ConflictException,
     ForbiddenException,
     InternalServerErrorException,
@@ -157,18 +161,38 @@ class OrganizationService:
         self,
         body: NewOrganizationBody,
         slug: str | None,
+        session_id: str,
     ) -> dict:
-        """Create a new organization after slug uniqueness check."""
+        """Create a new organization after slug uniqueness check.
+
+        Args:
+            body: Organization creation data
+            slug: Optional slug for the organization
+            session_id: Session ID to validate and update organization context
+
+        Raises:
+            BadRequestException: If session is already linked to an organization
+            ForbiddenException: If user context is invalid
+        """
         # Validate user context
         if self.user_context.user_id is None:
             raise ForbiddenException(
                 message_key="organizations.errors.forbidden",
                 custom_code=CustomStatusCode.FORBIDDEN,
             )
-        if self.user_context.organization_id is not None:
-            raise ConflictException(
-                message_key="organizations.errors.conflict",
-                custom_code=CustomStatusCode.CONFLICT,
+
+        # Check if session is already linked to an organization before creating a new one
+        session_manager = SessionManagementService(db_connection=self.db_connection)
+
+        # Check if session already has an organization context
+        current_org_id = await session_manager.session_repository.get_session_organization_id(
+            session_id
+        )
+
+        # Restrict user from creating an organization if session is already linked with one
+        if current_org_id is not None:
+            raise BadRequestException(
+                message_key="organizations.errors.session_already_linked",
             )
 
         organization_id = str(uuid.uuid4())
@@ -205,6 +229,14 @@ class OrganizationService:
             body=body,
             isometrik_creds=isometrik_details,  # Pass the isometrik details here
         )
+
+        # Sync session organization context after successful creation
+        await session_manager.update_session_organization_context(
+            session_id=session_id,
+            user_id=self.user_context.user_id,
+            organization_id=organization_id,
+        )
+
         # Match API response shape
         return {
             "organization_id": organization_id,

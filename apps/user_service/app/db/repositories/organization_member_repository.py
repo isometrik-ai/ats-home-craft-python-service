@@ -185,6 +185,30 @@ class OrganizationMemberRepository:
         )
         return row is not None
 
+    async def check_user_membership_by_user_id(self, user_id: str, organization_id: str) -> bool:
+        """Check if user is a member of the organization by user_id.
+
+        Args:
+            user_id: User ID
+            organization_id: Organization ID
+
+        Returns:
+            bool: True if user is a member, False otherwise
+        """
+        query = """
+            SELECT EXISTS(
+                SELECT 1
+                FROM organization_members
+                WHERE user_id = $1
+                    AND organization_id = $2
+                    AND status != $3
+            )
+        """
+        exists = await self.db_connection.fetchval(
+            query, user_id, organization_id, OrganizationMemberStatus.DELETED.value
+        )
+        return bool(exists)
+
     async def check_phone_exists_for_other_user(
         self,
         phone_number: str,
@@ -398,7 +422,7 @@ class OrganizationMemberRepository:
             query, user_id, organization_id, OrganizationMemberStatus.ACTIVE.value
         )
 
-    async def update_user_status(self, user_id: str, organization_id: str, status: str) -> bool:
+    async def _update_user_status(self, user_id: str, organization_id: str, status: str) -> bool:
         """Update user status in the organization.
 
         Args:
@@ -429,7 +453,7 @@ class OrganizationMemberRepository:
         Returns:
             bool: True if user was suspended successfully, False otherwise
         """
-        return await self.update_user_status(
+        return await self._update_user_status(
             user_id, organization_id, OrganizationMemberStatus.SUSPENDED.value
         )
 
@@ -443,7 +467,7 @@ class OrganizationMemberRepository:
         Returns:
             bool: True if user was revoked successfully, False otherwise
         """
-        return await self.update_user_status(
+        return await self._update_user_status(
             user_id, organization_id, OrganizationMemberStatus.ACTIVE.value
         )
 

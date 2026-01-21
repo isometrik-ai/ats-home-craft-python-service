@@ -110,9 +110,9 @@ async def test_create_organization(monkeypatch, client):
             user_id="u1", email="u1@example.com", organization_id=None, user_type="admin"
         )
 
-    async def fake_create(_self, body, slug=None):
+    async def fake_create(_self, body, slug=None, session_id=None):
         """Fake create org."""
-        del _self, slug
+        del _self, slug, session_id
         assert body.company_data.company_name == "Org New"
         return {
             "organization_id": "org-new",

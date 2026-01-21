@@ -47,7 +47,8 @@
       "only_creator_can_request_deletion": "Only the organization creator can request deletion.",
       "duplicate_delete_request": "A delete request for this organization already exists. Please wait for the previous request to be processed.",
       "delete_request_not_found": "The delete request you are trying to access does not exist.",
-      "delete_request_already_processed": "This delete request has already been processed and cannot be modified."
+      "delete_request_already_processed": "This delete request has already been processed and cannot be modified.",
+      "session_already_linked": "You are currently logged in with an organization. Please logout and login again to create a new organization."
     },
     "success": {
       "organization_created": "Organization created successfully.",
@@ -83,7 +84,10 @@
       "invalid_refresh_token": "Invalid or expired refresh token. Please login again.",
       "authentication_service_unavailable": "Authentication service is temporarily unavailable.",
       "session_not_created_after_signup": "Your account was created successfully, but we couldn't create a session. Please try logging in with your email and password.",
-      "user_already_registered": "User already registered with this email."
+      "user_already_registered": "User already registered with this email.",
+      "session_cannot_access_organization": "Your current session cannot access this organization. Please login with the appropriate organization.",
+      "user_not_member_of_organization": "You are not a member of this organization.",
+      "session_already_has_organization": "Your session is already linked to an organization. Please logout and login again to switch organizations."
     },
     "success": {
       "login_successful": "Login successful.",
@@ -152,7 +156,8 @@
   },
   "sessions": {
     "errors": {
-      "bad_request": "Organization ID is required to list organization-wide sessions"
+      "bad_request": "Organization ID is required to list organization-wide sessions",
+      "invalid_session_data": "Invalid session data provided"
     }
   },
   "users": {

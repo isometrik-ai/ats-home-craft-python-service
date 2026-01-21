@@ -312,11 +312,16 @@ async def create_organization(
     # Extract user context from JWT token
     user_context = await extract_user_context(current_user, db_connection)
 
+    # Validate session_id is present
+    session_id = current_user.get("session_id")
+
     # Create service with user context and delegate to service
     organization_service = OrganizationService(
         user_context=user_context, db_connection=db_connection
     )
-    result = await organization_service.create_organization(body=body, slug=None)
+    result = await organization_service.create_organization(
+        body=body, slug=None, session_id=session_id
+    )
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,

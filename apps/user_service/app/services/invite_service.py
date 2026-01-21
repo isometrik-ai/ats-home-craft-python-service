@@ -14,17 +14,21 @@ from apps.user_service.app.db.repositories import (
     OrganizationMemberRepository,
     OrganizationRepository,
     RoleRepository,
+    UserRepository,
 )
 from apps.user_service.app.schemas.auth import (
-    AuthResponse,
     IsometrikDetails,
     SignupRequest,
-    UserInfo,
 )
 from apps.user_service.app.schemas.enums import InviteStatus, OrganizationMemberStatus
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
+    InviteAcceptResponse,
     InviteCreateRequest,
+    InvitedUserInfo,
+)
+from apps.user_service.app.services.session_management_service import (
+    SessionManagementService,
 )
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -35,9 +39,11 @@ from apps.user_service.app.utils.email_utils import send_organization_invitation
 from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_db.supabase_db.auth_repository import (
     get_user_by_id,
+    login_user,
     sign_up_supabase_user,
 )
 from libs.shared_utils.http_exceptions import (
+    BadRequestException,
     ConflictException,
     ForbiddenException,
     InternalServerErrorException,
@@ -68,6 +74,8 @@ class InviteService:
         self.organization_member_repository = OrganizationMemberRepository(
             db_connection=db_connection
         )
+        self.user_repository = UserRepository(db_connection=db_connection)
+        self.session_management_service = SessionManagementService(db_connection=db_connection)
         self.supabase_client = sb_client
 
     def _generate_invite_token(self) -> tuple[str, str]:
@@ -181,9 +189,202 @@ class InviteService:
 
         return invitation_data
 
+    def _extract_invite_metadata(
+        self, invitation_data: dict[str, Any]
+    ) -> tuple[dict[str, Any], str | None, str | None]:
+        """Extract metadata, phone number, and ISD code from invitation data.
+
+        Args:
+            invitation_data: Invitation data dictionary
+
+        Returns:
+            tuple: (metadata dict, phone_number, phone_isd_code)
+        """
+        inv_meta = self._parse_json_field(invitation_data.get("metadata"))
+        phone_number = inv_meta.get("phone_number", None)
+        phone_isd_code = inv_meta.get("phone_isd_code", None)
+        return inv_meta, phone_number, phone_isd_code
+
+    def _build_signup_request_from_invite(
+        self,
+        email: str,
+        password: str,
+        inv_meta: dict[str, Any],
+        phone_number: str | None,
+        phone_isd_code: str | None,
+    ) -> SignupRequest:
+        """Build SignupRequest from invitation metadata.
+
+        Args:
+            email: User email
+            password: User password
+            inv_meta: Invitation metadata dictionary
+            phone_number: Phone number
+            phone_isd_code: Phone ISD code
+
+        Returns:
+            SignupRequest: Signup request object
+        """
+        return SignupRequest(
+            email=email,
+            password=password,
+            first_name=inv_meta.get("first_name", None),
+            last_name=inv_meta.get("last_name", None),
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
+            timezone="UTC",
+            salutation=inv_meta.get("salutation", None),
+            verification_id="",
+            verification_code="",
+        )
+
+    async def _authenticate_existing_user(
+        self, email: str, password: str
+    ) -> Any:  # Returns auth result
+        """Authenticate an existing user with email and password.
+
+        Args:
+            email: User email
+            password: User password
+
+        Returns:
+            Auth result from Supabase
+
+        Raises:
+            BadRequestException: If authentication fails
+            InternalServerErrorException: If auth result is invalid
+        """
+        try:
+            auth_result = await login_user(
+                email=email, password=password, sb_client=self.supabase_client
+            )
+        except AuthApiError as login_error:
+            if login_error.status == 400:
+                raise BadRequestException(
+                    message_key="auth.errors.invalid_credentials",
+                    custom_code=CustomStatusCode.BAD_REQUEST,
+                ) from login_error
+            raise BadRequestException(
+                message_key="auth.errors.authentication_failed",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            ) from login_error
+        except Exception as login_error:
+            raise BadRequestException(
+                message_key="auth.errors.authentication_failed",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            ) from login_error
+
+        if not auth_result or not auth_result.user:
+            raise InternalServerErrorException(
+                message_key="errors.internal_server_error",
+                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+            )
+
+        return auth_result
+
+    async def _signup_new_user(self, signup_request: SignupRequest) -> Any:  # Returns auth result
+        """Create a new user account.
+
+        Args:
+            signup_request: Signup request data
+
+        Returns:
+            Auth result from Supabase
+
+        Raises:
+            BadRequestException: If signup fails
+            InternalServerErrorException: If auth result is invalid
+        """
+        try:
+            auth_result = await sign_up_supabase_user(signup_request, self.supabase_client)
+        except AuthApiError as signup_error:
+            raise BadRequestException(
+                message_key="auth.errors.authentication_failed",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            ) from signup_error
+
+        if not auth_result:
+            raise InternalServerErrorException(
+                message_key="errors.internal_server_error",
+                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+            )
+
+        return auth_result
+
+    async def _authenticate_or_signup_user(
+        self,
+        email: str,
+        password: str,
+        inv_meta: dict[str, Any],
+        phone_number: str | None,
+        phone_isd_code: str | None,
+    ) -> Any:  # Returns auth result
+        """Authenticate existing user or create new user account.
+
+        Args:
+            email: User email
+            password: User password
+            inv_meta: Invitation metadata
+            phone_number: Phone number
+            phone_isd_code: Phone ISD code
+
+        Returns:
+            Auth result from Supabase
+        """
+        # Check if user already exists in the auth system
+        existing_auth_user = await self.user_repository.get_auth_user_by_email(email)
+
+        if existing_auth_user:
+            # User already exists, authenticate them with the provided password
+            return await self._authenticate_existing_user(email, password)
+
+        # User doesn't exist, create a new account
+        signup_request = self._build_signup_request_from_invite(
+            email, password, inv_meta, phone_number, phone_isd_code
+        )
+        return await self._signup_new_user(signup_request)
+
+    def _build_invite_accept_response(
+        self,
+        session: Any,
+        user: Any,
+        user_metadata: dict[str, Any],
+        organization_data: dict[str, Any],
+        isometrik_details: IsometrikDetails,
+    ) -> InviteAcceptResponse:
+        """Build InviteAcceptResponse from authentication data.
+
+        Args:
+            session: Supabase session
+            user: Supabase user
+            user_metadata: User metadata dictionary
+            organization_data: Organization data dictionary
+            isometrik_details: Isometrik details
+
+        Returns:
+            InviteAcceptResponse: Authentication response
+        """
+        return InviteAcceptResponse(
+            access_token=session.access_token,
+            refresh_token=getattr(session, "refresh_token", None),
+            expires_in=getattr(session, "expires_in", None),
+            expires_at=getattr(session, "expires_at", None),
+            user=InvitedUserInfo(
+                id=getattr(user, "id", None),
+                email=getattr(user, "email", None),
+                first_name=user_metadata.get("first_name", None),
+                last_name=user_metadata.get("last_name", None),
+                phone_number=user_metadata.get("phone_number", None),
+                phone_isd_code=user_metadata.get("phone_isd_code", None),
+                timezone=user_metadata.get("timezone", None),
+                organization_id=str(organization_data.get("id", None)),
+            ),
+            isometrik_details=isometrik_details,
+        )
+
     async def accept_and_set_password(
         self, body: InviteAcceptBySettingPasswordRequest
-    ) -> AuthResponse:
+    ) -> InviteAcceptResponse:
         """Accept an organization invitation by setting password."""
         # Get invitation details by token with row locking for atomic acceptance
         token_hash = hash_token(body.token)
@@ -216,52 +417,18 @@ class InviteService:
             invitation_data["role_id"], invitation_data["organization_id"]
         )
 
-        inv_meta = self._parse_json_field(invitation_data.get("metadata"))
+        # Extract invitation metadata
+        inv_meta, phone_number, phone_isd_code = self._extract_invite_metadata(invitation_data)
 
-        phone_number = inv_meta.get("phone_number", None)
-        phone_isd_code = inv_meta.get("phone_isd_code", None)
-
-        try:
-            auth_result = await sign_up_supabase_user(
-                SignupRequest(
-                    email=invitation_data["email"],
-                    password=body.password,
-                    first_name=inv_meta.get("first_name", None),
-                    last_name=inv_meta.get("last_name", None),
-                    phone_number=phone_number,
-                    phone_isd_code=phone_isd_code,
-                    timezone="UTC",
-                    salutation=inv_meta.get("salutation", None),
-                    verification_id="",
-                    verification_code="",
-                ),
-                self.supabase_client,
-            )
-        except AuthApiError as exc:
-            # Supabase returns AuthApiError when user already exists
-            # if not (exc.status == 422 or exc.code == "user_already_exists"):
-            #     raise
-
-            # auth_result = await login_user(
-            #     email=invitation_data["email"],
-            #     password=body.password,
-            #     sb_client=self.supabase_client,
-            # )
-            # if not auth_result or not auth_result.user:
-            #     raise ConflictException(
-            #         message_key="auth.errors.user_already_registered",
-            #         custom_code=CustomStatusCode.CONFLICT,
-            #     ) from exc
-            raise ConflictException(
-                message_key="auth.errors.user_already_registered",
-                custom_code=CustomStatusCode.CONFLICT,
-            ) from exc
-
-        if not auth_result:
-            raise InternalServerErrorException(
-                message_key="errors.internal_server_error",
-                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
-            )
+        # Authenticate existing user or create new user account
+        # This allows existing users to accept invitations from new organizations
+        auth_result = await self._authenticate_or_signup_user(
+            email=invitation_data["email"],
+            password=body.password,
+            inv_meta=inv_meta,
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
+        )
 
         session = auth_result.session
         user = auth_result.user
@@ -296,26 +463,27 @@ class InviteService:
             isometrik_credentials=isometrik_credentials,
         )
 
+        # Session is created automatically by database trigger when auth.session is created
+        # Update session with organization_id
+        session_id = await self.session_management_service._extract_session_id(
+            session, self.supabase_client
+        )
+        await self.session_management_service.update_session_organization_context(
+            session_id=session_id,
+            user_id=user.id,
+            organization_id=invitation_data["organization_id"],
+        )
+
         # Update invitation status
         await self.invite_repository.update_invite_status(
             invitation_data["id"], InviteStatus.ACCEPTED.value, user.id
         )
 
-        return AuthResponse(
-            access_token=session.access_token,
-            refresh_token=getattr(session, "refresh_token", None),
-            expires_in=getattr(session, "expires_in", None),
-            expires_at=getattr(session, "expires_at", None),
-            user=UserInfo(
-                id=getattr(user, "id", None),
-                email=getattr(user, "email", None),
-                first_name=user_metadata.get("first_name", None),
-                last_name=user_metadata.get("last_name", None),
-                phone_number=user_metadata.get("phone_number", None),
-                phone_isd_code=user_metadata.get("phone_isd_code", None),
-                timezone=user_metadata.get("timezone", None),
-                organization_id=str(organization_data.get("id", None)),
-            ),
+        return self._build_invite_accept_response(
+            session=session,
+            user=user,
+            user_metadata=user_metadata,
+            organization_data=organization_data,
             isometrik_details=isometrik_details,
         )
 

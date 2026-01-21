@@ -19,8 +19,8 @@ import asyncpg
 from fastapi import HTTPException, Request
 
 from apps.user_service.app.db.repositories import (
-    OrganizationMemberRepository,
     OrganizationRepository,
+    SessionRepository,
 )
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
@@ -155,9 +155,11 @@ async def extract_user_context(
                 params={"error": "email not found"},
             )
 
-        # Get organization_id from organization_members table
-        org_member_repo = OrganizationMemberRepository(db_connection)
-        organization_id = await org_member_repo.get_organization_id_by_user_id(user_id)
+        # Get organization_id from user_sessions table using session_id from JWT
+        organization_id = None
+        session_id = current_user.get("session_id")
+        session_repo = SessionRepository(db_connection)
+        organization_id = await session_repo.get_session_organization_id(session_id)
 
         user_type = "organization_member" if organization_id else None
 
@@ -254,21 +256,38 @@ async def check_permissions(
 ) -> UserContext:
     """Extracts user context and checks if the user has the given permission.
 
+    Always uses organization_id from session, never from user-provided parameter.
+    Validates that session can access requested organization if provided.
+
     Args:
         current_user (dict): Current user data
         db_connection (asyncpg.Connection): Database connection
         permission_codes (list[str] | str): Permission codes to check
-        organization_id (str | None): Organization ID
+        organization_id (str | None): Organization ID for validation (not used for permission check)
 
     Returns:
         UserContext: User context
     """
     user_context = await extract_user_context(current_user, db_connection)
+
+    # Validate session can access requested organization if provided
+    # Use already-fetched organization_id from user_context to avoid redundant DB query
+    if organization_id:
+        if (
+            user_context.organization_id is not None
+            and user_context.organization_id != organization_id
+        ):
+            raise ForbiddenException(
+                message_key="auth.errors.session_cannot_access_organization",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+
+    # Always use organization_id from session (user_context.organization_id)
     await require_permission(
         permission_code=permission_codes,
         user_context=user_context,
         db_connection=db_connection,
-        organization_id=organization_id if organization_id else user_context.organization_id,
+        organization_id=user_context.organization_id,
     )
     return user_context
 

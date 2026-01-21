@@ -106,6 +106,15 @@ class SessionStatus(str, Enum):
     LOGGED_OUT = "logged_out"
 
 
+class LoginMethod(str, Enum):
+    """Enumeration for login methods."""
+
+    PASSWORD = "password"
+    SSO = "sso"
+    MFA = "mfa"
+    UNKNOWN = "unknown"
+
+
 class RoleType(str, Enum):
     """Enumeration for role types."""
 

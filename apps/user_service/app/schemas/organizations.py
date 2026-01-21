@@ -10,7 +10,6 @@ from fastapi import HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from apps.user_service.app.schemas.auth import (
-    Address,
     CompanyData,
     ComplianceSecurity,
     EnterpriseFeatures,
@@ -21,6 +20,7 @@ from apps.user_service.app.schemas.auth import (
     TeamSetup,
     User,
 )
+from apps.user_service.app.schemas.common import Address
 from apps.user_service.app.schemas.enums import (
     DeleteRequestStatus,
     OrganizationStatus,
@@ -111,24 +111,6 @@ class OrganizationInfo(BaseModel):
                 "user_role": "Administrator",
             }
         }
-    )
-
-
-class OrganizationBasicDetails(BaseModel):
-    """Model for organization basic details"""
-
-    id: str = Field(..., description="Unique identifier for the organization")
-    name: str = Field(..., description="Organization's name")
-    domain: str | None = Field(None, description="Organization's domain name")
-    logo_url: str | None = Field(None, description="URL to organization's logo")
-    description: str | None = Field(None, description="Organization's description")
-    company_size: str | None = Field(None, description="Organization's company size")
-    address: Address | None = Field(None, description="Organization's address")
-    primary_practice_areas: list[PracticeArea] | None = Field(
-        None, description="Organization's primary practice areas"
-    )
-    secondary_practice_areas: list[PracticeArea] | None = Field(
-        None, description="Organization's secondary practice areas"
     )
 
 

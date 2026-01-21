@@ -18,8 +18,8 @@ from apps.user_service.app.db.repositories.organization_repository import (
 )
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
 from apps.user_service.app.schemas.auth import IsometrikDetails
+from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import OrganizationMemberStatus
-from apps.user_service.app.schemas.organizations import OrganizationBasicDetails
 from apps.user_service.app.schemas.users import (
     PermissionInfo,
     RoleInfo,

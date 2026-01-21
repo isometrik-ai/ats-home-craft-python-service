@@ -17,9 +17,9 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 # Logger import
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_anon, supabase_service
-from apps.user_service.app.schemas.auth import AuthResponse
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
+    InviteAcceptResponse,
     InviteCreateRequest,
     InviteListResponse,
     InviteResponse,
@@ -49,10 +49,10 @@ router = APIRouter(prefix="/invite", tags=["Organization Invitations"])
     description="Accept an organization invitation by setting password",
     summary="Accept an organization invitation by setting password",
     status_code=http_status.HTTP_202_ACCEPTED,
-    response_model=AuthResponse,
+    response_model=InviteAcceptResponse,
     responses={
         http_status.HTTP_202_ACCEPTED: {
-            "model": AuthResponse,
+            "model": InviteAcceptResponse,
             "description": "Invitation accepted successfully",
         },
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
