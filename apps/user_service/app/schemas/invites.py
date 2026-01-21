@@ -10,7 +10,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.enums import InviteStatus
 
 
@@ -58,7 +57,6 @@ class InviteAcceptResponse(BaseModel):
     expires_in: int
     expires_at: datetime
     user: InvitedUserInfo
-    isometrik_details: IsometrikDetails | None = None
 
 
 class InviteCreateRequest(BaseModel):
