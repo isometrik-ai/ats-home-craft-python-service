@@ -24,6 +24,8 @@ from apps.user_service.app.schemas.invites import (
     InviteListResponse,
     InviteResponse,
     InviteStatus,
+    InviteValidateLinkRequest,
+    InviteValidateLinkResponse,
 )
 
 # Service import
@@ -41,6 +43,44 @@ from libs.shared_utils.status_codes import CustomStatusCode
 
 # Create router for invite endpoints
 router = APIRouter(prefix="/invite", tags=["Organization Invitations"])
+
+
+@handle_api_exceptions("validate invite link")
+@router.post(
+    "/validate/link",
+    description="Validate invite link and check if user is existing",
+    summary="Validate invite link and check if user is existing",
+    status_code=http_status.HTTP_200_OK,
+    response_model=InviteValidateLinkResponse,
+    responses={
+        http_status.HTTP_200_OK: {
+            "model": InviteValidateLinkResponse,
+            "description": "Invite link validated successfully",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Invitation not found or expired"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+async def validate_invite_link(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    body: InviteValidateLinkRequest = Body(...),
+):
+    """Validate invite link and check if user is existing"""
+    # Create service and delegate to service
+    invite_service = InviteService(user_context=None, db_connection=db_connection)
+    result = await invite_service.validate_invite_link(body.token)
+
+    return success_response(
+        request=request,
+        message_key="invitations.success.link_validated",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=InviteValidateLinkResponse(is_existing_user=result["is_existing_user"]),
+    )
 
 
 @handle_api_exceptions("accept invitation by setting password")

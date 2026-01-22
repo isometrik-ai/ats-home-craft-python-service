@@ -99,6 +99,34 @@ class InviteAcceptBySettingPasswordRequest(BaseModel):
     )
 
 
+class InviteValidateLinkRequest(BaseModel):
+    """Request model for invite link validation operations."""
+
+    token: str = Field(..., description="Invite token from the URL")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "token": "abc123xyz456...",
+            }
+        }
+    )
+
+
+class InviteValidateLinkResponse(BaseModel):
+    """Response model for invite link validation operations."""
+
+    is_existing_user: bool = Field(..., description="Whether the user already exists in the system")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "is_existing_user": True,
+            }
+        }
+    )
+
+
 class InviteListItem(BaseModel):
     """Model for invitation list item"""
 
