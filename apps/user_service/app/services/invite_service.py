@@ -43,6 +43,7 @@ from libs.shared_utils.http_exceptions import (
     BadRequestException,
     ConflictException,
     ForbiddenException,
+    GoneException,
     InternalServerErrorException,
     NotFoundException,
     ServiceUnavailableException,
@@ -162,26 +163,31 @@ class InviteService:
             dict[str, Any]: Validated invitation data
 
         Raises:
-            NotFoundException: If invitation is invalid, not pending, or expired
+            ConflictException: If invitation has already been accepted (409)
+            GoneException: If invitation is invalid, expired, or revoked (410)
         """
         if not invitation_data:
-            raise NotFoundException(
+            raise GoneException(
                 message_key="invitations.errors.invitation_invalid_or_expired",
-                custom_code=CustomStatusCode.NOT_FOUND,
+                custom_code=CustomStatusCode.GONE,
             )
 
-        if invitation_data.get("status") != InviteStatus.PENDING.value:
-            raise NotFoundException(
-                message_key="invitations.errors.invitation_invalid_or_expired",
-                custom_code=CustomStatusCode.NOT_FOUND,
+        status = invitation_data.get("status")
+
+        # Check if invitation has already been accepted
+        if status == InviteStatus.ACCEPTED.value:
+            raise ConflictException(
+                message_key="invitations.errors.invitation_already_accepted",
+                custom_code=CustomStatusCode.CONFLICT,
             )
 
+        # Check if invitation has expired based on expiration date
         expires_at = invitation_data.get("expires_at")
         if expires_at and isinstance(expires_at, datetime):
             if expires_at <= datetime.now(timezone.utc):
-                raise NotFoundException(
+                raise GoneException(
                     message_key="invitations.errors.invitation_invalid_or_expired",
-                    custom_code=CustomStatusCode.NOT_FOUND,
+                    custom_code=CustomStatusCode.GONE,
                 )
 
         return invitation_data
@@ -467,6 +473,31 @@ class InviteService:
             user_metadata=user_metadata,
             organization_id=str(invitation_data["organization_id"]),
         )
+
+    async def validate_invite_link(self, token: str) -> dict[str, bool]:
+        """Validate invite link and check if user is existing.
+
+        Args:
+            token: Invite token from the URL
+
+        Returns:
+            dict[str, bool]: Dictionary with is_existing_user boolean
+
+        Raises:
+            NotFoundException: If invitation is invalid, not pending, or expired
+        """
+        # Get invitation details by token
+        token_hash = hash_token(token)
+        invitation_data = await self.invite_repository.get_invite_by_token(token_hash)
+
+        # Validate invitation exists, is pending, and not expired
+        invitation_data = self._validate_invitation_for_acceptance(invitation_data)
+
+        # Check if user already exists in the auth system
+        email = invitation_data["email"]
+        existing_auth_user = await self.user_repository.get_auth_user_by_email(email)
+
+        return {"is_existing_user": existing_auth_user is not None}
 
     async def create_invitation(
         self, organization_id: str, body: InviteCreateRequest
