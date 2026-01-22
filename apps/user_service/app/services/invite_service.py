@@ -16,10 +16,7 @@ from apps.user_service.app.db.repositories import (
     RoleRepository,
     UserRepository,
 )
-from apps.user_service.app.schemas.auth import (
-    IsometrikDetails,
-    SignupRequest,
-)
+from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.schemas.enums import InviteStatus, OrganizationMemberStatus
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
@@ -349,8 +346,7 @@ class InviteService:
         session: Any,
         user: Any,
         user_metadata: dict[str, Any],
-        organization_data: dict[str, Any],
-        isometrik_details: IsometrikDetails,
+        organization_id: str,
     ) -> InviteAcceptResponse:
         """Build InviteAcceptResponse from authentication data.
 
@@ -358,8 +354,7 @@ class InviteService:
             session: Supabase session
             user: Supabase user
             user_metadata: User metadata dictionary
-            organization_data: Organization data dictionary
-            isometrik_details: Isometrik details
+            organization_id: Organization ID
 
         Returns:
             InviteAcceptResponse: Authentication response
@@ -377,9 +372,8 @@ class InviteService:
                 phone_number=user_metadata.get("phone_number", None),
                 phone_isd_code=user_metadata.get("phone_isd_code", None),
                 timezone=user_metadata.get("timezone", None),
-                organization_id=str(organization_data.get("id", None)),
+                organization_id=organization_id,
             ),
-            isometrik_details=isometrik_details,
         )
 
     async def accept_and_set_password(
@@ -445,7 +439,7 @@ class InviteService:
             )
 
         # Add user to organization
-        isometrik_details = await self._add_user_to_organization(
+        await self._add_user_to_organization(
             organization_id=invitation_data["organization_id"],
             invite_data={
                 "user_id": user.id,
@@ -462,18 +456,6 @@ class InviteService:
             invited_by=invitation_data["invited_by"],
             isometrik_credentials=isometrik_credentials,
         )
-
-        # Session is created automatically by database trigger when auth.session is created
-        # Update session with organization_id
-        session_id = await self.session_management_service._extract_session_id(
-            session, self.supabase_client
-        )
-        await self.session_management_service.update_session_organization_context(
-            session_id=session_id,
-            user_id=user.id,
-            organization_id=invitation_data["organization_id"],
-        )
-
         # Update invitation status
         await self.invite_repository.update_invite_status(
             invitation_data["id"], InviteStatus.ACCEPTED.value, user.id
@@ -483,8 +465,7 @@ class InviteService:
             session=session,
             user=user,
             user_metadata=user_metadata,
-            organization_data=organization_data,
-            isometrik_details=isometrik_details,
+            organization_id=str(invitation_data["organization_id"]),
         )
 
     async def create_invitation(
@@ -724,7 +705,7 @@ class InviteService:
         role_name: str,
         invited_by: str,
         isometrik_credentials: dict[str, Any],
-    ) -> IsometrikDetails:
+    ) -> None:
         """Add user to organization as a member."""
         isometrik_user_id = None
         isometrik_response = await create_isometrik_user(
@@ -767,16 +748,6 @@ class InviteService:
         await self.organization_member_repository.add_member(
             organization_id=organization_id, member_data=member_record
         )
-
-        isometrik_details = IsometrikDetails(
-            user_id=isometrik_response.get("userId"),
-            token=isometrik_response.get("userToken"),
-            license_key=isometrik_credentials.get("licenseKey"),
-            user_secret=isometrik_credentials.get("userSecret"),
-            app_secret=isometrik_credentials.get("appSecret"),
-        )
-
-        return isometrik_details
 
     async def validate_organization_subscription(self, organization_data: dict[str, Any]) -> bool:
         """Validate whether the organization has a valid subscription.
