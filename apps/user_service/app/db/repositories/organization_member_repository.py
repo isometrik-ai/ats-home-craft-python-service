@@ -546,26 +546,6 @@ class OrganizationMemberRepository:
         # asyncpg execute returns status string like "UPDATE 3", extract number
         return int(result.split()[-1]) if result else 0
 
-    # DELETE OPERATIONS
-    async def delete_user(self, user_id: str, organization_id: str) -> bool:
-        """Delete user from organization.
-
-        Args:
-            user_id: User ID
-            organization_id: Organization ID
-
-        Returns:
-            bool: True if user was deleted successfully, False otherwise
-        """
-        query = """
-            DELETE FROM organization_members
-            WHERE user_id = $1
-            AND organization_id = $2
-            RETURNING id
-        """
-        row = await self.db_connection.fetchrow(query, user_id, organization_id)
-        return row is not None
-
     async def get_organization_id_by_user_id(self, user_id: str) -> str | None:
         """Get organization_id for a user from organization_members table.
 
@@ -622,6 +602,34 @@ class OrganizationMemberRepository:
         """
         rows = await self.db_connection.fetch(query, organization_id)
         return [dict(row) for row in rows]
+
+    # Delete operations
+    async def delete_member_by_user_id(self, user_id: str, organization_id: str) -> bool:
+        """Soft delete a single member by user_id and organization_id by
+         setting status to 'deleted'.
+
+        Args:
+            user_id: User ID
+            organization_id: Organization ID
+
+        Returns:
+            bool: True if member was deleted successfully, False otherwise
+        """
+        query = """
+            UPDATE organization_members
+            SET status = $3, updated_at = NOW()
+            WHERE user_id = $1
+            AND organization_id = $2
+            AND status != $3
+            RETURNING id
+        """
+        row = await self.db_connection.fetchrow(
+            query,
+            user_id,
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+        )
+        return row is not None
 
     async def delete_all_members_by_organization_id(self, organization_id: str) -> None:
         """Soft delete all members of an organization by setting status to 'deleted'.

@@ -520,3 +520,23 @@ class TeamRepository:
         """
         result = await self.db_connection.execute(delete_teams_query, organization_id)
         return int(result.split()[-1]) if result else 0
+
+    async def delete_user_from_all_teams(self, user_id: str, organization_id: str) -> None:
+        """Hard delete a user from all teams in an organization.
+
+        Uses JOIN to filter by organization_id through teams table,
+        as team_members does not have organization_id column.
+
+        Args:
+            user_id: User ID to remove from teams
+            organization_id: Organization ID
+        """
+        query = """
+            DELETE FROM team_members tm
+            USING teams t
+            WHERE tm.user_id = $1
+                AND tm.team_id = t.id
+                AND t.organization_id = $2
+                AND t.deleted_at IS NULL
+        """
+        await self.db_connection.execute(query, user_id, organization_id)

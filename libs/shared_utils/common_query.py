@@ -19,6 +19,7 @@ PERMISSIONS_MANAGEMENT_VIEW = "permissions_management.view"
 PERMISSIONS_MANAGEMENT_EDIT = "permissions_management.edit"
 PERMISSIONS_MANAGEMENT_DELETE = "permissions_management.delete"
 
+USERS_MANAGEMENT_DELETE = "users_management.delete"
 
 DEFAULT_PERMISSIONS = [
     # User Management

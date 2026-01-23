@@ -1229,3 +1229,48 @@ class OrganizationService:
             "review_reason": updated_request.get("review_reason"),
             "reviewed_at": format_iso_datetime(updated_request.get("reviewed_at")) or "",
         }
+
+    async def delete_organization_member(self, member_user_id: str) -> None:
+        """Delete an organization member.
+
+        Business Rules:
+        - Cannot delete organization owner
+        - Soft deletes organization member record
+        - Hard deletes member from all teams
+
+        Args:
+            member_user_id: Organization member user ID
+
+        Raises:
+            NotFoundException: If member not found
+            BadRequestException: If member is organization owner
+        """
+        member_exists = await self.organization_member_repository.check_user_membership_by_user_id(
+            member_user_id, self.user_context.organization_id
+        )
+        if not member_exists:
+            raise NotFoundException(
+                message_key="auth.errors.user_not_member_of_organization",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        # check if user is owner of the organization
+        is_owner = await self.organization_repository.is_user_organization_owner(
+            self.user_context.organization_id, member_user_id
+        )
+
+        if is_owner:
+            raise BadRequestException(
+                message_key="organizations.errors.owner_cannot_be_deleted",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+
+        # Soft delete organization member
+        await self.organization_member_repository.delete_member_by_user_id(
+            member_user_id, self.user_context.organization_id
+        )
+
+        # Hard delete from all current organization teams
+        await self.team_repository.delete_user_from_all_teams(
+            user_id=member_user_id, organization_id=self.user_context.organization_id
+        )

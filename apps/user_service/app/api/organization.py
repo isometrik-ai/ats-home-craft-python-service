@@ -47,7 +47,11 @@ from apps.user_service.app.utils.common_utils import (
 
 # Permission imports
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
+from libs.shared_utils.common_query import (
+    SETTINGS_SYSTEM_MANAGE,
+    USERS_MANAGEMENT_DELETE,
+)
+from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -679,4 +683,67 @@ async def process_delete_request(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=result,
+    )
+
+
+@handle_api_exceptions("delete organization member")
+@router.delete(
+    "/member/{member_user_id}",
+    description="Delete an organization member",
+    summary="Delete an organization member",
+    status_code=http_status.HTTP_200_OK,
+    response_model=None,
+    responses={
+        http_status.HTTP_200_OK: {"description": "Member deleted successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {
+            "description": "Bad request - Organization owner cannot be deleted"
+        },
+        http_status.HTTP_404_NOT_FOUND: {"description": "Member not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden - Insufficient permissions"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("100/minute")
+async def delete_organization_member(
+    request: Request,
+    member_user_id: UUID = Path(..., description="The UUID of the organization member to delete"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Delete an organization member (Requires: users_management.delete)
+
+    Cannot delete organization owner.
+    Soft deletes organization member and hard deletes from all teams.
+    """
+    # Extract user context (needed for service initialization)
+    user_context = await extract_user_context(current_user, db_connection)
+
+    # Validate user has organization context
+    if user_context.organization_id is None:
+        raise ValidationException(
+            message_key="organizations.errors.user_not_a_member_of_any_organization",
+            custom_code=CustomStatusCode.INVALID_DATA,
+        )
+
+    # Bypass permission check if self delete, otherwise check permissions
+    if current_user["sub"] != str(member_user_id):
+        # Check permissions for deleting other users
+        await require_permission(
+            permission_code=USERS_MANAGEMENT_DELETE,
+            user_context=user_context,
+            db_connection=db_connection,
+            organization_id=user_context.organization_id,
+        )
+
+    # Create service with user context and delegate to service
+    organization_service = OrganizationService(
+        user_context=user_context, db_connection=db_connection
+    )
+    await organization_service.delete_organization_member(member_user_id)
+
+    return success_response(
+        request=request,
+        message_key="organizations.success.member_deleted",
+        custom_code=CustomStatusCode.DELETED,
+        status_code=http_status.HTTP_200_OK,
     )
