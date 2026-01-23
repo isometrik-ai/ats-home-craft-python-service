@@ -50,7 +50,8 @@
       "duplicate_delete_request": "A delete request for this organization already exists. Please wait for the previous request to be processed.",
       "delete_request_not_found": "The delete request you are trying to access does not exist.",
       "delete_request_already_processed": "This delete request has already been processed and cannot be modified.",
-      "session_already_linked": "You are currently logged in with an organization. Please logout and login again to create a new organization."
+      "session_already_linked": "You are currently logged in with an organization. Please logout and login again to create a new organization.",
+      "owner_cannot_be_deleted": "The organization owner cannot be deleted."
     },
     "success": {
       "organization_created": "Organization created successfully.",
@@ -58,7 +59,8 @@
       "organization_deleted": "Organization deleted successfully.",
       "delete_request_created": "Delete request created successfully.",
       "delete_request_approved": "Delete request approved successfully. Organization and all related data have been deleted.",
-      "delete_request_rejected": "Delete request rejected successfully. Organization remains active."
+      "delete_request_rejected": "Delete request rejected successfully. Organization remains active.",
+      "member_deleted": "Organization member deleted successfully."
     }
   },
   "auth": {

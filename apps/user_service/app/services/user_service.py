@@ -212,20 +212,6 @@ class UserService:
             user_id=user_id, organization_id=organization_id, update_data=update_data
         )
 
-    async def delete_user(self, user_id: str, organization_id: str) -> bool:
-        """Delete user from organization.
-
-        Args:
-            user_id: User ID
-            organization_id: Organization ID
-
-        Returns:
-            bool: True if user was deleted successfully, False otherwise
-        """
-        return await self.organization_member_repository.delete_user(
-            user_id=user_id, organization_id=organization_id
-        )
-
     async def check_user_exists(self, email: str, organization_id: str) -> bool:
         """Check if user exists in organization.
 
