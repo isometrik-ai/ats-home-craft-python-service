@@ -25,6 +25,7 @@ from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
     AccountType,
     DeleteRequestStatus,
+    OrganizationMemberRole,
     OrganizationMemberStatus,
     OrganizationStatus,
     PlanType,
@@ -826,6 +827,7 @@ class OrganizationService:
             "role": "admin",
             "timezone": getattr(body.user_data, "timezone", None) or "UTC",
             "role_id": role_id,
+            "member_role": OrganizationMemberRole.OWNER.value,
             "status": OrganizationMemberStatus.ACTIVE.value,
         }
 
@@ -838,7 +840,7 @@ class OrganizationService:
                 email=member_data["email"],
                 isometrik_credentials=isometrik_creds,
                 organization_id=organization_id,
-                role="admin",  # Default role for organization creators
+                role=OrganizationMemberRole.OWNER.value,
             )
             if isometrik_user and (user_id := isometrik_user.get("userId")):
                 member_data["isometrik_user_id"] = user_id

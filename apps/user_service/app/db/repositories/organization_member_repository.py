@@ -32,6 +32,7 @@ class OrganizationMemberRepository:
                 email,
                 role_id,
                 role,
+                member_role,
                 status,
                 organization_id,
                 created_at,
@@ -46,9 +47,9 @@ class OrganizationMemberRepository:
                 invited_by
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6,
-                $7, NOW(), NOW(), NOW(),
-                $8, $9, $10, $11, COALESCE($12, 'UTC'), $13, $14
+                $1, $2, $3, $4, $5, $6, $7,
+                $8, NOW(), NOW(), NOW(),
+                $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15
             )
             RETURNING *
         """
@@ -61,6 +62,7 @@ class OrganizationMemberRepository:
             member_data.get("email"),
             member_data.get("role_id"),
             member_data.get("role"),
+            member_data.get("member_role"),
             status,
             organization_id,
             member_data.get("first_name"),
@@ -112,6 +114,8 @@ class OrganizationMemberRepository:
                 phone_isd_code,
                 timezone,
                 role_id,
+                role,
+                member_role,
                 status,
                 created_at,
                 updated_at,
@@ -295,6 +299,8 @@ class OrganizationMemberRepository:
                 phone_isd_code,
                 timezone,
                 role_id,
+                role,
+                member_role,
                 status,
                 created_at,
                 updated_at,
@@ -604,6 +610,8 @@ class OrganizationMemberRepository:
                 phone_isd_code,
                 timezone,
                 role_id,
+                role,
+                member_role,
                 status,
                 created_at,
                 updated_at,
