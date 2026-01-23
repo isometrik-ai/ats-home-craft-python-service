@@ -17,7 +17,11 @@ from apps.user_service.app.db.repositories import (
     UserRepository,
 )
 from apps.user_service.app.schemas.auth import SignupRequest
-from apps.user_service.app.schemas.enums import InviteStatus, OrganizationMemberStatus
+from apps.user_service.app.schemas.enums import (
+    InviteStatus,
+    OrganizationMemberRole,
+    OrganizationMemberStatus,
+)
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
     InviteAcceptResponse,
@@ -457,8 +461,8 @@ class InviteService:
                 "salutation": inv_meta.get("salutation", None),
             },
             email=invitation_data["email"],
-            role_id=invitation_data["role_id"],
-            role_name=role_data["name"],
+            role_data={"id": invitation_data["role_id"], "name": role_data["name"]},
+            member_role=OrganizationMemberRole.MEMBER.value,
             invited_by=invitation_data["invited_by"],
             isometrik_credentials=isometrik_credentials,
         )
@@ -732,8 +736,8 @@ class InviteService:
         organization_id: str,
         invite_data: dict[str, Any],
         email: str,
-        role_id: str,
-        role_name: str,
+        role_data: dict[str, str],
+        member_role: str,
         invited_by: str,
         isometrik_credentials: dict[str, Any],
     ) -> None:
@@ -746,7 +750,7 @@ class InviteService:
             email=email,
             isometrik_credentials=isometrik_credentials,
             organization_id=organization_id,
-            role="member",
+            role=OrganizationMemberRole.MEMBER.value,
         )
         if isometrik_response:
             isometrik_user_id = isometrik_response.get("userId", None)
@@ -769,8 +773,9 @@ class InviteService:
             "phone_isd_code": invite_data.get("phone_isd_code", None),
             "timezone": invite_data.get("timezone", "UTC"),
             "salutation": invite_data.get("salutation", None),
-            "role_id": role_id,
-            "role": role_name,
+            "role_id": role_data["id"],
+            "role": role_data["name"],
+            "member_role": member_role,
             "status": OrganizationMemberStatus.ACTIVE.value,
             "invited_by": invited_by,
             "isometrik_user_id": invite_data.get("isometrik_user_id", None),

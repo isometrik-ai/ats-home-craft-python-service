@@ -19,7 +19,10 @@ from apps.user_service.app.db.repositories.organization_repository import (
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
 from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
-from apps.user_service.app.schemas.enums import OrganizationMemberStatus
+from apps.user_service.app.schemas.enums import (
+    OrganizationMemberRole,
+    OrganizationMemberStatus,
+)
 from apps.user_service.app.schemas.users import (
     PermissionInfo,
     RoleInfo,
@@ -182,6 +185,8 @@ class UserService:
             "phone_isd_code": user_data.get("phone_isd_code"),
             "timezone": user_data.get("timezone", "UTC"),
             "role_id": user_data.get("role_id"),
+            "role": user_data.get("role"),
+            "member_role": user_data.get("member_role", OrganizationMemberRole.MEMBER.value),
             "status": user_data.get("status", OrganizationMemberStatus.ACTIVE.value),
             "isometrik_user_id": user_data.get("isometrik_user_id"),
         }
@@ -504,6 +509,30 @@ class UserService:
 
         return OrganizationService._map_to_organization_basic_details(organization)
 
+    async def get_user_organizations(self, user_id: str) -> list[OrganizationBasicDetails]:
+        """Get user's active organizations with basic details.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            list[OrganizationBasicDetails]: List of organization basic details
+        """
+        organizations_data = await self.organization_repository.get_user_active_organizations(
+            user_id
+        )
+        organizations = [
+            OrganizationBasicDetails(
+                id=str(org["id"]),
+                name=org["name"],
+                domain=org.get("domain"),
+                logo_url=org.get("logo_url"),
+                description=org.get("description"),
+            )
+            for org in organizations_data
+        ]
+        return organizations
+
     @staticmethod
     def _extract_auth_user_contact(
         user_data: Any, fallback_email: str
@@ -755,6 +784,8 @@ class UserService:
                 phone_number=u.get("phone_number"),
                 phone_isd_code=u.get("phone_isd_code"),
                 role_id=str(u["role_id"]) if u.get("role_id") else "",
+                role=u.get("role"),
+                member_role=u.get("member_role"),
                 status=u.get("status", OrganizationMemberStatus.ACTIVE.value),
                 joined_at=(
                     format_iso_datetime(u["joined_at"])

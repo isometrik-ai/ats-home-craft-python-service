@@ -77,6 +77,13 @@ class OrganizationMemberStatus(str, Enum):
     DELETED = "deleted"
 
 
+class OrganizationMemberRole(str, Enum):
+    """Enumeration for organization roles (owner or member)."""
+
+    OWNER = "owner"
+    MEMBER = "member"
+
+
 # ============================================================================
 # INVITE ENUMS
 # ============================================================================

@@ -139,16 +139,6 @@ async def get_user_profile(
         user_context.user_id, user_context.organization_id
     )
 
-    # Handle case where user has no organization
-    if not user_context.organization_id:
-        return success_response(
-            request=request,
-            message_key=SUCCESS_RETRIEVED_KEY,
-            custom_code=CustomStatusCode.NO_CONTENT,
-            status_code=http_status.HTTP_200_OK,
-            data=[],
-        )
-
     # Set audit data from service
     request.state.raw_audit_new_data = result["audit_data"]
 
@@ -420,4 +410,52 @@ async def update_user_profile(
         message_key="users.success.user_profile_updated",
         custom_code=CustomStatusCode.UPDATED,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("get user organizations")
+@router.get(
+    "/organizations/lists",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get user's organizations list (user level)",
+    summary="Get user's organizations list (user level)",
+    responses={
+        http_status.HTTP_200_OK: {"description": "User organizations retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+async def get_user_organizations(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Retrieve the authenticated user's list of organizations."""
+    user_context = await extract_user_context(current_user, db_connection)
+
+    # Create service and delegate all business logic to service
+    user_service = UserService(user_context=user_context, db_connection=db_connection)
+    organizations = await user_service.get_user_organizations(user_context.user_id)
+
+    if not organizations:
+        return success_response(
+            request=request,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+            data=[],
+        )
+
+    return success_response(
+        request=request,
+        message_key=SUCCESS_RETRIEVED_KEY,
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=organizations,
     )

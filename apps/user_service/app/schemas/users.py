@@ -10,7 +10,11 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
-from apps.user_service.app.schemas.enums import OrganizationMemberStatus, UserStatus
+from apps.user_service.app.schemas.enums import (
+    OrganizationMemberRole,
+    OrganizationMemberStatus,
+    UserStatus,
+)
 
 
 class RoleInfo(BaseModel):
@@ -348,7 +352,7 @@ class UserListItem(BaseModel):
         email (str): User's email address
         first_name (Optional[str]): User's first name
         last_name (Optional[str]): User's last name
-        role_name (str): Name of user's assigned role
+        role (str): User's role in organization according to role id
         status (str): User's membership status
         joined_at (str): ISO timestamp when user joined
         last_active_at (Optional[str]): ISO timestamp of last activity
@@ -362,11 +366,15 @@ class UserListItem(BaseModel):
     phone_number: str | None = Field(None, description="Phone number (without ISD code)")
     phone_isd_code: str | None = Field(None, description="Phone ISD code (e.g., '+91')")
     # role_name: str = Field(..., description="Name of user's assigned role")
+    role: str = Field(..., description="User's role in organization based on role id")
     status: OrganizationMemberStatus = Field(..., description="User's membership status")
     joined_at: str = Field(..., description="ISO timestamp when user joined")
     last_active_at: str | None = Field(None, description="ISO timestamp of last activity")
     permissions_count: int = Field(0, description="Number of permissions assigned to the user")
     role_id: str = Field(..., description="ID of the role assigned to the user")
+    member_role: OrganizationMemberRole = Field(
+        ..., description="Organization member role (owner, member)"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -375,12 +383,13 @@ class UserListItem(BaseModel):
                 "email": "john@example.com",
                 "first_name": "J",
                 "last_name": "Jonnah Jamison",
-                "role_name": "Administrator",
+                "role": "admin",
                 "status": OrganizationMemberStatus.ACTIVE.value,
                 "joined_at": "2024-12-19T10:00:00Z",
                 "last_active_at": "2024-12-19T15:30:00Z",
                 "permissions_count": 10,
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
+                "member_role": OrganizationMemberRole.OWNER.value,
             }
         }
     )
