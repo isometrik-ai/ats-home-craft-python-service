@@ -88,6 +88,26 @@ class UserRepository:
 
         return None
 
+    async def get_user_email_by_id(self, user_id: str) -> tuple[bool, str | None]:
+        """Check if a user exists in auth.users table by user ID and return email.
+
+        Args:
+            user_id: The user ID to check.
+
+        Returns:
+            tuple[bool, str | None]: (True, email) if user exists, (False, None) otherwise.
+        """
+        query = """
+            SELECT email
+            FROM auth.users
+            WHERE id = $1
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(query, user_id)
+        if row:
+            return (True, row["email"])
+        return (False, None)
+
     async def phone_exists_for_other_user(self, phone: str, user_id: str | None = None) -> bool:
         """Check if a phone number already exists in auth.users.
         Exact match, no normalization.

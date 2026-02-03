@@ -1229,3 +1229,129 @@ Your organization remains active. If you have any questions, please contact our 
     except Exception as error:
         logger.error("Error sending organization deletion rejected email: %s", str(error))
         return False
+
+
+def send_client_creation_email(
+    email: str,
+    organization_name: str,
+    company_name: str = COMMON_COMPANY_NAME,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL,
+) -> bool:
+    """Send a client creation email to the user.
+
+    Args:
+        email (str): User's email address
+        organization_name (str): Name of the organization
+        company_name (str): Company name (default: "House of App AI")
+        company_address (str): Company address for footer
+        privacy_policy_url (str): Privacy policy URL
+        terms_url (str): Terms of service URL
+
+    Returns:
+        bool: True if email was sent successfully, False otherwise
+    """
+    try:
+        current_year = datetime.now().year
+
+        subject = f"Welcome to {organization_name} - Client Account Created"
+
+        # Plain text message
+        message = f"""Hello,
+
+Your client account has been successfully created with {organization_name}.
+
+Organization: {organization_name}
+
+You can now access your client portal and manage your account.
+
+If you have any questions, please contact the organization support team.
+
+Best regards,
+{organization_name} Team"""
+
+        # HTML message
+        html_message = f"""<!DOCTYPE html>
+<html lang="en" style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Client Account Created</title>
+  </head>
+  <body style="background-color: #f8f9fb; padding: 0; margin: 0;">
+    <table width="100%" cellpadding="0" cellspacing="0"
+        style="background-color: #f8f9fb; padding: 40px 0;">
+      <tr>
+        <td align="center">
+          <table width="600" cellpadding="0" cellspacing="0"
+              style="background-color: #ffffff; border-radius: 12px; overflow: hidden;
+              box-shadow: 0 4px 8px rgba(0,0,0,0.05);">
+            <!-- Header -->
+            <tr>
+              <td style="background-color: #1d4ed8; padding: 30px 40px; text-align: center;">
+                <h1 style="color: #ffffff; margin: 0; font-size: 22px;">Client Account Created</h1>
+              </td>
+            </tr>
+            <!-- Body -->
+            <tr>
+              <td style="padding: 40px;">
+                <p style="color: #111827; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  Hello,
+                </p>
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  Your client account has been successfully created with
+                  <strong>{organization_name}</strong>.
+                </p>
+                <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                  <p style="margin: 5px 0; color: #111827;">
+                  <strong>Organization:</strong> {organization_name}</p>
+                </div>
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">
+                  You can now access your client portal and manage your account.
+                </p>
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">
+                  If you have any questions, please contact the organization support team.
+                </p>
+                <p style="color: #111827; font-size: 16px; margin-top: 30px;">
+                  Best regards,<br>
+                  {organization_name} Team
+                </p>
+              </td>
+            </tr>
+            <!-- Footer -->
+            <tr>
+              <td style="background-color: #f3f4f6; text-align: center; padding: 20px;
+                  font-size: 13px; color: #6b7280;">
+                <p style="margin: 0;">This is an automated message from {organization_name}.</p>
+                <p style="margin: 4px 0;">
+                &copy; {current_year} {company_name}. All rights reserved.
+                </p>
+                <p style="margin: 4px 0;">{company_address}</p>
+                <p style="margin: 0;">
+                  <a href="{privacy_policy_url}"
+                  style="color: #6b7280; text-decoration: none;">Privacy Policy</a> |
+                  <a href="{terms_url}"
+                  style="color: #6b7280; text-decoration: none;">Terms of Service</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>"""
+
+        # Send the email with HTML content and sender name "Ross.Ai"
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
+
+        if email_sent:
+            logger.info("Client creation email sent successfully to %s", email)
+            return True
+        logger.error("Failed to send client creation email to %s", email)
+        return False
+
+    except Exception as error:
+        logger.error("Error sending client creation email: %s", str(error))
+        return False

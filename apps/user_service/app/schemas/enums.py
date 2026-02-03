@@ -283,6 +283,18 @@ class PracticeArea(str, Enum):
     SECURITIES_LAW = "Securities Law"
 
 
+# ============================================================================
+# CLIENT ENUMS
+# ============================================================================
+
+
+class ClientType(str, Enum):
+    """Client type enumeration."""
+
+    PERSON = "person"
+    COMPANY = "company"
+
+
 class Specialization(str, Enum):
     """Specialization options."""
 
