@@ -125,7 +125,7 @@ class ClientRepository:
                 - date_of_birth (optional): Date of birth
                 - profile_photo_url (optional): URL to profile photo
                 - status (optional): Client user status, defaults to 'active' in DB
-
+                - isometrik_user_id (required): Isometrik user ID
         Returns:
             dict: Created client user record
 
@@ -135,9 +135,7 @@ class ClientRepository:
         # Validate required fields
         client_id = client_user_data.get("client_id")
         organization_id = client_user_data.get("organization_id")
-
-        if not client_id or not organization_id:
-            raise ValueError("client_id and organization_id are required fields")
+        isometrik_user_id = client_user_data.get("isometrik_user_id")
 
         # Build dynamic query - only include fields that are explicitly provided
         fields = []
@@ -154,6 +152,11 @@ class ClientRepository:
         fields.append("organization_id")
         placeholders.append(f"${param_index}")
         values.append(organization_id)
+        param_index += 1
+
+        fields.append("isometrik_user_id")
+        placeholders.append(f"${param_index}")
+        values.append(isometrik_user_id)
         param_index += 1
 
         # Optional fields - only include if explicitly provided (not None)
@@ -186,3 +189,21 @@ class ClientRepository:
 
         row = await self.db_connection.fetchrow(query, *values)
         return dict(row)
+
+    async def check_client_user_exists(self, user_id: str, organization_id: str) -> bool:
+        """Check if a client user exists for a given user and organization.
+
+        Args:
+            user_id: User ID
+            organization_id: Organization ID
+
+        Returns:
+            bool: True if client user exists, False otherwise
+        """
+        query = """
+            SELECT EXISTS(
+                SELECT 1 FROM client_users WHERE user_id = $1 AND organization_id = $2
+            )
+        """
+        exists = await self.db_connection.fetchval(query, user_id, organization_id)
+        return bool(exists)

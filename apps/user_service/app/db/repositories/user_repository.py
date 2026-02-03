@@ -88,25 +88,35 @@ class UserRepository:
 
         return None
 
-    async def get_user_email_by_id(self, user_id: str) -> tuple[bool, str | None]:
-        """Check if a user exists in auth.users table by user ID and return email.
+    async def get_user_details_by_id(
+        self,
+        user_id: str,
+        select_columns: list[str] | None = None,
+    ) -> dict | None:
+        """Get user details by user ID from auth.users table.
 
         Args:
-            user_id: The user ID to check.
+            user_id: The user ID to get details for.
+            select_columns: Optional list of column names to select.
+             If None or empty, selects all columns (*).
 
         Returns:
-            tuple[bool, str | None]: (True, email) if user exists, (False, None) otherwise.
+            dict | None: User details if found, else None.
         """
-        query = """
-            SELECT email
+        if not select_columns:
+            columns_str = "*"
+        else:
+            columns_str = ", ".join(select_columns)
+
+        query = f"""
+            SELECT {columns_str}
             FROM auth.users
             WHERE id = $1
-            LIMIT 1
         """
         row = await self.db_connection.fetchrow(query, user_id)
         if row:
-            return (True, row["email"])
-        return (False, None)
+            return dict(row)
+        return None
 
     async def phone_exists_for_other_user(self, phone: str, user_id: str | None = None) -> bool:
         """Check if a phone number already exists in auth.users.

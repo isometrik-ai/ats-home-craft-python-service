@@ -23,19 +23,18 @@ logger = get_logger("clients-api")
 
 @handle_api_exceptions("create client from user")
 @router.post(
-    "/create-from-user",
+    "/from-auth",
     status_code=http_status.HTTP_201_CREATED,
     description="Create a client from user ID",
     summary="Create a client from user ID",
     responses={
         http_status.HTTP_201_CREATED: {"description": "Client created successfully"},
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
-        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
         http_status.HTTP_404_NOT_FOUND: {"description": "User or organization not found"},
         http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
         http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
         http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
-        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_409_CONFLICT: {"description": "User is already a client"},
     },
 )
 @limiter.limit("100/minute")
