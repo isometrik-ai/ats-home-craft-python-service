@@ -153,6 +153,15 @@
       "deleted": "Role deleted successfully."
     }
   },
+  "clients": {
+    "errors": {
+      "isometrik_user_creation_failed": "Failed to create Isometrik user",
+      "user_already_a_client": "User is already a client of this organization"
+    },
+    "success": {
+      "client_created": "Client created successfully."
+    }
+  },
   "audit_logs": {
     "errors": {
       "not_found": "The audit log you are trying to access does not exist."

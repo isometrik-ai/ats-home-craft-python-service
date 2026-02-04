@@ -174,25 +174,25 @@ async def create_isometrik_application(
 
 async def create_isometrik_user(
     user_id: str,
-    first_name: str | None,
-    last_name: str | None,
     email: str,
     isometrik_credentials: dict[str, Any],
     organization_id: str,
     role: str,
+    first_name: str | None = None,
+    last_name: str | None = None,
     avatar_url: str | None = "https://example.com/default-avatar.jpg",
 ) -> dict[str, Any]:
     """Create a new Isometrik user for an organization.
 
     Args:
         user_id (str): User ID
-        first_name (str | None): User's first name
-        last_name (str | None): User's last name
         email (str): User's email address
         isometrik_credentials (dict[str, Any]): Isometrik credentials from settings
             Should contain: userSecret, licenseKey, appSecret
         organization_id (str): Organization ID
         role (str): Role of the user
+        first_name (str | None): User's first name (optional)
+        last_name (str | None): User's last name (optional)
         avatar_url (str | None): URL to user's avatar
     Returns:
         dict[str, Any]: Response from Isometrik API containing user details

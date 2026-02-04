@@ -12,6 +12,7 @@ Usage:
     teams = await repo.get_teams_list(organization_id)
 """
 
+from apps.user_service.app.db.repositories.client_repository import ClientRepository
 from apps.user_service.app.db.repositories.invite_repository import InviteRepository
 from apps.user_service.app.db.repositories.organization_delete_request_repository import (
     OrganizationDeleteRequestRepository,
@@ -36,6 +37,7 @@ from apps.user_service.app.db.repositories.verification_code_repository import (
 )
 
 __all__ = [
+    "ClientRepository",
     "TeamRepository",
     "PermissionsRepository",
     "OrganizationRepository",

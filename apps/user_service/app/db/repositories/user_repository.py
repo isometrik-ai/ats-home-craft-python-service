@@ -88,6 +88,36 @@ class UserRepository:
 
         return None
 
+    async def get_user_details_by_id(
+        self,
+        user_id: str,
+        select_columns: list[str] | None = None,
+    ) -> dict | None:
+        """Get user details by user ID from auth.users table.
+
+        Args:
+            user_id: The user ID to get details for.
+            select_columns: Optional list of column names to select.
+             If None or empty, selects all columns (*).
+
+        Returns:
+            dict | None: User details if found, else None.
+        """
+        if not select_columns:
+            columns_str = "*"
+        else:
+            columns_str = ", ".join(select_columns)
+
+        query = f"""
+            SELECT {columns_str}
+            FROM auth.users
+            WHERE id = $1
+        """
+        row = await self.db_connection.fetchrow(query, user_id)
+        if row:
+            return dict(row)
+        return None
+
     async def phone_exists_for_other_user(self, phone: str, user_id: str | None = None) -> bool:
         """Check if a phone number already exists in auth.users.
         Exact match, no normalization.
