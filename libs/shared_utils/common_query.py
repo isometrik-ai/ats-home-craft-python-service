@@ -19,6 +19,11 @@ PERMISSIONS_MANAGEMENT_VIEW = "permissions_management.view"
 PERMISSIONS_MANAGEMENT_EDIT = "permissions_management.edit"
 PERMISSIONS_MANAGEMENT_DELETE = "permissions_management.delete"
 
+CLIENTS_MANAGEMENT_CREATE = "clients_management.create"
+CLIENTS_MANAGEMENT_VIEW = "clients_management.view"
+CLIENTS_MANAGEMENT_EDIT = "clients_management.edit"
+CLIENTS_MANAGEMENT_DELETE = "clients_management.delete"
+
 USERS_MANAGEMENT_DELETE = "users_management.delete"
 
 DEFAULT_PERMISSIONS = [
@@ -215,6 +220,31 @@ DEFAULT_PERMISSIONS = [
         "Delete Permissions",
         "Remove permissions",
         "permissions",
+    ),
+    # clients management
+    (
+        "clients_management.view",
+        "View Clients",
+        "View client list and details",
+        "clients_management",
+    ),
+    (
+        "clients_management.create",
+        "Create Clients",
+        "Create new clients",
+        "clients_management",
+    ),
+    (
+        "clients_management.edit",
+        "Edit Clients",
+        "Modify client information",
+        "clients_management",
+    ),
+    (
+        "clients_management.delete",
+        "Delete Clients",
+        "Remove clients from the system",
+        "clients",
     ),
 ]
 

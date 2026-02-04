@@ -12,11 +12,13 @@ import traceback
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from functools import wraps
 from typing import Any
 
 import asyncpg
 from fastapi import HTTPException, Request
+from pydantic import BaseModel
 
 from apps.user_service.app.db.repositories import (
     OrganizationRepository,
@@ -543,3 +545,26 @@ def parse_json_field(field_value: str | dict[str, Any] | None) -> dict[str, Any]
             return {}
         return json.loads(field_value)
     return {}
+
+
+def serialize_pydantic_models(value: Any) -> Any:
+    """Recursively convert Pydantic models and other
+    non-serializable objects to JSON-serializable primitives.
+
+    Args:
+        value: The value to serialize (can be Pydantic model, dict, list, enum, or primitive)
+
+    Returns:
+        JSON-serializable value
+    """
+    if value is None:
+        return None
+    if isinstance(value, BaseModel):
+        return value.model_dump(exclude_none=True)
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {k: serialize_pydantic_models(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [serialize_pydantic_models(item) for item in value]
+    return value

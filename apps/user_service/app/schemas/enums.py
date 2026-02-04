@@ -295,6 +295,56 @@ class ClientType(str, Enum):
     COMPANY = "company"
 
 
+class ClientStatus(str, Enum):
+    """Client status enumeration."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    PROSPECT = "prospect"
+    DELETED = "deleted"
+
+
+class ClientUserStatus(str, Enum):
+    """Client user status enumeration."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    DELETED = "deleted"
+
+
+class LeadStatus(str, Enum):
+    """Lead status enumeration."""
+
+    PROSPECT = "prospect"
+    QUALIFIED = "qualified"
+    CONSULTATION = "consultation"
+    PROPOSAL = "proposal"
+    CONVERTED = "converted"
+    LOST = "lost"
+
+
+class IntakeStage(str, Enum):
+    """Intake stage enumeration."""
+
+    INITIAL_CONTACT = "Initial Contact"
+    QUALIFICATION = "Qualification"
+    CONFLICT_CHECK = "Conflict Check"
+    CONSULTATION = "Consultation"
+    PROPOSAL = "Proposal"
+    ONBOARDING = "Onboarding"
+    COMPLETED = "Completed"
+
+
+class AddressType(str, Enum):
+    """Address type enumeration."""
+
+    WORK = "work"
+    HOME = "home"
+    BILLING = "billing"
+    SHIPPING = "shipping"
+    OTHER = "other"
+
+
 class Specialization(str, Enum):
     """Specialization options."""
 
@@ -325,3 +375,16 @@ class PreferredIntegration(str, Enum):
     MYCASE = "MyCase"
     PRACTICE_SUITE = "PracticeSuite"
     LAWPAY = "LawPay"
+
+
+# ============================================================================
+# ISOMETRIK ENUMS
+# ============================================================================
+
+
+class IsometrikRole(str, Enum):
+    """Isometrik user role enumeration."""
+
+    CLIENT = "client"
+    OWNER = "owner"
+    MEMBER = "member"

@@ -16,7 +16,6 @@ from libs.shared_utils.response_factory import CustomStatusCode
 async def create_user(
     sb_client: AsyncClient,
     email: str,
-    password: str,
     user_metadata: dict[str, Any] | None = None,
     phone: str | None = None,
     email_confirm: bool = False,
@@ -25,7 +24,6 @@ async def create_user(
     Args:
         sb_client: Supabase AsyncClient
         email: User's email address
-        password: User's password
         user_metadata: User's metadata
         phone: User's phone number
         email_confirm: Whether to confirm email
@@ -35,7 +33,6 @@ async def create_user(
     resp = await sb_client.auth.admin.create_user(
         {
             "email": email,
-            "password": password,
             "user_metadata": user_metadata or {},
             "phone": phone,
             "email_confirm": email_confirm,

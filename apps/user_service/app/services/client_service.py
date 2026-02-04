@@ -4,14 +4,35 @@ This service handles all business logic related to clients, including
 validation, formatting, and orchestration of client operations.
 """
 
+import json
+from typing import Any
+
 import asyncpg
+from supabase import AsyncClient
 
 from apps.user_service.app.db.repositories import OrganizationRepository, UserRepository
 from apps.user_service.app.db.repositories.client_repository import ClientRepository
-from apps.user_service.app.schemas.clients import CreateClientFromUserRequest
-from apps.user_service.app.schemas.enums import ClientType
-from apps.user_service.app.utils.common_utils import parse_json_field
+from apps.user_service.app.schemas.clients import (
+    BillingPreferences,
+    ClientAddressResponse,
+    ClientDetailsResponse,
+    ClientListResponse,
+    CreateClientFromUserRequest,
+    CreateClientRequest,
+    LeadInfo,
+    PrimaryContactInfo,
+    Website,
+)
+from apps.user_service.app.schemas.enums import ClientType, IsometrikRole
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    format_iso_datetime,
+    parse_json_field,
+    safe_json_loads,
+    serialize_pydantic_models,
+)
 from apps.user_service.app.utils.email_utils import send_client_creation_email
+from libs.shared_db.supabase_db.auth_repository import create_user
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -37,14 +58,19 @@ class ClientService:
     def __init__(
         self,
         db_connection: asyncpg.Connection,
+        user_context: UserContext | None = None,
+        supabase_client: AsyncClient | None = None,
     ) -> None:
         """Initialize ClientService with user context and database connection.
 
         Args:
             db_connection: database connection for postgresql
+            supabase_client: Supabase client for auth operations
         """
+        self.user_context = user_context
         self.db_connection = db_connection
         self.client_repository = ClientRepository(db_connection=db_connection)
+        self.supabase_client = supabase_client
 
     async def create_client_from_user(self, request_data: CreateClientFromUserRequest) -> None:
         """Create a client and client_user from user ID.
@@ -110,7 +136,7 @@ class ClientService:
             email=user_details.get("email"),
             isometrik_credentials=isometrik_credentials,
             organization_id=organization_id,
-            role="client",
+            role=IsometrikRole.CLIENT.value,
         )
         if not isometrik_response or not isometrik_response.get("userId"):
             raise ServiceUnavailableException(
@@ -145,3 +171,556 @@ class ClientService:
                 )
         except Exception as e:
             logger.error("Failed to send client creation email: %s", str(e))
+
+    async def _validate_client_creation(
+        self, request_data: CreateClientRequest, organization_id: str
+    ) -> dict[str, Any]:
+        """Validate organization exists and check for conflicts.
+
+        Args:
+            request_data: Request data
+            organization_id: Organization ID
+
+        Returns:
+            dict: Organization data
+
+        Raises:
+            NotFoundException: If organization not found
+            ConflictException: If email/name already exists
+        """
+        organization_repository = OrganizationRepository(db_connection=self.db_connection)
+        organization = await organization_repository.get_organization_by_id(organization_id)
+        if not organization:
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+                params={"organization_id": organization_id},
+            )
+
+        # Validate email uniqueness
+        email_exists = await self.client_repository.check_email_exists(
+            email=request_data.email, organization_id=organization_id
+        )
+        if email_exists:
+            raise ConflictException(
+                message_key="clients.errors.email_already_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        # Validate phone uniqueness
+        user_repository = UserRepository(db_connection=self.db_connection)
+        phone_exists = await user_repository.phone_exists_for_other_user(
+            phone=f"{request_data.phone_isd_code}{request_data.phone_number}",
+        )
+        if phone_exists:
+            raise ConflictException(
+                message_key="clients.errors.phone_number_already_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        # Validate name uniqueness for both person and company types
+        if request_data.client_type == ClientType.PERSON:
+            name_exists = await self.client_repository.check_client_name_exists(
+                name=f"{request_data.first_name} {request_data.last_name}",
+                organization_id=organization_id,
+                client_type=ClientType.PERSON.value,
+            )
+            if name_exists:
+                raise ConflictException(
+                    message_key="clients.errors.client_name_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+        elif request_data.client_type == ClientType.COMPANY:
+            name_exists = await self.client_repository.check_client_name_exists(
+                name=request_data.name,
+                organization_id=organization_id,
+                client_type=ClientType.COMPANY.value,
+            )
+            if name_exists:
+                raise ConflictException(
+                    message_key="clients.errors.client_name_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+
+        return organization
+
+    async def _create_auth_and_isometrik_user(
+        self, request_data: CreateClientRequest, organization: dict[str, Any], organization_id: str
+    ) -> tuple[str, str]:
+        """Create Supabase auth user and Isometrik user.
+
+        Args:
+            request_data: Request data
+            organization: Organization data
+            organization_id: Organization ID
+
+        Returns:
+            tuple: (user_id, isometrik_user_id)
+
+        Raises:
+            ServiceUnavailableException: If auth or Isometrik creation fails
+        """
+        # Build phone number for auth
+        phone = f"{request_data.phone_isd_code}{request_data.phone_number}"
+
+        # Build user metadata same as signup/invite accept flow
+        user_metadata: dict[str, Any] = {
+            "phone_number": request_data.phone_number,
+            "phone_isd_code": request_data.phone_isd_code,
+            "timezone": "UTC",
+            "first_name": request_data.first_name,
+            "last_name": request_data.last_name,
+        }
+
+        # Add person-specific fields if client type is PERSON
+        if request_data.client_type == ClientType.PERSON:
+            if request_data.prefix:
+                user_metadata["salutation"] = request_data.prefix
+
+        # Create Supabase auth user
+        auth_user = await create_user(
+            sb_client=self.supabase_client,
+            email=request_data.email,
+            phone=phone,
+            email_confirm=True,
+            user_metadata=user_metadata,
+        )
+        if not auth_user or not auth_user.get("id"):
+            raise ServiceUnavailableException(
+                message_key="clients.errors.auth_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+        user_id = auth_user["id"]
+
+        # Get Isometrik credentials
+        org_settings = parse_json_field(organization.get("settings"))
+        isometrik_credentials = get_isometrik_data_from_settings(org_settings)
+
+        # Prepare name for Isometrik
+        if request_data.client_type == ClientType.PERSON:
+            isometrik_first_name = request_data.first_name
+            isometrik_last_name = request_data.last_name
+        else:
+            # For company type, use the provided first_name and last_name
+            isometrik_first_name = request_data.first_name
+            isometrik_last_name = request_data.last_name
+
+        # Create Isometrik user
+        isometrik_response = await create_isometrik_user(
+            user_id=user_id,
+            email=request_data.email,
+            isometrik_credentials=isometrik_credentials,
+            organization_id=organization_id,
+            role=IsometrikRole.CLIENT.value,
+            first_name=isometrik_first_name,
+            last_name=isometrik_last_name,
+        )
+        if not isometrik_response or not isometrik_response.get("userId"):
+            raise ServiceUnavailableException(
+                message_key="clients.errors.isometrik_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+
+        return user_id, isometrik_response["userId"]
+
+    def _build_client_name(self, request_data: CreateClientRequest) -> str:
+        """Build client name based on client type.
+
+        Args:
+            request_data: Request data
+
+        Returns:
+            str: Client name
+        """
+        if request_data.client_type == ClientType.PERSON:
+            return f"{request_data.first_name} {request_data.last_name}".strip()
+        return request_data.name or ""
+
+    def _prepare_client_data(
+        self,
+        request_data: CreateClientRequest,
+        organization_id: str,
+    ) -> dict[str, Any]:
+        """Prepare client data dictionary.
+
+        Args:
+            request_data: Request data
+            organization_id: Organization ID
+
+        Returns:
+            dict: Client data with JSONB fields serialized to JSON strings
+        """
+        client_name = self._build_client_name(request_data)
+        client_data = {
+            "organization_id": organization_id,
+            "client_type": request_data.client_type.value,
+            "name": client_name,
+        }
+
+        if request_data.industry:
+            client_data["industry"] = request_data.industry
+        if request_data.profile_photo_url:
+            client_data["profile_photo_url"] = request_data.profile_photo_url
+        if request_data.tags:
+            client_data["tags"] = request_data.tags
+
+        # Add portal_access field (defaults to False if not provided)
+        client_data["portal_access"] = request_data.portal_access
+
+        # Serialize JSONB fields for asyncpg (business logic in service layer)
+        if request_data.websites:
+            serialized_websites = serialize_pydantic_models(request_data.websites)
+            client_data["websites"] = json.dumps(serialized_websites)
+        if request_data.billing_preferences:
+            serialized_billing = serialize_pydantic_models(request_data.billing_preferences)
+            client_data["billing_preferences"] = json.dumps(serialized_billing)
+        if request_data.custom_fields:
+            serialized_custom_fields = serialize_pydantic_models(request_data.custom_fields)
+            client_data["custom_fields"] = json.dumps(serialized_custom_fields)
+
+        return client_data
+
+    def _prepare_client_user_data(
+        self,
+        request_data: CreateClientRequest,
+        client_id: str,
+        organization_id: str,
+        user_id: str,
+        isometrik_user_id: str,
+    ) -> dict[str, Any]:
+        """Prepare client_user data dictionary.
+
+        Args:
+            request_data: Request data
+            client_id: Client ID
+            organization_id: Organization ID
+            user_id: User ID
+            isometrik_user_id: Isometrik user ID
+
+        Returns:
+            dict: Client user data
+        """
+        client_user_data = {
+            "client_id": client_id,
+            "organization_id": organization_id,
+            "user_id": user_id,
+            "isometrik_user_id": isometrik_user_id,
+            "is_primary_contact": True,
+            "first_name": request_data.first_name,
+            "last_name": request_data.last_name,
+        }
+
+        # Add optional fields only if provided
+        if request_data.middle_name:
+            client_user_data["middle_name"] = request_data.middle_name
+        if request_data.title:
+            client_user_data["title"] = request_data.title
+        if request_data.prefix:
+            client_user_data["prefix"] = request_data.prefix
+        if request_data.date_of_birth:
+            client_user_data["date_of_birth"] = request_data.date_of_birth
+        if request_data.profile_photo_url:
+            client_user_data["profile_photo_url"] = request_data.profile_photo_url
+
+        return client_user_data
+
+    async def _create_optional_records(
+        self,
+        request_data: CreateClientRequest,
+        client_id: str,
+    ) -> None:
+        """Create lead and address records if provided.
+
+        Args:
+            request_data: Request data
+            client_id: Client ID
+        """
+        # Create lead record if enabled
+        if request_data.lead_management and request_data.lead_management.enabled:
+            lead_data = {
+                "client_id": client_id,
+                "lead_status": request_data.lead_management.lead_status.value
+                if request_data.lead_management.lead_status
+                else None,
+                "intake_stage": request_data.lead_management.intake_stage.value
+                if request_data.lead_management.intake_stage
+                else None,
+                "lead_source": request_data.lead_management.lead_source,
+                "referral_source": request_data.lead_management.referral_source,
+                "lead_score": request_data.lead_management.lead_score,
+            }
+            await self.client_repository.create_lead(lead_data)
+
+        # Create address records if provided
+        if request_data.addresses:
+            addresses_data = [
+                {
+                    "client_id": client_id,
+                    "address_line1": address.address_line1,
+                    "address_line2": address.address_line2,
+                    "city": address.city,
+                    "state": address.state,
+                    "postal_code": address.postal_code,
+                    "country": address.country,
+                    "address_type": address.address_type.value if address.address_type else None,
+                    "is_primary": address.is_primary,
+                }
+                for address in request_data.addresses
+            ]
+            await self.client_repository.bulk_create_addresses(addresses_data)
+
+    async def create_client(self, request_data: CreateClientRequest) -> None:
+        """Create a new client with complete onboarding flow.
+
+        Orchestrates the full client creation process: validates organization existence
+        and data uniqueness (email, phone, company name), provisions authentication
+        and Isometrik users, creates client and client_user records, and optionally
+        creates lead and address records. Sends a welcome email upon successful creation.
+
+        Args:
+            request_data: Request data containing client information
+
+        Raises:
+            NotFoundException: If organization not found
+            ConflictException: If email/phone/name already exists
+            ServiceUnavailableException: If auth or Isometrik creation fails
+            ValidationException: If validation fails
+        """
+        organization_id = self.user_context.organization_id
+
+        # Validate and get organization
+        organization = await self._validate_client_creation(request_data, organization_id)
+
+        # Create auth and Isometrik users
+        user_id, isometrik_user_id = await self._create_auth_and_isometrik_user(
+            request_data, organization, organization_id
+        )
+
+        # Create client record
+        client_data = self._prepare_client_data(request_data, organization_id)
+        client_record = await self.client_repository.create_client(client_data)
+
+        # Create client_user record
+        client_user_data = self._prepare_client_user_data(
+            request_data, client_record["id"], organization_id, user_id, isometrik_user_id
+        )
+        await self.client_repository.create_client_user(client_user_data)
+
+        # Create optional records (lead, address)
+        await self._create_optional_records(request_data, client_record["id"])
+
+        # Send creation email
+        if request_data.portal_access:
+            try:
+                send_client_creation_email(
+                    email=request_data.email, organization_name=organization["name"]
+                )
+            except Exception as e:
+                logger.error("Failed to send client creation email: %s", str(e))
+
+    async def get_clients_list(
+        self,
+        organization_id: str,
+        filter_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Get paginated list of clients with filtering.
+
+        Args:
+            organization_id: Organization ID
+            filter_params: Dictionary containing filter parameters:
+                - search: Search term (searches in client name)
+                - client_type: Filter by client type
+                - status: Filter by status
+                - page: Page number
+                - page_size: Page size
+
+        Returns:
+            dict: Dictionary containing 'clients' list and 'total' count
+        """
+        page = filter_params.get("page", 1)
+        page_size = filter_params.get("page_size", 20)
+        offset = (page - 1) * page_size
+
+        # Prepare repository filter params
+        repo_filter_params = {
+            "search": filter_params.get("search"),
+            "client_type": filter_params.get("client_type"),
+            "status": filter_params.get("status"),
+            "limit": page_size,
+            "offset": offset,
+        }
+
+        # Get clients from repository
+        clients = await self.client_repository.get_clients_list(
+            organization_id=organization_id,
+            filter_params=repo_filter_params,
+        )
+
+        # Prepare count filter params (without pagination)
+        count_filter_params = {
+            "search": filter_params.get("search"),
+            "client_type": filter_params.get("client_type"),
+            "status": filter_params.get("status"),
+        }
+
+        # Get total count
+        total = await self.client_repository.get_clients_count(
+            organization_id=organization_id,
+            filter_params=count_filter_params,
+        )
+
+        # Transform to response model
+        transformed_clients = []
+        for client in clients:
+            primary_contact = {
+                "first_name": client.get("first_name"),
+                "last_name": client.get("last_name"),
+                "title": client.get("title"),
+                "email": client.get("email"),
+                "phone_isd_code": client.get("phone_isd_code"),
+                "phone": client.get("phone"),
+            }
+
+            client_response = ClientListResponse(
+                id=str(client.get("id")),
+                name=client.get("name") or "",
+                primary_contact=primary_contact,
+                company_type=client.get("client_type"),
+                status=client.get("status"),
+                matters=[],
+                created_at=format_iso_datetime(client.get("created_at")) or "",
+                updated_at=format_iso_datetime(client.get("updated_at")) or "",
+                outstanding=None,
+                tags=client.get("tags") or [],
+            )
+            transformed_clients.append(client_response.model_dump())
+
+        return {"clients": transformed_clients, "total": total}
+
+    async def get_client_details(
+        self, client_id: str, organization_id: str
+    ) -> ClientDetailsResponse:
+        """Get client details with all fields and addresses.
+
+        Args:
+            client_id: Client ID
+            organization_id: Organization ID
+
+        Returns:
+            ClientDetailsResponse: Client details with addresses
+
+        Raises:
+            NotFoundException: If client not found
+        """
+        # Get client details with primary contact
+        client = await self.client_repository.get_client_details_with_primary_contact(
+            client_id, organization_id
+        )
+        if not client:
+            raise NotFoundException(
+                message_key="clients.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        # Get addresses
+        addresses = await self.client_repository.get_client_addresses(client_id)
+
+        # Build primary contact info
+        primary_contact = PrimaryContactInfo(
+            first_name=client.get("first_name"),
+            last_name=client.get("last_name"),
+            title=client.get("title"),
+            email=client.get("email"),
+            phone_isd_code=client.get("phone_isd_code"),
+            phone=client.get("phone"),
+        )
+
+        # Parse JSONB fields
+        websites_data = safe_json_loads(client.get("websites"), [])
+        websites = [Website(**website) for website in websites_data] if websites_data else []
+
+        billing_preferences_data = parse_json_field(client.get("billing_preferences"))
+        billing_preferences = None
+        if billing_preferences_data:
+            billing_preferences = BillingPreferences(**billing_preferences_data)
+
+        custom_fields = parse_json_field(client.get("custom_fields")) or {}
+
+        # Format lead information if exists
+        lead_info = None
+        if client.get("lead_id"):
+            lead_info = LeadInfo(
+                id=str(client.get("lead_id")),
+                lead_status=client.get("lead_status"),
+                intake_stage=client.get("intake_stage"),
+                lead_source=client.get("lead_source"),
+                referral_source=client.get("referral_source"),
+                lead_score=client.get("lead_score"),
+                converted_at=format_iso_datetime(client.get("converted_at")),
+                notes=client.get("lead_notes"),
+                created_at=format_iso_datetime(client.get("lead_created_at")) or "",
+                updated_at=format_iso_datetime(client.get("lead_updated_at")) or "",
+            )
+
+        # Format addresses
+        formatted_addresses = []
+        for addr in addresses:
+            address_data = parse_json_field(addr.get("address_data"))
+            formatted_addresses.append(
+                ClientAddressResponse(
+                    id=str(addr.get("id")),
+                    place_id=addr.get("place_id"),
+                    address_line1=addr.get("address_line1"),
+                    address_line2=addr.get("address_line2"),
+                    city=addr.get("city"),
+                    state=addr.get("state"),
+                    postal_code=addr.get("postal_code"),
+                    country=addr.get("country"),
+                    latitude=float(addr.get("latitude"))
+                    if addr.get("latitude") is not None
+                    else None,
+                    longitude=float(addr.get("longitude"))
+                    if addr.get("longitude") is not None
+                    else None,
+                    address_type=addr.get("address_type"),
+                    address_data=address_data or {},
+                    is_primary=bool(addr.get("is_primary", False)),
+                    created_at=format_iso_datetime(addr.get("created_at")) or "",
+                    updated_at=format_iso_datetime(addr.get("updated_at")) or "",
+                )
+            )
+
+        # Build response
+        return ClientDetailsResponse(
+            id=str(client.get("id")),
+            organization_id=str(client.get("organization_id")),
+            client_type=client.get("client_type"),
+            name=client.get("name") or "",
+            status=client.get("status"),
+            industry=client.get("industry"),
+            profile_photo_url=client.get("profile_photo_url"),
+            tags=client.get("tags") or [],
+            primary_contact=primary_contact,
+            websites=websites,
+            billing_preferences=billing_preferences,
+            custom_fields=custom_fields,
+            addresses=formatted_addresses,
+            lead=lead_info,
+            created_at=format_iso_datetime(client.get("created_at")) or "",
+            updated_at=format_iso_datetime(client.get("updated_at")) or "",
+        )
+
+    async def delete_client(self, client_id: str, organization_id: str) -> None:
+        """Soft delete a client.
+
+        Args:
+            client_id: Client ID
+            organization_id: Organization ID
+
+        Raises:
+            NotFoundException: If client not found
+        """
+        # Soft delete client (existence check is handled in repository)
+        await self.client_repository.delete_client(client_id, organization_id)
+        await self.client_repository.delete_client_users(client_id)
+        await self.client_repository.delete_leads(client_id)
+        await self.client_repository.delete_addresses(client_id)
