@@ -36,6 +36,7 @@ class ApplicationSettings(BaseSettings):
     shared_settings: SharedAppSettings = shared_settings
     two_fa_settings: TwoFASettings = TwoFASettings()
     invite_expiry_days: int = config("INVITE_EXPIRY_DAYS", default=7)
+    datadog_tracing_enabled: bool = config("DATADOG_TRACING_ENABLED", default=False)
 
 
 app_settings = ApplicationSettings()

@@ -8,10 +8,7 @@ and includes API routes. It also handles path configuration for imports.
 import os
 from pathlib import Path
 
-from ddtrace.contrib.asgi import TraceMiddleware
-
 # Third-party imports
-from ddtrace.trace import tracer
 from fastapi import status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -35,9 +32,6 @@ register_translation_path(service_locale_dir)
 
 # Initialize logging at module level
 app_logger = setup_logging()
-
-# ddtrace.auto is imported above and automatically patches supported libraries
-
 
 # Update the app's metadata
 app.title = app_settings.shared_settings.app_name
@@ -73,8 +67,11 @@ app.add_middleware(
 
 register_exception_handlers(app)
 
-# Add Datadog tracing middleware (monitors all requests)
-app.add_middleware(TraceMiddleware, tracer=tracer)
+if app_settings.datadog_tracing_enabled:
+    from ddtrace.contrib.asgi import TraceMiddleware
+    from ddtrace.trace import tracer
+
+    app.add_middleware(TraceMiddleware, tracer=tracer)
 
 # Cache request body BEFORE JWT and auditing (allows multiple reads)
 app.add_middleware(CacheRequestBodyMiddleware)
