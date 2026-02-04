@@ -125,6 +125,7 @@ async def get_pool() -> asyncpg.Pool:
         init=init_cb,
         ssl=ssl_context,
         max_inactive_connection_lifetime=max_idle,
+        statement_cache_size=0,
     )
     _pool_holder["pool"] = pool
     return pool
