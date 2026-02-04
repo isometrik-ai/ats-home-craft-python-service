@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.responses import Response
 
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.translations import translator
@@ -81,8 +82,14 @@ def success_response(
     custom_code: CustomStatusCode = CustomStatusCode.SUCCESS,
     data: Any = None,
     params: dict[str, Any] | None = None,
-) -> JSONResponse:
+) -> Response | JSONResponse:
     """Create a standard success response."""
+
+    # RFC-compliant: 204/304 responses MUST NOT include a message body.
+    # Returning a JSONResponse with these status codes can lead to protocol-level
+    # Content-Length mismatches under some ASGI server/middleware combinations.
+    if status_code in (204, 304):
+        return Response(status_code=status_code)
 
     language = request.headers.get("lan", "en")
     message = translator.get(message_key, language, **(params or {}))
