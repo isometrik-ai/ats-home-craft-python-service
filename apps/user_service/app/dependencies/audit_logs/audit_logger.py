@@ -31,7 +31,7 @@ from apps.user_service.app.db.repositories.audit_log_repository import (
 from apps.user_service.app.services.audit_log_service import (
     AuditLogService,
 )
-from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
+from libs.shared_db.drivers.asyncpg_client import get_pool
 from libs.shared_db.drivers.asyncpg_uow import UnitOfWork
 from libs.shared_utils.http_exceptions import InternalServerErrorException
 from libs.shared_utils.logger import get_logger
@@ -72,8 +72,8 @@ class AuditLogger:
         self._pool = None  # Cached pool reference
 
         # Processing configuration
-        self._batch_size = 10
-        self._batch_timeout = 3.0
+        self._batch_size = 5
+        self._batch_timeout = 5.0
         self._max_retries = 3
 
     async def start_processing(self):
@@ -239,25 +239,6 @@ class AuditLogger:
 
                 await asyncio.sleep(2**attempt)
 
-    async def _get_last_hash_from_db(self, organization_id: str | None = None) -> str | None:
-        """Fetch the last hash from the database to maintain audit chain integrity.
-
-        Args:
-            organization_id: Organization ID to filter by (optional)
-
-        Returns:
-            Optional[str]: The last hash from the database, or None if no audit logs exist
-        """
-        org_id = organization_id or "default"
-
-        try:
-            async with AcquireConnection(self._pool) as conn:
-                repository = AuditLogRepository(db_connection=conn)
-                return await repository.get_last_audit_log_hash(organization_id=org_id)
-        except Exception as e:
-            logger.error("Error fetching last audit log hash: %s", str(e), exc_info=True)
-            return None
-
     async def _write_audit_batch(self, events: list[dict]) -> None:
         """Write a batch of audit events to the database.
 
@@ -268,57 +249,54 @@ class AuditLogger:
             return
 
         try:
-            # Get the last hash from database if we don't have it cached
-            if self._last_hash is None:
-                # Use organization_id from the first event if available
-                org_id = events[0].get("organization_id") if events else None
-                self._last_hash = await self._get_last_hash_from_db(org_id)
-
-            # Prepare batch data with hash signatures and retention dates
-            batch_data = []
-            for event in events:
-                hash_signature = self._generate_hash(event)
-                retention_date = self._calculate_retention_date(
-                    event["timestamp"], event["data_classification"]
-                )
-
-                batch_data.append(
-                    {
-                        "organization_id": event["organization_id"],
-                        "user_id": event["user_id"],
-                        "user_email": event["user_email"],
-                        "user_role": event["user_role"],
-                        "action_type": event["action_type"],
-                        "data_classification": event["data_classification"],
-                        "table_name": event["table_name"],
-                        "record_id": event["record_id"],
-                        "old_values": event["old_values"],
-                        "new_values": event["new_values"],
-                        "changed_fields": event.get("changed_fields"),
-                        "compliance_tags": event.get("compliance_tags"),
-                        "risk_level": event["risk_level"],
-                        "ip_address": event["ip_address"],
-                        "timestamp": event["timestamp"],
-                        "hash_signature": hash_signature,
-                        "previous_hash": self._last_hash,
-                        "description": event["description"],
-                        "retention_date": retention_date,
-                        "status_code": event.get("status_code"),
-                        "category": event.get("category"),
-                    }
-                )
-
-                # Update last hash for next event
-                self._last_hash = hash_signature
-
-            # Prepare data for database (JSONB serialization, normalization)
-            prepared_data = AuditLogService.prepare_bulk_audit_logs_for_db(batch_data)
-
-            # Use repository bulk create operation with transaction for atomicity
             async with UnitOfWork(self._pool) as conn:
                 repository = AuditLogRepository(db_connection=conn)
+
+                # Fetch last hash ONCE, using SAME connection
+                if self._last_hash is None:
+                    org_id = events[0].get("organization_id") or "default"
+                    self._last_hash = await repository.get_last_audit_log_hash(
+                        organization_id=org_id
+                    )
+
+                batch_data = []
+
+                for event in events:
+                    hash_signature = self._generate_hash(event)
+                    retention_date = self._calculate_retention_date(
+                        event["timestamp"], event["data_classification"]
+                    )
+
+                    batch_data.append(
+                        {
+                            "organization_id": event["organization_id"],
+                            "user_id": event["user_id"],
+                            "user_email": event["user_email"],
+                            "user_role": event["user_role"],
+                            "action_type": event["action_type"],
+                            "data_classification": event["data_classification"],
+                            "table_name": event["table_name"],
+                            "record_id": event["record_id"],
+                            "old_values": event["old_values"],
+                            "new_values": event["new_values"],
+                            "changed_fields": event.get("changed_fields"),
+                            "compliance_tags": event.get("compliance_tags"),
+                            "risk_level": event["risk_level"],
+                            "ip_address": event["ip_address"],
+                            "timestamp": event["timestamp"],
+                            "hash_signature": hash_signature,
+                            "previous_hash": self._last_hash,
+                            "description": event["description"],
+                            "retention_date": retention_date,
+                            "status_code": event.get("status_code"),
+                            "category": event.get("category"),
+                        }
+                    )
+
+                    self._last_hash = hash_signature
+
+                prepared_data = AuditLogService.prepare_bulk_audit_logs_for_db(batch_data)
                 await repository.bulk_create_audit_logs(prepared_data)
-                # Transaction commits automatically on successful exit
 
         except Exception as e:
             logger.error("Unknown error: %s", e, exc_info=True)
