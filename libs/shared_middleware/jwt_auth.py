@@ -296,8 +296,15 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         token = auth_header.split(" ")[1]
-        payload = await get_claims_from_token(token)
-        request.state.user = payload
-        request.state.access_token = token
+        try:
+            payload = await get_claims_from_token(token)
+            request.state.user = payload
+            request.state.access_token = token
+        except Exception as e:
+            logger.error("JWT validation error: %s", str(e))
+            raise UnauthorizedException(
+                message_key="errors.authentication_failed",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            ) from e
 
         return await call_next(request)
