@@ -28,7 +28,7 @@ class UserEventRepository:
         """
         query = """
             UPDATE user_events
-            SET status = $1, updated_at = NOW()
+            SET status = $1, processed_at = NOW()
             WHERE user_id = $2
         """
         await self.db_connection.execute(query, status.value, user_id)
