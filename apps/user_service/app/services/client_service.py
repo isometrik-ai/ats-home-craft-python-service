@@ -32,6 +32,7 @@ from apps.user_service.app.utils.common_utils import (
     serialize_pydantic_models,
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
+from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_db.supabase_db.auth_repository import create_user
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -296,13 +297,8 @@ class ClientService:
         isometrik_credentials = get_isometrik_data_from_settings(org_settings)
 
         # Prepare name for Isometrik
-        if request_data.client_type == ClientType.PERSON:
-            isometrik_first_name = request_data.first_name
-            isometrik_last_name = request_data.last_name
-        else:
-            # For company type, use the provided first_name and last_name
-            isometrik_first_name = request_data.first_name
-            isometrik_last_name = request_data.last_name
+        isometrik_first_name = request_data.first_name
+        isometrik_last_name = request_data.last_name
 
         # Create Isometrik user
         isometrik_response = await create_isometrik_user(
@@ -322,19 +318,6 @@ class ClientService:
 
         return user_id, isometrik_response["userId"]
 
-    def _build_client_name(self, request_data: CreateClientRequest) -> str:
-        """Build client name based on client type.
-
-        Args:
-            request_data: Request data
-
-        Returns:
-            str: Client name
-        """
-        if request_data.client_type == ClientType.PERSON:
-            return f"{request_data.first_name} {request_data.last_name}".strip()
-        return request_data.name or ""
-
     def _prepare_client_data(
         self,
         request_data: CreateClientRequest,
@@ -349,7 +332,10 @@ class ClientService:
         Returns:
             dict: Client data with JSONB fields serialized to JSON strings
         """
-        client_name = self._build_client_name(request_data)
+        if request_data.client_type == ClientType.PERSON:
+            client_name = build_full_name(request_data.first_name, request_data.last_name)
+        else:
+            client_name = request_data.name or ""
         client_data = {
             "organization_id": organization_id,
             "client_type": request_data.client_type.value,

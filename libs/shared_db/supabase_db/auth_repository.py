@@ -16,6 +16,7 @@ from libs.shared_utils.response_factory import CustomStatusCode
 async def create_user(
     sb_client: AsyncClient,
     email: str,
+    password: str | None = None,
     user_metadata: dict[str, Any] | None = None,
     phone: str | None = None,
     email_confirm: bool = False,
@@ -27,6 +28,7 @@ async def create_user(
         user_metadata: User's metadata
         phone: User's phone number
         email_confirm: Whether to confirm email
+        password: User's password
     Returns:
         dict[str, Any]: User data
     """
@@ -36,6 +38,7 @@ async def create_user(
             "user_metadata": user_metadata or {},
             "phone": phone,
             "email_confirm": email_confirm,
+            "password": password,
         }
     )
     return resp.user.model_dump() if resp and resp.user else {}
