@@ -44,6 +44,7 @@ from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_db.supabase_db.auth_repository import create_user
 from libs.shared_utils.http_exceptions import (
     ConflictException,
+    BadRequestException,
     NotFoundException,
     ServiceUnavailableException,
 )
@@ -101,9 +102,26 @@ class ClientService:
             NotFoundException: If user or organization not found
             ServiceUnavailableException: If Isometrik user creation fails
             ConflictException: If user is already a client
+            BadRequestException: If user event is not pending
         """
         user_id = request_data.user_id
         organization_id = request_data.organization_id
+
+        # Only process if user_event for this user is pending
+        user_event_repository = UserEventRepository(db_connection=self.db_connection)
+        user_event_details = await user_event_repository.get_user_event_by_user_id(
+            user_id, ["status"]
+        )
+        is_valid = (
+            user_event_details
+            and user_event_details.get("status") == UserEventStatus.PENDING.value
+         )
+
+        if not is_valid:
+            raise BadRequestException(
+                message_key="clients.errors.user_event_not_available",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
 
         user_repository = UserRepository(db_connection=self.db_connection)
 
@@ -172,7 +190,6 @@ class ClientService:
         )
 
         # Mark user_event as completed
-        user_event_repository = UserEventRepository(db_connection=self.db_connection)
         await user_event_repository.update_status_by_user_id(
             user_id=user_id, status=UserEventStatus.COMPLETED
         )

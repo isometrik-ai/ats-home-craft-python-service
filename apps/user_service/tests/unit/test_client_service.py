@@ -15,6 +15,7 @@ from apps.user_service.app.schemas.enums import ClientType, LeadStatus, UserEven
 from apps.user_service.app.services.client_service import ClientService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
+    BadRequestException,
     ConflictException,
     NotFoundException,
     ServiceUnavailableException,
@@ -155,9 +156,14 @@ class _FakeOrgRepo:
 class _FakeUserEventRepo:
     """Fake user event repository."""
 
-    def __init__(self, db_connection=None):
+    def __init__(self, db_connection=None, user_event_details=None):
         self.db_connection = db_connection
         self.calls = {}
+        self.user_event_details = user_event_details or {"status": "pending"}
+
+    async def get_user_event_by_user_id(self, user_id: str, select_columns=None):
+        """Return configured user_event details."""
+        return self.user_event_details
 
     async def update_status_by_user_id(self, user_id: str, status: UserEventStatus) -> None:
         """Record call and no-op."""
@@ -175,13 +181,69 @@ def _ctx(org_id="org-1"):
 
 
 @pytest.mark.asyncio
+async def test_create_client_from_user_raises_user_event_not_available_when_none(monkeypatch):
+    """Raises BadRequestException when user event is missing."""
+    fake_repo = _FakeClientRepo()
+    fake_user_event_repo = _FakeUserEventRepo()
+    fake_user_event_repo.user_event_details = None
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserEventRepository",
+        lambda db_connection=None: fake_user_event_repo,
+    )
+
+    service = ClientService(db_connection=None)
+    request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_client_from_user(request_data)
+
+    assert exc_info.value.message_key == "clients.errors.user_event_not_available"
+
+
+@pytest.mark.asyncio
+async def test_create_client_from_user_raises_user_event_not_available_when_not_pending(monkeypatch):
+    """Raises BadRequestException when user event status is not pending."""
+    fake_repo = _FakeClientRepo()
+    fake_user_event_repo = _FakeUserEventRepo(
+        user_event_details={"status": UserEventStatus.COMPLETED.value}
+    )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserEventRepository",
+        lambda db_connection=None: fake_user_event_repo,
+    )
+
+    service = ClientService(db_connection=None)
+    request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_client_from_user(request_data)
+
+    assert exc_info.value.message_key == "clients.errors.user_event_not_available"
+
+
+@pytest.mark.asyncio
 async def test_client_from_user_raises_user_already_client(monkeypatch):
     """Raises ConflictException when user is already a client."""
     fake_repo = _FakeClientRepo()
     fake_repo.client_user_exists = True
+    fake_user_event_repo = _FakeUserEventRepo()
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserEventRepository",
+        lambda db_connection=None: fake_user_event_repo,
     )
 
     service = ClientService(db_connection=None)
@@ -197,6 +259,7 @@ async def test_create_client_from_user_raises_user_not_found(monkeypatch):
     fake_repo = _FakeClientRepo()
     fake_user_repo = _FakeUserRepo()
     fake_user_repo.user_details = None
+    fake_user_event_repo = _FakeUserEventRepo()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
@@ -205,6 +268,10 @@ async def test_create_client_from_user_raises_user_not_found(monkeypatch):
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.UserRepository",
         lambda db_connection=None: fake_user_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserEventRepository",
+        lambda db_connection=None: fake_user_event_repo,
     )
 
     service = ClientService(db_connection=None)
@@ -221,6 +288,7 @@ async def test_client_from_user_raises_org_not_found(monkeypatch):
     fake_user_repo = _FakeUserRepo()
     fake_org_repo = _FakeOrgRepo()
     fake_org_repo.organization = None
+    fake_user_event_repo = _FakeUserEventRepo()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
@@ -233,6 +301,10 @@ async def test_client_from_user_raises_org_not_found(monkeypatch):
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.OrganizationRepository",
         lambda db_connection=None: fake_org_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserEventRepository",
+        lambda db_connection=None: fake_user_event_repo,
     )
 
     service = ClientService(db_connection=None)
@@ -662,6 +734,7 @@ async def test_create_isometrik_user_raises_when_fails(monkeypatch):
     fake_repo = _FakeClientRepo()
     fake_user_repo = _FakeUserRepo()
     fake_org_repo = _FakeOrgRepo()
+    fake_user_event_repo = _FakeUserEventRepo()
 
     async def fake_create_isometrik_user(*_args, **_kwargs):
         return None  # Failed
@@ -677,6 +750,10 @@ async def test_create_isometrik_user_raises_when_fails(monkeypatch):
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.OrganizationRepository",
         lambda db_connection=None: fake_org_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserEventRepository",
+        lambda db_connection=None: fake_user_event_repo,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.create_isometrik_user",
