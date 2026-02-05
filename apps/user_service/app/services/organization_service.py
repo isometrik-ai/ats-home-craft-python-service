@@ -6,11 +6,9 @@ import json
 import math
 import uuid
 from datetime import datetime, timedelta, timezone
-from enum import Enum
 from typing import Any
 
 import asyncpg
-from pydantic import BaseModel
 
 from apps.user_service.app.db.repositories import (
     OrganizationDeleteRequestRepository,
@@ -44,6 +42,7 @@ from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
     parse_json_field,
+    serialize_pydantic_models,
     validate_uuid_format,
 )
 from apps.user_service.app.utils.email_utils import (
@@ -67,29 +66,6 @@ from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.super_admin_utils import get_system_super_admin_emails
 
 logger = get_logger("organization_service")
-
-
-def _serialize_pydantic_models(value: Any) -> Any:
-    """Recursively convert Pydantic models and other
-    non-serializable objects to JSON-serializable primitives.
-
-    Args:
-        value: The value to serialize (can be Pydantic model, dict, list, enum, or primitive)
-
-    Returns:
-        JSON-serializable value
-    """
-    if value is None:
-        return None
-    if isinstance(value, BaseModel):
-        return value.model_dump(exclude_none=True)
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {k: _serialize_pydantic_models(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_serialize_pydantic_models(item) for item in value]
-    return value
 
 
 class OrganizationService:
@@ -290,9 +266,9 @@ class OrganizationService:
         db_payload = self._build_update_payload(existing_settings, update_payload)
 
         # Serialize JSON fields for asyncpg
-        # _serialize_pydantic_models handles all types (dict, BaseModel, list, None, etc.)
+        # serialize_pydantic_models handles all types (dict, BaseModel, list, None, etc.)
         if "settings" in db_payload:
-            serialized_settings = _serialize_pydantic_models(db_payload["settings"])
+            serialized_settings = serialize_pydantic_models(db_payload["settings"])
             db_payload["settings"] = json.dumps(serialized_settings)
 
         # Perform the update
@@ -702,7 +678,7 @@ class OrganizationService:
         provided_settings = getattr(body.company_data, "settings", None)
         if provided_settings:
             # Convert Pydantic models to dicts if settings are provided
-            return _serialize_pydantic_models(provided_settings)
+            return serialize_pydantic_models(provided_settings)
 
         settings = {
             "practice_areas": {
@@ -719,7 +695,7 @@ class OrganizationService:
             "address": body.company_data.address,
         }
         # Convert any Pydantic models to dicts for JSON serialization
-        return _serialize_pydantic_models(settings)
+        return serialize_pydantic_models(settings)
 
     async def _create_isometrik_application_if_enabled(
         self, body: NewOrganizationBody
@@ -752,9 +728,9 @@ class OrganizationService:
             settings["isometrik_application_details"] = isometrik_details
 
         # Convert any remaining Pydantic models to dicts before JSON serialization
-        serialized_settings_dict = _serialize_pydantic_models(settings) if settings else None
+        serialized_settings_dict = serialize_pydantic_models(settings) if settings else None
         serialized_subscription_dict = (
-            _serialize_pydantic_models(subscription) if subscription else None
+            serialize_pydantic_models(subscription) if subscription else None
         )
 
         # Serialize JSON fields for asyncpg (business logic in service layer)

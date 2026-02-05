@@ -156,10 +156,24 @@
   "clients": {
     "errors": {
       "isometrik_user_creation_failed": "Failed to create Isometrik user",
-      "user_already_a_client": "User is already a client of this organization"
+      "user_already_a_client": "User is already a client of this organization",
+      "not_found": "Client does not exist or has been deleted",
+      "client_user_not_found": "Client user not found",
+      "email_already_exists": "A client with this email already exists in your organization",
+      "phone_number_already_exists": "A client with this phone number already exists in your organization",
+      "client_name_already_exists": "A client with this name already exists in your organization",
+      "auth_user_creation_failed": "Failed to create authentication user",
+      "company_contact_required": "Company contact is required for company type",
+      "company_name_required": "Company name is required for company type",
+      "only_one_primary_website": "Only one website can be marked as primary",
+      "only_one_primary_address": "Only one address can be marked as primary"
     },
     "success": {
-      "client_created": "Client created successfully."
+      "client_created": "Client created successfully.",
+      "clients_retrieved": "Clients retrieved successfully",
+      "client_retrieved": "Client details retrieved successfully",
+      "client_updated": "Client updated successfully",
+      "client_deleted": "Client deleted successfully"
     }
   },
   "audit_logs": {
