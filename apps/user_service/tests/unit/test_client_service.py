@@ -440,7 +440,7 @@ async def test_delete_client_calls_delete_methods(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_build_client_name_for_person():
-    """_build_client_name returns full name for person type."""
+    """_prepare_client_data builds full name for person type."""
     service = ClientService(db_connection=None)
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
@@ -451,14 +451,14 @@ async def test_build_client_name_for_person():
         last_name="Doe",
     )
 
-    name = service._build_client_name(request_data)  # pylint: disable=protected-access
+    client_data = service._prepare_client_data(request_data, "org-1")
 
-    assert name == "John Doe"
+    assert client_data["name"] == "John Doe"
 
 
 @pytest.mark.asyncio
 async def test_build_client_name_for_company():
-    """_build_client_name returns company name for company type."""
+    """_prepare_client_data builds company name for company type."""
     service = ClientService(db_connection=None)
     request_data = CreateClientRequest(
         client_type=ClientType.COMPANY,
@@ -470,9 +470,9 @@ async def test_build_client_name_for_company():
         name="Test Company",
     )
 
-    name = service._build_client_name(request_data)  # pylint: disable=protected-access
+    client_data = service._prepare_client_data(request_data, "org-1")
 
-    assert name == "Test Company"
+    assert client_data["name"] == "Test Company"
 
 
 @pytest.mark.asyncio
@@ -491,7 +491,7 @@ async def test_prepare_client_data_serializes_jsonb_fields():
         custom_fields={"key": "value"},
     )
 
-    client_data = service._prepare_client_data(request_data, "org-1")  # pylint: disable=protected-access
+    client_data = service._prepare_client_data(request_data, "org-1")
 
     assert client_data["organization_id"] == "org-1"
     assert client_data["client_type"] == "person"
@@ -516,7 +516,7 @@ async def test_prepare_client_user_data_includes_fields():
         title="CEO",
     )
 
-    client_user_data = service._prepare_client_user_data(  # pylint: disable=protected-access
+    client_user_data = service._prepare_client_user_data(
         request_data, "client-1", "org-1", "user-1", "isometrik-1"
     )
 
@@ -550,7 +550,7 @@ async def test_create_records_creates_lead_when_enabled(monkeypatch):
         lead_management=LeadManagement(enabled=True, lead_status=LeadStatus.PROSPECT),
     )
 
-    await service._create_optional_records(request_data, "client-1")  # pylint: disable=protected-access
+    await service._create_optional_records(request_data, "client-1")
 
     assert "create_lead" in fake_repo.calls
     assert fake_repo.calls["create_lead"]["client_id"] == "client-1"
@@ -584,7 +584,7 @@ async def test_create_optional_records_creates_addresses(monkeypatch):
         ],
     )
 
-    await service._create_optional_records(request_data, "client-1")  # pylint: disable=protected-access
+    await service._create_optional_records(request_data, "client-1")
 
     assert "bulk_create_addresses" in fake_repo.calls
     addresses = fake_repo.calls["bulk_create_addresses"]
@@ -702,7 +702,7 @@ async def test_create_auth_and_isometrik_user_for_person(monkeypatch):
         prefix="Mr.",
     )
 
-    user_id, isometrik_user_id = await service._create_auth_and_isometrik_user(  # pylint: disable=protected-access
+    user_id, isometrik_user_id = await service._create_auth_and_isometrik_user(
         request_data, fake_org_repo.organization, "org-1"
     )
 
@@ -745,7 +745,7 @@ async def test_create_auth_and_isometrik_user_for_company(monkeypatch):
         name="Test Company",
     )
 
-    user_id, isometrik_user_id = await service._create_auth_and_isometrik_user(  # pylint: disable=protected-access
+    user_id, isometrik_user_id = await service._create_auth_and_isometrik_user(
         request_data, fake_org_repo.organization, "org-1"
     )
 
@@ -781,7 +781,7 @@ async def test_create_user_raises_when_auth_fails(monkeypatch):
     )
 
     with pytest.raises(ServiceUnavailableException):
-        await service._create_auth_and_isometrik_user(  # pylint: disable=protected-access
+        await service._create_auth_and_isometrik_user(
             request_data, fake_org_repo.organization, "org-1"
         )
 
@@ -821,7 +821,7 @@ async def test_create_user_raises_when_isometrik_fails(monkeypatch):
     )
 
     with pytest.raises(ServiceUnavailableException):
-        await service._create_auth_and_isometrik_user(  # pylint: disable=protected-access
+        await service._create_auth_and_isometrik_user(
             request_data, fake_org_repo.organization, "org-1"
         )
 
