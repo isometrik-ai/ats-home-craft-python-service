@@ -26,6 +26,14 @@ class AccountType(str, Enum):
     BUSINESS = "business"
 
 
+class UserEventStatus(str, Enum):
+    """User event statuses."""
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class PlanType(str, Enum):
     """Plan type enumeration"""
 

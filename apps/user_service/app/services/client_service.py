@@ -10,8 +10,12 @@ from typing import Any
 import asyncpg
 from supabase import AsyncClient
 
-from apps.user_service.app.db.repositories import OrganizationRepository, UserRepository
-from apps.user_service.app.db.repositories.client_repository import ClientRepository
+from apps.user_service.app.db.repositories import (
+    ClientRepository,
+    OrganizationRepository,
+    UserEventRepository,
+    UserRepository,
+)
 from apps.user_service.app.schemas.clients import (
     BillingPreferences,
     ClientAddressResponse,
@@ -23,7 +27,11 @@ from apps.user_service.app.schemas.clients import (
     PrimaryContactInfo,
     Website,
 )
-from apps.user_service.app.schemas.enums import ClientType, IsometrikRole
+from apps.user_service.app.schemas.enums import (
+    ClientType,
+    IsometrikRole,
+    UserEventStatus,
+)
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -161,6 +169,12 @@ class ClientService:
                 "user_id": user_id,
                 "isometrik_user_id": isometrik_user_id,
             }
+        )
+
+        # Mark user_event as completed
+        user_event_repository = UserEventRepository(db_connection=self.db_connection)
+        await user_event_repository.update_status_by_user_id(
+            user_id=user_id, status=UserEventStatus.COMPLETED
         )
 
         # Send creation email

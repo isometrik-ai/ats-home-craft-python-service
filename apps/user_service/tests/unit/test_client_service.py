@@ -11,7 +11,7 @@ from apps.user_service.app.schemas.clients import (
     LeadManagement,
     Website,
 )
-from apps.user_service.app.schemas.enums import ClientType, LeadStatus
+from apps.user_service.app.schemas.enums import ClientType, LeadStatus, UserEventStatus
 from apps.user_service.app.services.client_service import ClientService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
@@ -150,6 +150,18 @@ class _FakeOrgRepo:
     async def get_organization_by_id(self, _organization_id):
         """Get organization."""
         return self.organization
+
+
+class _FakeUserEventRepo:
+    """Fake user event repository."""
+
+    def __init__(self, db_connection=None):
+        self.db_connection = db_connection
+        self.calls = {}
+
+    async def update_status_by_user_id(self, user_id: str, status: UserEventStatus) -> None:
+        """Record call and no-op."""
+        self.calls["update_status_by_user_id"] = {"user_id": user_id, "status": status}
 
 
 def _ctx(org_id="org-1"):
@@ -599,6 +611,7 @@ async def test_create_client_from_user_success(monkeypatch):
     fake_repo = _FakeClientRepo()
     fake_user_repo = _FakeUserRepo()
     fake_org_repo = _FakeOrgRepo()
+    fake_user_event_repo = _FakeUserEventRepo()
 
     async def fake_create_isometrik_user(*_args, **_kwargs):
         return {"userId": "isometrik-123"}
@@ -616,6 +629,10 @@ async def test_create_client_from_user_success(monkeypatch):
         lambda db_connection=None: fake_org_repo,
     )
     monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserEventRepository",
+        lambda db_connection=None: fake_user_event_repo,
+    )
+    monkeypatch.setattr(
         "apps.user_service.app.services.client_service.create_isometrik_user",
         fake_create_isometrik_user,
     )
@@ -631,6 +648,12 @@ async def test_create_client_from_user_success(monkeypatch):
 
     assert "create_client" in fake_repo.calls
     assert "create_client_user" in fake_repo.calls
+    assert "update_status_by_user_id" in fake_user_event_repo.calls
+    assert fake_user_event_repo.calls["update_status_by_user_id"]["user_id"] == "user-1"
+    assert (
+        fake_user_event_repo.calls["update_status_by_user_id"]["status"]
+        == UserEventStatus.COMPLETED
+    )
 
 
 @pytest.mark.asyncio

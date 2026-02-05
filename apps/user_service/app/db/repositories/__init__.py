@@ -31,6 +31,9 @@ from apps.user_service.app.db.repositories.session_repository import (
     SessionRepository,
 )
 from apps.user_service.app.db.repositories.team_repository import TeamRepository
+from apps.user_service.app.db.repositories.user_event_repository import (
+    UserEventRepository,
+)
 from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.db.repositories.verification_code_repository import (
     VerificationCodeRepository,
@@ -39,6 +42,7 @@ from apps.user_service.app.db.repositories.verification_code_repository import (
 __all__ = [
     "ClientRepository",
     "TeamRepository",
+    "UserEventRepository",
     "PermissionsRepository",
     "OrganizationRepository",
     "OrganizationMemberRepository",
