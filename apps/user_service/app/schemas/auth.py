@@ -343,7 +343,7 @@ class CompanyData(BaseModel):
     logo_url: str | None = None
     address: Address | None = None
     referral_source: str | None = None
-    primary_practice_areas: list[PracticeArea] = Field(..., min_length=1, max_length=3)
+    primary_practice_areas: list[PracticeArea] = Field(..., description="Primary practice areas")
     secondary_practice_areas: list[PracticeArea] | None = None
     specializations: list[Specialization] | None = None
     team_setup: TeamSetup | None = None
