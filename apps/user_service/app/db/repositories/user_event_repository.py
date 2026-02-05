@@ -9,6 +9,21 @@ import asyncpg
 
 from apps.user_service.app.schemas.enums import UserEventStatus
 
+# Allowlist of user_events columns for safe dynamic SELECT (prevents SQL injection)
+USER_EVENTS_ALLOWED_COLUMNS = frozenset(
+    {
+        "id",
+        "event_type",
+        "user_id",
+        "payload",
+        "status",
+        "retry_count",
+        "last_error",
+        "created_at",
+        "processed_at",
+    }
+)
+
 
 class UserEventRepository:
     """Repository for user_events table operations."""
@@ -35,11 +50,15 @@ class UserEventRepository:
 
         Returns:
             User event details if found, else None.
+
+        Note:
+            Only allowlisted column names are used; any other entries are ignored.
         """
         if not select_columns:
             columns_str = "*"
         else:
-            columns_str = ", ".join(select_columns)
+            valid_columns = [c for c in select_columns if c in USER_EVENTS_ALLOWED_COLUMNS]
+            columns_str = ", ".join(valid_columns) if valid_columns else "*"
 
         query = f"""
             SELECT {columns_str}

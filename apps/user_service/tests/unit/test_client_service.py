@@ -15,7 +15,6 @@ from apps.user_service.app.schemas.enums import ClientType, LeadStatus, UserEven
 from apps.user_service.app.services.client_service import ClientService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
-    BadRequestException,
     ConflictException,
     NotFoundException,
     ServiceUnavailableException,
@@ -161,7 +160,7 @@ class _FakeUserEventRepo:
         self.calls = {}
         self.user_event_details = user_event_details or {"status": "pending"}
 
-    async def get_user_event_by_user_id(self, user_id: str, select_columns=None):
+    async def get_user_event_by_user_id(self, _user_id: str, _select_columns=None):
         """Return configured user_event details."""
         return self.user_event_details
 
@@ -181,8 +180,8 @@ def _ctx(org_id="org-1"):
 
 
 @pytest.mark.asyncio
-async def test_create_client_from_user_raises_user_event_not_available_when_none(monkeypatch):
-    """Raises BadRequestException when user event is missing."""
+async def test_create_client_from_user_when_user_event_none(monkeypatch):
+    """Raises ConflictException when user event is missing."""
     fake_repo = _FakeClientRepo()
     fake_user_event_repo = _FakeUserEventRepo()
     fake_user_event_repo.user_event_details = None
@@ -199,15 +198,15 @@ async def test_create_client_from_user_raises_user_event_not_available_when_none
     service = ClientService(db_connection=None)
     request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
 
-    with pytest.raises(BadRequestException) as exc_info:
+    with pytest.raises(ConflictException) as exc_info:
         await service.create_client_from_user(request_data)
 
     assert exc_info.value.message_key == "clients.errors.user_event_not_available"
 
 
 @pytest.mark.asyncio
-async def test_create_client_from_user_raises_user_event_not_available_when_not_pending(monkeypatch):
-    """Raises BadRequestException when user event status is not pending."""
+async def test_create_client_from_user_when_event_not_pending(monkeypatch):
+    """Raises ConflictException when user event status is not pending."""
     fake_repo = _FakeClientRepo()
     fake_user_event_repo = _FakeUserEventRepo(
         user_event_details={"status": UserEventStatus.COMPLETED.value}
@@ -225,7 +224,7 @@ async def test_create_client_from_user_raises_user_event_not_available_when_not_
     service = ClientService(db_connection=None)
     request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
 
-    with pytest.raises(BadRequestException) as exc_info:
+    with pytest.raises(ConflictException) as exc_info:
         await service.create_client_from_user(request_data)
 
     assert exc_info.value.message_key == "clients.errors.user_event_not_available"
