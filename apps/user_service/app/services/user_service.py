@@ -573,6 +573,8 @@ class UserService:
         if not base_profile:
             first_name = user_metadata.get("first_name", "")
             last_name = user_metadata.get("last_name", "")
+            alternate_emails = user_metadata.get("alternate_emails")
+
             return {
                 "user_id": user_id,
                 "email": current_email,
@@ -583,6 +585,7 @@ class UserService:
                 "phone_isd_code": phone_isd_code,
                 "timezone": user_metadata.get("timezone", "UTC"),
                 "salutation": user_metadata.get("salutation"),
+                "alternate_emails": alternate_emails,
                 "role_id": None,
                 "status": OrganizationMemberStatus.ACTIVE.value,
                 "created_at": None,
@@ -601,6 +604,10 @@ class UserService:
         if phone_number is not None or phone_isd_code is not None:
             base_profile["phone_number"] = phone_number
             base_profile["phone_isd_code"] = phone_isd_code
+
+        # Update alternate_emails from user_metadata if available
+        alternate_emails = user_metadata.get("alternate_emails")
+        base_profile["alternate_emails"] = alternate_emails
 
         return base_profile
 
@@ -764,6 +771,7 @@ class UserService:
             UserListItem(
                 user_id=str(u["user_id"]),
                 email=u["email"],
+                alternate_emails=u.get("alternate_emails"),
                 salutation=u.get("salutation"),
                 first_name=u.get("first_name"),
                 last_name=u.get("last_name"),
@@ -1060,6 +1068,9 @@ class UserService:
             update_data["salutation"] = body.salutation
             metadata_update["salutation"] = body.salutation
 
+        if body.alternate_emails is not None:
+            metadata_update["alternate_emails"] = list(set(body.alternate_emails))
+
         metadata_update |= self._build_verification_metadata(body)
 
         return update_data, metadata_update
@@ -1173,6 +1184,7 @@ class UserService:
             permissions=permissions or [],
             identities=user_profile.get("identities", []),
             verification_preference=verification_preference,
+            alternate_emails=user_profile.get("alternate_emails"),
             organization_details=organization_details,
             isometrik_details=isometrik_details,
         )
