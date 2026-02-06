@@ -16,6 +16,7 @@ from apps.user_service.app.schemas.clients import (
     ClientDetailsResponse,
     CreateClientFromUserRequest,
     CreateClientRequest,
+    UpdateClientRequest,
 )
 from apps.user_service.app.schemas.enums import ClientStatus, ClientType
 from apps.user_service.app.services.client_service import ClientService
@@ -27,6 +28,7 @@ from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     CLIENTS_MANAGEMENT_CREATE,
     CLIENTS_MANAGEMENT_DELETE,
+    CLIENTS_MANAGEMENT_EDIT,
     CLIENTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.logger import get_logger
@@ -378,6 +380,68 @@ async def delete_client(
     return success_response(
         request=request,
         message_key="clients.success.client_deleted",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("update client")
+@router.patch(
+    "/{client_id}",
+    status_code=http_status.HTTP_200_OK,
+    description="Update a client (partial)",
+    summary="Update client",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Client updated successfully"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Client not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="clients",
+    category="CLIENT",
+)
+async def update_client(
+    request: Request,
+    client_id: str = Path(..., description="Client ID"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: UpdateClientRequest = Body(...),
+):
+    """Update client by ID. Only provided fields are applied."""
+    request.state.audit_table = "clients"
+    request.state.audit_requested_id = client_id
+    request.state.audit_description = f"Updated client: {client_id}"
+    request.state.audit_risk_level = "medium"
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CLIENTS_MANAGEMENT_EDIT,
+    )
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+    client_service = ClientService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    result = await client_service.update_client(client_id, user_context.organization_id, body)
+
+    if result:
+        request.state.raw_audit_old_data = result.get("old_data")
+        request.state.raw_audit_new_data = body.model_dump(exclude_unset=True, exclude_none=True)
+
+    return success_response(
+        request=request,
+        message_key="clients.success.client_updated",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )

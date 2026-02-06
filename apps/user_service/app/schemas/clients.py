@@ -6,7 +6,7 @@ This module contains Pydantic models for client management operations.
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.user_service.app.schemas.enums import (
     AddressType,
@@ -22,6 +22,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 class Website(BaseModel):
     """Website schema."""
 
+    id: str | None = Field(None, description="Website ID")
     url: str = Field(..., description="Website URL", max_length=500)
     type: str = Field(..., description="Website type", max_length=50)
     is_primary: bool = Field(default=False, description="Primary website flag")
@@ -30,8 +31,8 @@ class Website(BaseModel):
 class Address(BaseModel):
     """Address schema."""
 
-    address_line1: str = Field(..., description="Primary address line", max_length=200)
-    address_line2: str | None = Field(None, description="Secondary address line", max_length=200)
+    address_line1: str = Field(..., description="Primary address line", max_length=1000)
+    address_line2: str | None = Field(None, description="Secondary address line", max_length=1000)
     city: str | None = Field(None, description="City", max_length=100)
     state: str | None = Field(None, description="State/Province", max_length=100)
     postal_code: str | None = Field(None, description="Postal/ZIP code", max_length=20)
@@ -56,6 +57,103 @@ class BillingPreferences(BaseModel):
 
     method: str | None = Field(None, description="Billing method", max_length=50)
     terms: str | None = Field(None, description="Payment terms", max_length=50)
+
+
+# Update schemas
+class AddressUpdate(BaseModel):
+    """Address for add/update; id = update, omit = add."""
+
+    id: str | None = Field(None, description="Address ID; required for update, omit for add")
+    place_id: str | None = Field(None, max_length=200)
+    address_line1: str | None = Field(None, max_length=1000)
+    address_line2: str | None = Field(None, max_length=1000)
+    city: str | None = Field(None, max_length=100)
+    state: str | None = Field(None, max_length=100)
+    postal_code: str | None = Field(None, max_length=20)
+    country: str | None = Field(None, max_length=100)
+    latitude: float | None = None
+    longitude: float | None = None
+    address_type: AddressType | None = None
+    address_data: dict[str, Any] | None = None
+    is_primary: bool | None = None
+
+
+class WebsiteUpdate(BaseModel):
+    """Website for add/update; id = update, omit = add."""
+
+    id: str | None = Field(None, description="Website ID; required for update, omit for add")
+    url: str | None = Field(None, max_length=500)
+    type: str | None = Field(None, max_length=50)
+    is_primary: bool | None = None
+
+
+class LeadManagementUpdate(BaseModel):
+    """Lead update by lead_id."""
+
+    lead_id: str = Field(..., description="Lead ID to update")
+    enabled: bool | None = None
+    lead_status: LeadStatus | None = None
+    intake_stage: IntakeStage | None = None
+    lead_source: str | None = Field(None, max_length=100)
+    referral_source: str | None = Field(None, max_length=200)
+    lead_score: str | None = None
+    notes: str | None = None
+
+
+class BillingPreferencesUpdate(BaseModel):
+    """Partial billing preferences; merged with existing."""
+
+    method: str | None = Field(None, max_length=50)
+    terms: str | None = Field(None, max_length=50)
+
+
+class UpdateClientRequest(BaseModel):
+    """Client PATCH payload; only provided fields are applied."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_name: str | None = Field(None, max_length=200)
+    industry: str | None = Field(None, max_length=100)
+    profile_photo_url: str | None = Field(None, max_length=500)
+    portal_access: bool | None = None
+    tags: list[str] | None = Field(None, max_length=50)
+    websites: list[WebsiteUpdate] | None = Field(None, max_length=10)
+    addresses: list[AddressUpdate] | None = Field(None, max_length=10)
+    lead_management: LeadManagementUpdate | None = None
+    billing_preferences: BillingPreferencesUpdate | None = None
+    custom_fields: dict[str, str | None] | None = None
+
+    @field_validator("addresses")
+    @classmethod
+    def validate_primary_address(
+        cls,
+        addresses: list[AddressUpdate] | None,
+    ) -> list[AddressUpdate] | None:
+        """Validate only one primary address."""
+        if not addresses:
+            return addresses
+        if sum(1 for a in addresses if a.is_primary is True) > 1:
+            raise ValidationException(
+                message_key="clients.errors.only_one_primary_address",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return addresses
+
+    @field_validator("websites")
+    @classmethod
+    def validate_primary_website(
+        cls,
+        websites: list[WebsiteUpdate] | None,
+    ) -> list[WebsiteUpdate] | None:
+        """Validate only one primary website."""
+        if not websites:
+            return websites
+        if sum(1 for w in websites if w.is_primary is True) > 1:
+            raise ValidationException(
+                message_key="clients.errors.only_one_primary_website",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return websites
 
 
 class CreateClientRequest(BaseModel):

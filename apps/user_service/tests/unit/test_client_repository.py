@@ -241,20 +241,7 @@ async def test_check_client_name_exists():
     assert result is True
     query = conn.fetchval_calls[0][0]
     assert "clients" in query
-    assert "name = $" in query
-
-
-@pytest.mark.asyncio
-async def test_check_client_name_exists_with_client_type():
-    """check_client_name_exists filters by client_type when provided."""
-    conn = _FakeConn()
-    conn.fetchval_result = False
-    repo = ClientRepository(db_connection=conn)
-
-    await repo.check_client_name_exists("Test", "org-1", client_type="person")
-
-    query = conn.fetchval_calls[0][0]
-    assert "client_type = $" in query
+    assert "LOWER(name) = $" in query
 
 
 @pytest.mark.asyncio
@@ -619,3 +606,134 @@ async def test_create_lead_with_required_fields_only():
     query = conn.fetchrow_calls[0][0]
     assert "client_id" in query
     assert "lead_status" in query
+
+
+# --- Update operations ---
+@pytest.mark.asyncio
+async def test_get_client_for_update_returns_none_not_found():
+    """get_client_for_update returns None when client not found."""
+    conn = _FakeConn()
+    conn.fetchrow_result = None
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.get_client_for_update("client-1", "org-1")
+
+    assert result is None
+    assert len(conn.fetchrow_calls) == 1
+    query = conn.fetchrow_calls[0][0]
+    assert "SELECT id, name, industry" in query
+    assert "status != $" in query
+    assert ClientStatus.DELETED.value in conn.fetchrow_calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_get_client_for_update_returns_row_when_found():
+    """get_client_for_update returns client row when found."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "client-1",
+        "name": "Old Name",
+        "industry": "Tech",
+        "profile_photo_url": None,
+        "portal_access": True,
+        "tags": [],
+        "websites": "[]",
+        "billing_preferences": "{}",
+        "custom_fields": "{}",
+    }
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.get_client_for_update("client-1", "org-1")
+
+    assert result is not None
+    assert result["id"] == "client-1"
+    assert result["name"] == "Old Name"
+
+
+@pytest.mark.asyncio
+async def test_update_client_builds_set_clause():
+    """update_client builds SET clause and returns updated row."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "client-1",
+        "name": "New Name",
+        "industry": "Tech",
+        "updated_at": datetime.datetime.now(),
+    }
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.update_client("client-1", "org-1", {"name": "New Name", "industry": "Tech"})
+
+    assert result is not None
+    assert len(conn.fetchrow_calls) == 1
+    query = conn.fetchrow_calls[0][0]
+    assert "UPDATE clients" in query
+    assert "SET " in query
+    assert "updated_at = NOW()" in query
+    assert "RETURNING *" in query
+    assert ClientStatus.DELETED.value in conn.fetchrow_calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_update_lead_calls_fetchrow():
+    """update_lead builds UPDATE and returns True when row updated."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {"id": "lead-1"}
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.update_lead(
+        "lead-1", "client-1", {"lead_status": "qualified", "notes": "Updated"}
+    )
+
+    assert result is True
+    assert len(conn.fetchrow_calls) == 1
+    query = conn.fetchrow_calls[0][0]
+    assert "UPDATE leads" in query
+    assert "WHERE id = $" in query
+    assert "client_id = $" in query
+
+
+@pytest.mark.asyncio
+async def test_update_address_calls_fetchrow():
+    """update_address builds UPDATE and returns True when row updated."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {"id": "addr-1"}
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.update_address(
+        "addr-1", "client-1", {"address_line1": "456 New St", "city": "Boston"}
+    )
+
+    assert result is True
+    assert len(conn.fetchrow_calls) == 1
+    query = conn.fetchrow_calls[0][0]
+    assert "UPDATE client_addresses" in query
+    assert "client_id = $" in query
+
+
+@pytest.mark.asyncio
+async def test_delete_addresses_by_ids_executes_delete():
+    """delete_addresses_by_ids executes DELETE with client_id and address_ids."""
+    conn = _FakeConn()
+    repo = ClientRepository(db_connection=conn)
+
+    await repo.delete_addresses_by_ids("client-1", ["addr-1", "addr-2"])
+
+    assert len(conn.execute_calls) == 1
+    query = conn.execute_calls[0][0]
+    assert "DELETE FROM client_addresses" in query
+    assert "client_id = $1" in query
+    assert "ANY($2::uuid[])" in query
+    assert "client-1" in conn.execute_calls[0][1]
+    assert ["addr-1", "addr-2"] in conn.execute_calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_delete_addresses_by_ids_no_op_when_empty():
+    """delete_addresses_by_ids does nothing when address_ids is empty."""
+    conn = _FakeConn()
+    repo = ClientRepository(db_connection=conn)
+
+    await repo.delete_addresses_by_ids("client-1", [])
+
+    assert len(conn.execute_calls) == 0

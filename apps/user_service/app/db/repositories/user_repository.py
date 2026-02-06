@@ -166,7 +166,7 @@ class UserRepository:
 
     async def phone_exists_for_other_user(self, phone: str, user_id: str | None = None) -> bool:
         """Check if a phone number already exists in auth.users.
-        Exact match, no normalization.
+        Normalizes phone by replacing '+' with empty string for comparison.
 
         Args:
             phone: Phone number to check
@@ -175,8 +175,9 @@ class UserRepository:
         Returns:
             True if phone exists, False otherwise
         """
-        query = "SELECT 1 FROM auth.users WHERE phone = $1"
-        params = [phone]
+        phone_normalized = phone.replace("+", "")
+        query = "SELECT 1 FROM auth.users WHERE REPLACE(phone, '+', '') = $1"
+        params = [phone_normalized]
 
         if user_id:
             query += " AND id != $2"

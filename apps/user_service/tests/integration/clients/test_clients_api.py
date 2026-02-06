@@ -187,6 +187,41 @@ async def test_create_client_from_user(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_update_client(monkeypatch, client):
+    """Update client by ID; only provided fields are applied."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_update_client(self, client_id, organization_id, body):
+        """Fake update client."""
+        del self
+        assert client_id == "client-123"
+        assert organization_id == "org-1"
+        assert body.client_name == "Updated Name"
+        return {"old_data": {"client_id": "client-123", "name": "Old Name"}}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientService.update_client",
+        fake_update_client,
+    )
+
+    res = await client.patch(
+        "/v1/clients/client-123",
+        json={"client_name": "Updated Name"},
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
 async def test_delete_client(monkeypatch, client):
     """Delete a client (soft delete)."""
 
