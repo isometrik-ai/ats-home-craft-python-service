@@ -12,6 +12,48 @@ from libs.shared_utils.logger import get_logger
 
 logger = get_logger("user_repository")
 
+# Allowlist of auth.users columns for safe dynamic SELECT in get_user_details_by_id
+# (prevents SQL injection). Only columns suitable for "user details" are exposed.
+AUTH_USERS_ALLOWED_COLUMNS = frozenset(
+    {
+        "id",
+        "instance_id",
+        "aud",
+        "role",
+        "email",
+        "encrypted_password",
+        "email_confirmed_at",
+        "invited_at",
+        "confirmation_token",
+        "confirmation_sent_at",
+        "recovery_token",
+        "recovery_sent_at",
+        "email_change_token_new",
+        "email_change",
+        "email_change_sent_at",
+        "last_sign_in_at",
+        "raw_app_meta_data",
+        "raw_user_meta_data",
+        "is_super_admin",
+        "created_at",
+        "updated_at",
+        "phone",
+        "phone_confirmed_at",
+        "phone_change",
+        "phone_change_token",
+        "phone_change_sent_at",
+        "confirmed_at",
+        "email_change_token_current",
+        "email_change_confirm_status",
+        "banned_until",
+        "reauthentication_token",
+        "reauthentication_sent_at",
+        "is_anonymous",
+        "is_sso_user",
+        "deleted_at",
+    }
+)
+
 
 class UserRepository:
     """Database operations class for user management using asyncpg.
@@ -102,11 +144,15 @@ class UserRepository:
 
         Returns:
             dict | None: User details if found, else None.
+
+        Note:
+            Only allowlisted column names are used; any other entries are ignored.
         """
         if not select_columns:
             columns_str = "*"
         else:
-            columns_str = ", ".join(select_columns)
+            valid_columns = [c for c in select_columns if c in AUTH_USERS_ALLOWED_COLUMNS]
+            columns_str = ", ".join(valid_columns) if valid_columns else "*"
 
         query = f"""
             SELECT {columns_str}

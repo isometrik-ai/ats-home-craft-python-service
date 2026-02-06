@@ -51,7 +51,9 @@ logger = get_logger("clients-api")
         http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
         http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
         http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
-        http_status.HTTP_409_CONFLICT: {"description": "User is already a client"},
+        http_status.HTTP_409_CONFLICT: {
+            "description": "User is already a client, or user event is missing/not pending"
+        },
     },
 )
 @limiter.limit("100/minute")

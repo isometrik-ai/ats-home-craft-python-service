@@ -157,6 +157,7 @@
     "errors": {
       "isometrik_user_creation_failed": "Failed to create Isometrik user",
       "user_already_a_client": "User is already a client of this organization",
+      "user_event_not_available": "User event does not exist or has already been processed",
       "not_found": "Client does not exist or has been deleted",
       "client_user_not_found": "Client user not found",
       "email_already_exists": "A client with this email already exists in your organization",

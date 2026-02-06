@@ -10,8 +10,12 @@ from typing import Any
 import asyncpg
 from supabase import AsyncClient
 
-from apps.user_service.app.db.repositories import OrganizationRepository, UserRepository
-from apps.user_service.app.db.repositories.client_repository import ClientRepository
+from apps.user_service.app.db.repositories import (
+    ClientRepository,
+    OrganizationRepository,
+    UserEventRepository,
+    UserRepository,
+)
 from apps.user_service.app.schemas.clients import (
     BillingPreferences,
     ClientAddressResponse,
@@ -23,7 +27,11 @@ from apps.user_service.app.schemas.clients import (
     PrimaryContactInfo,
     Website,
 )
-from apps.user_service.app.schemas.enums import ClientType, IsometrikRole
+from apps.user_service.app.schemas.enums import (
+    ClientType,
+    IsometrikRole,
+    UserEventStatus,
+)
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -92,10 +100,25 @@ class ClientService:
         Raises:
             NotFoundException: If user or organization not found
             ServiceUnavailableException: If Isometrik user creation fails
-            ConflictException: If user is already a client
+            ConflictException: If user is already a client or user event is not pending
         """
         user_id = request_data.user_id
         organization_id = request_data.organization_id
+
+        # Only process if user_event for this user is pending
+        user_event_repository = UserEventRepository(db_connection=self.db_connection)
+        user_event_details = await user_event_repository.get_user_event_by_user_id(
+            user_id, ["status"]
+        )
+        is_valid = (
+            user_event_details and user_event_details.get("status") == UserEventStatus.PENDING.value
+        )
+
+        if not is_valid:
+            raise ConflictException(
+                message_key="clients.errors.user_event_not_available",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
 
         user_repository = UserRepository(db_connection=self.db_connection)
 
@@ -161,6 +184,11 @@ class ClientService:
                 "user_id": user_id,
                 "isometrik_user_id": isometrik_user_id,
             }
+        )
+
+        # Mark user_event as completed
+        await user_event_repository.update_status_by_user_id(
+            user_id=user_id, status=UserEventStatus.COMPLETED
         )
 
         # Send creation email
