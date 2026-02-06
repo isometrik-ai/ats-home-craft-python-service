@@ -5,6 +5,9 @@ All SQL queries for client management are centralized here with proper
 transaction handling and efficient batch operations.
 """
 
+import json
+from typing import Any
+
 import asyncpg
 
 from apps.user_service.app.schemas.enums import ClientStatus, ClientUserStatus
@@ -13,6 +16,9 @@ from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("client_repository")
+
+# JSONB columns in clients table - values must be serialized to JSON string for asyncpg
+CLIENT_JSONB_COLUMNS = frozenset({"websites", "billing_preferences", "custom_fields"})
 
 
 class ClientRepository:
@@ -27,6 +33,13 @@ class ClientRepository:
             db_connection: Active asyncpg connection (potentially in transaction)
         """
         self.db_connection = db_connection
+
+    @staticmethod
+    def _serialize_jsonb_param(key: str, value: Any) -> Any:
+        """Serialize JSONB column values to JSON string for asyncpg; pass others through."""
+        if key in CLIENT_JSONB_COLUMNS and isinstance(value, (list, dict)):
+            return json.dumps(value)
+        return value
 
     # CREATE OPERATIONS
     async def create_client(self, client_data: dict) -> dict:
@@ -432,6 +445,101 @@ class ClientRepository:
         await self.db_connection.execute(query, client_id)
         return True
 
+    async def delete_addresses_by_ids(self, client_id: str, address_ids: list[str]) -> None:
+        """Delete addresses by ids for a client."""
+        if not address_ids:
+            return
+        query = """
+            DELETE FROM client_addresses
+            WHERE client_id = $1 AND id = ANY($2::uuid[])
+        """
+        await self.db_connection.execute(query, client_id, address_ids)
+
+    # UPDATE OPERATIONS
+    async def get_client_for_update(self, client_id: str, organization_id: str) -> dict | None:
+        """Fetch client row for update merges and audit logging.
+
+        Returns:
+            dict | None: Row with id, name, industry, profile_photo_url, portal_access,
+                tags, websites, billing_preferences, custom_fields or None
+        """
+        query = """
+            SELECT id, name, industry, profile_photo_url, portal_access,
+                   tags, websites, billing_preferences, custom_fields
+            FROM clients
+            WHERE id = $1 AND organization_id = $2 AND status != $3
+        """
+        row = await self.db_connection.fetchrow(
+            query, client_id, organization_id, ClientStatus.DELETED.value
+        )
+        return dict(row) if row else None
+
+    async def update_client(
+        self, client_id: str, organization_id: str, update_data: dict
+    ) -> dict | None:
+        """Update client by id and organization_id. Only provided keys are updated."""
+        set_parts = [
+            f"{k} = ${i}::jsonb" if k in CLIENT_JSONB_COLUMNS else f"{k} = ${i}"
+            for i, k in enumerate(update_data, start=1)
+        ]
+        set_expr = (
+            ", ".join(set_parts) + ", updated_at = NOW()" if set_parts else "updated_at = NOW()"
+        )
+        index = len(update_data)
+        params = [self._serialize_jsonb_param(k, v) for k, v in update_data.items()] + [
+            client_id,
+            organization_id,
+            ClientStatus.DELETED.value,
+        ]
+        row = await self.db_connection.fetchrow(
+            f"""
+            UPDATE clients
+            SET {set_expr}
+            WHERE id = ${index + 1} AND organization_id = ${index + 2} AND status != ${index + 3}
+            RETURNING *
+            """,
+            *params,
+        )
+        return dict(row) if row else None
+
+    async def update_lead(self, lead_id: str, client_id: str, update_data: dict) -> bool:
+        """Update lead by id and client_id. Only provided keys are updated."""
+        set_parts = [f"{k} = ${i}" for i, k in enumerate(update_data, start=1)]
+        set_expr = (
+            ", ".join(set_parts) + ", updated_at = NOW()" if set_parts else "updated_at = NOW()"
+        )
+        index = len(update_data)
+        params = list(update_data.values()) + [lead_id, client_id]
+        row = await self.db_connection.fetchrow(
+            f"""
+            UPDATE leads
+            SET {set_expr}
+            WHERE id = ${index + 1} AND client_id = ${index + 2}
+            RETURNING id
+            """,
+            *params,
+        )
+        return row is not None
+
+    async def update_address(self, address_id: str, client_id: str, update_data: dict) -> bool:
+        """Update address by id and client_id. Only provided keys are updated."""
+        set_parts = [f"{k} = ${i}" for i, k in enumerate(update_data, start=1)]
+        set_expr = (
+            ", ".join(set_parts) + ", updated_at = NOW()" if set_parts else "updated_at = NOW()"
+        )
+        index = len(update_data)
+        params = list(update_data.values()) + [address_id, client_id]
+        row = await self.db_connection.fetchrow(
+            f"""
+            UPDATE client_addresses
+            SET {set_expr}
+            WHERE id = ${index + 1} AND client_id = ${index + 2}
+            RETURNING id
+            """,
+            *params,
+        )
+        return row is not None
+
     # VALIDATION OPERATIONS
     async def check_email_exists(
         self, email: str, organization_id: str, exclude_client_id: str | None = None
@@ -469,41 +577,31 @@ class ClientRepository:
         self,
         name: str,
         organization_id: str,
-        client_type: str | None = None,
         exclude_client_id: str | None = None,
     ) -> bool:
-        """Check if client name exists for this organization.
+        """Check if client name exists for this organization (any client type).
 
         Args:
-            name: Client name
-            organization_id: Organization ID
-            client_type: Optional client type filter ('person' or 'company')
-            exclude_client_id: Client ID to exclude from check
+            name: Client name (normalized, e.g. full name for person or company name).
+            organization_id: Organization ID.
+            exclude_client_id: Client ID to exclude from check (e.g. current client on update).
 
         Returns:
-            bool: True if name exists
+            True if a non-deleted client with this name exists; False otherwise.
         """
-        query = """
-            SELECT EXISTS(
-                SELECT 1 FROM clients
-                WHERE name = $1
-                AND organization_id = $2
-                AND status != $3
-        """
-        params = [name, organization_id, ClientStatus.DELETED.value]
-        param_index = 4
+        conditions = [
+            "LOWER(name) = $1",
+            "organization_id = $2",
+            "status != $3",
+        ]
+        params: list[str] = [name, organization_id, ClientStatus.DELETED.value]
+        next_index = 4
 
-        if client_type:
-            query += f" AND client_type = ${param_index}"
-            params.append(client_type)
-            param_index += 1
-
-        if exclude_client_id:
-            query += f" AND id != ${param_index}"
+        if exclude_client_id is not None:
+            conditions.append(f"id != ${next_index}")
             params.append(exclude_client_id)
 
-        query += ")"
-
+        query = "SELECT EXISTS(SELECT 1 FROM clients WHERE " + " AND ".join(conditions) + ")"
         exists = await self.db_connection.fetchval(query, *params)
         return bool(exists)
 

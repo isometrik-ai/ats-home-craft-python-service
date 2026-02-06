@@ -6,10 +6,15 @@ import pytest
 
 from apps.user_service.app.schemas.clients import (
     Address,
+    AddressUpdate,
+    BillingPreferencesUpdate,
     CreateClientFromUserRequest,
     CreateClientRequest,
     LeadManagement,
+    LeadManagementUpdate,
+    UpdateClientRequest,
     Website,
+    WebsiteUpdate,
 )
 from apps.user_service.app.schemas.enums import ClientType, LeadStatus, UserEventStatus
 from apps.user_service.app.services.client_service import ClientService
@@ -118,6 +123,32 @@ class _FakeClientRepo:
         """Get client addresses."""
         self.calls["get_client_addresses"] = client_id
         return self.address_result
+
+    get_client_for_update_result = None
+
+    async def get_client_for_update(self, client_id, organization_id):
+        """Get client for update."""
+        self.calls["get_client_for_update"] = (client_id, organization_id)
+        return self.get_client_for_update_result
+
+    async def update_client(self, client_id, organization_id, update_data):
+        """Update client."""
+        self.calls["update_client"] = (client_id, organization_id, update_data)
+        return {"id": client_id, **update_data}
+
+    async def update_lead(self, lead_id, client_id, update_data):
+        """Update lead."""
+        self.calls["update_lead"] = (lead_id, client_id, update_data)
+        return True
+
+    async def update_address(self, address_id, client_id, update_data):
+        """Update address."""
+        self.calls["update_address"] = (address_id, client_id, update_data)
+        return True
+
+    async def delete_addresses_by_ids(self, client_id, address_ids):
+        """Delete addresses by ids."""
+        self.calls["delete_addresses_by_ids"] = (client_id, address_ids)
 
 
 class _FakeUserRepo:
@@ -1197,3 +1228,335 @@ async def test_get_client_details_with_null_coordinates(monkeypatch):
     assert result.addresses[0].latitude is None
     assert result.addresses[0].longitude is None
     assert result.addresses[0].place_id is None
+
+
+# --- update_client ---
+@pytest.mark.asyncio
+async def test_update_client_returns_none_no_update_fields(monkeypatch):
+    """update_client returns None when body has no fields to apply."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    body = UpdateClientRequest()
+
+    result = await service.update_client("client-1", "org-1", body)
+
+    assert result is None
+    assert "get_client_for_update" not in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_update_client_raises_not_found_client_missing(monkeypatch):
+    """update_client raises NotFoundException when client not found."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = None
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    body = UpdateClientRequest(client_name="New Name")
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.update_client("client-1", "org-1", body)
+
+    assert exc_info.value.message_key == "clients.errors.not_found"
+    assert fake_repo.calls["get_client_for_update"] == ("client-1", "org-1")
+
+
+@pytest.mark.asyncio
+async def test_update_client_raises_conflict_when_name_exists(monkeypatch):
+    """update_client raises ConflictException when client_name already exists."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = {
+        "id": "client-1",
+        "name": "Old Name",
+        "industry": None,
+        "profile_photo_url": None,
+        "portal_access": False,
+        "tags": [],
+        "websites": "[]",
+        "billing_preferences": "{}",
+        "custom_fields": "{}",
+    }
+    fake_repo.name_exists = True
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    body = UpdateClientRequest(client_name="Existing Client")
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.update_client("client-1", "org-1", body)
+
+    assert exc_info.value.message_key == "clients.errors.client_name_already_exists"
+    assert fake_repo.calls["check_client_name_exists"]["name"] == "existing client"
+    assert fake_repo.calls["check_client_name_exists"]["exclude_client_id"] == "client-1"
+
+
+@pytest.mark.asyncio
+async def test_update_client_success_scalar_only(monkeypatch):
+    """update_client updates scalar fields and returns old_data for audit."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = {
+        "id": "client-1",
+        "name": "Old Name",
+        "industry": "Old Industry",
+        "profile_photo_url": None,
+        "portal_access": False,
+        "tags": [],
+        "websites": "[]",
+        "billing_preferences": "{}",
+        "custom_fields": "{}",
+    }
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    body = UpdateClientRequest(
+        client_name="New Name",
+        industry="Tech",
+        portal_access=True,
+    )
+
+    result = await service.update_client("client-1", "org-1", body)
+
+    assert result is not None
+    assert result["old_data"]["client_id"] == "client-1"
+    assert result["old_data"]["name"] == "Old Name"
+    assert "update_client" in fake_repo.calls
+    args = fake_repo.calls["update_client"]
+    assert args[0] == "client-1" and args[1] == "org-1"
+    assert args[2]["name"] == "New Name"
+    assert args[2]["industry"] == "Tech"
+    assert args[2]["portal_access"] is True
+    assert "get_client_addresses" not in fake_repo.calls
+    assert "update_lead" not in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_update_client_success_with_addresses(monkeypatch):
+    """update_client applies address delta when addresses provided."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = {
+        "id": "client-1",
+        "name": "Client",
+        "industry": None,
+        "profile_photo_url": None,
+        "portal_access": False,
+        "tags": [],
+        "websites": "[]",
+        "billing_preferences": "{}",
+        "custom_fields": "{}",
+    }
+    fake_repo.address_result = [
+        {"id": "addr-1", "address_line1": "123 Main St", "client_id": "client-1"}
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    body = UpdateClientRequest(
+        client_name="Client",
+        addresses=[
+            AddressUpdate(id="addr-1", address_line1="456 Updated St"),
+            AddressUpdate(address_line1="New Address"),
+        ],
+    )
+
+    await service.update_client("client-1", "org-1", body)
+
+    assert "get_client_addresses" in fake_repo.calls
+    # No delete: addr-1 is kept (updated); only a new address is added
+    assert "update_address" in fake_repo.calls
+    assert "bulk_create_addresses" in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_update_client_success_with_lead_management(monkeypatch):
+    """update_client calls update_lead when lead_management provided."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = {
+        "id": "client-1",
+        "name": "Client",
+        "industry": None,
+        "profile_photo_url": None,
+        "portal_access": False,
+        "tags": [],
+        "websites": "[]",
+        "billing_preferences": "{}",
+        "custom_fields": "{}",
+    }
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    body = UpdateClientRequest(
+        industry="Legal",
+        lead_management=LeadManagementUpdate(
+            lead_id="lead-1",
+            lead_status=LeadStatus.QUALIFIED,
+            notes="Updated notes",
+        ),
+    )
+
+    await service.update_client("client-1", "org-1", body)
+
+    assert "update_lead" in fake_repo.calls
+    assert fake_repo.calls["update_lead"] == (
+        "lead-1",
+        "client-1",
+        {"lead_status": LeadStatus.QUALIFIED.value, "notes": "Updated notes"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_any_update_false_when_all_none():
+    """_has_any_update returns False when all fields are None."""
+    service = ClientService(db_connection=None)
+    body = UpdateClientRequest()
+
+    assert service._has_any_update(body) is False
+
+
+@pytest.mark.asyncio
+async def test_has_any_update_true_when_any_field_set():
+    """_has_any_update returns True when any updatable field is set."""
+    service = ClientService(db_connection=None)
+
+    assert service._has_any_update(UpdateClientRequest(client_name="X")) is True
+    assert service._has_any_update(UpdateClientRequest(industry="Tech")) is True
+    assert service._has_any_update(UpdateClientRequest(portal_access=True)) is True
+    assert service._has_any_update(UpdateClientRequest(tags=["a"])) is True
+
+
+@pytest.mark.asyncio
+async def test_build_client_update_payload_scalar_and_merge():
+    """_build_client_update_payload sets scalars and merges
+    billing_preferences and custom_fields."""
+    service = ClientService(db_connection=None)
+    current = {
+        "name": "Old",
+        "billing_preferences": '{"method": "invoice"}',
+        "custom_fields": '{"a": "1", "b": "2"}',
+    }
+    body = UpdateClientRequest(
+        client_name="New Name",
+        billing_preferences=BillingPreferencesUpdate(terms="Net 30"),
+        custom_fields={"a": "updated", "b": None, "c": "new"},
+    )
+
+    payload = service._build_client_update_payload(body, current)
+
+    assert payload["name"] == "New Name"
+    assert payload["billing_preferences"]["method"] == "invoice"
+    assert payload["billing_preferences"]["terms"] == "Net 30"
+    assert payload["custom_fields"]["a"] == "updated"
+    assert "b" not in payload["custom_fields"]
+    assert payload["custom_fields"]["c"] == "new"
+
+
+@pytest.mark.asyncio
+async def test_build_client_update_payload_websites():
+    """_build_client_update_payload normalizes websites with ids."""
+    service = ClientService(db_connection=None)
+    current = {"name": "Client", "websites": "[]"}
+    body = UpdateClientRequest(websites=[WebsiteUpdate(url="https://x.com", type="primary")])
+
+    payload = service._build_client_update_payload(body, current)
+
+    assert "websites" in payload
+    assert len(payload["websites"]) == 1
+    assert payload["websites"][0]["url"] == "https://x.com"
+    assert "id" in payload["websites"][0]
+
+
+@pytest.mark.asyncio
+async def test_apply_lead_update_calls_repository(monkeypatch):
+    """_apply_lead_update calls update_lead with lead_id and payload."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    lead = LeadManagementUpdate(lead_id="lead-1", lead_status=LeadStatus.CONVERTED)
+
+    await service._apply_lead_update("client-1", lead)
+
+    assert fake_repo.calls["update_lead"] == (
+        "lead-1",
+        "client-1",
+        {"lead_status": LeadStatus.CONVERTED.value},
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_lead_update_no_op_when_empty_payload(monkeypatch):
+    """_apply_lead_update does not call repository when only lead_id provided."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    lead = LeadManagementUpdate(lead_id="lead-1")
+
+    await service._apply_lead_update("client-1", lead)
+
+    assert "update_lead" not in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_diff_addresses_final_remove_update_add():
+    """_diff_addresses_final returns to_remove, to_update, to_add correctly."""
+    service = ClientService(db_connection=None)
+    current = [
+        {"id": "addr-1", "address_line1": "Old 1"},
+        {"id": "addr-2", "address_line1": "Old 2"},
+    ]
+    final = [
+        AddressUpdate(id="addr-1", address_line1="Updated 1"),
+        AddressUpdate(id="addr-3", address_line1="New"),
+    ]
+
+    to_remove, to_update, to_add = service._diff_addresses_final(current, final)
+
+    assert set(to_remove) == {"addr-2"}
+    assert len(to_update) == 1
+    assert to_update[0].id == "addr-1"
+    assert len(to_add) == 1
+    assert to_add[0].address_line1 == "New"
+
+
+@pytest.mark.asyncio
+async def test_apply_addresses_final_calls_remove_update_add(monkeypatch):
+    """_apply_addresses_final calls delete_addresses_by_ids,
+    update_address, bulk_create_addresses as needed."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    current = [{"id": "addr-1", "address_line1": "Old"}]
+    final = [
+        AddressUpdate(id="addr-1", address_line1="Updated"),
+        AddressUpdate(address_line1="New Addr"),
+    ]
+
+    await service._apply_addresses_final("client-1", current, final)
+
+    assert "update_address" in fake_repo.calls
+    assert fake_repo.calls["update_address"][0] == "addr-1"
+    assert fake_repo.calls["update_address"][1] == "client-1"
+    assert "bulk_create_addresses" in fake_repo.calls
+    assert len(fake_repo.calls["bulk_create_addresses"]) == 1
+    assert fake_repo.calls["bulk_create_addresses"][0]["address_line1"] == "New Addr"

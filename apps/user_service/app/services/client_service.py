@@ -5,6 +5,7 @@ validation, formatting, and orchestration of client operations.
 """
 
 import json
+import uuid
 from typing import Any
 
 import asyncpg
@@ -17,6 +18,7 @@ from apps.user_service.app.db.repositories import (
     UserRepository,
 )
 from apps.user_service.app.schemas.clients import (
+    AddressUpdate,
     BillingPreferences,
     ClientAddressResponse,
     ClientDetailsResponse,
@@ -24,8 +26,11 @@ from apps.user_service.app.schemas.clients import (
     CreateClientFromUserRequest,
     CreateClientRequest,
     LeadInfo,
+    LeadManagementUpdate,
     PrimaryContactInfo,
+    UpdateClientRequest,
     Website,
+    WebsiteUpdate,
 )
 from apps.user_service.app.schemas.enums import (
     ClientType,
@@ -246,29 +251,22 @@ class ClientService:
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
-        # Validate name uniqueness for both person and company types
+        # Validate name uniqueness (use same name as stored in DB)
+        name_to_check = None
         if request_data.client_type == ClientType.PERSON:
-            name_exists = await self.client_repository.check_client_name_exists(
-                name=f"{request_data.first_name} {request_data.last_name}",
-                organization_id=organization_id,
-                client_type=ClientType.PERSON.value,
-            )
-            if name_exists:
-                raise ConflictException(
-                    message_key="clients.errors.client_name_already_exists",
-                    custom_code=CustomStatusCode.CONFLICT,
-                )
+            name_to_check = build_full_name(request_data.first_name, request_data.last_name).strip()
         elif request_data.client_type == ClientType.COMPANY:
-            name_exists = await self.client_repository.check_client_name_exists(
-                name=request_data.name,
-                organization_id=organization_id,
-                client_type=ClientType.COMPANY.value,
+            name_to_check = (request_data.name or "").strip()
+
+        name_exists = await self.client_repository.check_client_name_exists(
+            name=name_to_check,
+            organization_id=organization_id,
+        )
+        if name_exists:
+            raise ConflictException(
+                message_key="clients.errors.client_name_already_exists",
+                custom_code=CustomStatusCode.CONFLICT,
             )
-            if name_exists:
-                raise ConflictException(
-                    message_key="clients.errors.client_name_already_exists",
-                    custom_code=CustomStatusCode.CONFLICT,
-                )
 
         return organization
 
@@ -383,7 +381,7 @@ class ClientService:
         # Serialize JSONB fields for asyncpg (business logic in service layer)
         if request_data.websites:
             serialized_websites = serialize_pydantic_models(request_data.websites)
-            client_data["websites"] = json.dumps(serialized_websites)
+            client_data["websites"] = json.dumps(self._ensure_website_ids(serialized_websites))
         if request_data.billing_preferences:
             serialized_billing = serialize_pydantic_models(request_data.billing_preferences)
             client_data["billing_preferences"] = json.dumps(serialized_billing)
@@ -738,3 +736,235 @@ class ClientService:
         await self.client_repository.delete_client_users(client_id)
         await self.client_repository.delete_leads(client_id)
         await self.client_repository.delete_addresses(client_id)
+
+    async def update_client(
+        self, client_id: str, organization_id: str, body: UpdateClientRequest
+    ) -> dict | None:
+        """Update a client by ID. Only provided fields are applied (PATCH semantics).
+
+        Scalar fields (name, industry, etc.) are set when provided. Nested structures
+        use standard delta semantics: websites and addresses support add/update/remove;
+        billing_preferences and custom_fields are merged with existing. Client must exist
+        when any update is requested.
+
+        Args:
+            client_id: Client ID
+            organization_id: Organization ID
+            body: PATCH body; only non-None fields are applied
+
+        Returns:
+            dict | None: Result with old_data for audit when update is applied, None when no-op
+
+        Raises:
+            NotFoundException: If client not found
+            ConflictException: If client name already exists
+        """
+        if not self._has_any_update(body):
+            return None
+
+        current = await self.client_repository.get_client_for_update(client_id, organization_id)
+        if not current:
+            raise NotFoundException(
+                message_key="clients.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        old_data = self._format_client_for_audit(current)
+
+        # Validate client name when updating (same as create: non-empty and unique)
+        if body.client_name is not None:
+            name_to_check = body.client_name.lower().strip()
+            name_exists = await self.client_repository.check_client_name_exists(
+                name=name_to_check,
+                organization_id=organization_id,
+                exclude_client_id=client_id,
+            )
+            if name_exists:
+                raise ConflictException(
+                    message_key="clients.errors.client_name_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+
+        update_data = self._build_client_update_payload(body, current)
+
+        if body.addresses is not None:
+            current_addresses = await self.client_repository.get_client_addresses(client_id)
+            await self._apply_addresses_final(client_id, current_addresses, body.addresses)
+
+        if body.lead_management is not None:
+            await self._apply_lead_update(client_id, body.lead_management)
+
+        if update_data:
+            await self.client_repository.update_client(client_id, organization_id, update_data)
+
+        return {"old_data": old_data}
+
+    @staticmethod
+    def _format_client_for_audit(client_data: dict[str, Any]) -> dict[str, Any]:
+        """Format client data for audit logging.
+
+        Extracts and formats client fields into a structure suitable for audit log comparison.
+
+        Args:
+            client_data: Raw client data from database
+
+        Returns:
+            Dictionary with formatted client data for audit logging
+        """
+        return {
+            "client_id": str(client_data.get("id")),
+            "name": client_data.get("name"),
+            "industry": client_data.get("industry"),
+            "profile_photo_url": client_data.get("profile_photo_url"),
+            "portal_access": client_data.get("portal_access"),
+            "tags": client_data.get("tags"),
+            "websites": parse_json_field(client_data.get("websites")),
+            "billing_preferences": parse_json_field(client_data.get("billing_preferences")),
+            "custom_fields": parse_json_field(client_data.get("custom_fields")),
+        }
+
+    def _has_any_update(self, body: UpdateClientRequest) -> bool:
+        """Return True if body contains at least one field to apply."""
+        return any(
+            getattr(body, name) is not None
+            for name in (
+                "client_name",
+                "industry",
+                "profile_photo_url",
+                "portal_access",
+                "tags",
+                "websites",
+                "addresses",
+                "lead_management",
+                "billing_preferences",
+                "custom_fields",
+            )
+        )
+
+    def _apply_simple_client_update_fields(
+        self, body: UpdateClientRequest, payload: dict[str, Any]
+    ) -> None:
+        """Apply simple (no-merge) client fields from body onto payload."""
+        simple_fields = [
+            ("client_name", "name"),
+            ("industry", "industry"),
+            ("profile_photo_url", "profile_photo_url"),
+            ("portal_access", "portal_access"),
+            ("tags", "tags"),
+        ]
+        for body_attr, payload_key in simple_fields:
+            value = getattr(body, body_attr, None)
+            if value is not None:
+                payload[payload_key] = value
+
+    def _merge_billing_preferences_into_payload(
+        self,
+        body: UpdateClientRequest,
+        current: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
+        """Merge body.billing_preferences with current and set on payload."""
+        if body.billing_preferences is None:
+            return
+        existing = parse_json_field(current.get("billing_preferences"))
+        payload["billing_preferences"] = {
+            **existing,
+            **body.billing_preferences.model_dump(exclude_none=True),
+        }
+
+    def _merge_custom_fields_into_payload(
+        self,
+        body: UpdateClientRequest,
+        current: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
+        """Merge body.custom_fields with current and set on payload."""
+        if body.custom_fields is None:
+            return
+        existing = parse_json_field(current.get("custom_fields"))
+        merged = dict(existing)
+        for key, value in body.custom_fields.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        payload["custom_fields"] = merged
+
+    def _build_client_update_payload(
+        self, body: UpdateClientRequest, current: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Build the client row update dict from body and current row (merge where needed)."""
+        payload: dict[str, Any] = {}
+        self._apply_simple_client_update_fields(body, payload)
+        if body.websites is not None:
+            payload["websites"] = self._normalize_websites_final(body.websites)
+        self._merge_billing_preferences_into_payload(body, current, payload)
+        self._merge_custom_fields_into_payload(body, current, payload)
+        return payload
+
+    def _ensure_website_ids(self, websites: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return a copy of websites with an id set on each item (generated if missing)."""
+        result: list[dict[str, Any]] = []
+        for website in websites:
+            item = dict(website)
+            if not item.get("id"):
+                item["id"] = str(uuid.uuid4())
+            result.append(item)
+        return result
+
+    def _normalize_websites_final(self, final: list[WebsiteUpdate]) -> list[dict[str, Any]]:
+        """Normalize final website list from UI: ensure each item has an id."""
+        result: list[dict[str, Any]] = []
+        for item in final:
+            data = item.model_dump(exclude_none=True)
+            if not data.get("id"):
+                data["id"] = str(uuid.uuid4())
+            result.append(data)
+        return result
+
+    async def _apply_lead_update(self, client_id: str, lead: LeadManagementUpdate) -> None:
+        """Apply lead update by lead_id; only provided fields are sent to repository."""
+        lead_data = lead.model_dump(exclude={"lead_id"}, exclude_none=True)
+        if not lead_data:
+            return
+        await self.client_repository.update_lead(lead.lead_id, client_id, lead_data)
+
+    def _diff_addresses_final(
+        self,
+        current: list[dict[str, Any]],
+        final: list[AddressUpdate],
+    ) -> tuple[list[str], list[AddressUpdate], list[AddressUpdate]]:
+        """Compare current addresses with final state; return (to_remove_ids, to_update, to_add)."""
+        current_ids = {str(a["id"]) for a in current if a.get("id")}
+        final_with_id = [a for a in final if a.id]
+        final_ids = {str(a.id) for a in final_with_id}
+        to_remove = list(current_ids - final_ids)
+        to_update = [a for a in final_with_id if str(a.id) in current_ids]
+        to_add = [a for a in final if not a.id or str(a.id) not in current_ids]
+        return to_remove, to_update, to_add
+
+    async def _apply_addresses_final(
+        self,
+        client_id: str,
+        current: list[dict[str, Any]],
+        final: list[AddressUpdate],
+    ) -> None:
+        """Apply final address state: remove missing, update existing, add new."""
+        to_remove, to_update, to_add = self._diff_addresses_final(current, final)
+        if to_remove:
+            await self.client_repository.delete_addresses_by_ids(client_id, to_remove)
+        for item in to_update:
+            payload = item.model_dump(exclude_none=True)
+            addr_id = payload.pop("id", None)
+            if addr_id and payload:
+                await self.client_repository.update_address(addr_id, client_id, payload)
+        if to_add:
+            rows = [self._address_add_row(client_id, a) for a in to_add]
+            await self.client_repository.bulk_create_addresses(rows)
+
+    def _address_add_row(self, client_id: str, address: AddressUpdate) -> dict[str, Any]:
+        """Build address row for bulk_create_addresses (no id; matches create flow)."""
+        row: dict[str, Any] = {"client_id": client_id}
+        data = address.model_dump(exclude_none=True, exclude={"id"})
+        row.update(data)
+        return row
