@@ -8,6 +8,7 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.schemas.enums import OrganizationMemberStatus
+from apps.user_service.app.utils.common_utils import parse_json_field
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("organization_member_repository")
@@ -263,8 +264,11 @@ class OrganizationMemberRepository:
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Get paginated list of users with optional search."""
-        where_clause = "WHERE organization_id = $1 AND status != $2"
+        """Get paginated list of users with optional search.
+
+        Joins auth.users to include alternate_emails from raw_user_meta_data.
+        """
+        where_clause = "WHERE om.organization_id = $1 AND om.status != $2"
         params: list[Any] = [organization_id, OrganizationMemberStatus.DELETED.value]
         param_index = 3
 
@@ -273,11 +277,11 @@ class OrganizationMemberRepository:
             search_param = f"${param_index}"
             where_clause += f"""
                 AND (
-                    email ILIKE {search_param}
-                    OR first_name ILIKE {search_param}
-                    OR last_name ILIKE {search_param}
-                    OR salutation ILIKE {search_param}
-                    OR phone_number ILIKE {search_param}
+                    om.email ILIKE {search_param}
+                    OR om.first_name ILIKE {search_param}
+                    OR om.last_name ILIKE {search_param}
+                    OR om.salutation ILIKE {search_param}
+                    OR om.phone_number ILIKE {search_param}
                 )
             """
             params.append(search_pattern)
@@ -289,31 +293,37 @@ class OrganizationMemberRepository:
 
         query = f"""
             SELECT
-                id,
-                user_id,
-                email,
-                first_name,
-                last_name,
-                salutation,
-                phone_number,
-                phone_isd_code,
-                timezone,
-                role_id,
-                role,
-                member_role,
-                status,
-                created_at,
-                updated_at,
-                last_active_at
-            FROM organization_members
+                om.id,
+                om.user_id,
+                om.email,
+                om.first_name,
+                om.last_name,
+                om.salutation,
+                om.phone_number,
+                om.phone_isd_code,
+                om.timezone,
+                om.role_id,
+                om.role,
+                om.member_role,
+                om.status,
+                om.created_at,
+                om.updated_at,
+                om.last_active_at,
+                COALESCE(au.raw_user_meta_data->'alternate_emails', '[]'::jsonb) AS alternate_emails
+            FROM organization_members om
+            LEFT JOIN auth.users au ON au.id = om.user_id
             {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY om.created_at DESC
             LIMIT {limit_param}
             OFFSET {offset_param}
         """
         rows = await self.db_connection.fetch(query, *params)
-
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            row_dict = dict(row)
+            row_dict["alternate_emails"] = parse_json_field(row_dict.get("alternate_emails"))
+            result.append(row_dict)
+        return result
 
     async def get_users_total_count(
         self,

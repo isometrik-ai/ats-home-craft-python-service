@@ -179,6 +179,10 @@ class UserProfileData(BaseModel):
         None,
         description="Verification preference settings (enabled/disabled and type: PHONE or EMAIL)",
     )
+    alternate_emails: list[str] | None = Field(
+        None,
+        description="Alternate email addresses of the user from user_metadata",
+    )
     organization_details: OrganizationBasicDetails | None = Field(
         None,
         description="Organization details",
@@ -356,10 +360,16 @@ class UserListItem(BaseModel):
         status (str): User's membership status
         joined_at (str): ISO timestamp when user joined
         last_active_at (Optional[str]): ISO timestamp of last activity
+        alternate_emails (Optional[list[str]]): Alternate email addresses of the user
     """
 
     user_id: str = Field(..., description="Unique identifier for the user")
     email: str = Field(..., description="email address of the user")
+    alternate_emails: list[str] | None = Field(
+        None,
+        description="Alternate email addresses of the user",
+        max_length=10,
+    )
     first_name: str | None = Field(None, description="Updated first name")
     last_name: str | None = Field(None, description="Updated last name")
     salutation: str | None = Field(None, description="Updated salutation")
@@ -381,6 +391,7 @@ class UserListItem(BaseModel):
             "example": {
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "email": "john@example.com",
+                "alternate_emails": ["john@example.com", "john@example.com"],
                 "first_name": "J",
                 "last_name": "Jonnah Jamison",
                 "role": "admin",
@@ -457,7 +468,11 @@ class UpdateUserProfileRequest(BaseModel):
         "EMAIL",
         description="Type of verification preference: PHONE or EMAIL (defaults to EMAIL)",
     )
-
+    alternate_emails: list[str] | None = Field(
+        None,
+        description="Alternate email addresses of the user from user_metadata",
+        max_length=10,
+    )
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -468,6 +483,7 @@ class UpdateUserProfileRequest(BaseModel):
                 "avatar_url": "house-of-apps-legal-ai/user-id/avatar.jpg",
                 "two_fa_enabled": True,
                 "verification_method": "EMAIL",
+                "alternate_emails": ["john@example.com", "john@example.com"],
             }
         }
     }

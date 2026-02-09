@@ -20,10 +20,6 @@ import asyncpg
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from apps.user_service.app.db.repositories import (
-    OrganizationRepository,
-    SessionRepository,
-)
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.http_exceptions import (
@@ -160,6 +156,8 @@ async def extract_user_context(
         # Get organization_id from user_sessions table using session_id from JWT
         organization_id = None
         session_id = current_user.get("session_id")
+        from apps.user_service.app.db.repositories import SessionRepository
+
         session_repo = SessionRepository(db_connection)
         organization_id = await session_repo.get_session_organization_id(session_id)
 
@@ -310,6 +308,8 @@ async def require_organization_creator(
         ForbiddenException: If user is not the organization creator
         NotFoundException: If organization is not found
     """
+    from apps.user_service.app.db.repositories import OrganizationRepository
+
     org_repo = OrganizationRepository(db_connection)
     is_owner = await org_repo.is_user_organization_owner(organization_id, user_context.user_id)
     if not is_owner:
@@ -538,6 +538,8 @@ def parse_json_field(field_value: str | dict[str, Any] | None) -> dict[str, Any]
     """
     if field_value is None:
         return {}
+    if isinstance(field_value, list):
+        return field_value
     if isinstance(field_value, dict):
         return field_value
     if isinstance(field_value, str):

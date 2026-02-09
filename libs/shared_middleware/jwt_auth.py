@@ -18,9 +18,6 @@ from fastapi import Depends, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from supabase import AsyncClient, AuthError
 
-from apps.user_service.app.db.repositories import (
-    SessionRepository,
-)
 from apps.user_service.app.dependencies.db import db_conn
 from libs.shared_db.supabase_db.client import get_supabase_client
 from libs.shared_utils.http_exceptions import (
@@ -221,6 +218,8 @@ async def get_user_from_auth(
 
     # Setup audit context (before validation to ensure audit trail)
     organization_id = None
+    from apps.user_service.app.db.repositories import SessionRepository
+
     session_repo = SessionRepository(db_connection=db_connection)
     organization_id = await session_repo.get_session_organization_id(session_id)
 
