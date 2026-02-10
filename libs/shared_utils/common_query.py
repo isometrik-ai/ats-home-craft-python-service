@@ -226,19 +226,19 @@ DEFAULT_PERMISSIONS = [
         "clients_management.view",
         "View Clients",
         "View client list and details",
-        "clients_management",
+        "clients",
     ),
     (
         "clients_management.create",
         "Create Clients",
         "Create new clients",
-        "clients_management",
+        "clients",
     ),
     (
         "clients_management.edit",
         "Edit Clients",
         "Modify client information",
-        "clients_management",
+        "clients",
     ),
     (
         "clients_management.delete",
