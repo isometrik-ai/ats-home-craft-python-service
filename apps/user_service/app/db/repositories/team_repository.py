@@ -5,9 +5,12 @@ All SQL queries for team management are centralized here with proper
 transaction handling and efficient batch operations.
 """
 
+import json
+
 import asyncpg
 
 from apps.user_service.app.schemas.teams import (
+    MemberData,
     TeamDbDelete,
     TeamDbIn,
     TeamDbUpdate,
@@ -68,14 +71,14 @@ class TeamRepository:
         team_id = team_record["id"]
 
         # Add members if provided
-        if team_input.member_ids:
+        if team_input.member_data:
             await self._insert_team_members(
-                team_id=team_id, member_ids=team_input.member_ids, added_by=team_input.created_by
+                team_id=team_id, member_data=team_input.member_data, added_by=team_input.created_by
             )
 
             logger.info(
                 "Successfully added %s members to team - Team ID: %s",
-                len(team_input.member_ids),
+                len(team_input.member_data),
                 team_id,
             )
 
@@ -84,39 +87,66 @@ class TeamRepository:
     async def _insert_team_members(
         self,
         team_id: str,
-        member_ids: list[str],
+        member_data: list[MemberData],
         added_by: str,
     ) -> None:
-        """Add members to a team in a single query.
+        """Add members to a team in a single query with optional additional_data.
 
-        This function adds members to a team using a list of member user IDs.
-        It handles duplicate entries gracefully.
+        This function adds members to a team using a list of member data.
+        It handles duplicate entries gracefully and supports additional_data JSONB field.
 
         Args:
             team_id: Team UUID to add members to
-            member_ids: List of user IDs to add as members
+            member_data: List of MemberData objects with member_id and optional additional_data
             added_by: User ID who is adding the members
         """
-        if not member_ids:
+        if not member_data:
             return
+
+        # Prepare data for batch insert
+        member_ids = []
+        roles = []
+        additional_data_list = []
+
+        for member in member_data:
+            member_ids.append(member.member_id)
+            # Extract role from additional_data if present, otherwise use default
+            role = (
+                member.additional_data.get("role")
+                if member.additional_data and "role" in member.additional_data
+                else TeamRoles.MEMBER
+            )
+            roles.append(role)
+
+            # Serialize additional_data to JSON string, or use NULL
+            additional_data_json = (
+                json.dumps(member.additional_data) if member.additional_data else None
+            )
+            additional_data_list.append(additional_data_json)
 
         # Perform a single batch insert using UNNEST
         count = len(member_ids)
 
         insert_query = """
-            INSERT INTO team_members (team_id, user_id, role, added_by, added_at)
+            INSERT INTO team_members (team_id, user_id, role, added_by, added_at, additional_data)
             SELECT
                 t.team_id,
                 t.user_id,
                 t.role,
                 t.added_by,
-                NOW()
+                NOW(),
+                CASE
+                    WHEN t.additional_data IS NOT NULL AND t.additional_data != ''
+                    THEN t.additional_data::jsonb
+                    ELSE NULL
+                END
             FROM UNNEST(
                 $1::uuid[],
                 $2::uuid[],
                 $3::text[],
-                $4::uuid[]
-            ) AS t(team_id, user_id, role, added_by)
+                $4::uuid[],
+                $5::text[]
+            ) AS t(team_id, user_id, role, added_by, additional_data)
             ON CONFLICT (team_id, user_id) DO NOTHING;
         """
 
@@ -124,8 +154,9 @@ class TeamRepository:
             insert_query,
             [team_id] * count,
             member_ids,
-            [TeamRoles.MEMBER] * count,
+            roles,
             [added_by] * count,
+            additional_data_list,
         )
 
     # READ OPERATIONS
@@ -239,11 +270,13 @@ class TeamRepository:
 
         return {
             "id": row["user_id"],
+            "user_id": row["user_id"],
             "email": row["email"],
             "first_name": first_name,
             "last_name": last_name,
             "role": row["role"],
             "added_at": row["added_at"],
+            "additional_data": row.get("additional_data"),
         }
 
     async def get_team_detail(
@@ -281,6 +314,7 @@ class TeamRepository:
                 tm.user_id,
                 tm.role,
                 tm.added_at,
+                tm.additional_data,
                 om.first_name,
                 om.last_name,
                 om.email
@@ -450,9 +484,14 @@ class TeamRepository:
 
         # Add new members
         if team_input.members_to_add:
+            # Convert member IDs to MemberData format (with minimal additional_data)
+            member_data = [
+                MemberData(member_id=member_id, additional_data=None)
+                for member_id in team_input.members_to_add
+            ]
             await self._insert_team_members(
                 team_id=team_input.team_id,
-                member_ids=team_input.members_to_add,
+                member_data=member_data,
                 added_by=team_input.added_by,
             )
 

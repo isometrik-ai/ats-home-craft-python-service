@@ -144,6 +144,8 @@ class TeamRoles(str, Enum):
 
     LEAD = "LEAD"
     MEMBER = "MEMBER"
+    TECH_LEAD = "TECH LEAD"
+    PROJECT_LEAD = "PROJECT LEAD"
 
 
 # ============================================================================
@@ -396,3 +398,88 @@ class IsometrikRole(str, Enum):
     CLIENT = "client"
     OWNER = "owner"
     MEMBER = "member"
+
+
+# ============================================================================
+# PROJECT ENUMS
+# ============================================================================
+
+
+class ProjectStatus(str, Enum):
+    """Project status enumeration."""
+
+    DISCOVERY = "discovery"
+    ACTIVE = "active"
+    ON_HOLD = "on_hold"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    ARCHIVED = "archived"
+
+
+class ProjectPriority(str, Enum):
+    """Project priority enumeration."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
+class BillingType(str, Enum):
+    """Billing type enumeration."""
+
+    TIME_AND_MATERIALS = "time_and_materials"
+    FIXED_PRICE = "fixed_price"
+    MONTHLY_RETAINER = "monthly_retainer"
+    MILESTONE_BASED = "milestone_based"
+    HYBRID = "hybrid"
+    VALUE_BASED = "value_based"
+
+
+class PaymentTerms(str, Enum):
+    """Payment terms enumeration."""
+
+    NET_15 = "Net 15"
+    NET_30 = "Net 30"
+    NET_45 = "Net 45"
+    NET_60 = "Net 60"
+    DUE_ON_RECEIPT = "Due on receipt"
+
+
+class RepositoryPlatform(str, Enum):
+    """Repository platform enumeration."""
+
+    GITHUB = "github"
+    GITLAB = "gitlab"
+    BITBUCKET = "bitbucket"
+    AZURE_DEVOPS = "azure_devops"
+
+
+class IntegrationType(str, Enum):
+    """Integration type enumeration."""
+
+    JIRA = "jira"
+    ASANA = "asana"
+    LINEAR = "linear"
+    CLICKUP = "clickup"
+    MONDAY = "monday"
+    TRELLO = "trello"
+    NOTION = "notion"
+
+
+class SyncDirection(str, Enum):
+    """Sync direction enumeration."""
+
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+    BIDIRECTIONAL = "bidirectional"
+
+
+class ConnectionStatus(str, Enum):
+    """Connection status enumeration."""
+
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
+    ERROR = "error"
+    PENDING = "pending"
+    PENDING_AUTH = "pending_auth"

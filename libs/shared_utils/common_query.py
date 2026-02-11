@@ -24,6 +24,11 @@ CLIENTS_MANAGEMENT_VIEW = "clients_management.view"
 CLIENTS_MANAGEMENT_EDIT = "clients_management.edit"
 CLIENTS_MANAGEMENT_DELETE = "clients_management.delete"
 
+PROJECTS_MANAGEMENT_CREATE = "projects_management.create"
+PROJECTS_MANAGEMENT_VIEW = "projects_management.view"
+PROJECTS_MANAGEMENT_EDIT = "projects_management.edit"
+PROJECTS_MANAGEMENT_DELETE = "projects_management.delete"
+
 USERS_MANAGEMENT_DELETE = "users_management.delete"
 
 DEFAULT_PERMISSIONS = [
@@ -245,6 +250,31 @@ DEFAULT_PERMISSIONS = [
         "Delete Clients",
         "Remove clients from the system",
         "clients",
+    ),
+    # projects management
+    (
+        "projects_management.view",
+        "View Projects",
+        "View project list and details",
+        "projects",
+    ),
+    (
+        "projects_management.create",
+        "Create Projects",
+        "Create new projects",
+        "projects",
+    ),
+    (
+        "projects_management.edit",
+        "Edit Projects",
+        "Modify project information",
+        "projects",
+    ),
+    (
+        "projects_management.delete",
+        "Delete Projects",
+        "Remove projects from the system",
+        "projects",
     ),
 ]
 

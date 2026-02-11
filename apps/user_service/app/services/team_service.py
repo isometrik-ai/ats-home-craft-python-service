@@ -5,6 +5,7 @@ import asyncpg
 from apps.user_service.app.db.repositories import TeamRepository
 from apps.user_service.app.schemas.teams import (
     CreateTeamRequest,
+    MemberData,
     TeamDbDelete,
     TeamDbIn,
     TeamDbUpdate,
@@ -85,13 +86,17 @@ class TeamService:
         )
 
         # Validate and deduplicate member IDs
-        member_ids = []
+        member_data = None
         if request.member_ids is not None:
             unique_member_ids = set(request.member_ids)
             await self._validate_member_ids(
                 unique_member_ids,
             )
-            member_ids = list(unique_member_ids)
+            # Convert member_ids to member_data format (with minimal additional_data)
+            member_data = [
+                MemberData(member_id=member_id, additional_data=None)
+                for member_id in unique_member_ids
+            ]
 
         # Create team
         db_in = TeamDbIn(
@@ -99,7 +104,7 @@ class TeamService:
             name=request.name,
             description=request.description,
             created_by=self.user_context.user_id,
-            member_ids=member_ids,
+            member_data=member_data,
         )
         await self.team_repository.create_team(db_in)
 

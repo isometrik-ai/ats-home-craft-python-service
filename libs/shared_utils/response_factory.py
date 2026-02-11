@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime
 from enum import Enum
 from typing import Any, TypeVar
 
@@ -60,19 +58,13 @@ class ListResponse(ApiResponse):
     total_pages: int = Field(0, description="Total number of pages")
 
 
-class DateTimeEncoder(json.JSONEncoder):
-    """Custom JSON encoder that handles datetime serialization."""
-
-    def default(self, o):  # type: ignore[override]
-        if isinstance(o, datetime):
-            return o.isoformat()
-        return super().default(o)
-
-
 def _serialize_payload(payload: BaseModel) -> dict[str, Any]:
-    """Serialize a pydantic payload with datetime support."""
+    """Serialize a pydantic payload to JSON-compatible dict.
 
-    return json.loads(json.dumps(payload.model_dump(exclude_none=True), cls=DateTimeEncoder))
+    Uses Pydantic's built-in JSON serialization mode which automatically handles
+    Decimal, datetime, date, and other non-JSON-serializable types.
+    """
+    return payload.model_dump(mode="json", exclude_none=True)
 
 
 def success_response(
@@ -180,7 +172,6 @@ def list_response(
 __all__ = [
     "ApiResponse",
     "DataResponse",
-    "DateTimeEncoder",
     "ErrorResponse",
     "ListResponse",
     "ResponseStatus",
