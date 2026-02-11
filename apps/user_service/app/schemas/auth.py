@@ -257,6 +257,14 @@ class SelectOrganizationResponse(BaseModel):
     )
 
 
+class ValidateTokenResponse(BaseModel):
+    """Response model for token validation endpoint"""
+
+    organization_id: str | None = Field(
+        None, description="Organization ID associated with the session"
+    )
+
+
 class User(BaseModel):
     """User information."""
 
