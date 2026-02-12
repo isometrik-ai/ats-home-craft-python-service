@@ -278,3 +278,12 @@ async def test_delete_user(monkeypatch, client):
     res = await client.delete("/v1/auth/user")
     body = assert_success(res, 200)
     assert body["code"]  # ensure custom code present
+
+
+@pytest.mark.asyncio
+async def test_validate_token_success(client):
+    """Test that the validate token endpoint returns organization_id when token is valid."""
+    res = await client.get("/v1/auth/validate")
+    body = assert_success(res, 200)
+    assert body["data"]["organization_id"] == "org-123"
+    assert body["code"]  # ensure custom code present

@@ -34,10 +34,12 @@ from apps.user_service.app.schemas.auth import (
     SignupRequest,
     ValidateAccountRequest,
     ValidateAccountResponse,
+    ValidateTokenResponse,
 )
 from apps.user_service.app.services.auth_service import AuthService
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.http_exceptions import UnauthorizedException
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -460,4 +462,55 @@ async def select_organization(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=result.model_dump(exclude_none=True),
+    )
+
+
+@handle_api_exceptions("validate_token")
+@router.get(
+    "/validate",
+    response_model=ValidateTokenResponse,
+    status_code=http_status.HTTP_200_OK,
+    description="Validate authentication token and return organization_id",
+    summary="Validate authentication token and return organization_id",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Token validated successfully"},
+        http_status.HTTP_401_UNAUTHORIZED: {
+            "description": "Unauthorized - Invalid token or no organization associated"
+        },
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("100/minute")
+async def validate(
+    request: Request,
+    _current_user: dict = Depends(get_user_from_auth),
+):
+    """Validate authentication token and return organization_id.
+
+    This endpoint validates the authentication token and returns the organization_id
+    associated with the current session. This is useful as an external endpoint
+    for authentication validation.
+
+    Raises:
+        UnauthorizedException: If organization_id is not associated with the session
+
+    Returns:
+        ValidateTokenResponse: Contains organization_id
+    """
+    # Get organization_id from request.state (already fetched by get_user_from_auth)
+    audit_context = getattr(request.state, "audit_user_context", None)
+    organization_id = audit_context.get("organization_id") if audit_context else None
+
+    if not organization_id:
+        raise UnauthorizedException(
+            message_key="auth.errors.session_cannot_access_organization",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+
+    return success_response(
+        request=request,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=ValidateTokenResponse(organization_id=organization_id),
     )

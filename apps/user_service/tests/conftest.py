@@ -437,14 +437,25 @@ async def _mock_get_supabase_service_client():
     return _StubSupabase()
 
 
-def _get_user_from_auth(request: Request) -> dict:
+async def _get_user_from_auth(request: Request, _db_connection=None) -> dict:
     """Mock get_user_from_auth that sets request.state.user and returns user."""
     user = {
         "sub": "test-user-id",
         "email": "test@example.com",
+        "session_id": "test-session-id",
         "user_metadata": {"organization_id": "org-123", "type": "organization_member"},
     }
     # Set request.state.user before get_user_from_auth checks for it
+
+    from libs.shared_middleware.jwt_auth import setup_audit_context
+
+    setup_audit_context(
+        request,
+        user_id="test-user-id",
+        user_email="test@example.com",
+        organization_id="org-123",
+        session_id="test-session-id",
+    )
     request.state.user = user
     return user
 
@@ -475,7 +486,15 @@ def override_dependencies(monkeypatch):
     app.dependency_overrides[supabase_anon] = _stub_supabase
     app.dependency_overrides[supabase_service] = _stub_supabase
     app.dependency_overrides[supabase_anon_client_with_headers] = _stub_supabase
+    # Override get_user_from_auth dependency using FastAPI's dependency override system
+    from libs.shared_middleware.jwt_auth import get_user_from_auth
+
+    app.dependency_overrides[get_user_from_auth] = _get_user_from_auth
+    # Also patch it in modules where it's imported to ensure consistency
     monkeypatch.setattr(jwt_auth, "get_user_from_auth", _get_user_from_auth)
+    from apps.user_service.app.api import auth as auth_module
+
+    monkeypatch.setattr(auth_module, "get_user_from_auth", _get_user_from_auth)
 
     yield
     app.dependency_overrides.clear()

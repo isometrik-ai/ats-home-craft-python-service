@@ -108,9 +108,11 @@ async def _log_audit_event(
 
     if audit_state["raw_old"]:
         request.state.audit_old_values = {"data": audit_state["raw_old"]}
-        request.state.audit_changed_fields = get_changed_fields(
-            audit_state["raw_old"], audit_state["raw_new"]
-        )
+        # Only calculate changed fields if both old and new data are available
+        if audit_state["raw_new"] is not None:
+            request.state.audit_changed_fields = get_changed_fields(
+                audit_state["raw_old"], audit_state["raw_new"]
+            )
 
     audit_event_data = AuditEventData(
         user_context=user_context,
@@ -170,19 +172,23 @@ def _build_new_values(
     }
 
 
-def get_changed_fields(old_data: dict, new_data: dict, prefix: str = "") -> list[str]:
+def get_changed_fields(old_data: dict | None, new_data: dict | None, prefix: str = "") -> list[str]:
     """Recursively compares old and new data to identify changed fields.
 
     Only includes fields that exist in both old and new data and have different values.
 
     Args:
-        old_data (dict): Original data dictionary
-        new_data (dict): Updated data dictionary
+        old_data (dict | None): Original data dictionary
+        new_data (dict | None): Updated data dictionary
         prefix (str): Optional prefix for nested field names (default: "")
 
     Returns:
         list[str]: List of changed field names
     """
+    # Handle None values gracefully
+    if old_data is None or new_data is None:
+        return []
+
     changed = []
 
     # Only compare fields that exist in both old and new data
