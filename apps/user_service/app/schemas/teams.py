@@ -5,6 +5,7 @@ These schemas are used for request/response validation and API documentation.
 """
 
 import re
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -211,6 +212,29 @@ class TeamDetailResponse(BaseModel):
 # ============================================================================
 # DATABASE INPUT MODELS
 # ============================================================================
+class MemberData(BaseModel):
+    """Model for team member data with additional_data"""
+
+    member_id: str = Field(..., description="Member user ID")
+    additional_data: dict[str, Any] | None = Field(
+        None, description="Additional member data (e.g., role, allocation_percentage, hourly_rate)"
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "member_id": "550e8400-e29b-41d4-a716-446655440002",
+                "additional_data": {
+                    "role": "Project Lead",
+                    "allocation_percentage": 60,
+                    "hourly_rate": 150.00,
+                    "role_description": "Manages project delivery",
+                },
+            }
+        }
+    )
+
+
 class TeamDbIn(BaseModel):
     """Input model for creating a new team in database"""
 
@@ -218,7 +242,9 @@ class TeamDbIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=255, description="Team name")
     description: str | None = Field(None, max_length=1000, description="Team description")
     created_by: str = Field(..., description="User ID creating the team")
-    member_ids: list[str] | None = Field(None, description="Initial team member IDs")
+    member_data: list[MemberData] | None = Field(
+        None, description="Initial team member data with additional_data"
+    )
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -226,7 +252,12 @@ class TeamDbIn(BaseModel):
                 "name": EXAMPLE_TEAM_NAME,
                 "description": EXAMPLE_TEAM_DESCRIPTION,
                 "created_by": "550e8400-e29b-41d4-a716-446655440001",
-                "member_ids": ["550e8400-e29b-41d4-a716-446655440002"],
+                "member_data": [
+                    {
+                        "member_id": "550e8400-e29b-41d4-a716-446655440002",
+                        "additional_data": None,
+                    }
+                ],
             }
         }
     )

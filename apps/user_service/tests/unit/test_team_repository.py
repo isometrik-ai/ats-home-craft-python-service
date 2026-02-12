@@ -3,7 +3,7 @@
 import pytest
 
 from apps.user_service.app.db.repositories.team_repository import TeamRepository
-from apps.user_service.app.schemas.teams import TeamDbIn
+from apps.user_service.app.schemas.teams import MemberData, TeamDbIn
 
 
 class _FakeConn:
@@ -35,13 +35,20 @@ class _FakeConn:
 
 def _team_input(with_members=False):
     """Helper to build TeamDbIn payload."""
-    members = ["u2", "u3"] if with_members else []
+    members = (
+        [
+            MemberData(member_id="u2", additional_data=None),
+            MemberData(member_id="u3", additional_data=None),
+        ]
+        if with_members
+        else []
+    )
     return TeamDbIn(
         organization_id="org1",
         name="Team",
         description="desc",
         created_by="u1",
-        member_ids=members,
+        member_data=members,
     )
 
 
@@ -65,7 +72,7 @@ async def test_insert_team_members_noop_on_empty():
     conn = _FakeConn()
     repo = TeamRepository(db_connection=conn)
 
-    await repo._insert_team_members(team_id="t1", member_ids=[], added_by="u1")  # pylint: disable=protected-access
+    await repo._insert_team_members(team_id="t1", member_data=[], added_by="u1")  # pylint: disable=protected-access
 
     assert not conn.execute_calls
 

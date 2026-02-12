@@ -211,5 +211,18 @@
     "success": {
       "presigned_url_generated": "Presigned URL generated successfully."
     }
+  },
+  "projects": {
+    "errors": {
+      "project_title_exists": "A project with this title already exists in the organization.",
+      "client_not_found": "Client not found",
+      "team_member_not_found": "One or more team members do not exist in the organization.",
+      "project_not_found": "Project not found"
+    },
+    "success": {
+      "project_created": "Project created successfully.",
+      "projects_retrieved": "Projects retrieved successfully.",
+      "project_retrieved": "Project retrieved successfully."
+    }
   }
 }
