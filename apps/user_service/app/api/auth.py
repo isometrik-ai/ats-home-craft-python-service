@@ -467,7 +467,7 @@ async def select_organization(
 
 @handle_api_exceptions("validate_token")
 @router.get(
-    "/validate-token",
+    "/validate",
     response_model=ValidateTokenResponse,
     status_code=http_status.HTTP_200_OK,
     description="Validate authentication token and return organization_id",
@@ -481,7 +481,7 @@ async def select_organization(
     },
 )
 @limiter.limit("100/minute")
-async def validate_token(
+async def validate(
     request: Request,
     _current_user: dict = Depends(get_user_from_auth),
 ):
