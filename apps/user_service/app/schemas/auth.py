@@ -16,7 +16,6 @@ from apps.user_service.app.schemas.enums import (
     ExpectedMembers,
     FirmSize,
     LoginMethod,
-    PlanType,
     PracticeArea,
     PreferredIntegration,
     SessionStatus,
@@ -316,28 +315,6 @@ class EnterpriseFeatures(BaseModel):
     custom_integration: list[CustomIntegration]
     custom_reporting: list[CustomReporting]
     primary_contact_information: PrimaryContactInformation
-
-
-class Subscription(BaseModel):
-    """Subscription information."""
-
-    max_users: int | None = Field(
-        default=None,
-        ge=1,
-        description="Maximum number of licensed seats for the organization",
-    )
-    plan_type: PlanType = Field(
-        default=PlanType.TRIAL,
-        description="Current subscription plan type",
-    )
-    start_date: str | None = Field(
-        default=None,
-        description="ISO timestamp when the subscription becomes active",
-    )
-    end_date: str | None = Field(
-        default=None,
-        description="ISO timestamp when the subscription expires",
-    )
 
 
 class CompanyData(BaseModel):

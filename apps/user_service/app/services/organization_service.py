@@ -18,8 +18,7 @@ from apps.user_service.app.db.repositories import (
     RoleRepository,
     TeamRepository,
 )
-from apps.user_service.app.schemas.auth import Subscription
-from apps.user_service.app.schemas.common import OrganizationBasicDetails
+from apps.user_service.app.schemas.common import OrganizationBasicDetails, Subscription
 from apps.user_service.app.schemas.enums import (
     AccountType,
     DeleteRequestStatus,
@@ -646,6 +645,7 @@ class OrganizationService:
             address=settings_fields["address"],
             primary_practice_areas=settings_fields["primary_practice_areas"],
             secondary_practice_areas=settings_fields["secondary_practice_areas"],
+            subscription=OrganizationService._parse_subscription(org_data.get("subscription")),
         )
 
     @staticmethod

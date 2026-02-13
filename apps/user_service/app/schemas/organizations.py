@@ -16,11 +16,10 @@ from apps.user_service.app.schemas.auth import (
     PracticeArea,
     PreferredIntegration,
     Specialization,
-    Subscription,
     TeamSetup,
     User,
 )
-from apps.user_service.app.schemas.common import Address
+from apps.user_service.app.schemas.common import Address, Subscription
 from apps.user_service.app.schemas.enums import (
     DeleteRequestStatus,
     OrganizationStatus,

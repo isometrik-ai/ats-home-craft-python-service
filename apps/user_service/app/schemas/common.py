@@ -5,7 +5,7 @@ Shared schemas used across multiple modules to avoid circular dependencies.
 
 from pydantic import BaseModel, Field
 
-from apps.user_service.app.schemas.enums import PracticeArea
+from apps.user_service.app.schemas.enums import PlanType, PracticeArea
 
 
 class Address(BaseModel):
@@ -18,6 +18,28 @@ class Address(BaseModel):
     country: str = Field(..., description="Country name")
 
 
+class Subscription(BaseModel):
+    """Subscription information."""
+
+    max_users: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum number of licensed seats for the organization",
+    )
+    plan_type: PlanType = Field(
+        default=PlanType.TRIAL,
+        description="Current subscription plan type",
+    )
+    start_date: str | None = Field(
+        default=None,
+        description="ISO timestamp when the subscription becomes active",
+    )
+    end_date: str | None = Field(
+        default=None,
+        description="ISO timestamp when the subscription expires",
+    )
+
+
 class OrganizationBasicDetails(BaseModel):
     """Model for organization basic details"""
 
@@ -28,6 +50,7 @@ class OrganizationBasicDetails(BaseModel):
     description: str | None = Field(None, description="Organization's description")
     company_size: str | None = Field(None, description="Organization's company size")
     address: Address | None = Field(None, description="Organization's address")
+    subscription: Subscription | None = Field(None, description="Organization's subscription")
     primary_practice_areas: list[PracticeArea] | None = Field(
         None, description="Organization's primary practice areas"
     )
