@@ -501,9 +501,7 @@ class ProjectRepository:
         total_count = await self.db_connection.fetchval(count_query, *params)
         return [dict(row) for row in rows], int(total_count) if total_count is not None else 0
 
-    async def check_project_exists(
-        self, project_id: str, organization_id: str
-    ) -> bool:
+    async def check_project_exists(self, project_id: str, organization_id: str) -> bool:
         """Lightweight check if project exists.
 
         Minimal query that only checks existence without fetching any data.
@@ -787,9 +785,7 @@ class ProjectRepository:
         """
         await self.db_connection.execute(query, project_id, organization_id, integration_ids)
 
-    async def delete_all_project_repositories(
-        self, project_id: str, organization_id: str
-    ) -> None:
+    async def delete_all_project_repositories(self, project_id: str, organization_id: str) -> None:
         """Hard delete all repositories for a project."""
         query = """
             DELETE FROM project_repositories
@@ -797,9 +793,7 @@ class ProjectRepository:
         """
         await self.db_connection.execute(query, project_id, organization_id)
 
-    async def delete_all_project_integrations(
-        self, project_id: str, organization_id: str
-    ) -> None:
+    async def delete_all_project_integrations(self, project_id: str, organization_id: str) -> None:
         """Hard delete all integrations for a project."""
         query = """
             DELETE FROM project_integrations

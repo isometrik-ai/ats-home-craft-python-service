@@ -883,12 +883,8 @@ class ProjectService:
                     organization_id=organization_id,
                 )
             )
-        await self.project_repository.delete_all_project_repositories(
-            project_uuid, organization_id
-        )
-        await self.project_repository.delete_all_project_integrations(
-            project_uuid, organization_id
-        )
+        await self.project_repository.delete_all_project_repositories(project_uuid, organization_id)
+        await self.project_repository.delete_all_project_integrations(project_uuid, organization_id)
         await self.project_repository.soft_delete_project(
             project_uuid,
             organization_id,

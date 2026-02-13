@@ -327,9 +327,7 @@ async def update_project(
     summary="Delete project",
     responses={
         http_status.HTTP_200_OK: {"description": "Project deleted successfully"},
-        http_status.HTTP_404_NOT_FOUND: {
-            "description": "Project not found or already deleted"
-        },
+        http_status.HTTP_404_NOT_FOUND: {"description": "Project not found or already deleted"},
         http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
         http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
         http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
