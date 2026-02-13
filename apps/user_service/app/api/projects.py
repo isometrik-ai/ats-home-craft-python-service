@@ -16,6 +16,7 @@ from apps.user_service.app.schemas.projects import (
     ProjectDetailData,
     ProjectListQueryParams,
     ProjectListResponse,
+    UpdateProjectRequest,
 )
 from apps.user_service.app.services.project_service import ProjectService
 from apps.user_service.app.utils.common_utils import (
@@ -25,6 +26,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_CREATE,
+    PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.logger import get_logger
@@ -240,4 +242,77 @@ async def get_project_details(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=project_detail.model_dump(mode="json", exclude_none=False),
+    )
+
+
+@handle_api_exceptions("update project")
+@router.patch(
+    "/{project_id}",
+    status_code=http_status.HTTP_200_OK,
+    description="Update a project",
+    summary="Update project",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Project updated successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request or validation error"},
+        http_status.HTTP_404_NOT_FOUND: {
+            "description": "Project, repository, or integration not found"
+        },
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=["soc2_audit", "audit_required"],
+    table_name="projects",
+    category="PROJECT",
+)
+async def update_project(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    project_id: str = Path(..., description="Project UUID or human-readable ID"),
+    body: UpdateProjectRequest = Body(...),
+):
+    """Update a project. Only provided fields are updated.
+
+    List-type fields (team_members, repositories, integrations) support single operations:
+    exactly one of add, update, or remove per call. All operations run in a single transaction.
+    """
+    request.state.audit_table = "projects"
+    request.state.audit_description = f"Updated project: {project_id}"
+    request.state.audit_risk_level = "medium"
+
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+    )
+
+    project_service = ProjectService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    result = await project_service.update_project(project_id, body)
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    if result:
+        request.state.raw_audit_old_data = result.get("old_data")
+        request.state.raw_audit_new_data = body.model_dump(exclude_unset=True, exclude_none=True)
+
+    return success_response(
+        request=request,
+        message_key="projects.success.project_updated",
+        custom_code=CustomStatusCode.UPDATED,
+        status_code=http_status.HTTP_200_OK,
     )

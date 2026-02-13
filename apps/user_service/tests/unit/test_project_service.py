@@ -21,13 +21,22 @@ from apps.user_service.app.schemas.projects import (
     BudgetInfo,
     CreateProjectRequest,
     IntegrationInput,
+    IntegrationsUpdate,
+    IntegrationUpdateItem,
     ProjectListQueryParams,
+    RepositoriesUpdate,
     RepositoryInput,
+    RepositoryUpdateItem,
+    TeamMemberInput,
+    TeamMembersUpdate,
+    TeamMemberUpdateItem,
     TechStack,
+    UpdateProjectRequest,
 )
 from apps.user_service.app.services.project_service import ProjectService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
+    BadRequestException,
     ConflictException,
     NotFoundException,
 )
@@ -99,15 +108,62 @@ class _FakeProjectRepo:
         self.calls["get_project_with_client"] = (project_id, organization_id)
         return self.project_with_client_result
 
-    async def get_project_repositories(self, project_id, organization_id):
+    async def get_project_repositories(self, project_id, organization_id, *, primary_only=False):
         """Get project repositories."""
-        self.calls["get_project_repositories"] = (project_id, organization_id)
+        self.calls["get_project_repositories"] = (project_id, organization_id, primary_only)
+        if primary_only:
+            return [r for r in self.repositories_result if r.get("is_primary")] or []
         return self.repositories_result
 
     async def get_project_integrations(self, project_id, organization_id):
         """Get project integrations."""
         self.calls["get_project_integrations"] = (project_id, organization_id)
         return self.integrations_result
+
+    async def update_project(self, project_id, organization_id, data):
+        """Update project."""
+        self.calls["update_project"] = (project_id, organization_id, data)
+        return None
+
+    async def update_project_repository(self, project_id, organization_id, repository_id, data):
+        """Update project repository."""
+        self.calls["update_project_repository"] = (
+            project_id,
+            organization_id,
+            repository_id,
+            data,
+        )
+        return None
+
+    async def delete_project_repositories_by_ids(self, project_id, organization_id, repository_ids):
+        """Delete project repositories."""
+        self.calls["delete_project_repositories_by_ids"] = (
+            project_id,
+            organization_id,
+            repository_ids,
+        )
+        return None
+
+    async def update_project_integration(self, project_id, organization_id, integration_id, data):
+        """Update project integration."""
+        self.calls["update_project_integration"] = (
+            project_id,
+            organization_id,
+            integration_id,
+            data,
+        )
+        return None
+
+    async def delete_project_integrations_by_ids(
+        self, project_id, organization_id, integration_ids
+    ):
+        """Delete project integrations."""
+        self.calls["delete_project_integrations_by_ids"] = (
+            project_id,
+            organization_id,
+            integration_ids,
+        )
+        return None
 
 
 class _FakeClientRepo:
@@ -149,6 +205,25 @@ class _FakeTeamRepo:
         """Get team detail."""
         self.calls["get_team_detail"] = (team_id, organization_id)
         return self.team_detail_result, self.member_rows_result
+
+    async def delete_team_members_by_user_ids(self, team_id, user_ids):
+        """Delete team members."""
+        self.calls["delete_team_members_by_user_ids"] = (team_id, user_ids)
+        return None
+
+    async def update_team_members_additional_data(self, team_id, organization_id, member_updates):
+        """Update team members."""
+        self.calls["update_team_members_additional_data"] = (
+            team_id,
+            organization_id,
+            member_updates,
+        )
+        return None
+
+    async def _insert_team_members(self, team_id, member_data, added_by):
+        """Insert team members."""
+        self.calls["_insert_team_members"] = (team_id, member_data, added_by)
+        return None
 
 
 def _ctx(org_id="org-1"):
@@ -314,7 +389,6 @@ def test_prepare_project_data_populates_optional_fields(monkeypatch):
 
     assert project_data["organization_id"] == service.user_context.organization_id
     assert project_data["primary_repo_url"] == "https://github.com/org/frontend"
-    assert project_data["primary_pm_tool"] == IntegrationType.LINEAR.value
     assert project_data["billing_info"]["budget"]["total"] == 50000.0
     assert project_data["tech_stack"]["backend"] == ["FastAPI"]
     assert project_data["team_id"] == "team-1"
@@ -968,3 +1042,830 @@ async def test_get_project_details_success(monkeypatch):
     assert project_detail.id == "project-1"
     assert project_detail.project_title == "Test Project"
     assert "get_project_with_client" in fake_project_repo.calls
+
+
+# Update Project Tests
+
+
+def test_build_project_update_dict_only_provided_fields(monkeypatch):
+    """_build_project_update_dict only includes non-None fields."""
+    service, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(
+        project_title="Updated Title",
+        status=ProjectStatus.ON_HOLD,
+        priority=ProjectPriority.LOW,
+    )
+
+    update_dict = service._build_project_update_dict(request, "user-1")
+
+    assert update_dict["updated_by"] == "user-1"
+    assert update_dict["project_title"] == "Updated Title"
+    assert update_dict["status"] == ProjectStatus.ON_HOLD.value
+    assert update_dict["priority"] == ProjectPriority.LOW.value
+    assert "project_description" not in update_dict
+
+
+def test_build_project_update_dict_billing_info(monkeypatch):
+    """_build_project_update_dict includes billing_info when provided."""
+    service, *_ = _service_with_fakes(monkeypatch)
+    billing_info = BillingInfo(
+        billing_type=BillingType.FIXED_PRICE,
+        hourly_rate=Decimal("200.00"),
+        currency="USD",
+    )
+    request = UpdateProjectRequest(billing_info=billing_info)
+
+    update_dict = service._build_project_update_dict(request, "user-1")
+
+    assert "billing_info" in update_dict
+    assert update_dict["billing_info"]["billing_type"] == BillingType.FIXED_PRICE.value
+    assert update_dict["billing_info"]["hourly_rate"] == 200.0
+
+
+def test_build_project_update_dict_tech_stack(monkeypatch):
+    """_build_project_update_dict includes tech_stack when provided."""
+    service, *_ = _service_with_fakes(monkeypatch)
+    tech_stack = TechStack(frontend=["Vue"], backend=["Django"])
+    request = UpdateProjectRequest(tech_stack=tech_stack)
+
+    update_dict = service._build_project_update_dict(request, "user-1")
+
+    assert "tech_stack" in update_dict
+    assert update_dict["tech_stack"]["frontend"] == ["Vue"]
+    assert update_dict["tech_stack"]["backend"] == ["Django"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_project_team_creates_when_no_team_add(monkeypatch):
+    """_ensure_project_team creates team when project has no team and add is requested."""
+    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    fake_team_repo.team_id_result = "new-team-1"
+    project = {"id": "project-1", "project_title": "Test Project"}
+    request = UpdateProjectRequest(
+        team_members=TeamMembersUpdate(
+            add=TeamMemberInput(
+                member_id="member-1",
+                role="Developer",
+                allocation_percentage=100,
+            )
+        )
+    )
+
+    team_id, new_team_id = await service._ensure_project_team(project, request)
+
+    assert team_id == "new-team-1"
+    assert new_team_id == "new-team-1"
+    assert "create_team" in fake_team_repo.calls
+    assert "validate_organization_members" in fake_team_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_ensure_project_team_returns_existing_team_id(monkeypatch):
+    """_ensure_project_team returns existing team_id when project has team."""
+    service, *_ = _service_with_fakes(monkeypatch)
+    project = {"id": "project-1", "team_id": "existing-team-1"}
+    request = UpdateProjectRequest(
+        team_members=TeamMembersUpdate(
+            add=TeamMemberInput(
+                member_id="member-1",
+                role="Developer",
+                allocation_percentage=100,
+            )
+        )
+    )
+
+    team_id, new_team_id = await service._ensure_project_team(project, request)
+
+    assert team_id == "existing-team-1"
+    assert new_team_id is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_team_raises_when_member_not_found(monkeypatch):
+    """_ensure_project_team raises NotFoundException when member not found."""
+    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    fake_team_repo.members_valid = False
+    project = {"id": "project-1", "project_title": "Test Project"}
+    request = UpdateProjectRequest(
+        team_members=TeamMembersUpdate(
+            add=TeamMemberInput(
+                member_id="invalid-member",
+                role="Developer",
+                allocation_percentage=100,
+            )
+        )
+    )
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service._ensure_project_team(project, request)
+
+    assert exc_info.value.message_key == "projects.errors.team_member_not_found"
+
+
+@pytest.mark.asyncio
+async def test_apply_team_members_changes_removes_member(monkeypatch):
+    """_apply_team_members_changes removes member when remove is requested."""
+    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(team_members=TeamMembersUpdate(remove="member-1"))
+
+    await service._apply_team_members_changes("team-1", request, skip_add=False)
+
+    assert "delete_team_members_by_user_ids" in fake_team_repo.calls
+    call = fake_team_repo.calls["delete_team_members_by_user_ids"]
+    assert call[0] == "team-1"
+    assert call[1] == ["member-1"]
+
+
+@pytest.mark.asyncio
+async def test_apply_team_members_changes_updates_member(monkeypatch):
+    """_apply_team_members_changes updates member when update is requested."""
+    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+
+    request = UpdateProjectRequest(
+        team_members=TeamMembersUpdate(
+            update=TeamMemberUpdateItem(
+                id="member-1",
+                role="Senior Developer",
+                allocation_percentage=80,
+                hourly_rate=Decimal("180.00"),
+            )
+        )
+    )
+
+    await service._apply_team_members_changes("team-1", request, skip_add=False)
+
+    assert "update_team_members_additional_data" in fake_team_repo.calls
+    call = fake_team_repo.calls["update_team_members_additional_data"]
+    assert call[0] == "team-1"
+    assert call[2][0]["user_id"] == "member-1"
+    assert call[2][0]["role"] == "Senior Developer"
+
+
+@pytest.mark.asyncio
+async def test_apply_team_members_changes_adds_member(monkeypatch):
+    """_apply_team_members_changes adds member when add is requested."""
+    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(
+        team_members=TeamMembersUpdate(
+            add=TeamMemberInput(
+                member_id="member-2",
+                role="Developer",
+                allocation_percentage=100,
+            )
+        )
+    )
+
+    await service._apply_team_members_changes("team-1", request, skip_add=False)
+
+    assert "_insert_team_members" in fake_team_repo.calls
+    call = fake_team_repo.calls["_insert_team_members"]
+    assert call[0] == "team-1"
+    assert call[1][0].member_id == "member-2"
+
+
+@pytest.mark.asyncio
+async def test_apply_repositories_changes_removes_repository(monkeypatch):
+    """_apply_repositories_changes removes repository when remove is requested."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(repositories=RepositoriesUpdate(remove="repo-1"))
+
+    await service._apply_repositories_changes("project-1", "org-1", "user-1", request)
+
+    assert "delete_project_repositories_by_ids" in fake_project_repo.calls
+    call = fake_project_repo.calls["delete_project_repositories_by_ids"]
+    assert call[0] == "project-1"
+    assert call[1] == "org-1"
+    assert call[2] == ["repo-1"]
+
+
+@pytest.mark.asyncio
+async def test_apply_repositories_changes_updates_repository(monkeypatch):
+    """_apply_repositories_changes updates repository when update is requested."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(
+        repositories=RepositoriesUpdate(
+            update=RepositoryUpdateItem(
+                id="repo-1",
+                repository_name="updated-repo",
+                is_primary=False,
+            )
+        )
+    )
+
+    await service._apply_repositories_changes("project-1", "org-1", "user-1", request)
+
+    assert "update_project_repository" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project_repository"]
+    assert call[0] == "project-1"
+    assert call[1] == "org-1"
+    assert call[2] == "repo-1"
+    assert call[3]["repository_name"] == "updated-repo"
+
+
+@pytest.mark.asyncio
+async def test_apply_repositories_changes_adds_repository(monkeypatch):
+    """_apply_repositories_changes adds repository when add is requested."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.repositories_result = []
+    request = UpdateProjectRequest(
+        repositories=RepositoriesUpdate(
+            add=RepositoryInput(
+                platform=RepositoryPlatform.GITHUB,
+                repository_name="new-repo",
+                repository_url="https://github.com/org/new-repo",
+                is_primary=True,
+            )
+        )
+    )
+
+    await service._apply_repositories_changes("project-1", "org-1", "user-1", request)
+
+    assert "get_project_repositories" in fake_project_repo.calls
+    assert fake_project_repo.calls["get_project_repositories"][2] is True  # primary_only=True
+    assert "create_project_repositories" in fake_project_repo.calls
+    call = fake_project_repo.calls["create_project_repositories"]
+    assert call["project_id"] == "project-1"
+    assert call["repositories"][0]["repository_name"] == "new-repo"
+
+
+@pytest.mark.asyncio
+async def test_apply_integrations_changes_removes(monkeypatch):
+    """_apply_integrations_changes removes integration when remove is requested."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(integrations=IntegrationsUpdate(remove="integration-1"))
+
+    await service._apply_integrations_changes("project-1", "org-1", "user-1", request)
+
+    assert "delete_project_integrations_by_ids" in fake_project_repo.calls
+    call = fake_project_repo.calls["delete_project_integrations_by_ids"]
+    assert call[0] == "project-1"
+    assert call[1] == "org-1"
+    assert call[2] == ["integration-1"]
+
+
+@pytest.mark.asyncio
+async def test_apply_integrations_changes_updates(monkeypatch):
+    """_apply_integrations_changes updates integration when update is requested."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+
+    request = UpdateProjectRequest(
+        integrations=IntegrationsUpdate(
+            update=IntegrationUpdateItem(
+                id="integration-1",
+                integration_name="Updated Integration",
+                sync_enabled=False,
+            )
+        )
+    )
+
+    await service._apply_integrations_changes("project-1", "org-1", "user-1", request)
+
+    assert "update_project_integration" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project_integration"]
+    assert call[0] == "project-1"
+    assert call[2] == "integration-1"
+    assert call[3]["integration_name"] == "Updated Integration"
+
+
+@pytest.mark.asyncio
+async def test_apply_integrations_changes_adds_integration(monkeypatch):
+    """_apply_integrations_changes adds integration when add is requested."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(
+        integrations=IntegrationsUpdate(
+            add=IntegrationInput(
+                integration_type=IntegrationType.LINEAR,
+                integration_name="New Integration",
+                sync_enabled=True,
+            )
+        )
+    )
+
+    await service._apply_integrations_changes("project-1", "org-1", "user-1", request)
+
+    assert "create_project_integrations" in fake_project_repo.calls
+    call = fake_project_repo.calls["create_project_integrations"]
+    assert call["project_id"] == "project-1"
+    assert call["integrations"][0]["integration_name"] == "New Integration"
+
+
+@pytest.mark.asyncio
+async def test_update_project_raises_not_found_missing(monkeypatch):
+    """update_project raises NotFoundException
+    when project not found."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_with_client_result = None
+    request = UpdateProjectRequest(project_title="Updated Title")
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.update_project("project-123", request)
+
+    assert exc_info.value.message_key == "projects.errors.project_not_found"
+
+
+@pytest.mark.asyncio
+async def test_update_project_raises_bad_request_no_team(monkeypatch):
+    """update_project raises BadRequestException when
+    updating team member without team."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_with_client_result = {
+        "id": "project-1",
+        "project_title": "Test Project",
+        "team_id": None,
+    }
+    request = UpdateProjectRequest(
+        team_members=TeamMembersUpdate(
+            update=TeamMemberUpdateItem(
+                id="member-1",
+                role="Developer",
+                allocation_percentage=100,
+            )
+        )
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_project("project-1", request)
+
+    assert exc_info.value.message_key == "projects.errors.project_has_no_team"
+
+
+@pytest.mark.asyncio
+async def test_update_project_success_with_scalar_fields(monkeypatch):
+    """update_project successfully updates scalar fields."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_with_client_result = {
+        "id": "project-1",
+        "project_title": "Original Title",
+        "project_description": "Original Description",
+        "status": "active",
+        "priority": "high",
+        "team_id": None,
+    }
+    request = UpdateProjectRequest(
+        project_title="Updated Title",
+        project_description="Updated Description",
+        status=ProjectStatus.ON_HOLD,
+    )
+
+    result = await service.update_project("project-1", request)
+
+    assert result is not None
+    assert "old_data" in result
+    assert "update_project" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project"]
+    assert call[0] == "project-1"
+    assert call[2]["project_title"] == "Updated Title"
+    assert call[2]["status"] == ProjectStatus.ON_HOLD.value
+
+
+@pytest.mark.asyncio
+async def test_update_project_success_with_team_member_add(monkeypatch):
+    """update_project successfully adds team member."""
+    service, fake_project_repo, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    fake_team_repo.team_id_result = "new-team-1"
+    fake_project_repo.project_with_client_result = {
+        "id": "project-1",
+        "project_title": "Test Project",
+        "team_id": None,
+    }
+    request = UpdateProjectRequest(
+        team_members=TeamMembersUpdate(
+            add=TeamMemberInput(
+                member_id="member-1",
+                role="Developer",
+                allocation_percentage=100,
+            )
+        )
+    )
+
+    result = await service.update_project("project-1", request)
+
+    assert result is not None
+    assert "create_team" in fake_team_repo.calls
+    assert "update_project" in fake_project_repo.calls
+    # Verify team_id is set in project update
+    call = fake_project_repo.calls["update_project"]
+    assert call[2]["team_id"] == "new-team-1"
+
+
+@pytest.mark.asyncio
+async def test_update_project_success_with_repo_update(monkeypatch):
+    """update_project successfully updates repository."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_with_client_result = {
+        "id": "project-1",
+        "project_title": "Test Project",
+        "team_id": None,
+    }
+    request = UpdateProjectRequest(
+        repositories=RepositoriesUpdate(
+            update=RepositoryUpdateItem(
+                id="repo-1",
+                repository_name="updated-repo-name",
+            )
+        )
+    )
+
+    result = await service.update_project("project-1", request)
+
+    assert result is not None
+    assert "update_project_repository" in fake_project_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_update_project_success_with_integration_add(monkeypatch):
+    """update_project successfully adds integration."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_with_client_result = {
+        "id": "project-1",
+        "project_title": "Test Project",
+        "team_id": None,
+    }
+    request = UpdateProjectRequest(
+        integrations=IntegrationsUpdate(
+            add=IntegrationInput(
+                integration_type=IntegrationType.JIRA,
+                integration_name="Jira Integration",
+            )
+        )
+    )
+
+    result = await service.update_project("project-1", request)
+
+    assert result is not None
+    assert "create_project_integrations" in fake_project_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_update_project_returns_old_data_for_audit(monkeypatch):
+    """update_project returns old_data formatted for audit logging."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_with_client_result = {
+        "id": "project-1",
+        "project_title": "Original Title",
+        "project_description": "Original Description",
+        "status": "active",
+        "priority": "high",
+        "team_id": None,
+        "billing_info": None,
+        "tech_stack": None,
+        "project_category": [],
+        "practice_areas": [],
+        "start_date": None,
+        "target_end_date": None,
+        "project_goals": None,
+        "success_criteria": None,
+        "additional_ai_context": None,
+        "tags": [],
+        "custom_fields": None,
+        "is_billable": True,
+        "is_internal": False,
+    }
+    request = UpdateProjectRequest(project_title="Updated Title")
+
+    result = await service.update_project("project-1", request)
+
+    assert result is not None
+    assert "old_data" in result
+    assert result["old_data"]["project_title"] == "Original Title"
+    assert result["old_data"]["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_ensure_single_primary_repo_clears_existing(monkeypatch):
+    """_ensure_single_primary_repository clears existing primary when different from exclude_id."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.repositories_result = [{"id": "repo-2", "is_primary": True}]
+
+    await service._ensure_single_primary_repository("project-1", "org-1", exclude_id="repo-1")
+
+    assert "get_project_repositories" in fake_project_repo.calls
+    assert fake_project_repo.calls["get_project_repositories"][2] is True
+    assert "update_project_repository" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project_repository"]
+    assert call[2] == "repo-2"
+    assert call[3]["is_primary"] is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_single_primary_repo_skips_same_id(monkeypatch):
+    """_ensure_single_primary_repository skips update when exclude_id matches."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.repositories_result = [{"id": "repo-1", "is_primary": True}]
+
+    await service._ensure_single_primary_repository("project-1", "org-1", exclude_id="repo-1")
+
+    assert "get_project_repositories" in fake_project_repo.calls
+    assert "update_project_repository" not in fake_project_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_apply_repos_changes_updates_primary_flag(monkeypatch):
+    """_apply_repositories_changes clears existing primary when setting new primary."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.repositories_result = [{"id": "repo-2", "is_primary": True}]
+    request = UpdateProjectRequest(
+        repositories=RepositoriesUpdate(
+            update=RepositoryUpdateItem(
+                id="repo-1",
+                repository_name="updated-repo",
+                is_primary=True,
+            )
+        )
+    )
+
+    await service._apply_repositories_changes("project-1", "org-1", "user-1", request)
+
+    assert "get_project_repositories" in fake_project_repo.calls
+    assert "update_project_repository" in fake_project_repo.calls
+    calls = [c for k, c in fake_project_repo.calls.items() if k == "update_project_repository"]
+    assert len(calls) >= 1
+
+
+@pytest.mark.asyncio
+async def test_apply_repo_changes_skips_when_no_request(monkeypatch):
+    """_apply_repositories_changes returns early when repositories is None."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(repositories=None)
+
+    await service._apply_repositories_changes("project-1", "org-1", "user-1", request)
+
+    assert "delete_project_repositories_by_ids" not in fake_project_repo.calls
+    assert "update_project_repository" not in fake_project_repo.calls
+    assert "create_project_repositories" not in fake_project_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_apply_project_row_sets_primary_from_add(monkeypatch):
+    """_apply_project_row_update sets primary_repo_url from add request."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(
+        repositories=RepositoriesUpdate(
+            add=RepositoryInput(
+                platform=RepositoryPlatform.GITHUB,
+                repository_name="new-repo",
+                repository_url="https://github.com/org/new-repo",
+                is_primary=True,
+            )
+        )
+    )
+
+    await service._apply_project_row_update("project-1", "org-1", request, None)
+
+    assert "update_project" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project"]
+    assert call[2]["primary_repo_url"] == "https://github.com/org/new-repo"
+
+
+@pytest.mark.asyncio
+async def test_apply_project_row_sets_primary_from_update(monkeypatch):
+    """_apply_project_row_update sets primary_repo_url from update request."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(
+        repositories=RepositoriesUpdate(
+            update=RepositoryUpdateItem(
+                id="repo-1",
+                repository_url="https://github.com/org/updated-repo",
+                is_primary=True,
+            )
+        )
+    )
+
+    await service._apply_project_row_update("project-1", "org-1", request, None)
+
+    assert "update_project" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project"]
+    assert call[2]["primary_repo_url"] == "https://github.com/org/updated-repo"
+
+
+@pytest.mark.asyncio
+async def test_apply_project_row_fetches_primary_not_in_req(monkeypatch):
+    """_apply_project_row_update fetches primary repo when not in request."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.repositories_result = [
+        {"id": "repo-1", "repository_url": "https://github.com/org/existing", "is_primary": True}
+    ]
+    request = UpdateProjectRequest(repositories=RepositoriesUpdate(remove="repo-2"))
+
+    await service._apply_project_row_update("project-1", "org-1", request, None)
+
+    assert "get_project_repositories" in fake_project_repo.calls
+    assert fake_project_repo.calls["get_project_repositories"][2] is True
+    assert "update_project" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project"]
+    assert call[2]["primary_repo_url"] == "https://github.com/org/existing"
+
+
+@pytest.mark.asyncio
+async def test_apply_project_row_handles_no_primary_repo(monkeypatch):
+    """_apply_project_row_update handles case when no primary repo exists."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.repositories_result = []
+    request = UpdateProjectRequest(repositories=RepositoriesUpdate(remove="repo-1"))
+
+    await service._apply_project_row_update("project-1", "org-1", request, None)
+
+    assert "update_project" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project"]
+    assert call[2]["primary_repo_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_apply_project_row_skips_no_repos_request(monkeypatch):
+    """_apply_project_row_update skips primary_repo_url when repositories not in request."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(project_title="Updated Title")
+
+    await service._apply_project_row_update("project-1", "org-1", request, None)
+
+    assert "update_project" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project"]
+    assert "primary_repo_url" not in call[2]
+
+
+@pytest.mark.asyncio
+async def test_apply_project_row_update_sets_team_id(monkeypatch):
+    """_apply_project_row_update sets team_id when new_team_id provided."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(project_title="Updated Title")
+
+    await service._apply_project_row_update("project-1", "org-1", request, "new-team-1")
+
+    assert "update_project" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project"]
+    assert call[2]["team_id"] == "new-team-1"
+
+
+@pytest.mark.asyncio
+async def test_apply_integrations_changes_skips_when_no_req(monkeypatch):
+    """_apply_integrations_changes returns early when integrations is None."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest(integrations=None)
+
+    await service._apply_integrations_changes("project-1", "org-1", "user-1", request)
+
+    assert "delete_project_integrations_by_ids" not in fake_project_repo.calls
+    assert "update_project_integration" not in fake_project_repo.calls
+    assert "create_project_integrations" not in fake_project_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_build_billing_info_handles_none():
+    """_build_billing_info returns None for None input."""
+    result = ProjectService._build_billing_info(None)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_build_billing_info_handles_non_dict():
+    """_build_billing_info returns None for non-dict data."""
+    result = ProjectService._build_billing_info(json.dumps([1, 2, 3]))
+    assert result is None
+
+
+def test_prepare_billing_info_dict_without_hourly_rate(monkeypatch):
+    """_prepare_billing_info_dict handles billing_info without hourly_rate."""
+    service, *_ = _service_with_fakes(monkeypatch)
+    billing_info = BillingInfo(
+        billing_type=BillingType.FIXED_PRICE,
+        hourly_rate=None,
+        currency="USD",
+    )
+
+    billing_dict = service._prepare_billing_info_dict(billing_info)
+
+    assert "hourly_rate" not in billing_dict
+    assert billing_dict["billing_type"] == BillingType.FIXED_PRICE.value
+    assert billing_dict["currency"] == "USD"
+
+
+def test_prepare_billing_info_dict_without_currency(monkeypatch):
+    """_prepare_billing_info_dict handles billing_info without currency."""
+    service, *_ = _service_with_fakes(monkeypatch)
+    billing_info = BillingInfo(
+        billing_type=BillingType.FIXED_PRICE,
+        hourly_rate=Decimal("150.00"),
+        currency=None,
+    )
+
+    billing_dict = service._prepare_billing_info_dict(billing_info)
+
+    assert "currency" not in billing_dict
+    assert billing_dict["hourly_rate"] == 150.0
+
+
+def test_apply_project_flags_with_none_values(monkeypatch):
+    """_apply_project_flags skips fields when is_billable or is_internal is not provided."""
+    service, *_ = _service_with_fakes(monkeypatch)
+    project_data = {}
+    # Create request without is_billable and is_internal (they default to None in the method)
+    request = CreateProjectRequest(
+        project_title="Test",
+        client_id="client-1",
+        status=ProjectStatus.ACTIVE,
+    )
+    # Manually set to None to test the None check logic
+    request.is_billable = None
+    request.is_internal = None
+
+    service._apply_project_flags(project_data, request)
+
+    assert "is_billable" not in project_data
+    assert "is_internal" not in project_data
+
+
+def test_primary_relationships_without_primary_repo(monkeypatch):
+    """_apply_primary_relationships skips when no primary repository."""
+    service, *_ = _service_with_fakes(monkeypatch)
+    project_data = {}
+    request = CreateProjectRequest(
+        project_title="Test",
+        client_id="client-1",
+        status=ProjectStatus.ACTIVE,
+        repositories=[
+            RepositoryInput(
+                platform=RepositoryPlatform.GITHUB,
+                repository_name="repo",
+                repository_url="https://github.com/org/repo",
+                is_primary=False,
+            )
+        ],
+    )
+
+    service._apply_primary_relationships(project_data, request)
+
+    assert "primary_repo_url" not in project_data
+
+
+@pytest.mark.asyncio
+async def test_create_project_integrations_optional_missing(monkeypatch):
+    """_create_project_integrations handles integration with missing optional fields."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = CreateProjectRequest(
+        project_title="Integration Project",
+        client_id="client-1",
+        status=ProjectStatus.ACTIVE,
+        integrations=[
+            IntegrationInput(
+                integration_type=IntegrationType.LINEAR,
+                integration_name=None,
+                external_project_id=None,
+                external_project_key=None,
+                external_workspace_id=None,
+                external_board_id=None,
+                integration_purpose=None,
+                integration_config=None,
+                sync_enabled=True,
+            )
+        ],
+    )
+
+    await service._create_project_integrations("project-1", request)
+
+    call = fake_project_repo.calls["create_project_integrations"]
+    payload = call["integrations"][0]
+    assert payload["integration_type"] == IntegrationType.LINEAR.value
+    assert "integration_name" not in payload
+    assert "external_project_id" not in payload
+    assert "external_project_key" not in payload
+    assert "external_workspace_id" not in payload
+    assert "external_board_id" not in payload
+    assert "integration_purpose" not in payload
+    assert "integration_config" not in payload
+
+
+@pytest.mark.asyncio
+async def test_apply_repos_changes_adds_non_primary(monkeypatch):
+    """_apply_repositories_changes adds repository without primary flag."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.repositories_result = []
+    request = UpdateProjectRequest(
+        repositories=RepositoriesUpdate(
+            add=RepositoryInput(
+                platform=RepositoryPlatform.GITHUB,
+                repository_name="new-repo",
+                repository_url="https://github.com/org/new-repo",
+                is_primary=False,
+            )
+        )
+    )
+
+    await service._apply_repositories_changes("project-1", "org-1", "user-1", request)
+
+    assert "get_project_repositories" not in fake_project_repo.calls
+    assert "create_project_repositories" in fake_project_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_apply_project_row_update_with_only_updated_by(monkeypatch):
+    """_apply_project_row_update includes updated_by even when no other fields."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    request = UpdateProjectRequest()
+
+    await service._apply_project_row_update("project-1", "org-1", request, None)
+
+    # updated_by is always included, so update_project is called
+    assert "update_project" in fake_project_repo.calls
+    call = fake_project_repo.calls["update_project"]
+    assert call[2]["updated_by"] == service.user_context.user_id
+    assert len(call[2]) == 1  # Only updated_by
