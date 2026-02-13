@@ -293,3 +293,259 @@ async def test_list_projects_empty_result(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"] == []
     assert body["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_update_project(monkeypatch, client):
+    """Update a project with scalar fields."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_update_project(self, project_id, request_data):
+        """Fake update project."""
+        del self
+        assert project_id == "project-123"
+        assert request_data.project_title == "Updated Project Title"
+        assert request_data.status == "on_hold"
+        return {
+            "old_data": {
+                "project_title": "Original Title",
+                "status": "active",
+            }
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.projects.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.ProjectService.update_project",
+        fake_update_project,
+    )
+
+    res = await client.patch(
+        "/v1/projects/project-123",
+        json={
+            "project_title": "Updated Project Title",
+            "status": "on_hold",
+        },
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_update_project_with_team_member_add(monkeypatch, client):
+    """Update project by adding a team member."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_update_project(self, project_id, request_data):
+        """Fake update project."""
+        del self
+        assert project_id == "project-123"
+        assert request_data.team_members is not None
+        assert request_data.team_members.add is not None
+        assert request_data.team_members.add.member_id == "member-1"
+        return {"old_data": {}}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.projects.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.ProjectService.update_project",
+        fake_update_project,
+    )
+
+    res = await client.patch(
+        "/v1/projects/project-123",
+        json={
+            "team_members": {
+                "add": {
+                    "member_id": "member-1",
+                    "role": "Developer",
+                    "allocation_percentage": 100,
+                }
+            }
+        },
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_update_project_with_repository_update(monkeypatch, client):
+    """Update project by updating a repository."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_update_project(self, project_id, request_data):
+        """Fake update project."""
+        del self
+        assert project_id == "project-123"
+        assert request_data.repositories is not None
+        assert request_data.repositories.update is not None
+        assert request_data.repositories.update.id == "repo-1"
+        assert request_data.repositories.update.repository_name == "updated-repo"
+        return {"old_data": {}}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.projects.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.ProjectService.update_project",
+        fake_update_project,
+    )
+
+    res = await client.patch(
+        "/v1/projects/project-123",
+        json={
+            "repositories": {
+                "update": {
+                    "id": "repo-1",
+                    "repository_name": "updated-repo",
+                }
+            }
+        },
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_update_project_with_integration_add(monkeypatch, client):
+    """Update project by adding an integration."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_update_project(self, project_id, request_data):
+        """Fake update project."""
+        del self
+        assert project_id == "project-123"
+        assert request_data.integrations is not None
+        assert request_data.integrations.add is not None
+        assert request_data.integrations.add.integration_type == "linear"
+        return {"old_data": {}}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.projects.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.ProjectService.update_project",
+        fake_update_project,
+    )
+
+    res = await client.patch(
+        "/v1/projects/project-123",
+        json={
+            "integrations": {
+                "add": {
+                    "integration_type": "linear",
+                    "integration_name": "Linear Integration",
+                    "sync_enabled": True,
+                }
+            }
+        },
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_update_project_with_multiple_fields(monkeypatch, client):
+    """Update project with multiple fields including billing and tech stack."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_update_project(self, project_id, request_data):
+        """Fake update project."""
+        del self
+        assert project_id == "project-123"
+        assert request_data.project_title == "Updated Title"
+        assert request_data.billing_info is not None
+        assert request_data.tech_stack is not None
+        return {"old_data": {}}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.projects.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.ProjectService.update_project",
+        fake_update_project,
+    )
+
+    res = await client.patch(
+        "/v1/projects/project-123",
+        json={
+            "project_title": "Updated Title",
+            "billing_info": {
+                "billing_type": "time_and_materials",
+                "hourly_rate": 150.00,
+                "currency": "USD",
+            },
+            "tech_stack": {
+                "frontend": ["React", "TypeScript"],
+                "backend": ["Node.js"],
+            },
+        },
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_update_project_with_no_changes(monkeypatch, client):
+    """Test updating project with empty update (no changes)."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_update_project(self, project_id, request_data):
+        """Fake update project returning None (no changes)."""
+        del self, project_id, request_data
+        return None
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.projects.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.ProjectService.update_project",
+        fake_update_project,
+    )
+
+    res = await client.patch(
+        "/v1/projects/project-123",
+        json={},
+    )
+    assert_success(res, 200)
+    # When result is None, audit data should not be set
+    # This tests the if result: branch in the API handler

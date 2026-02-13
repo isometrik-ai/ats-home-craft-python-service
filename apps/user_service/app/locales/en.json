@@ -217,12 +217,18 @@
       "project_title_exists": "A project with this title already exists in the organization.",
       "client_not_found": "Client not found",
       "team_member_not_found": "One or more team members do not exist in the organization.",
-      "project_not_found": "Project not found"
+      "project_not_found": "Project not found",
+      "client_id_cannot_change": "Client ID cannot be changed after project creation.",
+      "team_must_have_one_member": "Team must have at least one member.",
+      "project_has_no_team": "Project has no team; cannot update team members.",
+      "repository_not_found": "Repository not found.",
+      "integration_not_found": "Integration not found."
     },
     "success": {
       "project_created": "Project created successfully.",
       "projects_retrieved": "Projects retrieved successfully.",
-      "project_retrieved": "Project retrieved successfully."
+      "project_retrieved": "Project retrieved successfully.",
+      "project_updated": "Project updated successfully."
     }
   }
 }

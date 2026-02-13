@@ -506,6 +506,76 @@ class TeamRepository:
                 delete_query, team_input.team_id, team_input.members_to_remove
             )
 
+    async def delete_team_members_by_user_ids(self, team_id: str, user_ids: list[str]) -> None:
+        """Remove team members by user IDs.
+
+        Args:
+            team_id: Team UUID
+            user_ids: List of user IDs to remove
+        """
+        if not user_ids:
+            return
+        query = """
+            DELETE FROM team_members
+            WHERE team_id = $1::uuid AND user_id = ANY($2::uuid[])
+        """
+        await self.db_connection.execute(query, team_id, list(set(user_ids)))
+
+    async def update_team_members_additional_data(
+        self,
+        team_id: str,
+        organization_id: str,
+        updates: list[dict],
+    ) -> None:
+        """Update additional_data for team members. Verifies team belongs to organization.
+
+        Args:
+            team_id: Team UUID
+            organization_id: Organization UUID (for scoping)
+            updates: List of dicts with user_id and optional role, allocation_percentage,
+                     hourly_rate, role_description
+        """
+        if not updates:
+            return
+        for item in updates:
+            user_id = item.get("user_id")
+            if not user_id:
+                continue
+            additional_data = {}
+            if item.get("role") is not None:
+                additional_data["role"] = item["role"]
+            if item.get("allocation_percentage") is not None:
+                additional_data["allocation_percentage"] = item["allocation_percentage"]
+            if item.get("hourly_rate") is not None:
+                additional_data["hourly_rate"] = item["hourly_rate"]
+            if item.get("role_description") is not None:
+                additional_data["role_description"] = item["role_description"]
+            if not additional_data:
+                continue
+
+            # Merge with existing additional_data and update role column
+            query = """
+                UPDATE team_members tm
+                SET
+                    role = COALESCE($3::text, tm.role),
+                    additional_data = COALESCE(tm.additional_data, '{}'::jsonb) || $4::jsonb
+                FROM teams t
+                WHERE tm.team_id = t.id
+                  AND tm.team_id = $1::uuid
+                  AND tm.user_id = $2::uuid
+                  AND t.organization_id = $5::uuid
+                  AND t.deleted_at IS NULL
+            """
+            role_val = str(additional_data.get("role")) if "role" in additional_data else None
+            await self.db_connection.execute(
+                query,
+                team_id,
+                user_id,
+                role_val,
+                json.dumps(additional_data),
+                organization_id,
+            )
+
     # DELETE OPERATIONS
     async def delete_team_and_members(self, team_input: TeamDbDelete) -> None:
         """Hard-delete members and soft-delete team in a single transaction.

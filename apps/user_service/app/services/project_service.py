@@ -23,7 +23,9 @@ from apps.user_service.app.schemas.projects import (
     ProjectDetailData,
     ProjectListItem,
     ProjectListQueryParams,
+    TeamMemberInput,
     TechStack,
+    UpdateProjectRequest,
 )
 from apps.user_service.app.schemas.teams import MemberData, TeamDbIn
 from apps.user_service.app.utils.common_utils import (
@@ -32,6 +34,7 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_field,
 )
 from libs.shared_utils.http_exceptions import (
+    BadRequestException,
     ConflictException,
     NotFoundException,
 )
@@ -350,25 +353,13 @@ class ProjectService:
         project_data: dict[str, Any],
         request_data: CreateProjectRequest,
     ) -> None:
-        """Set primary repo and integration metadata when available."""
+        """Set primary repo metadata when available."""
         if request_data.repositories:
             primary_repo = next(
                 (repo for repo in request_data.repositories if repo.is_primary), None
             )
             if primary_repo:
                 project_data["primary_repo_url"] = primary_repo.repository_url
-
-        if request_data.integrations:
-            primary_integration = next(
-                (
-                    integration
-                    for integration in request_data.integrations
-                    if integration.is_primary
-                ),
-                None,
-            )
-            if primary_integration:
-                project_data["primary_pm_tool"] = primary_integration.integration_type.value
 
     async def _create_project_repositories(
         self,
@@ -434,7 +425,6 @@ class ProjectService:
                 "sync_direction": integration.sync_direction.value,
                 "auto_sync": integration.auto_sync,
                 "sync_interval_minutes": integration.sync_interval_minutes,
-                "is_primary": integration.is_primary,
             }
             if integration.integration_name:
                 integration_dict["integration_name"] = integration.integration_name
@@ -502,6 +492,360 @@ class ProjectService:
 
         # Create integrations if provided
         await self._create_project_integrations(project_uuid, request_data)
+
+    def _build_project_update_dict(
+        self, request_data: UpdateProjectRequest, updated_by: str
+    ) -> dict[str, Any]:
+        """Build partial project update dict from request (only non-None scalar fields)."""
+        data: dict[str, Any] = {"updated_by": updated_by}
+        scalar_fields = (
+            "project_title",
+            "project_description",
+            "status",
+            "priority",
+            "project_category",
+            "practice_areas",
+            "start_date",
+            "target_end_date",
+            "project_goals",
+            "success_criteria",
+            "additional_ai_context",
+            "tags",
+            "custom_fields",
+            "is_billable",
+            "is_internal",
+        )
+        for field in scalar_fields:
+            value = getattr(request_data, field, None)
+            if value is not None:
+                if hasattr(value, "value"):  # Enum
+                    data[field] = value.value
+                else:
+                    data[field] = value
+        if request_data.billing_info is not None:
+            data["billing_info"] = self._prepare_billing_info_dict(request_data.billing_info)
+        if request_data.tech_stack is not None:
+            data["tech_stack"] = self._prepare_tech_stack_dict(request_data.tech_stack)
+        return data
+
+    @staticmethod
+    def _format_project_for_audit(project_data: dict[str, Any]) -> dict[str, Any]:
+        """Format project data for audit logging.
+
+        Extracts and formats project fields into a structure suitable for audit log comparison.
+        """
+        return {
+            "project_id": str(project_data.get("id")),
+            "project_title": project_data.get("project_title"),
+            "project_description": project_data.get("project_description"),
+            "status": project_data.get("status"),
+            "priority": project_data.get("priority"),
+            "project_category": project_data.get("project_category"),
+            "practice_areas": project_data.get("practice_areas"),
+            "start_date": format_iso_datetime(project_data.get("start_date")),
+            "target_end_date": format_iso_datetime(project_data.get("target_end_date")),
+            "billing_info": parse_json_field(project_data.get("billing_info")),
+            "tech_stack": parse_json_field(project_data.get("tech_stack")),
+            "project_goals": project_data.get("project_goals"),
+            "success_criteria": project_data.get("success_criteria"),
+            "additional_ai_context": project_data.get("additional_ai_context"),
+            "tags": project_data.get("tags"),
+            "custom_fields": parse_json_field(project_data.get("custom_fields")),
+            "is_billable": project_data.get("is_billable"),
+            "is_internal": project_data.get("is_internal"),
+        }
+
+    @staticmethod
+    def _partial_update_payload(
+        dumped: dict[str, Any],
+        exclude_keys: frozenset[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build DB update payload from model_dump: exclude keys and serialize enums."""
+        exclude = exclude_keys or frozenset()
+        return {
+            k: (v.value if hasattr(v, "value") else v)
+            for k, v in dumped.items()
+            if k not in exclude
+        }
+
+    @staticmethod
+    def _member_input_to_member_data(member: TeamMemberInput) -> MemberData:
+        """Build MemberData from a single TeamMemberInput."""
+        return MemberData(
+            member_id=member.member_id,
+            additional_data={
+                "role": member.role,
+                "allocation_percentage": member.allocation_percentage,
+                "hourly_rate": float(member.hourly_rate)
+                if member.hourly_rate is not None
+                else None,
+                "role_description": member.role_description,
+            },
+        )
+
+    async def _ensure_project_team(
+        self,
+        project: dict[str, Any],
+        request_data: UpdateProjectRequest,
+    ) -> tuple[str | None, str | None]:
+        """If project has no team and request is team_members.add, create team with that member.
+        Returns (team_id, new_team_id_for_project or None). Single operation only.
+        """
+        organization_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+        team_id = str(project["team_id"]) if project.get("team_id") else None
+        new_team_id: str | None = None
+        team_members = request_data.team_members
+
+        if not team_members or team_id or not team_members.add:
+            return team_id, new_team_id
+
+        valid = await self.team_repository.validate_organization_members(
+            [team_members.add.member_id], organization_id
+        )
+        if not valid:
+            raise NotFoundException(
+                message_key="projects.errors.team_member_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        project_title = project.get("project_title") or "Project"
+        team_db_in = TeamDbIn(
+            organization_id=organization_id,
+            name=project_title,
+            description=f"Team for project: {project_title}",
+            created_by=user_id,
+            member_data=[self._member_input_to_member_data(team_members.add)],
+        )
+        new_team_id = await self.team_repository.create_team(team_db_in)
+        return new_team_id, new_team_id
+
+    async def _apply_team_members_changes(
+        self,
+        team_id: str,
+        request_data: UpdateProjectRequest,
+        skip_add: bool,
+    ) -> None:
+        """Apply exactly one team member operation: remove, update, or add."""
+        organization_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+        team_member = request_data.team_members
+        if not team_member:
+            return
+
+        if team_member.remove:
+            await self.team_repository.delete_team_members_by_user_ids(
+                team_id, [team_member.remove]
+            )
+        elif team_member.update:
+            await self.team_repository.update_team_members_additional_data(
+                team_id,
+                organization_id,
+                [
+                    {
+                        "user_id": team_member.update.id,
+                        "role": team_member.update.role,
+                        "allocation_percentage": team_member.update.allocation_percentage,
+                        "hourly_rate": (
+                            float(team_member.update.hourly_rate)
+                            if team_member.update.hourly_rate is not None
+                            else None
+                        ),
+                        "role_description": team_member.update.role_description,
+                    }
+                ],
+            )
+        elif team_member.add and not skip_add:
+            await self.team_repository._insert_team_members(
+                team_id=team_id,
+                member_data=[self._member_input_to_member_data(team_member.add)],
+                added_by=user_id,
+            )
+
+    async def _ensure_single_primary_repository(
+        self,
+        project_uuid: str,
+        organization_id: str,
+        *,
+        exclude_id: str | None = None,
+    ) -> None:
+        """Enforce at most one primary repo:
+        clear is_primary on current primary (if different from exclude_id)."""
+        current_primary = await self.project_repository.get_project_repositories(
+            project_uuid, organization_id, primary_only=True
+        )
+        if current_primary and current_primary[0].get("id") != exclude_id:
+            await self.project_repository.update_project_repository(
+                project_uuid, organization_id, str(current_primary[0]["id"]), {"is_primary": False}
+            )
+
+    async def _apply_repositories_changes(
+        self,
+        project_uuid: str,
+        organization_id: str,
+        user_id: str,
+        request_data: UpdateProjectRequest,
+    ) -> None:
+        """Apply single remove, update, or add for repositories. Enforces at most one primary."""
+        repos_req = request_data.repositories
+        if not repos_req:
+            return
+        if repos_req.remove:
+            await self.project_repository.delete_project_repositories_by_ids(
+                project_uuid, organization_id, [repos_req.remove]
+            )
+        elif repos_req.update:
+            item = repos_req.update
+            data = self._partial_update_payload(
+                item.model_dump(exclude_none=True), exclude_keys=frozenset({"id"})
+            )
+            if data.get("is_primary") is True:
+                await self._ensure_single_primary_repository(
+                    project_uuid, organization_id, exclude_id=item.id
+                )
+            await self.project_repository.update_project_repository(
+                project_uuid, organization_id, item.id, data
+            )
+        elif repos_req.add:
+            add_item = repos_req.add
+            if add_item.is_primary:
+                await self._ensure_single_primary_repository(
+                    project_uuid, organization_id, exclude_id=None
+                )
+            repo_row = self._partial_update_payload(add_item.model_dump())
+            await self.project_repository.create_project_repositories(
+                project_id=project_uuid,
+                organization_id=organization_id,
+                repositories=[repo_row],
+                created_by=user_id,
+            )
+
+    async def _apply_integrations_changes(
+        self,
+        project_uuid: str,
+        organization_id: str,
+        user_id: str,
+        request_data: UpdateProjectRequest,
+    ) -> None:
+        """Apply single remove, update, or add for integrations."""
+        integrations_req = request_data.integrations
+        if not integrations_req:
+            return
+        if integrations_req.remove:
+            await self.project_repository.delete_project_integrations_by_ids(
+                project_uuid, organization_id, [integrations_req.remove]
+            )
+        elif integrations_req.update:
+            item = integrations_req.update
+            data = self._partial_update_payload(
+                item.model_dump(exclude_none=True), exclude_keys=frozenset({"id"})
+            )
+            await self.project_repository.update_project_integration(
+                project_uuid, organization_id, item.id, data
+            )
+        elif integrations_req.add:
+            add_item = integrations_req.add
+            integration_row = self._partial_update_payload(add_item.model_dump())
+            await self.project_repository.create_project_integrations(
+                project_id=project_uuid,
+                organization_id=organization_id,
+                integrations=[integration_row],
+                connected_by=user_id,
+            )
+
+    async def _apply_project_row_update(
+        self,
+        project_uuid: str,
+        organization_id: str,
+        request_data: UpdateProjectRequest,
+        new_team_id: str | None,
+    ) -> None:
+        """Build project update dict; set primary_repo if needed."""
+        user_id = self.user_context.user_id
+        project_data = self._build_project_update_dict(request_data, user_id)
+        if new_team_id is not None:
+            project_data["team_id"] = new_team_id
+        if request_data.repositories:
+            # Optimize: only fetch if we can't determine primary from request data
+            primary_repo_url = None
+
+            # Check if we can determine primary repo from request
+            repos_req = request_data.repositories
+            if repos_req.add and repos_req.add.is_primary:
+                primary_repo_url = repos_req.add.repository_url
+            elif (
+                repos_req.update and repos_req.update.is_primary and repos_req.update.repository_url
+            ):
+                primary_repo_url = repos_req.update.repository_url
+
+            # Fetch only if we couldn't determine from request
+            if primary_repo_url is None:
+                repos = await self.project_repository.get_project_repositories(
+                    project_uuid, organization_id, primary_only=True
+                )
+                primary_repo = repos[0] if repos else None
+                primary_repo_url = primary_repo["repository_url"] if primary_repo else None
+
+            project_data["primary_repo_url"] = primary_repo_url
+        if project_data:
+            await self.project_repository.update_project(
+                project_uuid, organization_id, project_data
+            )
+
+    async def update_project(
+        self, project_id: str, request_data: UpdateProjectRequest
+    ) -> dict[str, Any] | None:
+        """Update a project. Only provided fields are updated. List fields use add/update/remove.
+
+        Invariant: at most one primary repository per project.
+        When a repo is set to primary, others are cleared first.
+
+        Order: remove (team_members, repos, integrations), then update, then add, then project row.
+        All operations run in the same transaction (caller must use db_uow).
+
+        Returns:
+            dict | None: Result with old_data for audit when update is applied, None when no-op
+
+        Raises:
+            NotFoundException: Project, repository, or integration not found
+            BadRequestException: Team would have zero members or project has no team when needed
+        """
+        organization_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+
+        project = await self.project_repository.get_project_with_client(project_id, organization_id)
+        if not project:
+            raise NotFoundException(
+                message_key="projects.errors.project_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        project_uuid = str(project["id"])
+        team_id, new_team_id = await self._ensure_project_team(project, request_data)
+
+        team_members_req = request_data.team_members
+        has_team_member_change = (
+            team_members_req
+            and (team_members_req.update or team_members_req.remove)
+            and not team_id
+        )
+        if has_team_member_change:
+            raise BadRequestException(
+                message_key="projects.errors.project_has_no_team",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        if team_id:
+            await self._apply_team_members_changes(
+                team_id, request_data, skip_add=(new_team_id is not None)
+            )
+        await self._apply_repositories_changes(project_uuid, organization_id, user_id, request_data)
+        await self._apply_integrations_changes(project_uuid, organization_id, user_id, request_data)
+        await self._apply_project_row_update(
+            project_uuid, organization_id, request_data, new_team_id
+        )
+        old_data = self._format_project_for_audit(project)
+        return {"old_data": old_data}
 
     async def list_projects(
         self, filters: ProjectListQueryParams

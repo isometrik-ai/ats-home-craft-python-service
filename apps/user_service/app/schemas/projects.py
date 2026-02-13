@@ -213,7 +213,6 @@ class IntegrationInput(BaseModel):
         None,
         description="Integration-specific configuration",
     )
-    is_primary: bool = Field(default=False, description="Whether integration is primary PM tool")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -230,6 +229,126 @@ class IntegrationInput(BaseModel):
             }
         }
     )
+
+
+class TeamMemberUpdateItem(BaseModel):
+    """Team member update item; id is the team_member record id or user_id."""
+
+    id: str = Field(..., description="Team member record ID (or user_id) to update")
+    role: str | None = Field(None, min_length=1, max_length=100, description="Member role")
+    allocation_percentage: int | None = Field(None, ge=1, le=100, description="Allocation (1-100)")
+    hourly_rate: Decimal | None = Field(None, ge=0, le=99999.99, description="Hourly rate")
+    role_description: str | None = Field(None, max_length=500, description="Role description")
+
+
+class RepositoryUpdateItem(BaseModel):
+    """Repository update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Project repository record ID to update")
+    repository_name: str | None = Field(None, max_length=100)
+    repository_owner: str | None = Field(None, max_length=100)
+    repository_url: str | None = Field(None, max_length=500)
+    purpose: str | None = Field(None, max_length=200)
+    primary_branch: str | None = Field(None, max_length=100)
+    is_private: bool | None = None
+    is_primary: bool | None = None
+    description: str | None = Field(None, max_length=2000)
+    connection_status: ConnectionStatus | None = None
+    webhook_url: str | None = Field(None, max_length=500)
+    webhook_secret: str | None = Field(None, max_length=500)
+    webhook_events: list[str] | None = Field(None, max_length=50)
+
+
+class IntegrationUpdateItem(BaseModel):
+    """Integration update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Project integration record ID to update")
+    integration_name: str | None = Field(None, max_length=200)
+    connection_status: ConnectionStatus | None = None
+    external_project_id: str | None = Field(None, max_length=200)
+    external_project_key: str | None = Field(None, max_length=100)
+    external_workspace_id: str | None = Field(None, max_length=200)
+    external_board_id: str | None = Field(None, max_length=200)
+    webhook_url: str | None = Field(None, max_length=500)
+    webhook_secret: str | None = Field(None, max_length=500)
+    webhook_events: list[str] | None = Field(None, max_length=50)
+    outgoing_webhook_url: str | None = Field(None, max_length=500)
+    outgoing_webhook_secret: str | None = Field(None, max_length=500)
+    sync_enabled: bool | None = None
+    sync_direction: SyncDirection | None = None
+    auto_sync: bool | None = None
+    sync_interval_minutes: int | None = Field(None, ge=5, le=1440)
+    integration_purpose: str | None = Field(None, max_length=500)
+    integration_config: dict[str, Any] | None = None
+
+
+class TeamMembersUpdate(BaseModel):
+    """Single team member operation: add, update, or remove. Exactly one must be provided."""
+
+    add: TeamMemberInput | None = Field(None, description="New member to add")
+    update: TeamMemberUpdateItem | None = Field(
+        None, description="Existing member to update (must include id)"
+    )
+    remove: str | None = Field(None, min_length=1, description="Team member user_id to remove")
+
+
+class RepositoriesUpdate(BaseModel):
+    """Single repository operation: add, update, or remove. Exactly one must be provided."""
+
+    add: RepositoryInput | None = Field(None, description="New repository to add")
+    update: RepositoryUpdateItem | None = Field(
+        None, description="Existing repository to update (must include id)"
+    )
+    remove: str | None = Field(None, min_length=1, description="Repository record ID to remove")
+
+
+class IntegrationsUpdate(BaseModel):
+    """Single integration operation: add, update, or remove. Exactly one must be provided."""
+
+    add: IntegrationInput | None = Field(None, description="New integration to add")
+    update: IntegrationUpdateItem | None = Field(
+        None, description="Existing integration to update (must include id)"
+    )
+    remove: str | None = Field(None, min_length=1, description="Integration record ID to remove")
+
+
+class UpdateProjectRequest(BaseModel):
+    """Request model for updating a project.
+    All fields optional; only provided fields are updated."""
+
+    project_title: str | None = Field(None, min_length=1, max_length=200)
+    project_description: str | None = Field(None, max_length=2000)
+    status: ProjectStatus | None = None
+    priority: ProjectPriority | None = None
+    project_category: list[str] | None = Field(None, max_length=10)
+    practice_areas: list[str] | None = Field(None, max_length=10)
+    start_date: date | None = None
+    target_end_date: date | None = None
+    billing_info: BillingInfo | None = None
+    tech_stack: TechStack | None = None
+    project_goals: str | None = Field(None, max_length=2000)
+    success_criteria: str | None = Field(None, max_length=2000)
+    additional_ai_context: str | None = Field(None, max_length=2000)
+    tags: list[str] | None = Field(None, max_length=50)
+    custom_fields: dict[str, Any] | None = None
+    is_billable: bool | None = None
+    is_internal: bool | None = None
+    team_members: TeamMembersUpdate | None = Field(
+        None, description="Single team member operation: add, update, or remove"
+    )
+    repositories: RepositoriesUpdate | None = Field(
+        None, description="Single repository operation: add, update, or remove"
+    )
+    integrations: IntegrationsUpdate | None = Field(
+        None, description="Single integration operation: add, update, or remove"
+    )
+
+    @model_validator(mode="after")
+    def validate_dates(self) -> "UpdateProjectRequest":
+        """Validate that target_end_date is after start_date when both provided."""
+        if self.start_date and self.target_end_date and self.target_end_date <= self.start_date:
+            raise ValueError("Target end date must be after start date")
+        return self
 
 
 class CreateProjectRequest(BaseModel):
@@ -300,15 +419,6 @@ class CreateProjectRequest(BaseModel):
             primary_count = sum(1 for r in self.repositories if r.is_primary)
             if primary_count > 1:
                 raise ValueError("Only one repository can be marked as primary")
-        return self
-
-    @model_validator(mode="after")
-    def validate_primary_integration(self) -> "CreateProjectRequest":
-        """Validate that only one integration is marked as primary."""
-        if self.integrations:
-            primary_count = sum(1 for i in self.integrations if i.is_primary)
-            if primary_count > 1:
-                raise ValueError("Only one integration can be marked as primary")
         return self
 
     model_config = ConfigDict(

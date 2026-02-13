@@ -2,7 +2,7 @@
 
 This module contains all project-related database operations using asyncpg.
 All SQL queries for project management are centralized here with proper
-transaction handling and efficient batch operations.
+transaction handling.
 """
 
 import json
@@ -559,45 +559,220 @@ class ProjectRepository:
         return dict(row) if row else None
 
     async def get_project_repositories(
-        self, project_id: str, organization_id: str
+        self,
+        project_id: str,
+        organization_id: str,
+        *,
+        primary_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Get repositories for a project.
 
         Args:
             project_id: Project UUID
             organization_id: Organization UUID
+            primary_only: If True, return only the primary repository (at most one).
 
         Returns:
             List of repository dictionaries
         """
-        query = """
+        base = """
             SELECT *
             FROM project_repositories
-            WHERE project_id = $1::uuid
-              AND organization_id = $2::uuid
-            ORDER BY is_primary DESC, created_at ASC
+            WHERE project_id = $1::uuid AND organization_id = $2::uuid
         """
+        order = " ORDER BY is_primary DESC, created_at ASC"
+        limit = " LIMIT 1" if primary_only else ""
+        where_primary = " AND is_primary = true" if primary_only else ""
+        query = base + where_primary + order + limit
         rows = await self.db_connection.fetch(query, project_id, organization_id)
         return [dict(row) for row in rows]
 
     async def get_project_integrations(
-        self, project_id: str, organization_id: str
+        self,
+        project_id: str,
+        organization_id: str,
+        *,
+        primary_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Get integrations for a project.
 
         Args:
             project_id: Project UUID
             organization_id: Organization UUID
+            primary_only: If True, return first integration by created_at (at most one).
 
         Returns:
             List of integration dictionaries
         """
-        query = """
+        base = """
             SELECT *
             FROM project_integrations
-            WHERE project_id = $1::uuid
-              AND organization_id = $2::uuid
-            ORDER BY created_at ASC
+            WHERE project_id = $1::uuid AND organization_id = $2::uuid
         """
+        order = " ORDER BY created_at ASC"
+        limit = " LIMIT 1" if primary_only else ""
+        query = base + order + limit
         rows = await self.db_connection.fetch(query, project_id, organization_id)
         return [dict(row) for row in rows]
+
+    async def update_project(
+        self, project_id: str, organization_id: str, data: dict[str, Any]
+    ) -> None:
+        """Partially update a project. Only keys present in data are updated.
+
+        Args:
+            project_id: Project UUID
+            organization_id: Organization UUID
+            data: Field names and values to update (must not include client_id or project_id)
+        """
+        if not data:
+            return
+
+        set_parts = []
+        values: list[Any] = []
+        idx = 1
+        for key, value in data.items():
+            if key in ("client_id", "project_id", "id", "organization_id"):
+                continue
+            if key in PROJECT_JSONB_COLUMNS and isinstance(value, (list, dict)):
+                value = json.dumps(value)
+            set_parts.append(f"{key} = ${idx}")
+            values.append(value)
+            idx += 1
+        if not set_parts:
+            return
+        set_parts.append("updated_at = NOW()")
+        values.extend([project_id, organization_id])
+        where = f"WHERE id = ${idx} AND organization_id = ${idx + 1} AND status != 'archived'"
+        query = f"UPDATE projects SET {', '.join(set_parts)} {where}"
+        await self.db_connection.execute(query, *values)
+
+    async def get_project_repository_ids_existing(
+        self, project_id: str, organization_id: str, repository_ids: list[str]
+    ) -> set[str]:
+        """Return set of repository ids that exist for this project (single query)."""
+        if not repository_ids:
+            return set()
+        query = """
+            SELECT id::text FROM project_repositories
+            WHERE project_id = $1::uuid AND organization_id = $2::uuid AND id = ANY($3::uuid[])
+        """
+        rows = await self.db_connection.fetch(
+            query, project_id, organization_id, list(set(repository_ids))
+        )
+        return {row["id"] for row in rows}
+
+    async def delete_project_repositories_by_ids(
+        self, project_id: str, organization_id: str, repository_ids: list[str]
+    ) -> None:
+        """Delete project repositories by ids, scoped to project and organization."""
+        if not repository_ids:
+            return
+        query = """
+            DELETE FROM project_repositories
+            WHERE project_id = $1::uuid AND organization_id = $2::uuid AND id = ANY($3::uuid[])
+        """
+        await self.db_connection.execute(query, project_id, organization_id, repository_ids)
+
+    async def update_project_repository(
+        self,
+        project_id: str,
+        organization_id: str,
+        repository_id: str,
+        data: dict[str, Any],
+    ) -> None:
+        """Partially update a single project repository. Only keys present in data are updated."""
+        if not data:
+            return
+        forbidden = {
+            "id",
+            "project_id",
+            "organization_id",
+            "created_by",
+            "created_at",
+        }
+        set_parts = []
+        values: list[Any] = []
+        idx = 1
+        for key, value in data.items():
+            if key in forbidden:
+                continue
+            set_parts.append(f"{key} = ${idx}")
+            values.append(value)
+            idx += 1
+        if not set_parts:
+            return
+        set_parts.append("updated_at = NOW()")
+        values.extend([repository_id, project_id, organization_id])
+        where_clause = (
+            f"WHERE id = ${idx}::uuid AND project_id = ${idx + 1}::uuid "
+            f"AND organization_id = ${idx + 2}::uuid"
+        )
+        query = f"UPDATE project_repositories SET {', '.join(set_parts)} {where_clause}"
+        await self.db_connection.execute(query, *values)
+
+    async def get_project_integration_ids_existing(
+        self, project_id: str, organization_id: str, integration_ids: list[str]
+    ) -> set[str]:
+        """Return set of integration ids that exist for this project (single query)."""
+        if not integration_ids:
+            return set()
+        query = """
+            SELECT id::text FROM project_integrations
+            WHERE project_id = $1::uuid AND organization_id = $2::uuid AND id = ANY($3::uuid[])
+        """
+        rows = await self.db_connection.fetch(
+            query, project_id, organization_id, list(set(integration_ids))
+        )
+        return {row["id"] for row in rows}
+
+    async def delete_project_integrations_by_ids(
+        self, project_id: str, organization_id: str, integration_ids: list[str]
+    ) -> None:
+        """Delete project integrations by ids, scoped to project and organization."""
+        if not integration_ids:
+            return
+        query = """
+            DELETE FROM project_integrations
+            WHERE project_id = $1::uuid AND organization_id = $2::uuid AND id = ANY($3::uuid[])
+        """
+        await self.db_connection.execute(query, project_id, organization_id, integration_ids)
+
+    async def update_project_integration(
+        self,
+        project_id: str,
+        organization_id: str,
+        integration_id: str,
+        data: dict[str, Any],
+    ) -> None:
+        """Partially update a single project integration. Only keys present in data are updated."""
+        if not data:
+            return
+        forbidden = {
+            "id",
+            "project_id",
+            "organization_id",
+            "connected_by",
+            "created_at",
+        }
+        set_parts = []
+        values: list[Any] = []
+        idx = 1
+        for key, value in data.items():
+            if key in forbidden:
+                continue
+            if key == "integration_config" and isinstance(value, dict):
+                value = json.dumps(value)
+            set_parts.append(f"{key} = ${idx}")
+            values.append(value)
+            idx += 1
+        if not set_parts:
+            return
+        set_parts.append("updated_at = NOW()")
+        values.extend([integration_id, project_id, organization_id])
+        where_clause = (
+            f"WHERE id = ${idx}::uuid AND project_id = ${idx + 1}::uuid "
+            f"AND organization_id = ${idx + 2}::uuid"
+        )
+        query = f"UPDATE project_integrations SET {', '.join(set_parts)} {where_clause}"
+        await self.db_connection.execute(query, *values)

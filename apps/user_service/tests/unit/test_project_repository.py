@@ -463,3 +463,403 @@ async def test_build_project_filters_includes_tags():
 
     assert "p.tags && $" in where_clause
     assert params[-1] == ["alpha", "beta", "gamma"]
+
+
+# Update Project Tests
+
+
+@pytest.mark.asyncio
+async def test_update_project_updates_only_provided_fields():
+    """update_project only updates fields present in data dict."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+    update_data = {
+        "project_title": "Updated Title",
+        "status": "on_hold",
+        "updated_by": "user-1",
+    }
+
+    await repo.update_project("project-1", "org-1", update_data)
+
+    assert len(conn.execute_calls) == 1
+    query = conn.execute_calls[0][0]
+    assert "UPDATE projects" in query
+    assert "project_title = $" in query
+    assert "status = $" in query
+    assert "updated_by = $" in query
+    assert "updated_at = NOW()" in query
+    assert "id = $" in query
+    assert "organization_id = $" in query
+    assert "status != 'archived'" in query
+
+
+@pytest.mark.asyncio
+async def test_update_project_skips_forbidden_fields():
+    """update_project skips client_id, project_id, id, organization_id."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+    update_data = {
+        "project_title": "Updated Title",
+        "client_id": "should-be-ignored",
+        "project_id": "should-be-ignored",
+        "id": "should-be-ignored",
+        "organization_id": "should-be-ignored",
+    }
+
+    await repo.update_project("project-1", "org-1", update_data)
+
+    query = conn.execute_calls[0][0]
+    assert "client_id" not in query
+    assert "project_id" not in query
+    assert "id = $" in query  # Only in WHERE clause
+    assert "organization_id = $" in query  # Only in WHERE clause
+
+
+@pytest.mark.asyncio
+async def test_update_project_serializes_jsonb_fields():
+    """update_project serializes JSONB fields correctly."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+    update_data = {
+        "billing_info": {"billing_type": "hourly", "hourly_rate": 100},
+        "tech_stack": {"frontend": ["React"]},
+        "custom_fields": {"key": "value"},
+    }
+
+    await repo.update_project("project-1", "org-1", update_data)
+
+    query = conn.execute_calls[0][0]
+    # Verify JSONB fields are in the query
+    assert "billing_info = $" in query
+    assert "tech_stack = $" in query
+    assert "custom_fields = $" in query
+
+
+@pytest.mark.asyncio
+async def test_update_project_does_nothing_when_data_empty():
+    """update_project does nothing when data dict is empty."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.update_project("project-1", "org-1", {})
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_update_project_repository_updates_fields():
+    """update_project_repository updates only provided fields."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+    update_data = {
+        "repository_name": "updated-repo",
+        "is_primary": True,
+    }
+
+    await repo.update_project_repository("project-1", "org-1", "repo-1", update_data)
+
+    assert len(conn.execute_calls) == 1
+    query = conn.execute_calls[0][0]
+    assert "UPDATE project_repositories" in query
+    assert "repository_name = $" in query
+    assert "is_primary = $" in query
+    assert "updated_at = NOW()" in query
+    assert "id = $" in query
+    assert "project_id = $" in query
+    assert "organization_id = $" in query
+
+
+@pytest.mark.asyncio
+async def test_update_project_repo_skip_forbidden_fields():
+    """update_project_repository skips forbidden fields."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+    update_data = {
+        "repository_name": "updated-repo",
+        "id": "should-be-ignored",
+        "project_id": "should-be-ignored",
+        "organization_id": "should-be-ignored",
+        "created_by": "should-be-ignored",
+        "created_at": "should-be-ignored",
+    }
+
+    await repo.update_project_repository("project-1", "org-1", "repo-1", update_data)
+
+    query = conn.execute_calls[0][0]
+    assert "id = $" in query  # Only in WHERE clause
+    assert "project_id = $" in query  # Only in WHERE clause
+    assert "organization_id = $" in query  # Only in WHERE clause
+    assert "created_by" not in query
+    assert "created_at" not in query
+
+
+@pytest.mark.asyncio
+async def test_update_project_repo_noop_when_data_empty():
+    """update_project_repository does nothing when data dict is empty."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.update_project_repository("project-1", "org-1", "repo-1", {})
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_update_project_integration_updates_fields():
+    """update_project_integration updates only provided fields."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+    update_data = {
+        "integration_name": "Updated Integration",
+        "sync_enabled": False,
+        "sync_interval_minutes": 30,
+    }
+
+    await repo.update_project_integration("project-1", "org-1", "integration-1", update_data)
+
+    assert len(conn.execute_calls) == 1
+    query = conn.execute_calls[0][0]
+    assert "UPDATE project_integrations" in query
+    assert "integration_name = $" in query
+    assert "sync_enabled = $" in query
+    assert "sync_interval_minutes = $" in query
+    assert "updated_at = NOW()" in query
+
+
+@pytest.mark.asyncio
+async def test_update_project_integration_serializes_config():
+    """update_project_integration serializes integration_config as JSON."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+    update_data = {
+        "integration_config": {"api_key": "secret", "workspace": "test"},
+    }
+
+    await repo.update_project_integration("project-1", "org-1", "integration-1", update_data)
+
+    query, args = conn.execute_calls[0]
+    assert "integration_config = $" in query
+    # Verify config is serialized (check args)
+    config_arg = args[0] if args else None
+    assert isinstance(config_arg, str) or config_arg is None
+
+
+@pytest.mark.asyncio
+async def test_update_project_integration_skip_forbidden():
+    """update_project_integration skips forbidden fields."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+    update_data = {
+        "integration_name": "Updated",
+        "id": "should-be-ignored",
+        "project_id": "should-be-ignored",
+        "organization_id": "should-be-ignored",
+        "connected_by": "should-be-ignored",
+        "created_at": "should-be-ignored",
+    }
+
+    await repo.update_project_integration("project-1", "org-1", "integration-1", update_data)
+
+    query = conn.execute_calls[0][0]
+    assert "id = $" in query  # Only in WHERE clause
+    assert "project_id = $" in query  # Only in WHERE clause
+    assert "organization_id = $" in query  # Only in WHERE clause
+    assert "connected_by" not in query
+    assert "created_at" not in query
+
+
+@pytest.mark.asyncio
+async def test_delete_project_repositories_by_ids():
+    """delete_project_repositories_by_ids deletes repositories by IDs."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.delete_project_repositories_by_ids("project-1", "org-1", ["repo-1", "repo-2"])
+
+    assert len(conn.execute_calls) == 1
+    query, args = conn.execute_calls[0]
+    assert "DELETE FROM project_repositories" in query
+    assert "project_id = $1" in query
+    assert "organization_id = $2" in query
+    assert "id = ANY($3" in query
+    assert args[0] == "project-1"
+    assert args[1] == "org-1"
+    assert args[2] == ["repo-1", "repo-2"]
+
+
+@pytest.mark.asyncio
+async def test_delete_project_repos_by_ids_noop_empty():
+    """delete_project_repositories_by_ids does nothing when repository_ids is empty."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.delete_project_repositories_by_ids("project-1", "org-1", [])
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_project_integrations_by_ids():
+    """delete_project_integrations_by_ids deletes integrations by IDs."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.delete_project_integrations_by_ids(
+        "project-1", "org-1", ["integration-1", "integration-2"]
+    )
+
+    assert len(conn.execute_calls) == 1
+    query, args = conn.execute_calls[0]
+    assert "DELETE FROM project_integrations" in query
+    assert "project_id = $1" in query
+    assert "organization_id = $2" in query
+    assert "id = ANY($3" in query
+    assert args[0] == "project-1"
+    assert args[1] == "org-1"
+    assert args[2] == ["integration-1", "integration-2"]
+
+
+@pytest.mark.asyncio
+async def test_delete_project_integrations_by_ids_noop_empty():
+    """delete_project_integrations_by_ids
+    does nothing when integration_ids is empty."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.delete_project_integrations_by_ids("project-1", "org-1", [])
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_project_repositories_with_primary_only():
+    """get_project_repositories returns only primary repository when primary_only=True."""
+    conn = _FakeConn()
+    conn.fetch_result = [
+        {
+            "id": "repo-1",
+            "repository_name": "primary-repo",
+            "is_primary": True,
+        }
+    ]
+    repo = ProjectRepository(db_connection=conn)
+
+    result = await repo.get_project_repositories("project-1", "org-1", primary_only=True)
+
+    assert len(result) == 1
+    assert result[0]["is_primary"] is True
+    assert len(conn.fetch_calls) == 1
+    query = conn.fetch_calls[0][0]
+    assert "is_primary = true" in query
+    assert "LIMIT 1" in query
+
+
+@pytest.mark.asyncio
+async def test_get_project_repositories_without_primary_only():
+    """get_project_repositories returns all repositories when primary_only=False."""
+    conn = _FakeConn()
+    conn.fetch_result = [
+        {"id": "repo-1", "repository_name": "repo-1", "is_primary": True},
+        {"id": "repo-2", "repository_name": "repo-2", "is_primary": False},
+    ]
+    repo = ProjectRepository(db_connection=conn)
+
+    result = await repo.get_project_repositories("project-1", "org-1", primary_only=False)
+
+    assert len(result) == 2
+    assert len(conn.fetch_calls) == 1
+    query = conn.fetch_calls[0][0]
+    assert "is_primary = true" not in query
+    assert "LIMIT 1" not in query
+
+
+@pytest.mark.asyncio
+async def test_create_project_repositories_with_empty_list():
+    """create_project_repositories returns early when repositories list is empty."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.create_project_repositories("project-1", "org-1", [], "user-1")
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_create_project_integrations_with_empty_list():
+    """create_project_integrations returns early when integrations list is empty."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.create_project_integrations("project-1", "org-1", [], "user-1")
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_build_project_filters_with_empty_tags():
+    """_build_project_filters handles tags filter with empty tag list."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+    filters = ProjectListQueryParams(tags="  ,  ,  ")
+
+    where_clause, _ = repo._build_project_filters("org-1", filters)
+
+    # Should not include tags condition when tag_list is empty
+    assert "tags" not in where_clause.lower()
+
+
+@pytest.mark.asyncio
+async def test_update_project_with_empty_data():
+    """update_project returns early when data is empty."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.update_project("project-1", "org-1", {})
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_project_repo_ids_existing_empty_list():
+    """get_project_repository_ids_existing returns empty set for empty list."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    result = await repo.get_project_repository_ids_existing("project-1", "org-1", [])
+
+    assert result == set()
+    assert len(conn.fetch_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_update_project_repository_with_empty_data():
+    """update_project_repository returns early when data is empty."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.update_project_repository("project-1", "org-1", "repo-1", {})
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_project_integration_ids_existing_empty():
+    """get_project_integration_ids_existing returns empty set for empty list."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    result = await repo.get_project_integration_ids_existing("project-1", "org-1", [])
+
+    assert result == set()
+    assert len(conn.fetch_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_update_project_integration_with_empty_data():
+    """update_project_integration returns early when data is empty."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.update_project_integration("project-1", "org-1", "integration-1", {})
+
+    assert len(conn.execute_calls) == 0
