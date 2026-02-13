@@ -863,3 +863,110 @@ async def test_update_project_integration_with_empty_data():
     await repo.update_project_integration("project-1", "org-1", "integration-1", {})
 
     assert len(conn.execute_calls) == 0
+
+
+# Delete Project (soft delete) and related methods
+@pytest.mark.asyncio
+async def test_delete_all_project_repositories():
+    """delete_all_project_repositories deletes all repositories for project."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.delete_all_project_repositories("project-1", "org-1")
+
+    assert len(conn.execute_calls) == 1
+    query, args = conn.execute_calls[0]
+    assert "DELETE FROM project_repositories" in query
+    assert "project_id = $1" in query
+    assert "organization_id = $2" in query
+    assert args[0] == "project-1"
+    assert args[1] == "org-1"
+
+
+@pytest.mark.asyncio
+async def test_delete_all_project_integrations():
+    """delete_all_project_integrations deletes all integrations for project."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.delete_all_project_integrations("project-1", "org-1")
+
+    assert len(conn.execute_calls) == 1
+    query, args = conn.execute_calls[0]
+    assert "DELETE FROM project_integrations" in query
+    assert "project_id = $1" in query
+    assert "organization_id = $2" in query
+    assert args[0] == "project-1"
+    assert args[1] == "org-1"
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_project():
+    """soft_delete_project sets status to archived and clears team_id."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.soft_delete_project("project-1", "org-1")
+
+    assert len(conn.execute_calls) == 1
+    query, args = conn.execute_calls[0]
+    assert "UPDATE projects" in query
+    assert "status = $3" in query
+    assert "team_id = NULL" in query
+    assert "updated_at = NOW()" in query
+    assert args[0] == "project-1"
+    assert args[1] == "org-1"
+    assert args[2] == "archived"
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_project_with_updated_by():
+    """soft_delete_project includes updated_by when provided."""
+    conn = _FakeConn()
+    repo = ProjectRepository(db_connection=conn)
+
+    await repo.soft_delete_project("project-1", "org-1", updated_by="user-1")
+
+    assert len(conn.execute_calls) == 1
+    query, args = conn.execute_calls[0]
+    assert "updated_by = $4" in query
+    assert args[3] == "user-1"
+
+
+@pytest.mark.asyncio
+async def test_get_project_basic_information_success():
+    """get_project_basic_information returns project when found."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "project-1",
+        "project_id": "test-project",
+        "project_title": "Test Project",
+        "status": "active",
+        "team_id": "team-1",
+        "client_id": "client-1",
+    }
+    repo = ProjectRepository(db_connection=conn)
+
+    result = await repo.get_project_basic_information("project-1", "org-1")
+
+    assert result is not None
+    assert result["id"] == "project-1"
+    assert result["team_id"] == "team-1"
+    assert len(conn.fetchrow_calls) == 1
+    query = conn.fetchrow_calls[0][0]
+    assert "p.id" in query
+    assert "p.team_id" in query
+    assert "status != 'archived'" in query
+
+
+@pytest.mark.asyncio
+async def test_get_project_basic_information_not_found():
+    """get_project_basic_information returns None when project not found."""
+    conn = _FakeConn()
+    conn.fetchrow_result = None
+    repo = ProjectRepository(db_connection=conn)
+
+    result = await repo.get_project_basic_information("project-123", "org-1")
+
+    assert result is None
+    assert len(conn.fetchrow_calls) == 1

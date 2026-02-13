@@ -26,6 +26,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_CREATE,
+    PROJECTS_MANAGEMENT_DELETE,
     PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
 )
@@ -314,5 +315,72 @@ async def update_project(
         request=request,
         message_key="projects.success.project_updated",
         custom_code=CustomStatusCode.UPDATED,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("delete project")
+@router.delete(
+    "/{project_id}",
+    status_code=http_status.HTTP_200_OK,
+    description="Delete a project",
+    summary="Delete project",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Project deleted successfully"},
+        http_status.HTTP_404_NOT_FOUND: {
+            "description": "Project not found or already deleted"
+        },
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="confidential",
+    compliance_tags=["soc2_audit", "audit_required"],
+    table_name="projects",
+    category="PROJECT",
+)
+async def delete_project(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    project_id: str = Path(..., description="Project UUID or human-readable ID"),
+):
+    """Delete a project.
+
+    Hard deletes all related: team, team members, repositories, integrations.
+    Soft deletes the project (sets status to archived) for audit retention.
+    """
+    request.state.audit_table = "projects"
+    request.state.audit_description = f"Deleted project: {project_id}"
+    request.state.audit_risk_level = "high"
+
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+    )
+
+    project_service = ProjectService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    await project_service.delete_project(project_id)
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    return success_response(
+        request=request,
+        message_key="projects.success.project_deleted",
+        custom_code=CustomStatusCode.DELETED,
         status_code=http_status.HTTP_200_OK,
     )

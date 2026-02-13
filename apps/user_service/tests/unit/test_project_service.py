@@ -33,6 +33,7 @@ from apps.user_service.app.schemas.projects import (
     TechStack,
     UpdateProjectRequest,
 )
+from apps.user_service.app.schemas.teams import TeamDbDelete
 from apps.user_service.app.services.project_service import ProjectService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
@@ -55,6 +56,31 @@ class _FakeProjectRepo:
         self.project_with_client_result = None
         self.repositories_result = []
         self.integrations_result = []
+        self.project_basic_result = {"id": "project-1", "team_id": "team-1"}
+
+    async def get_project_basic_information(self, project_id, organization_id):
+        """Get project basic information."""
+        self.calls["get_project_basic_information"] = (project_id, organization_id)
+        return self.project_basic_result
+
+    async def delete_all_project_repositories(self, project_id, organization_id):
+        """Delete all project repositories."""
+        self.calls["delete_all_project_repositories"] = (project_id, organization_id)
+        return None
+
+    async def delete_all_project_integrations(self, project_id, organization_id):
+        """Delete all project integrations."""
+        self.calls["delete_all_project_integrations"] = (project_id, organization_id)
+        return None
+
+    async def soft_delete_project(self, project_id, organization_id, updated_by=None):
+        """Soft delete project."""
+        self.calls["soft_delete_project"] = (
+            project_id,
+            organization_id,
+            updated_by,
+        )
+        return None
 
     async def check_project_id_unique(self, project_id, organization_id, exclude_id=None):
         """Return uniqueness flag."""
@@ -223,6 +249,11 @@ class _FakeTeamRepo:
     async def _insert_team_members(self, team_id, member_data, added_by):
         """Insert team members."""
         self.calls["_insert_team_members"] = (team_id, member_data, added_by)
+        return None
+
+    async def delete_team_and_members(self, team_input: TeamDbDelete):
+        """Delete team and members."""
+        self.calls["delete_team_and_members"] = team_input
         return None
 
 
@@ -1869,3 +1900,65 @@ async def test_apply_project_row_update_with_only_updated_by(monkeypatch):
     call = fake_project_repo.calls["update_project"]
     assert call[2]["updated_by"] == service.user_context.user_id
     assert len(call[2]) == 1  # Only updated_by
+
+
+# Delete Project Tests
+@pytest.mark.asyncio
+async def test_delete_project_raises_not_found(monkeypatch):
+    """delete_project raises NotFoundException when project not found."""
+    service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_basic_result = None
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.delete_project("project-123")
+
+    assert exc_info.value.message_key == "projects.errors.project_not_found"
+    assert "get_project_basic_information" in fake_project_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_delete_project_success_with_team(monkeypatch):
+    """delete_project hard deletes team, repos, integrations; soft deletes project."""
+    service, fake_project_repo, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_basic_result = {
+        "id": "project-uuid-1",
+        "team_id": "team-uuid-1",
+    }
+
+    await service.delete_project("project-123")
+
+    assert "get_project_basic_information" in fake_project_repo.calls
+    assert fake_project_repo.calls["get_project_basic_information"][0] == "project-123"
+    assert "delete_team_and_members" in fake_team_repo.calls
+    team_delete = fake_team_repo.calls["delete_team_and_members"]
+    assert team_delete.team_id == "team-uuid-1"
+    assert team_delete.organization_id == service.user_context.organization_id
+    assert "delete_all_project_repositories" in fake_project_repo.calls
+    call = fake_project_repo.calls["delete_all_project_repositories"]
+    assert call[0] == "project-uuid-1"
+    assert call[1] == service.user_context.organization_id
+    assert "delete_all_project_integrations" in fake_project_repo.calls
+    call = fake_project_repo.calls["delete_all_project_integrations"]
+    assert call[0] == "project-uuid-1"
+    assert "soft_delete_project" in fake_project_repo.calls
+    call = fake_project_repo.calls["soft_delete_project"]
+    assert call[0] == "project-uuid-1"
+    assert call[2] == service.user_context.user_id
+
+
+@pytest.mark.asyncio
+async def test_delete_project_success_without_team(monkeypatch):
+    """delete_project skips team delete when project has no team."""
+    service, fake_project_repo, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_basic_result = {
+        "id": "project-uuid-2",
+        "team_id": None,
+    }
+
+    await service.delete_project("project-456")
+
+    assert "get_project_basic_information" in fake_project_repo.calls
+    assert "delete_team_and_members" not in fake_team_repo.calls
+    assert "delete_all_project_repositories" in fake_project_repo.calls
+    assert "delete_all_project_integrations" in fake_project_repo.calls
+    assert "soft_delete_project" in fake_project_repo.calls

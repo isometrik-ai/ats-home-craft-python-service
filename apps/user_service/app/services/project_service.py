@@ -27,7 +27,7 @@ from apps.user_service.app.schemas.projects import (
     TechStack,
     UpdateProjectRequest,
 )
-from apps.user_service.app.schemas.teams import MemberData, TeamDbIn
+from apps.user_service.app.schemas.teams import MemberData, TeamDbDelete, TeamDbIn
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -846,6 +846,54 @@ class ProjectService:
         )
         old_data = self._format_project_for_audit(project)
         return {"old_data": old_data}
+
+    async def delete_project(self, project_id: str) -> None:
+        """Delete a project: hard delete related entities, soft delete project.
+
+        Hard deletes: team, team members, repositories, integrations.
+        Soft deletes: project (sets status='archived').
+
+        All operations run in a single transaction (caller must use db_uow).
+
+        Args:
+            project_id: Project UUID or human-readable ID
+
+        Raises:
+            NotFoundException: If project not found or already archived
+        """
+        organization_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+
+        project = await self.project_repository.get_project_basic_information(
+            project_id=project_id,
+            organization_id=organization_id,
+        )
+        if not project:
+            raise NotFoundException(
+                message_key="projects.errors.project_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        project_uuid = str(project["id"])
+        team_id = project["team_id"]
+
+        if team_id:
+            await self.team_repository.delete_team_and_members(
+                TeamDbDelete(
+                    team_id=str(team_id),
+                    organization_id=organization_id,
+                )
+            )
+        await self.project_repository.delete_all_project_repositories(
+            project_uuid, organization_id
+        )
+        await self.project_repository.delete_all_project_integrations(
+            project_uuid, organization_id
+        )
+        await self.project_repository.soft_delete_project(
+            project_uuid,
+            organization_id,
+            updated_by=user_id,
+        )
 
     async def list_projects(
         self, filters: ProjectListQueryParams

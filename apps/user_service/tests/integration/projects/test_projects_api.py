@@ -549,3 +549,68 @@ async def test_update_project_with_no_changes(monkeypatch, client):
     assert_success(res, 200)
     # When result is None, audit data should not be set
     # This tests the if result: branch in the API handler
+
+
+# Delete Project
+@pytest.mark.asyncio
+async def test_delete_project(monkeypatch, client):
+    """Delete a project (soft delete)."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_delete_project(self, project_id):
+        """Fake delete project."""
+        del self
+        assert project_id == "project-123"
+        return None
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.projects.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.ProjectService.delete_project",
+        fake_delete_project,
+    )
+
+    res = await client.delete("/v1/projects/project-123")
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_delete_project_not_found(monkeypatch, client):
+    """Delete project returns 404 when project not found."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    from libs.shared_utils.http_exceptions import NotFoundException
+
+    async def fake_delete_project(self, project_id):
+        """Fake delete project raises NotFoundException."""
+        del self
+        assert project_id == "project-nonexistent"
+        raise NotFoundException(
+            message_key="projects.errors.project_not_found",
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.projects.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.ProjectService.delete_project",
+        fake_delete_project,
+    )
+
+    res = await client.delete("/v1/projects/project-nonexistent")
+    assert res.status_code == 404
