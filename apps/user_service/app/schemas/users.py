@@ -41,7 +41,9 @@ class RoleInfo(BaseModel):
 class RoleInfoWithDescription(RoleInfo):
     """Role with descrption"""
 
-    description: str = Field(..., description="Optional description for the role")
+    role_id: str = Field(..., description="Unique identifier for the role")
+    role_name: str = Field(..., description="Human-readable name of the role")
+    description: str | None = Field(None, description="Optional description for the role")
 
     model_config = ConfigDict(
         json_schema_extra={

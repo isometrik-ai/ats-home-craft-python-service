@@ -698,6 +698,7 @@ class UserService:
             return RoleInfoWithDescription(role_id="", description="No organization assigned")
         return RoleInfoWithDescription(
             role_id=str(user_profile["role_id"]),
+            role_name=user_profile.get("role", ""),
             description=user_profile.get("role_description", ""),
         )
 
