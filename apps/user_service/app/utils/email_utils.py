@@ -1234,6 +1234,7 @@ Your organization remains active. If you have any questions, please contact our 
 def send_client_creation_email(
     email: str,
     organization_name: str,
+    password: str | None = None,
     company_name: str = COMMON_COMPANY_NAME,
     company_address: str = COMMON_COMPANY_ADDRESS,
     privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
@@ -1244,6 +1245,7 @@ def send_client_creation_email(
     Args:
         email (str): User's email address
         organization_name (str): Name of the organization
+        password (str, optional): User's password to include in the email
         company_name (str): Company name (default: "House of App AI")
         company_address (str): Company address for footer
         privacy_policy_url (str): Privacy policy URL
@@ -1257,13 +1259,25 @@ def send_client_creation_email(
 
         subject = f"Welcome to {organization_name} - Client Account Created"
 
+        # Build password section for plain text
+        password_section = ""
+        if password:
+            password_section = f"""
+
+Your login credentials:
+Email: {email}
+Password: {password}
+
+Please change your password after your first login for security purposes.
+"""
+
         # Plain text message
         message = f"""Hello,
 
 Your client account has been successfully created with {organization_name}.
 
 Organization: {organization_name}
-
+{password_section}
 You can now access your client portal and manage your account.
 
 If you have any questions, please contact the organization support team.
@@ -1307,6 +1321,29 @@ Best regards,
                   <p style="margin: 5px 0; color: #111827;">
                   <strong>Organization:</strong> {organization_name}</p>
                 </div>
+                {
+            f'''
+                <div style="background-color: #eff6ff; border-left: 4px solid #1d4ed8; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                  <p style="margin: 0 0 10px 0; color: #111827; font-weight: 600; font-size: 16px;">
+                    Your Login Credentials:
+                  </p>
+                  <p style="margin: 5px 0; color: #111827;">
+                    <strong>Email:</strong> {email}
+                  </p>
+                  <p style="margin: 5px 0; color: #111827;">
+                    <strong>Password:</strong>
+                    <code style="background-color: #ffffff; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 14px;">
+                    {password}
+                    </code>
+                  </p>
+                  <p style="margin: 10px 0 0 0; color: #dc2626; font-size: 14px;">
+                    ⚠️ Please change your password after your first login for security purposes.
+                  </p>
+                </div>
+                '''
+            if password
+            else ""
+        }
                 <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">
                   You can now access your client portal and manage your account.
                 </p>

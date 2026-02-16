@@ -3,7 +3,7 @@
 This module contains Pydantic models for client management operations.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -26,6 +26,14 @@ class Website(BaseModel):
     url: str = Field(..., description="Website URL", max_length=500)
     type: str = Field(..., description="Website type", max_length=50)
     is_primary: bool = Field(default=False, description="Primary website flag")
+
+
+class SocialPage(BaseModel):
+    """Social media page schema: platform (e.g. linkedin, instagram, twitter) and URL."""
+
+    id: str | None = Field(None, description="Social page ID")
+    platform: str = Field(..., description="Platform name", max_length=50)
+    url: str = Field(..., description="Profile/page URL", max_length=500)
 
 
 class Address(BaseModel):
@@ -59,11 +67,44 @@ class BillingPreferences(BaseModel):
     terms: str | None = Field(None, description="Payment terms", max_length=50)
 
 
-# Update schemas
-class AddressUpdate(BaseModel):
-    """Address for add/update; id = update, omit = add."""
+# Input schemas for add operations (no id field)
+class AddressInput(BaseModel):
+    """Address input for add operation."""
 
-    id: str | None = Field(None, description="Address ID; required for update, omit for add")
+    place_id: str | None = Field(None, max_length=200)
+    address_line1: str = Field(..., max_length=1000, description="Primary address line")
+    address_line2: str | None = Field(None, max_length=1000)
+    city: str | None = Field(None, max_length=100)
+    state: str | None = Field(None, max_length=100)
+    postal_code: str | None = Field(None, max_length=20)
+    country: str | None = Field(None, max_length=100)
+    latitude: float | None = None
+    longitude: float | None = None
+    address_type: AddressType | None = None
+    address_data: dict[str, Any] | None = None
+    is_primary: bool = Field(default=False, description="Primary address flag")
+
+
+class WebsiteInput(BaseModel):
+    """Website input for add operation."""
+
+    url: str = Field(..., max_length=500, description="Website URL")
+    type: str = Field(..., max_length=50, description="Website type")
+    is_primary: bool = Field(default=False, description="Primary website flag")
+
+
+class SocialPageInput(BaseModel):
+    """Social page input for add operation."""
+
+    platform: str = Field(..., max_length=50, description="Platform name")
+    url: str = Field(..., max_length=500, description="Profile/page URL")
+
+
+# Update item schemas (requires id)
+class AddressUpdateItem(BaseModel):
+    """Address update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Address record ID to update")
     place_id: str | None = Field(None, max_length=200)
     address_line1: str | None = Field(None, max_length=1000)
     address_line2: str | None = Field(None, max_length=1000)
@@ -78,13 +119,120 @@ class AddressUpdate(BaseModel):
     is_primary: bool | None = None
 
 
-class WebsiteUpdate(BaseModel):
-    """Website for add/update; id = update, omit = add."""
+class WebsiteUpdateItem(BaseModel):
+    """Website update item; only provided fields are updated."""
 
-    id: str | None = Field(None, description="Website ID; required for update, omit for add")
+    id: str = Field(..., description="Website ID to update")
     url: str | None = Field(None, max_length=500)
     type: str | None = Field(None, max_length=50)
     is_primary: bool | None = None
+
+
+class SocialPageUpdateItem(BaseModel):
+    """Social page update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Social page ID to update")
+    platform: str | None = Field(None, max_length=50)
+    url: str | None = Field(None, max_length=500)
+
+
+# Delta update wrappers (add/update/remove) - supports batch operations
+class AddressesUpdate(BaseModel):
+    """Batch address operations: add, update, and/or remove."""
+
+    add: list[AddressInput] | None = Field(None, description="New addresses to add", max_length=50)
+    update: list[AddressUpdateItem] | None = Field(
+        None, description="Existing addresses to update (must include id)", max_length=50
+    )
+    remove: list[str] | None = Field(
+        None, description="Address record IDs to remove", max_length=50
+    )
+
+    @field_validator("add")
+    @classmethod
+    def validate_primary_address_add(
+        cls, add_list: list[AddressInput] | None
+    ) -> list[AddressInput] | None:
+        """Validate only one primary address in add operations."""
+        if not add_list:
+            return add_list
+        primary_count = sum(1 for a in add_list if a.is_primary is True)
+        if primary_count > 1:
+            raise ValidationException(
+                message_key="clients.errors.only_one_primary_address",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return add_list
+
+    @field_validator("update")
+    @classmethod
+    def validate_primary_address_update(
+        cls, update_list: list[AddressUpdateItem] | None
+    ) -> list[AddressUpdateItem] | None:
+        """Validate only one primary address in update operations."""
+        if not update_list:
+            return update_list
+        primary_count = sum(1 for a in update_list if a.is_primary is True)
+        if primary_count > 1:
+            raise ValidationException(
+                message_key="clients.errors.only_one_primary_address",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return update_list
+
+
+class WebsitesUpdate(BaseModel):
+    """Batch website operations: add, update, and/or remove."""
+
+    add: list[WebsiteInput] | None = Field(None, description="New websites to add", max_length=50)
+    update: list[WebsiteUpdateItem] | None = Field(
+        None, description="Existing websites to update (must include id)", max_length=50
+    )
+    remove: list[str] | None = Field(None, description="Website IDs to remove", max_length=50)
+
+    @field_validator("add")
+    @classmethod
+    def validate_primary_website_add(
+        cls, add_list: list[WebsiteInput] | None
+    ) -> list[WebsiteInput] | None:
+        """Validate only one primary website in add operations."""
+        if not add_list:
+            return add_list
+        primary_count = sum(1 for w in add_list if w.is_primary is True)
+        if primary_count > 1:
+            raise ValidationException(
+                message_key="clients.errors.only_one_primary_website",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return add_list
+
+    @field_validator("update")
+    @classmethod
+    def validate_primary_website_update(
+        cls, update_list: list[WebsiteUpdateItem] | None
+    ) -> list[WebsiteUpdateItem] | None:
+        """Validate only one primary website in update operations."""
+        if not update_list:
+            return update_list
+        primary_count = sum(1 for w in update_list if w.is_primary is True)
+        if primary_count > 1:
+            raise ValidationException(
+                message_key="clients.errors.only_one_primary_website",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return update_list
+
+
+class SocialPagesUpdate(BaseModel):
+    """Batch social page operations: add, update, and/or remove."""
+
+    add: list[SocialPageInput] | None = Field(
+        None, description="New social pages to add", max_length=50
+    )
+    update: list[SocialPageUpdateItem] | None = Field(
+        None, description="Existing social pages to update (must include id)", max_length=50
+    )
+    remove: list[str] | None = Field(None, description="Social page IDs to remove", max_length=50)
 
 
 class LeadManagementUpdate(BaseModel):
@@ -108,7 +256,11 @@ class BillingPreferencesUpdate(BaseModel):
 
 
 class UpdateClientRequest(BaseModel):
-    """Client PATCH payload; only provided fields are applied."""
+    """Client PATCH payload; only provided fields are applied.
+
+    List-type fields (websites, addresses, social_pages) support batch operations:
+    multiple add, update, and/or remove operations per field.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -117,43 +269,21 @@ class UpdateClientRequest(BaseModel):
     profile_photo_url: str | None = Field(None, max_length=500)
     portal_access: bool | None = None
     tags: list[str] | None = Field(None, max_length=50)
-    websites: list[WebsiteUpdate] | None = Field(None, max_length=10)
-    addresses: list[AddressUpdate] | None = Field(None, max_length=10)
+    websites: WebsitesUpdate | None = Field(
+        None, description="Batch website operations: add, update, and/or remove"
+    )
+    addresses: AddressesUpdate | None = Field(
+        None, description="Batch address operations: add, update, and/or remove"
+    )
+    social_pages: SocialPagesUpdate | None = Field(
+        None, description="Batch social page operations: add, update, and/or remove"
+    )
     lead_management: LeadManagementUpdate | None = None
     billing_preferences: BillingPreferencesUpdate | None = None
     custom_fields: dict[str, str | None] | None = None
-
-    @field_validator("addresses")
-    @classmethod
-    def validate_primary_address(
-        cls,
-        addresses: list[AddressUpdate] | None,
-    ) -> list[AddressUpdate] | None:
-        """Validate only one primary address."""
-        if not addresses:
-            return addresses
-        if sum(1 for a in addresses if a.is_primary is True) > 1:
-            raise ValidationException(
-                message_key="clients.errors.only_one_primary_address",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return addresses
-
-    @field_validator("websites")
-    @classmethod
-    def validate_primary_website(
-        cls,
-        websites: list[WebsiteUpdate] | None,
-    ) -> list[WebsiteUpdate] | None:
-        """Validate only one primary website."""
-        if not websites:
-            return websites
-        if sum(1 for w in websites if w.is_primary is True) > 1:
-            raise ValidationException(
-                message_key="clients.errors.only_one_primary_website",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return websites
+    additional_data: dict[str, Any] | None = None
+    enrichment_done: bool | None = None
+    last_enriched_at: datetime | None = None
 
 
 class CreateClientRequest(BaseModel):
@@ -188,6 +318,12 @@ class CreateClientRequest(BaseModel):
     billing_preferences: BillingPreferences | None = Field(None, description="Billing preferences")
     custom_fields: dict[str, str] = Field(default_factory=dict, description="Custom fields")
     portal_access: bool = Field(default=False, description="Portal access enabled flag")
+    additional_data: dict[str, Any] = Field(
+        default_factory=dict, description="Dynamic data stored as passed"
+    )
+    social_pages: list[SocialPage] = Field(
+        default_factory=list, description="Social platform and URL entries", max_length=20
+    )
 
     @field_validator("websites")
     @classmethod
@@ -252,7 +388,7 @@ class ClientListResponse(BaseModel):
     primary_contact: PrimaryContactInfo = Field(..., description="Primary contact information")
     company_type: ClientType = Field(..., description="Client type")
     status: ClientStatus = Field(..., description="Client status")
-    matters: list[Any] = Field(default_factory=list, description="Matters list")
+    projects: list[Any] = Field(default_factory=list, description="Projects list")
     created_at: str = Field(..., description="Creation timestamp")
     updated_at: str = Field(..., description="Update timestamp")
     outstanding: None = Field(None, description="Outstanding balance")
@@ -313,5 +449,13 @@ class ClientDetailsResponse(BaseModel):
     custom_fields: dict[str, str] = Field(default_factory=dict, description="Custom fields")
     addresses: list[ClientAddressResponse] = Field(default_factory=list, description="Addresses")
     lead: LeadInfo | None = Field(None, description="Lead information")
+    additional_data: dict[str, Any] = Field(
+        default_factory=dict, description="Dynamic data stored as passed"
+    )
+    social_pages: list[SocialPage] = Field(
+        default_factory=list, description="Social platform and URL entries"
+    )
+    enrichment_done: bool = Field(default=False, description="Whether enrichment has been run")
+    last_enriched_at: str | None = Field(None, description="Last enrichment timestamp")
     created_at: str = Field(..., description="Creation timestamp")
     updated_at: str = Field(..., description="Update timestamp")

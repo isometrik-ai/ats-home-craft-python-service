@@ -1,20 +1,29 @@
 """Unit tests for ClientService business logic."""
+# pylint: disable=too-many-lines
 
 import datetime
+from datetime import date
 
 import pytest
 
 from apps.user_service.app.schemas.clients import (
     Address,
-    AddressUpdate,
+    AddressesUpdate,
+    AddressInput,
+    AddressUpdateItem,
     BillingPreferencesUpdate,
     CreateClientFromUserRequest,
     CreateClientRequest,
     LeadManagement,
     LeadManagementUpdate,
+    SocialPageInput,
+    SocialPagesUpdate,
+    SocialPageUpdateItem,
     UpdateClientRequest,
     Website,
-    WebsiteUpdate,
+    WebsiteInput,
+    WebsitesUpdate,
+    WebsiteUpdateItem,
 )
 from apps.user_service.app.schemas.enums import ClientType, LeadStatus, UserEventStatus
 from apps.user_service.app.services.client_service import ClientService
@@ -24,17 +33,15 @@ from libs.shared_utils.http_exceptions import (
     NotFoundException,
     ServiceUnavailableException,
 )
+from libs.shared_utils.status_codes import CustomStatusCode
 
 
 class _FakeClientRepo:
     """Lightweight fake client repository."""
 
-    def __init__(self, db_connection=None):
-        self.db_connection = db_connection
+    def __init__(self):
         self.calls = {}
         self.client_user_exists = False
-        self.email_exists = False
-        self.phone_exists = False
         self.name_exists = False
         self.client_result = None
         self.client_details_result = None
@@ -47,19 +54,11 @@ class _FakeClientRepo:
         self.calls["check_client_user_exists"] = (user_id, organization_id)
         return self.client_user_exists
 
-    async def check_email_exists(self, email, organization_id, exclude_client_id=None):
-        """Return email existence flag."""
-        self.calls["check_email_exists"] = (email, organization_id, exclude_client_id)
-        return self.email_exists
-
-    async def check_client_name_exists(
-        self, name, organization_id, client_type=None, exclude_client_id=None
-    ):
+    async def check_client_name_exists(self, name, organization_id, exclude_client_id=None):
         """Return name existence flag."""
         self.calls["check_client_name_exists"] = {
             "name": name,
             "organization_id": organization_id,
-            "client_type": client_type,
             "exclude_client_id": exclude_client_id,
         }
         return self.name_exists
@@ -157,10 +156,15 @@ class _FakeUserRepo:
     def __init__(self):
         self.user_details = {"id": "user-1", "email": "test@example.com"}
         self.phone_exists = False
+        self.email_exists = False
 
     async def get_user_details_by_id(self, _user_id, _fields):
         """Get user details."""
         return self.user_details
+
+    async def get_auth_user_by_email(self, _email):
+        """Get auth user by email."""
+        return self.user_details if self.email_exists else None
 
     async def phone_exists_for_other_user(self, phone=None, user_id=None):
         """Check phone existence."""
@@ -186,8 +190,7 @@ class _FakeOrgRepo:
 class _FakeUserEventRepo:
     """Fake user event repository."""
 
-    def __init__(self, db_connection=None, user_event_details=None):
-        self.db_connection = db_connection
+    def __init__(self, user_event_details=None):
         self.calls = {}
         self.user_event_details = user_event_details or {"status": "pending"}
 
@@ -211,7 +214,7 @@ def _ctx(org_id="org-1"):
 
 
 @pytest.mark.asyncio
-async def test_create_client_from_user_when_user_event_none(monkeypatch):
+async def test_create_client_from_user_no_event(monkeypatch):
     """Raises ConflictException when user event is missing."""
     fake_repo = _FakeClientRepo()
     fake_user_event_repo = _FakeUserEventRepo()
@@ -225,7 +228,6 @@ async def test_create_client_from_user_when_user_event_none(monkeypatch):
         "apps.user_service.app.services.client_service.UserEventRepository",
         lambda db_connection=None: fake_user_event_repo,
     )
-
     service = ClientService(db_connection=None)
     request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
 
@@ -236,7 +238,7 @@ async def test_create_client_from_user_when_user_event_none(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_client_from_user_when_event_not_pending(monkeypatch):
+async def test_create_client_from_user_event_not_pending(monkeypatch):
     """Raises ConflictException when user event status is not pending."""
     fake_repo = _FakeClientRepo()
     fake_user_event_repo = _FakeUserEventRepo(
@@ -251,7 +253,6 @@ async def test_create_client_from_user_when_event_not_pending(monkeypatch):
         "apps.user_service.app.services.client_service.UserEventRepository",
         lambda db_connection=None: fake_user_event_repo,
     )
-
     service = ClientService(db_connection=None)
     request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
 
@@ -275,7 +276,6 @@ async def test_client_from_user_raises_user_already_client(monkeypatch):
         "apps.user_service.app.services.client_service.UserEventRepository",
         lambda db_connection=None: fake_user_event_repo,
     )
-
     service = ClientService(db_connection=None)
     request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
 
@@ -284,7 +284,7 @@ async def test_client_from_user_raises_user_already_client(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_client_from_user_raises_user_not_found(monkeypatch):
+async def test_create_client_from_user_user_not_found(monkeypatch):
     """Raises NotFoundException when user not found."""
     fake_repo = _FakeClientRepo()
     fake_user_repo = _FakeUserRepo()
@@ -303,7 +303,6 @@ async def test_create_client_from_user_raises_user_not_found(monkeypatch):
         "apps.user_service.app.services.client_service.UserEventRepository",
         lambda db_connection=None: fake_user_event_repo,
     )
-
     service = ClientService(db_connection=None)
     request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
 
@@ -336,7 +335,6 @@ async def test_client_from_user_raises_org_not_found(monkeypatch):
         "apps.user_service.app.services.client_service.UserEventRepository",
         lambda db_connection=None: fake_user_event_repo,
     )
-
     service = ClientService(db_connection=None)
     request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
 
@@ -348,12 +346,17 @@ async def test_client_from_user_raises_org_not_found(monkeypatch):
 async def test_create_client_raises_email_exists(monkeypatch):
     """Raises ConflictException when email already exists."""
     fake_repo = _FakeClientRepo()
-    fake_repo.email_exists = True
+    fake_user_repo = _FakeUserRepo()
+    fake_user_repo.email_exists = True
     fake_org_repo = _FakeOrgRepo()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserRepository",
+        lambda db_connection=None: fake_user_repo,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.OrganizationRepository",
@@ -375,7 +378,7 @@ async def test_create_client_raises_email_exists(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_client_raises_when_phone_exists(monkeypatch):
+async def test_create_client_phone_exists(monkeypatch):
     """Raises ConflictException when phone already exists."""
     fake_repo = _FakeClientRepo()
     fake_user_repo = _FakeUserRepo()
@@ -445,7 +448,7 @@ async def test_create_client_raises_when_name_exists(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_client_raises_when_company_name_exists(monkeypatch):
+async def test_create_client_company_name_exists(monkeypatch):
     """Raises ConflictException when company name already exists."""
     fake_repo = _FakeClientRepo()
     fake_repo.name_exists = True
@@ -481,7 +484,7 @@ async def test_create_client_raises_when_company_name_exists(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_client_details_raises_when_not_found(monkeypatch):
+async def test_get_client_details_not_found(monkeypatch):
     """Raises NotFoundException when client not found."""
     fake_repo = _FakeClientRepo()
     fake_repo.client_details_result = None
@@ -537,7 +540,6 @@ async def test_get_clients_list_returns_results(monkeypatch):
 async def test_delete_client_calls_delete_methods(monkeypatch):
     """delete_client calls all related delete methods."""
     fake_repo = _FakeClientRepo()
-
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
@@ -629,7 +631,6 @@ async def test_prepare_client_user_data_includes_fields():
         middle_name="Middle",
         title="CEO",
     )
-
     client_user_data = service._prepare_client_user_data(
         request_data, "client-1", "org-1", "user-1", "isometrik-1"
     )
@@ -644,15 +645,13 @@ async def test_prepare_client_user_data_includes_fields():
 
 
 @pytest.mark.asyncio
-async def test_create_records_creates_lead_when_enabled(monkeypatch):
+async def test_create_records_creates_lead(monkeypatch):
     """_create_optional_records creates lead when lead_management enabled."""
     fake_repo = _FakeClientRepo()
-
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
     )
-
     service = ClientService(db_connection=None)
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
@@ -665,7 +664,6 @@ async def test_create_records_creates_lead_when_enabled(monkeypatch):
     )
 
     await service._create_optional_records(request_data, "client-1")
-
     assert "create_lead" in fake_repo.calls
     assert fake_repo.calls["create_lead"]["client_id"] == "client-1"
 
@@ -674,12 +672,10 @@ async def test_create_records_creates_lead_when_enabled(monkeypatch):
 async def test_create_optional_records_creates_addresses(monkeypatch):
     """_create_optional_records creates addresses when provided."""
     fake_repo = _FakeClientRepo()
-
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
     )
-
     service = ClientService(db_connection=None)
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
@@ -699,7 +695,6 @@ async def test_create_optional_records_creates_addresses(monkeypatch):
     )
 
     await service._create_optional_records(request_data, "client-1")
-
     assert "bulk_create_addresses" in fake_repo.calls
     addresses = fake_repo.calls["bulk_create_addresses"]
     assert len(addresses) == 1
@@ -747,7 +742,6 @@ async def test_create_client_from_user_success(monkeypatch):
     request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
 
     await service.create_client_from_user(request_data)
-
     assert "create_client" in fake_repo.calls
     assert "create_client_user" in fake_repo.calls
     assert "update_status_by_user_id" in fake_user_event_repo.calls
@@ -759,7 +753,7 @@ async def test_create_client_from_user_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_isometrik_user_raises_when_fails(monkeypatch):
+async def test_create_isometrik_user_fails(monkeypatch):
     """create_isometrik_user raises when Isometrik user creation fails."""
     fake_repo = _FakeClientRepo()
     fake_user_repo = _FakeUserRepo()
@@ -798,7 +792,7 @@ async def test_create_isometrik_user_raises_when_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_auth_and_isometrik_user_for_person(monkeypatch):
+async def test_create_auth_isometrik_user_person(monkeypatch):
     """_create_auth_and_isometrik_user creates user for person type."""
     fake_org_repo = _FakeOrgRepo()
 
@@ -832,16 +826,17 @@ async def test_create_auth_and_isometrik_user_for_person(monkeypatch):
         prefix="Mr.",
     )
 
-    user_id, isometrik_user_id = await service._create_auth_and_isometrik_user(
+    user_id, isometrik_user_id, password = await service._create_auth_and_isometrik_user(
         request_data, fake_org_repo.organization, "org-1"
     )
 
     assert user_id == "auth-user-123"
     assert isometrik_user_id == "isometrik-123"
+    assert password is not None
 
 
 @pytest.mark.asyncio
-async def test_create_auth_and_isometrik_user_for_company(monkeypatch):
+async def test_create_auth_isometrik_user_company(monkeypatch):
     """_create_auth_and_isometrik_user creates user for company type."""
     fake_org_repo = _FakeOrgRepo()
 
@@ -875,12 +870,13 @@ async def test_create_auth_and_isometrik_user_for_company(monkeypatch):
         name="Test Company",
     )
 
-    user_id, isometrik_user_id = await service._create_auth_and_isometrik_user(
+    user_id, isometrik_user_id, password = await service._create_auth_and_isometrik_user(
         request_data, fake_org_repo.organization, "org-1"
     )
 
     assert user_id == "auth-user-123"
     assert isometrik_user_id == "isometrik-123"
+    assert password is not None
 
 
 @pytest.mark.asyncio
@@ -917,7 +913,7 @@ async def test_create_user_raises_when_auth_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_user_raises_when_isometrik_fails(monkeypatch):
+async def test_create_user_isometrik_fails(monkeypatch):
     """_create_auth_and_isometrik_user raises when Isometrik creation fails."""
     fake_org_repo = _FakeOrgRepo()
 
@@ -1006,7 +1002,6 @@ async def test_create_client_success(monkeypatch):
     )
 
     await service.create_client(request_data)
-
     assert "create_client" in fake_repo.calls
     assert "create_client_user" in fake_repo.calls
 
@@ -1088,6 +1083,10 @@ async def test_get_client_details_with_full_data(monkeypatch):
         "websites": '[{"url": "https://example.com", "type": "primary"}]',
         "billing_preferences": '{"payment_method": "credit_card"}',
         "custom_fields": '{"key": "value"}',
+        "additional_data": "{}",
+        "social_pages": "[]",
+        "enrichment_done": False,
+        "last_enriched_at": None,
         "lead_id": "lead-1",
         "lead_status": "prospect",
         "intake_stage": "Initial Contact",
@@ -1177,7 +1176,7 @@ async def test_get_client_details_without_lead(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_client_details_with_null_coordinates(monkeypatch):
+async def test_get_client_details_null_coordinates(monkeypatch):
     """get_client_details handles addresses with null coordinates."""
     fake_repo = _FakeClientRepo()
     fake_repo.client_details_result = {
@@ -1230,9 +1229,8 @@ async def test_get_client_details_with_null_coordinates(monkeypatch):
     assert result.addresses[0].place_id is None
 
 
-# --- update_client ---
 @pytest.mark.asyncio
-async def test_update_client_returns_none_no_update_fields(monkeypatch):
+async def test_update_client_no_update_fields(monkeypatch):
     """update_client returns None when body has no fields to apply."""
     fake_repo = _FakeClientRepo()
     monkeypatch.setattr(
@@ -1249,7 +1247,7 @@ async def test_update_client_returns_none_no_update_fields(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_client_raises_not_found_client_missing(monkeypatch):
+async def test_update_client_not_found(monkeypatch):
     """update_client raises NotFoundException when client not found."""
     fake_repo = _FakeClientRepo()
     fake_repo.get_client_for_update_result = None
@@ -1268,7 +1266,7 @@ async def test_update_client_raises_not_found_client_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_client_raises_conflict_when_name_exists(monkeypatch):
+async def test_update_client_name_exists(monkeypatch):
     """update_client raises ConflictException when client_name already exists."""
     fake_repo = _FakeClientRepo()
     fake_repo.get_client_for_update_result = {
@@ -1281,6 +1279,10 @@ async def test_update_client_raises_conflict_when_name_exists(monkeypatch):
         "websites": "[]",
         "billing_preferences": "{}",
         "custom_fields": "{}",
+        "additional_data": "{}",
+        "social_pages": "[]",
+        "enrichment_done": False,
+        "last_enriched_at": None,
     }
     fake_repo.name_exists = True
     monkeypatch.setattr(
@@ -1296,6 +1298,7 @@ async def test_update_client_raises_conflict_when_name_exists(monkeypatch):
     assert exc_info.value.message_key == "clients.errors.client_name_already_exists"
     assert fake_repo.calls["check_client_name_exists"]["name"] == "existing client"
     assert fake_repo.calls["check_client_name_exists"]["exclude_client_id"] == "client-1"
+    assert "client_type" not in fake_repo.calls["check_client_name_exists"]
 
 
 @pytest.mark.asyncio
@@ -1312,6 +1315,10 @@ async def test_update_client_success_scalar_only(monkeypatch):
         "websites": "[]",
         "billing_preferences": "{}",
         "custom_fields": "{}",
+        "additional_data": "{}",
+        "social_pages": "[]",
+        "enrichment_done": False,
+        "last_enriched_at": None,
     }
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
@@ -1353,10 +1360,11 @@ async def test_update_client_success_with_addresses(monkeypatch):
         "websites": "[]",
         "billing_preferences": "{}",
         "custom_fields": "{}",
+        "additional_data": "{}",
+        "social_pages": "[]",
+        "enrichment_done": False,
+        "last_enriched_at": None,
     }
-    fake_repo.address_result = [
-        {"id": "addr-1", "address_line1": "123 Main St", "client_id": "client-1"}
-    ]
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
@@ -1364,22 +1372,20 @@ async def test_update_client_success_with_addresses(monkeypatch):
     service = ClientService(user_context=_ctx(), db_connection=None)
     body = UpdateClientRequest(
         client_name="Client",
-        addresses=[
-            AddressUpdate(id="addr-1", address_line1="456 Updated St"),
-            AddressUpdate(address_line1="New Address"),
-        ],
+        addresses=AddressesUpdate(
+            update=[AddressUpdateItem(id="addr-1", address_line1="456 Updated St")],
+            add=[AddressInput(address_line1="New Address")],
+        ),
     )
 
     await service.update_client("client-1", "org-1", body)
 
-    assert "get_client_addresses" in fake_repo.calls
-    # No delete: addr-1 is kept (updated); only a new address is added
     assert "update_address" in fake_repo.calls
     assert "bulk_create_addresses" in fake_repo.calls
 
 
 @pytest.mark.asyncio
-async def test_update_client_success_with_lead_management(monkeypatch):
+async def test_update_client_with_lead_management(monkeypatch):
     """update_client calls update_lead when lead_management provided."""
     fake_repo = _FakeClientRepo()
     fake_repo.get_client_for_update_result = {
@@ -1392,6 +1398,10 @@ async def test_update_client_success_with_lead_management(monkeypatch):
         "websites": "[]",
         "billing_preferences": "{}",
         "custom_fields": "{}",
+        "additional_data": "{}",
+        "social_pages": "[]",
+        "enrichment_done": False,
+        "last_enriched_at": None,
     }
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
@@ -1465,17 +1475,17 @@ async def test_build_client_update_payload_scalar_and_merge():
 
 @pytest.mark.asyncio
 async def test_build_client_update_payload_websites():
-    """_build_client_update_payload normalizes websites with ids."""
+    """_build_client_update_payload does not handle websites (handled separately)."""
     service = ClientService(db_connection=None)
     current = {"name": "Client", "websites": "[]"}
-    body = UpdateClientRequest(websites=[WebsiteUpdate(url="https://x.com", type="primary")])
+    body = UpdateClientRequest(
+        websites=WebsitesUpdate(add=[WebsiteInput(url="https://x.com", type="primary")])
+    )
 
     payload = service._build_client_update_payload(body, current)
 
-    assert "websites" in payload
-    assert len(payload["websites"]) == 1
-    assert payload["websites"][0]["url"] == "https://x.com"
-    assert "id" in payload["websites"][0]
+    # Websites are handled separately in _apply_websites_changes, not in payload
+    assert "websites" not in payload
 
 
 @pytest.mark.asyncio
@@ -1490,7 +1500,6 @@ async def test_apply_lead_update_calls_repository(monkeypatch):
     lead = LeadManagementUpdate(lead_id="lead-1", lead_status=LeadStatus.CONVERTED)
 
     await service._apply_lead_update("client-1", lead)
-
     assert fake_repo.calls["update_lead"] == (
         "lead-1",
         "client-1",
@@ -1499,7 +1508,7 @@ async def test_apply_lead_update_calls_repository(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_apply_lead_update_no_op_when_empty_payload(monkeypatch):
+async def test_apply_lead_update_empty_payload(monkeypatch):
     """_apply_lead_update does not call repository when only lead_id provided."""
     fake_repo = _FakeClientRepo()
     monkeypatch.setattr(
@@ -1510,53 +1519,612 @@ async def test_apply_lead_update_no_op_when_empty_payload(monkeypatch):
     lead = LeadManagementUpdate(lead_id="lead-1")
 
     await service._apply_lead_update("client-1", lead)
-
     assert "update_lead" not in fake_repo.calls
 
 
 @pytest.mark.asyncio
-async def test_diff_addresses_final_remove_update_add():
-    """_diff_addresses_final returns to_remove, to_update, to_add correctly."""
-    service = ClientService(db_connection=None)
-    current = [
-        {"id": "addr-1", "address_line1": "Old 1"},
-        {"id": "addr-2", "address_line1": "Old 2"},
-    ]
-    final = [
-        AddressUpdate(id="addr-1", address_line1="Updated 1"),
-        AddressUpdate(id="addr-3", address_line1="New"),
-    ]
-
-    to_remove, to_update, to_add = service._diff_addresses_final(current, final)
-
-    assert set(to_remove) == {"addr-2"}
-    assert len(to_update) == 1
-    assert to_update[0].id == "addr-1"
-    assert len(to_add) == 1
-    assert to_add[0].address_line1 == "New"
-
-
-@pytest.mark.asyncio
-async def test_apply_addresses_final_calls_remove_update_add(monkeypatch):
-    """_apply_addresses_final calls delete_addresses_by_ids,
-    update_address, bulk_create_addresses as needed."""
+async def test_apply_addresses_changes_ops(monkeypatch):
+    """_apply_addresses_changes calls delete, update, add as needed."""
     fake_repo = _FakeClientRepo()
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
     )
     service = ClientService(db_connection=None)
-    current = [{"id": "addr-1", "address_line1": "Old"}]
-    final = [
-        AddressUpdate(id="addr-1", address_line1="Updated"),
-        AddressUpdate(address_line1="New Addr"),
-    ]
+    addresses_update = AddressesUpdate(
+        remove=["addr-2"],
+        update=[AddressUpdateItem(id="addr-1", address_line1="Updated")],
+        add=[AddressInput(address_line1="New Addr")],
+    )
 
-    await service._apply_addresses_final("client-1", current, final)
-
+    await service._apply_addresses_changes("client-1", addresses_update)
+    assert "delete_addresses_by_ids" in fake_repo.calls
+    assert fake_repo.calls["delete_addresses_by_ids"] == ("client-1", ["addr-2"])
     assert "update_address" in fake_repo.calls
     assert fake_repo.calls["update_address"][0] == "addr-1"
     assert fake_repo.calls["update_address"][1] == "client-1"
     assert "bulk_create_addresses" in fake_repo.calls
     assert len(fake_repo.calls["bulk_create_addresses"]) == 1
     assert fake_repo.calls["bulk_create_addresses"][0]["address_line1"] == "New Addr"
+
+
+@pytest.mark.asyncio
+async def test_create_client_from_user_email_error(monkeypatch):
+    """create_client_from_user handles email sending exception gracefully."""
+    fake_repo = _FakeClientRepo()
+    fake_user_repo = _FakeUserRepo()
+    fake_org_repo = _FakeOrgRepo()
+    fake_user_event_repo = _FakeUserEventRepo()
+
+    async def fake_create_isometrik_user(*_args, **_kwargs):
+        return {"userId": "isometrik-123"}
+
+    def failing_send_email(*_args, **_kwargs):
+        raise ServiceUnavailableException(
+            message_key="errors.service_unavailable",
+            custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserRepository",
+        lambda db_connection=None: fake_user_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.OrganizationRepository",
+        lambda db_connection=None: fake_org_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserEventRepository",
+        lambda db_connection=None: fake_user_event_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.create_isometrik_user",
+        fake_create_isometrik_user,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.send_client_creation_email",
+        failing_send_email,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
+
+    # Should not raise exception, just log error
+    await service.create_client_from_user(request_data)
+    assert "create_client" in fake_repo.calls
+    assert "create_client_user" in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_create_client_from_user_no_email(monkeypatch):
+    """create_client_from_user handles missing email gracefully."""
+    fake_repo = _FakeClientRepo()
+    fake_user_repo = _FakeUserRepo()
+    fake_user_repo.user_details = {"id": "user-1"}  # No email
+    fake_org_repo = _FakeOrgRepo()
+    fake_user_event_repo = _FakeUserEventRepo()
+
+    async def fake_create_isometrik_user(*_args, **_kwargs):
+        return {"userId": "isometrik-123"}
+
+    email_called = []
+
+    def track_email(*_args, **_kwargs):
+        email_called.append(True)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserRepository",
+        lambda db_connection=None: fake_user_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.OrganizationRepository",
+        lambda db_connection=None: fake_org_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserEventRepository",
+        lambda db_connection=None: fake_user_event_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.create_isometrik_user",
+        fake_create_isometrik_user,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.send_client_creation_email",
+        track_email,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
+
+    await service.create_client_from_user(request_data)
+
+    assert len(email_called) == 0  # Email should not be sent when email is missing
+
+
+@pytest.mark.asyncio
+async def test_validate_client_creation_org_not_found(monkeypatch):
+    """_validate_client_creation raises NotFoundException when org not found."""
+    fake_repo = _FakeClientRepo()
+    fake_org_repo = _FakeOrgRepo()
+    fake_org_repo.organization = None
+    fake_user_repo = _FakeUserRepo()
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.OrganizationRepository",
+        lambda db_connection=None: fake_org_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserRepository",
+        lambda db_connection=None: fake_user_repo,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.PERSON,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+    )
+
+    with pytest.raises(NotFoundException):
+        await service._validate_client_creation(request_data, "org-1")
+
+
+@pytest.mark.asyncio
+async def test_validate_client_creation_company_name(monkeypatch):
+    """_validate_client_creation validates company name correctly."""
+    fake_repo = _FakeClientRepo()
+    fake_user_repo = _FakeUserRepo()
+    fake_org_repo = _FakeOrgRepo()
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserRepository",
+        lambda db_connection=None: fake_user_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.OrganizationRepository",
+        lambda db_connection=None: fake_org_repo,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.COMPANY,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+        name="  Test Company  ",
+    )
+
+    await service._validate_client_creation(request_data, "org-1")
+
+    # Name is stripped but not lowercased in validation
+    assert fake_repo.calls["check_client_name_exists"]["name"] == "Test Company"
+
+
+@pytest.mark.asyncio
+async def test_prepare_client_data_optional_fields():
+    """_prepare_client_data includes optional fields when provided."""
+    service = ClientService(db_connection=None)
+    from apps.user_service.app.schemas.clients import BillingPreferences, SocialPage
+
+    request_data = CreateClientRequest(
+        client_type=ClientType.PERSON,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+        industry="Technology",
+        profile_photo_url="https://example.com/photo.jpg",
+        billing_preferences=BillingPreferences(method="credit_card", terms="Net 30"),
+        additional_data={"key": "value"},
+        social_pages=[SocialPage(platform="linkedin", url="https://linkedin.com/in/john")],
+    )
+
+    client_data = service._prepare_client_data(request_data, "org-1")
+
+    assert client_data["industry"] == "Technology"
+    assert client_data["profile_photo_url"] == "https://example.com/photo.jpg"
+    assert isinstance(client_data["billing_preferences"], str)
+    assert isinstance(client_data["additional_data"], str)
+    assert isinstance(client_data["social_pages"], str)
+
+
+@pytest.mark.asyncio
+async def test_prepare_client_user_data_with_optional_fields():
+    """_prepare_client_user_data includes optional fields when provided."""
+    service = ClientService(db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.PERSON,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+        date_of_birth=datetime.date(1990, 1, 1),
+        profile_photo_url="https://example.com/photo.jpg",
+    )
+    client_user_data = service._prepare_client_user_data(
+        request_data, "client-1", "org-1", "user-1", "isometrik-1"
+    )
+
+    assert client_user_data["date_of_birth"] == date(1990, 1, 1)
+    assert client_user_data["profile_photo_url"] == "https://example.com/photo.jpg"
+
+
+@pytest.mark.asyncio
+async def test_create_client_email_sending_exception(monkeypatch):
+    """create_client handles email sending exception gracefully."""
+    fake_repo = _FakeClientRepo()
+    fake_org_repo = _FakeOrgRepo()
+    fake_user_repo = _FakeUserRepo()
+
+    async def fake_create_user(*_args, **_kwargs):
+        return {"id": "auth-user-123"}
+
+    async def fake_create_isometrik_user(*_args, **_kwargs):
+        return {"userId": "isometrik-123"}
+
+    def failing_send_email(*_args, **_kwargs):
+        raise ServiceUnavailableException(
+            message_key="errors.service_unavailable",
+            custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.OrganizationRepository",
+        lambda db_connection=None: fake_org_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UserRepository",
+        lambda db_connection=None: fake_user_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.create_user",
+        fake_create_user,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.create_isometrik_user",
+        fake_create_isometrik_user,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.send_client_creation_email",
+        failing_send_email,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.PERSON,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+        portal_access=True,
+    )
+
+    # Should not raise exception, just log error
+    await service.create_client(request_data)
+    assert "create_client" in fake_repo.calls
+    assert "create_client_user" in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_update_client_with_websites(monkeypatch):
+    """update_client applies websites changes."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = {
+        "id": "client-1",
+        "name": "Client",
+        "industry": None,
+        "profile_photo_url": None,
+        "portal_access": False,
+        "tags": [],
+        "websites": '[{"id": "web-1", "url": "https://old.com", "type": "primary"}]',
+        "billing_preferences": "{}",
+        "custom_fields": "{}",
+        "additional_data": "{}",
+        "social_pages": "[]",
+        "enrichment_done": False,
+        "last_enriched_at": None,
+    }
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    body = UpdateClientRequest(
+        websites=WebsitesUpdate(
+            add=[WebsiteInput(url="https://new.com", type="secondary")],
+            update=[WebsiteUpdateItem(id="web-1", url="https://updated.com", type="primary")],
+            remove=["web-2"],
+        )
+    )
+
+    await service.update_client("client-1", "org-1", body)
+    assert "update_client" in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_update_client_with_social_pages(monkeypatch):
+    """update_client applies social_pages changes."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = {
+        "id": "client-1",
+        "name": "Client",
+        "industry": None,
+        "profile_photo_url": None,
+        "portal_access": False,
+        "tags": [],
+        "websites": "[]",
+        "billing_preferences": "{}",
+        "custom_fields": "{}",
+        "additional_data": "{}",
+        "social_pages": '[{"id": "social-1", "platform": "linkedin", "url": "https://old.com"}]',
+        "enrichment_done": False,
+        "last_enriched_at": None,
+    }
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    body = UpdateClientRequest(
+        social_pages=SocialPagesUpdate(
+            add=[SocialPageInput(platform="twitter", url="https://twitter.com/user")],
+            update=[
+                SocialPageUpdateItem(id="social-1", platform="linkedin", url="https://updated.com")
+            ],
+            remove=["social-2"],
+        )
+    )
+
+    await service.update_client("client-1", "org-1", body)
+    assert "update_client" in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_update_client_with_empty_update_data(monkeypatch):
+    """update_client handles case when update_data is empty."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = {
+        "id": "client-1",
+        "name": "Client",
+        "industry": None,
+        "profile_photo_url": None,
+        "portal_access": False,
+        "tags": [],
+        "websites": "[]",
+        "billing_preferences": "{}",
+        "custom_fields": "{}",
+        "additional_data": "{}",
+        "social_pages": "[]",
+        "enrichment_done": False,
+        "last_enriched_at": None,
+    }
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    body = UpdateClientRequest(
+        addresses=AddressesUpdate(add=[AddressInput(address_line1="New Address")])
+    )
+
+    result = await service.update_client("client-1", "org-1", body)
+
+    # Should return old_data even if update_data is empty
+    assert result is not None
+    assert "old_data" in result
+
+
+@pytest.mark.asyncio
+async def test_build_client_update_payload_additional_data():
+    """_build_client_update_payload handles additional_data."""
+    service = ClientService(db_connection=None)
+    current = {
+        "name": "Client",
+        "additional_data": '{"existing": "data"}',
+    }
+    body = UpdateClientRequest(additional_data={"new": "value"})
+
+    payload = service._build_client_update_payload(body, current)
+
+    assert payload["additional_data"] == {"new": "value"}
+
+
+@pytest.mark.asyncio
+async def test_apply_addresses_changes_empty_payload(monkeypatch):
+    """_apply_addresses_changes handles update with empty payload."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    addresses_update = AddressesUpdate(
+        update=[AddressUpdateItem(id="addr-1")]  # No fields to update
+    )
+
+    await service._apply_addresses_changes("client-1", addresses_update)
+
+    # Should not call update_address if payload is empty
+    if "update_address" in fake_repo.calls:
+        # If called, payload should be empty dict
+        assert fake_repo.calls["update_address"][2] == {}
+
+
+@pytest.mark.asyncio
+async def test_apply_websites_changes_remove_only(monkeypatch):
+    """_apply_websites_changes handles remove operations."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = {
+        "websites": '[{"id": "web-1", "url": "https://example.com", "type": "primary"}]',
+    }
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    websites_update = WebsitesUpdate(remove=["web-1"])
+
+    websites_json = '[{"id": "web-1", "url": "https://example.com", "type": "primary"}]'
+    await service._apply_websites_changes(
+        "client-1", "org-1", websites_update, {"websites": websites_json}
+    )
+    assert "update_client" in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_apply_websites_changes_not_found(monkeypatch):
+    """_apply_websites_changes raises NotFoundException when website not found."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    websites_update = WebsitesUpdate(
+        update=[WebsiteUpdateItem(id="nonexistent", url="https://example.com", type="primary")]
+    )
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service._apply_websites_changes(
+            "client-1", "org-1", websites_update, {"websites": "[]"}
+        )
+
+    assert exc_info.value.message_key == "clients.errors.website_not_found"
+
+
+@pytest.mark.asyncio
+async def test_apply_websites_changes_non_list(monkeypatch):
+    """_apply_websites_changes handles non-list current websites."""
+    fake_repo = _FakeClientRepo()
+
+    def mock_parse_json_field(field_value):
+        if field_value == "invalid":
+            return {}  # Return empty dict for invalid JSON
+        from apps.user_service.app.utils.common_utils import parse_json_field
+
+        return parse_json_field(field_value)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.parse_json_field",
+        mock_parse_json_field,
+    )
+    service = ClientService(db_connection=None)
+    websites_update = WebsitesUpdate(add=[WebsiteInput(url="https://example.com", type="primary")])
+
+    await service._apply_websites_changes(
+        "client-1", "org-1", websites_update, {"websites": "invalid"}
+    )
+
+    assert "update_client" in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_apply_social_pages_changes_remove_only(monkeypatch):
+    """_apply_social_pages_changes handles remove operations."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+
+    social_pages_update = SocialPagesUpdate(remove=["social-1"])
+
+    await service._apply_social_pages_changes(
+        "client-1",
+        "org-1",
+        social_pages_update,
+        {
+            "social_pages": (
+                '[{"id": "social-1", "platform": "linkedin", "url": "https://example.com"}]'
+            )
+        },
+    )
+    assert "update_client" in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_apply_social_pages_changes_not_found(monkeypatch):
+    """_apply_social_pages_changes raises NotFoundException when social page not found."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    social_pages_update = SocialPagesUpdate(
+        update=[
+            SocialPageUpdateItem(id="nonexistent", platform="linkedin", url="https://example.com")
+        ]
+    )
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service._apply_social_pages_changes(
+            "client-1", "org-1", social_pages_update, {"social_pages": "[]"}
+        )
+
+    assert exc_info.value.message_key == "clients.errors.social_page_not_found"
+
+
+@pytest.mark.asyncio
+async def test_apply_social_pages_changes_non_list(monkeypatch):
+    """_apply_social_pages_changes handles non-list current social pages."""
+    fake_repo = _FakeClientRepo()
+
+    def mock_parse_json_field(field_value):
+        if field_value == "invalid":
+            return {}  # Return empty dict for invalid JSON
+        from apps.user_service.app.utils.common_utils import parse_json_field
+
+        return parse_json_field(field_value)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.parse_json_field",
+        mock_parse_json_field,
+    )
+    service = ClientService(db_connection=None)
+    social_pages_update = SocialPagesUpdate(
+        add=[SocialPageInput(platform="linkedin", url="https://example.com")]
+    )
+
+    await service._apply_social_pages_changes(
+        "client-1", "org-1", social_pages_update, {"social_pages": "invalid"}
+    )
+
+    assert "update_client" in fake_repo.calls

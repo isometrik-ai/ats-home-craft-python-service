@@ -18,7 +18,7 @@ from apps.user_service.app.db.repositories import (
     UserRepository,
 )
 from apps.user_service.app.schemas.clients import (
-    AddressUpdate,
+    AddressesUpdate,
     BillingPreferences,
     ClientAddressResponse,
     ClientDetailsResponse,
@@ -28,9 +28,11 @@ from apps.user_service.app.schemas.clients import (
     LeadInfo,
     LeadManagementUpdate,
     PrimaryContactInfo,
+    SocialPage,
+    SocialPagesUpdate,
     UpdateClientRequest,
     Website,
-    WebsiteUpdate,
+    WebsitesUpdate,
 )
 from apps.user_service.app.schemas.enums import (
     ClientType,
@@ -40,6 +42,7 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
+    generate_random_password,
     parse_json_field,
     safe_json_loads,
     serialize_pydantic_models,
@@ -231,17 +234,15 @@ class ClientService:
                 params={"organization_id": organization_id},
             )
 
-        # Validate email uniqueness
-        email_exists = await self.client_repository.check_email_exists(
-            email=request_data.email, organization_id=organization_id
-        )
-        if email_exists:
+        # Validate email uniqueness (check across all auth.users)
+        user_repository = UserRepository(db_connection=self.db_connection)
+        existing_user = await user_repository.get_auth_user_by_email(request_data.email)
+        if existing_user:
             raise ConflictException(
                 message_key="clients.errors.email_already_exists",
                 custom_code=CustomStatusCode.CONFLICT,
             )
-        # Validate phone uniqueness
-        user_repository = UserRepository(db_connection=self.db_connection)
+        # Validate phone uniqueness (check across all auth.users)
         phone_exists = await user_repository.phone_exists_for_other_user(
             phone=f"{request_data.phone_isd_code}{request_data.phone_number}",
         )
@@ -272,7 +273,7 @@ class ClientService:
 
     async def _create_auth_and_isometrik_user(
         self, request_data: CreateClientRequest, organization: dict[str, Any], organization_id: str
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str]:
         """Create Supabase auth user and Isometrik user.
 
         Args:
@@ -281,11 +282,14 @@ class ClientService:
             organization_id: Organization ID
 
         Returns:
-            tuple: (user_id, isometrik_user_id)
+            tuple: (user_id, isometrik_user_id, password)
 
         Raises:
             ServiceUnavailableException: If auth or Isometrik creation fails
         """
+        # Generate a random password for the client user
+        password = generate_random_password()
+
         # Build phone number for auth
         phone = f"{request_data.phone_isd_code}{request_data.phone_number}"
 
@@ -303,10 +307,11 @@ class ClientService:
             if request_data.prefix:
                 user_metadata["salutation"] = request_data.prefix
 
-        # Create Supabase auth user
+        # Create Supabase auth user with generated password
         auth_user = await create_user(
             sb_client=self.supabase_client,
             email=request_data.email,
+            password=password,
             phone=phone,
             email_confirm=True,
             user_metadata=user_metadata,
@@ -342,7 +347,7 @@ class ClientService:
                 custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
             )
 
-        return user_id, isometrik_response["userId"]
+        return user_id, isometrik_response["userId"], password
 
     def _prepare_client_data(
         self,
@@ -388,6 +393,13 @@ class ClientService:
         if request_data.custom_fields:
             serialized_custom_fields = serialize_pydantic_models(request_data.custom_fields)
             client_data["custom_fields"] = json.dumps(serialized_custom_fields)
+
+        if request_data.additional_data:
+            client_data["additional_data"] = json.dumps(request_data.additional_data)
+        if request_data.social_pages:
+            client_data["social_pages"] = json.dumps(
+                [p.model_dump() for p in request_data.social_pages]
+            )
 
         return client_data
 
@@ -503,7 +515,7 @@ class ClientService:
         organization = await self._validate_client_creation(request_data, organization_id)
 
         # Create auth and Isometrik users
-        user_id, isometrik_user_id = await self._create_auth_and_isometrik_user(
+        user_id, isometrik_user_id, password = await self._create_auth_and_isometrik_user(
             request_data, organization, organization_id
         )
 
@@ -520,11 +532,13 @@ class ClientService:
         # Create optional records (lead, address)
         await self._create_optional_records(request_data, client_record["id"])
 
-        # Send creation email
+        # Send creation email with password
         if request_data.portal_access:
             try:
                 send_client_creation_email(
-                    email=request_data.email, organization_name=organization["name"]
+                    email=request_data.email,
+                    organization_name=organization["name"],
+                    password=password,
                 )
             except Exception as e:
                 logger.error("Failed to send client creation email: %s", str(e))
@@ -598,7 +612,7 @@ class ClientService:
                 primary_contact=primary_contact,
                 company_type=client.get("client_type"),
                 status=client.get("status"),
-                matters=[],
+                projects=[],
                 created_at=format_iso_datetime(client.get("created_at")) or "",
                 updated_at=format_iso_datetime(client.get("updated_at")) or "",
                 outstanding=None,
@@ -656,6 +670,9 @@ class ClientService:
             billing_preferences = BillingPreferences(**billing_preferences_data)
 
         custom_fields = parse_json_field(client.get("custom_fields")) or {}
+        additional_data = parse_json_field(client.get("additional_data")) or {}
+        social_pages_data = parse_json_field(client.get("social_pages")) or []
+        social_pages = [SocialPage(**p) for p in social_pages_data] if social_pages_data else []
 
         # Format lead information if exists
         lead_info = None
@@ -717,6 +734,10 @@ class ClientService:
             custom_fields=custom_fields,
             addresses=formatted_addresses,
             lead=lead_info,
+            additional_data=additional_data,
+            social_pages=social_pages,
+            enrichment_done=bool(client.get("enrichment_done", False)),
+            last_enriched_at=format_iso_datetime(client.get("last_enriched_at")),
             created_at=format_iso_datetime(client.get("created_at")) or "",
             updated_at=format_iso_datetime(client.get("updated_at")) or "",
         )
@@ -787,9 +808,17 @@ class ClientService:
 
         update_data = self._build_client_update_payload(body, current)
 
+        # Apply batch list operations (addresses, websites, social_pages)
         if body.addresses is not None:
-            current_addresses = await self.client_repository.get_client_addresses(client_id)
-            await self._apply_addresses_final(client_id, current_addresses, body.addresses)
+            await self._apply_addresses_changes(client_id, body.addresses)
+
+        if body.websites is not None:
+            await self._apply_websites_changes(client_id, organization_id, body.websites, current)
+
+        if body.social_pages is not None:
+            await self._apply_social_pages_changes(
+                client_id, organization_id, body.social_pages, current
+            )
 
         if body.lead_management is not None:
             await self._apply_lead_update(client_id, body.lead_management)
@@ -821,6 +850,10 @@ class ClientService:
             "websites": parse_json_field(client_data.get("websites")),
             "billing_preferences": parse_json_field(client_data.get("billing_preferences")),
             "custom_fields": parse_json_field(client_data.get("custom_fields")),
+            "additional_data": parse_json_field(client_data.get("additional_data")),
+            "social_pages": parse_json_field(client_data.get("social_pages")),
+            "enrichment_done": client_data.get("enrichment_done"),
+            "last_enriched_at": client_data.get("last_enriched_at"),
         }
 
     def _has_any_update(self, body: UpdateClientRequest) -> bool:
@@ -838,6 +871,10 @@ class ClientService:
                 "lead_management",
                 "billing_preferences",
                 "custom_fields",
+                "additional_data",
+                "social_pages",
+                "enrichment_done",
+                "last_enriched_at",
             )
         )
 
@@ -851,6 +888,8 @@ class ClientService:
             ("profile_photo_url", "profile_photo_url"),
             ("portal_access", "portal_access"),
             ("tags", "tags"),
+            ("enrichment_done", "enrichment_done"),
+            ("last_enriched_at", "last_enriched_at"),
         ]
         for body_attr, payload_key in simple_fields:
             value = getattr(body, body_attr, None)
@@ -896,8 +935,8 @@ class ClientService:
         """Build the client row update dict from body and current row (merge where needed)."""
         payload: dict[str, Any] = {}
         self._apply_simple_client_update_fields(body, payload)
-        if body.websites is not None:
-            payload["websites"] = self._normalize_websites_final(body.websites)
+        if body.additional_data is not None:
+            payload["additional_data"] = body.additional_data
         self._merge_billing_preferences_into_payload(body, current, payload)
         self._merge_custom_fields_into_payload(body, current, payload)
         return payload
@@ -912,16 +951,6 @@ class ClientService:
             result.append(item)
         return result
 
-    def _normalize_websites_final(self, final: list[WebsiteUpdate]) -> list[dict[str, Any]]:
-        """Normalize final website list from UI: ensure each item has an id."""
-        result: list[dict[str, Any]] = []
-        for item in final:
-            data = item.model_dump(exclude_none=True)
-            if not data.get("id"):
-                data["id"] = str(uuid.uuid4())
-            result.append(data)
-        return result
-
     async def _apply_lead_update(self, client_id: str, lead: LeadManagementUpdate) -> None:
         """Apply lead update by lead_id; only provided fields are sent to repository."""
         lead_data = lead.model_dump(exclude={"lead_id"}, exclude_none=True)
@@ -929,42 +958,126 @@ class ClientService:
             return
         await self.client_repository.update_lead(lead.lead_id, client_id, lead_data)
 
-    def _diff_addresses_final(
-        self,
-        current: list[dict[str, Any]],
-        final: list[AddressUpdate],
-    ) -> tuple[list[str], list[AddressUpdate], list[AddressUpdate]]:
-        """Compare current addresses with final state; return (to_remove_ids, to_update, to_add)."""
-        current_ids = {str(a["id"]) for a in current if a.get("id")}
-        final_with_id = [a for a in final if a.id]
-        final_ids = {str(a.id) for a in final_with_id}
-        to_remove = list(current_ids - final_ids)
-        to_update = [a for a in final_with_id if str(a.id) in current_ids]
-        to_add = [a for a in final if not a.id or str(a.id) not in current_ids]
-        return to_remove, to_update, to_add
-
-    async def _apply_addresses_final(
+    async def _apply_addresses_changes(
         self,
         client_id: str,
-        current: list[dict[str, Any]],
-        final: list[AddressUpdate],
+        addresses_update: AddressesUpdate,
     ) -> None:
-        """Apply final address state: remove missing, update existing, add new."""
-        to_remove, to_update, to_add = self._diff_addresses_final(current, final)
-        if to_remove:
-            await self.client_repository.delete_addresses_by_ids(client_id, to_remove)
-        for item in to_update:
-            payload = item.model_dump(exclude_none=True)
-            addr_id = payload.pop("id", None)
-            if addr_id and payload:
-                await self.client_repository.update_address(addr_id, client_id, payload)
-        if to_add:
-            rows = [self._address_add_row(client_id, a) for a in to_add]
+        """Apply batch address operations: add, update, and/or remove."""
+        # Remove operations
+        if addresses_update.remove:
+            await self.client_repository.delete_addresses_by_ids(client_id, addresses_update.remove)
+
+        # Update operations
+        if addresses_update.update:
+            for update_item in addresses_update.update:
+                payload = update_item.model_dump(exclude_none=True, exclude={"id"})
+                if payload:
+                    await self.client_repository.update_address(update_item.id, client_id, payload)
+
+        # Add operations
+        if addresses_update.add:
+            rows = []
+            for add_item in addresses_update.add:
+                row: dict[str, Any] = {"client_id": client_id}
+                row.update(add_item.model_dump(exclude_none=True))
+                rows.append(row)
             await self.client_repository.bulk_create_addresses(rows)
 
-    def _address_add_row(self, client_id: str, address: AddressUpdate) -> dict[str, Any]:
-        """Build address row for bulk_create_addresses (no id; matches create flow)."""
-        row: dict[str, Any] = {"client_id": client_id}
-        data = address.model_dump(exclude_none=True, exclude={"id"})
-        row.update(data)
-        return row
+    async def _apply_websites_changes(
+        self,
+        client_id: str,
+        organization_id: str,
+        websites_update: WebsitesUpdate,
+        current: dict[str, Any],
+    ) -> None:
+        """Apply batch website operations: add, update, and/or remove to JSONB field."""
+        current_websites = parse_json_field(current.get("websites")) or []
+        if not isinstance(current_websites, list):
+            current_websites = []
+
+        updated_websites = current_websites.copy()
+
+        # Remove operations
+        if websites_update.remove:
+            updated_websites = [
+                w for w in updated_websites if str(w.get("id")) not in websites_update.remove
+            ]
+
+        # Update operations
+        if websites_update.update:
+            for update_item in websites_update.update:
+                update_data = update_item.model_dump(exclude_none=True)
+                found = False
+                for i, website in enumerate(updated_websites):
+                    if str(website.get("id")) == update_item.id:
+                        updated_websites[i] = {**website, **update_data}
+                        found = True
+                        break
+                if not found:
+                    raise NotFoundException(
+                        message_key="clients.errors.website_not_found",
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )
+
+        # Add operations
+        if websites_update.add:
+            for add_item in websites_update.add:
+                new_website = add_item.model_dump(exclude_none=True)
+                new_website["id"] = str(uuid.uuid4())
+                updated_websites.append(new_website)
+
+        # Update the JSONB field
+        await self.client_repository.update_client(
+            client_id, organization_id, {"websites": json.dumps(updated_websites)}
+        )
+
+    async def _apply_social_pages_changes(
+        self,
+        client_id: str,
+        organization_id: str,
+        social_pages_update: SocialPagesUpdate,
+        current: dict[str, Any],
+    ) -> None:
+        """Apply batch social page operations: add, update, and/or remove to JSONB field."""
+        current_social_pages = parse_json_field(current.get("social_pages")) or []
+        if not isinstance(current_social_pages, list):
+            current_social_pages = []
+
+        updated_social_pages = current_social_pages.copy()
+
+        # Remove operations
+        if social_pages_update.remove:
+            updated_social_pages = [
+                sp
+                for sp in updated_social_pages
+                if str(sp.get("id")) not in social_pages_update.remove
+            ]
+
+        # Update operations
+        if social_pages_update.update:
+            for update_item in social_pages_update.update:
+                update_data = update_item.model_dump(exclude_none=True, exclude={"id"})
+                found = False
+                for i, social_page in enumerate(updated_social_pages):
+                    if str(social_page.get("id")) == update_item.id:
+                        updated_social_pages[i] = {**social_page, **update_data}
+                        found = True
+                        break
+                if not found:
+                    raise NotFoundException(
+                        message_key="clients.errors.social_page_not_found",
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )
+
+        # Add operations
+        if social_pages_update.add:
+            for add_item in social_pages_update.add:
+                new_social_page = add_item.model_dump(exclude_none=True)
+                new_social_page["id"] = str(uuid.uuid4())
+                updated_social_pages.append(new_social_page)
+
+        # Update the JSONB field
+        await self.client_repository.update_client(
+            client_id, organization_id, {"social_pages": json.dumps(updated_social_pages)}
+        )

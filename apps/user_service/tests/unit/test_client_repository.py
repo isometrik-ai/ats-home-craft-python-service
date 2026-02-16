@@ -202,34 +202,6 @@ async def test_delete_client_users():
 
 
 @pytest.mark.asyncio
-async def test_check_email_exists():
-    """check_email_exists checks email in client_users via auth.users."""
-    conn = _FakeConn()
-    conn.fetchval_result = True
-    repo = ClientRepository(db_connection=conn)
-
-    result = await repo.check_email_exists("test@example.com", "org-1")
-
-    assert result is True
-    query = conn.fetchval_calls[0][0]
-    assert "client_users" in query
-    assert "auth.users" in query
-
-
-@pytest.mark.asyncio
-async def test_check_email_exists_excludes_client_id():
-    """check_email_exists excludes client_id when provided."""
-    conn = _FakeConn()
-    conn.fetchval_result = False
-    repo = ClientRepository(db_connection=conn)
-
-    await repo.check_email_exists("test@example.com", "org-1", exclude_client_id="client-1")
-
-    query = conn.fetchval_calls[0][0]
-    assert "cu.client_id != $" in query
-
-
-@pytest.mark.asyncio
 async def test_check_client_name_exists():
     """check_client_name_exists checks name uniqueness."""
     conn = _FakeConn()
@@ -622,6 +594,8 @@ async def test_get_client_for_update_returns_none_not_found():
     assert len(conn.fetchrow_calls) == 1
     query = conn.fetchrow_calls[0][0]
     assert "SELECT id, name, industry" in query
+    assert "additional_data" in query
+    assert "social_pages" in query
     assert "status != $" in query
     assert ClientStatus.DELETED.value in conn.fetchrow_calls[0][1]
 
@@ -640,6 +614,10 @@ async def test_get_client_for_update_returns_row_when_found():
         "websites": "[]",
         "billing_preferences": "{}",
         "custom_fields": "{}",
+        "additional_data": "{}",
+        "social_pages": "[]",
+        "enrichment_done": False,
+        "last_enriched_at": None,
     }
     repo = ClientRepository(db_connection=conn)
 
@@ -737,3 +715,69 @@ async def test_delete_addresses_by_ids_no_op_when_empty():
     await repo.delete_addresses_by_ids("client-1", [])
 
     assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_serialize_jsonb_param_serializes_jsonb_columns():
+    """_serialize_jsonb_param serializes JSONB column values to JSON string."""
+    # Test websites (list)
+    result = ClientRepository._serialize_jsonb_param("websites", [{"url": "https://example.com"}])
+    assert isinstance(result, str)
+    assert "example.com" in result
+
+    # Test billing_preferences (dict)
+    result = ClientRepository._serialize_jsonb_param("billing_preferences", {"method": "credit"})
+    assert isinstance(result, str)
+    assert "credit" in result
+
+    # Test custom_fields (dict)
+    result = ClientRepository._serialize_jsonb_param("custom_fields", {"key": "value"})
+    assert isinstance(result, str)
+
+    # Test additional_data (dict)
+    result = ClientRepository._serialize_jsonb_param("additional_data", {"data": "test"})
+    assert isinstance(result, str)
+
+    # Test social_pages (list)
+    result = ClientRepository._serialize_jsonb_param("social_pages", [{"platform": "linkedin"}])
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
+async def test_serialize_jsonb_param_passes_through_non_jsonb():
+    """_serialize_jsonb_param passes through non-JSONB column values."""
+    # Test non-JSONB column
+    result = ClientRepository._serialize_jsonb_param("name", "Test Client")
+    assert result == "Test Client"
+
+    # Test non-JSONB column with dict value (should pass through)
+    result = ClientRepository._serialize_jsonb_param("other_field", {"key": "value"})
+    assert isinstance(result, dict)
+    assert result == {"key": "value"}
+
+
+@pytest.mark.asyncio
+async def test_update_client_serializes_jsonb_fields():
+    """update_client serializes JSONB fields correctly."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "client-1",
+        "websites": '[{"id": "web-1", "url": "https://example.com"}]',
+        "billing_preferences": '{"method": "credit"}',
+    }
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.update_client(
+        "client-1",
+        "org-1",
+        {
+            "websites": [{"id": "web-1", "url": "https://updated.com"}],
+            "billing_preferences": {"method": "invoice"},
+        },
+    )
+
+    assert result is not None
+    # Check that JSONB fields were serialized in the query
+    query = conn.fetchrow_calls[0][0]
+    assert "websites = $" in query or "websites = $1::jsonb" in query
+    assert "billing_preferences = $" in query or "billing_preferences = $2::jsonb" in query
