@@ -7,6 +7,8 @@ standardize common operations.
 
 import hashlib
 import json
+import secrets
+import string
 import time
 import traceback
 import uuid
@@ -570,3 +572,37 @@ def serialize_pydantic_models(value: Any) -> Any:
     if isinstance(value, list):
         return [serialize_pydantic_models(item) for item in value]
     return value
+
+
+def generate_random_password(length: int = 12) -> str:
+    """Generate a secure random password.
+
+    Args:
+        length: Length of the password (default: 12)
+
+    Returns:
+        str: A secure random password containing
+        uppercase, lowercase, digits, and special characters
+    """
+    # Define character sets
+    uppercase = string.ascii_uppercase
+    lowercase = string.ascii_lowercase
+    digits = string.digits
+    special_chars = "!@#$%^&*"
+
+    # Ensure at least one character from each set
+    password = [
+        secrets.choice(uppercase),
+        secrets.choice(lowercase),
+        secrets.choice(digits),
+        secrets.choice(special_chars),
+    ]
+
+    # Fill the rest with random characters from all sets
+    all_chars = uppercase + lowercase + digits + special_chars
+    password.extend(secrets.choice(all_chars) for _ in range(length - 4))
+
+    # Shuffle to avoid predictable pattern
+    secrets.SystemRandom().shuffle(password)
+
+    return "".join(password)

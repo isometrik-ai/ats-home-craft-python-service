@@ -98,6 +98,10 @@ async def test_get_client_details(monkeypatch, client):
             tags=[],
             websites=[],
             addresses=[],
+            additional_data={},
+            social_pages=[],
+            enrichment_done=False,
+            last_enriched_at=None,
             created_at="2024-01-01T00:00:00Z",
             updated_at="2024-01-01T00:00:00Z",
         )

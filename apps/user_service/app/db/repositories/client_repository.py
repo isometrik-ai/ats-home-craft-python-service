@@ -18,7 +18,9 @@ from libs.shared_utils.status_codes import CustomStatusCode
 logger = get_logger("client_repository")
 
 # JSONB columns in clients table - values must be serialized to JSON string for asyncpg
-CLIENT_JSONB_COLUMNS = frozenset({"websites", "billing_preferences", "custom_fields"})
+CLIENT_JSONB_COLUMNS = frozenset(
+    {"websites", "billing_preferences", "custom_fields", "additional_data", "social_pages"}
+)
 
 
 class ClientRepository:
@@ -104,6 +106,8 @@ class ClientRepository:
             "billing_preferences",
             "custom_fields",
             "portal_access",
+            "additional_data",
+            "social_pages",
         ]
 
         for field_name in optional_field_mapping:
@@ -465,7 +469,8 @@ class ClientRepository:
         """
         query = """
             SELECT id, name, industry, profile_photo_url, portal_access,
-                   tags, websites, billing_preferences, custom_fields
+                   tags, websites, billing_preferences, custom_fields,
+                   additional_data, social_pages, enrichment_done, last_enriched_at
             FROM clients
             WHERE id = $1 AND organization_id = $2 AND status != $3
         """
@@ -541,38 +546,6 @@ class ClientRepository:
         return row is not None
 
     # VALIDATION OPERATIONS
-    async def check_email_exists(
-        self, email: str, organization_id: str, exclude_client_id: str | None = None
-    ) -> bool:
-        """Check if email exists in auth.users for this organization.
-
-        Args:
-            email: Email address
-            organization_id: Organization ID
-            exclude_client_id: Client ID to exclude from check
-
-        Returns:
-            bool: True if email exists
-        """
-        # Check in client_users via user_id -> auth.users
-        query = """
-            SELECT EXISTS(
-                SELECT 1
-                FROM client_users cu
-                INNER JOIN auth.users au ON au.id = cu.user_id
-                WHERE au.email = $1
-                AND cu.organization_id = $2
-                AND cu.status != $3
-        """
-        params = [email, organization_id, ClientUserStatus.DELETED.value]
-        if exclude_client_id:
-            query += " AND cu.client_id != $3"
-            params.append(exclude_client_id)
-        query += ")"
-
-        exists = await self.db_connection.fetchval(query, *params)
-        return bool(exists)
-
     async def check_client_name_exists(
         self,
         name: str,
@@ -757,6 +730,10 @@ class ClientRepository:
                 c.websites,
                 c.billing_preferences,
                 c.custom_fields,
+                c.additional_data,
+                c.social_pages,
+                c.enrichment_done,
+                c.last_enriched_at,
                 c.created_at,
                 c.updated_at,
                 cu.first_name,
