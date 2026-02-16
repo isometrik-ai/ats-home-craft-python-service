@@ -169,7 +169,12 @@
       "only_one_primary_website": "Only one website can be marked as primary",
       "only_one_primary_address": "Only one address can be marked as primary",
       "website_not_found": "Website not found",
-      "social_page_not_found": "Social page not found"
+      "social_page_not_found": "Social page not found",
+      "company_fields_not_allowed_for_person": "Company-specific fields cannot be updated for individual clients",
+      "person_fields_not_allowed_for_company": "Individual-specific fields cannot be updated for company clients",
+      "work_history_item_not_found": "Work history item not found",
+      "educational_history_item_not_found": "Educational history item not found",
+      "linked_page_not_found": "Linked page not found"
     },
     "success": {
       "client_created": "Client created successfully.",

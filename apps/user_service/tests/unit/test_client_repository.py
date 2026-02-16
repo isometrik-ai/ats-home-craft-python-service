@@ -593,7 +593,7 @@ async def test_get_client_for_update_returns_none_not_found():
     assert result is None
     assert len(conn.fetchrow_calls) == 1
     query = conn.fetchrow_calls[0][0]
-    assert "SELECT id, name, industry" in query
+    assert "SELECT id, client_type, name, industry" in query
     assert "additional_data" in query
     assert "social_pages" in query
     assert "status != $" in query
