@@ -13,6 +13,7 @@ import asyncpg
 from apps.user_service.app.schemas.enums import (
     ClientStatus,
     ClientUserStatus,
+    ProjectStatus,
     TeamRoles,
 )
 from apps.user_service.app.schemas.projects import ProjectListQueryParams
@@ -500,6 +501,52 @@ class ProjectRepository:
         total_count = await self.db_connection.fetchval(count_query, *params)
         return [dict(row) for row in rows], int(total_count) if total_count is not None else 0
 
+    async def check_project_exists(self, project_id: str, organization_id: str) -> bool:
+        """Lightweight check if project exists.
+
+        Minimal query that only checks existence without fetching any data.
+        Use this for simple existence validation before operations.
+
+        Args:
+            project_id: Project UUID or human-readable ID
+            organization_id: Organization UUID
+
+        Returns:
+            True if project exists and is not archived, False otherwise
+        """
+        query = """
+            SELECT 1
+            FROM projects p
+            WHERE (p.id::text = $1 OR p.project_id = $1)
+              AND p.organization_id = $2::uuid
+              AND p.status != 'archived'
+            LIMIT 1
+        """
+        result = await self.db_connection.fetchval(query, project_id, organization_id)
+        return result is not None
+
+    async def get_project_basic_information(
+        self, project_id: str, organization_id: str
+    ) -> dict[str, Any] | None:
+        """Get project basic information.
+
+        Args:
+            project_id: Project UUID or human-readable ID
+            organization_id: Organization UUID
+        """
+        query = """
+            SELECT
+                p.id, p.project_id, p.project_title, p.status,
+                p.team_id, p.client_id
+            FROM projects p
+            WHERE (p.id::text = $1 OR p.project_id = $1)
+              AND p.organization_id = $2::uuid
+              AND p.status != 'archived'
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(query, project_id, organization_id)
+        return dict(row) if row else None
+
     async def get_project_with_client(
         self, project_id: str, organization_id: str
     ) -> dict[str, Any] | None:
@@ -737,6 +784,48 @@ class ProjectRepository:
             WHERE project_id = $1::uuid AND organization_id = $2::uuid AND id = ANY($3::uuid[])
         """
         await self.db_connection.execute(query, project_id, organization_id, integration_ids)
+
+    async def delete_all_project_repositories(self, project_id: str, organization_id: str) -> None:
+        """Hard delete all repositories for a project."""
+        query = """
+            DELETE FROM project_repositories
+            WHERE project_id = $1::uuid AND organization_id = $2::uuid
+        """
+        await self.db_connection.execute(query, project_id, organization_id)
+
+    async def delete_all_project_integrations(self, project_id: str, organization_id: str) -> None:
+        """Hard delete all integrations for a project."""
+        query = """
+            DELETE FROM project_integrations
+            WHERE project_id = $1::uuid AND organization_id = $2::uuid
+        """
+        await self.db_connection.execute(query, project_id, organization_id)
+
+    async def soft_delete_project(
+        self,
+        project_id: str,
+        organization_id: str,
+        updated_by: str | None = None,
+    ) -> None:
+        """Soft delete a project by setting status to archived and clearing team_id.
+
+        Args:
+            project_id: Project UUID
+            organization_id: Organization UUID
+            updated_by: User ID performing the delete (optional)
+        """
+        set_parts = ["status = $3", "team_id = NULL", "updated_at = NOW()"]
+        values: list[Any] = [project_id, organization_id, ProjectStatus.ARCHIVED.value]
+        if updated_by is not None:
+            set_parts.append("updated_by = $4")
+            values.append(updated_by)
+
+        query = f"""
+            UPDATE projects
+            SET {", ".join(set_parts)}
+            WHERE id = $1::uuid AND organization_id = $2::uuid AND status != $3
+        """
+        await self.db_connection.execute(query, *values)
 
     async def update_project_integration(
         self,
