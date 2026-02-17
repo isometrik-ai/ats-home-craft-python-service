@@ -19,7 +19,21 @@ logger = get_logger("client_repository")
 
 # JSONB columns in clients table - values must be serialized to JSON string for asyncpg
 CLIENT_JSONB_COLUMNS = frozenset(
-    {"websites", "billing_preferences", "custom_fields", "additional_data", "social_pages"}
+    {
+        "websites",
+        "billing_preferences",
+        "custom_fields",
+        "additional_data",
+        "social_pages",
+        "work_history",
+        "educational_history",
+        "linked_pages",
+        "skills",
+        "target_market_segments",
+        "current_tech_stack",
+        "preferred_communication_channels",
+        "industry_specific_terminologies",
+    }
 )
 
 
@@ -468,9 +482,13 @@ class ClientRepository:
                 tags, websites, billing_preferences, custom_fields or None
         """
         query = """
-            SELECT id, name, industry, profile_photo_url, portal_access,
+            SELECT id, client_type, name, industry, profile_photo_url, portal_access,
                    tags, websites, billing_preferences, custom_fields,
-                   additional_data, social_pages, enrichment_done, last_enriched_at
+                   additional_data, social_pages, enrichment_done, last_enriched_at,
+                   work_history, educational_history, skills,
+                   target_market_segments, current_tech_stack, description,
+                   preferred_communication_channels, industry_specific_terminologies,
+                   linked_pages
             FROM clients
             WHERE id = $1 AND organization_id = $2 AND status != $3
         """
@@ -734,6 +752,15 @@ class ClientRepository:
                 c.social_pages,
                 c.enrichment_done,
                 c.last_enriched_at,
+                c.work_history,
+                c.educational_history,
+                c.skills,
+                c.target_market_segments,
+                c.current_tech_stack,
+                c.description,
+                c.preferred_communication_channels,
+                c.industry_specific_terminologies,
+                c.linked_pages,
                 c.created_at,
                 c.updated_at,
                 cu.first_name,

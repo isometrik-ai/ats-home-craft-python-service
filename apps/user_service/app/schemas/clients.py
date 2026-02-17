@@ -136,6 +136,119 @@ class SocialPageUpdateItem(BaseModel):
     url: str | None = Field(None, max_length=500)
 
 
+# --- Individual (person) type: work_history, educational_history ---
+class WorkHistoryItem(BaseModel):
+    """Work history item (person type)."""
+
+    id: str | None = Field(None, description="Work history item ID")
+    job_title: str = Field(..., description="Job title", max_length=200)
+    company: str = Field(..., description="Company name", max_length=200)
+    start_date: str = Field(..., description="Start date (e.g. Jan 2023)", max_length=50)
+    end_date: str | None = Field(None, description="End date (e.g. Feb 2023)", max_length=50)
+    current: bool = Field(default=False, description="Currently employed here")
+
+
+class WorkHistoryInput(BaseModel):
+    """Work history input for add operation."""
+
+    job_title: str = Field(..., max_length=200)
+    company: str = Field(..., max_length=200)
+    start_date: str = Field(..., max_length=50, description="e.g. Jan 2023")
+    end_date: str | None = Field(None, max_length=50, description="e.g. Feb 2023")
+    current: bool = False
+
+
+class WorkHistoryUpdateItem(BaseModel):
+    """Work history update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Work history item ID to update")
+    job_title: str | None = Field(None, max_length=200)
+    company: str | None = Field(None, max_length=200)
+    start_date: str | None = Field(None, max_length=50)
+    end_date: str | None = Field(None, max_length=50)
+    current: bool | None = None
+
+
+class WorkHistoryUpdate(BaseModel):
+    """Batch work history operations: add, update, and/or remove (person type)."""
+
+    add: list[WorkHistoryInput] | None = Field(None, max_length=50)
+    update: list[WorkHistoryUpdateItem] | None = Field(None, max_length=50)
+    remove: list[str] | None = Field(None, max_length=50)
+
+
+class EducationalHistoryItem(BaseModel):
+    """Educational history item (person type)."""
+
+    id: str | None = Field(None, description="Educational history item ID")
+    university: str = Field(..., description="University name", max_length=300)
+    degree: str = Field(..., description="Degree", max_length=200)
+    field_of_study: str = Field(..., description="Field of study", max_length=200)
+    start_date: str = Field(..., description="Start date (e.g. Sep 2018)", max_length=50)
+    end_date: str | None = Field(None, description="End date (e.g. May 2022)", max_length=50)
+
+
+class EducationalHistoryInput(BaseModel):
+    """Educational history input for add operation."""
+
+    university: str = Field(..., max_length=300)
+    degree: str = Field(..., max_length=200)
+    field_of_study: str = Field(..., max_length=200)
+    start_date: str = Field(..., max_length=50)
+    end_date: str | None = Field(None, max_length=50)
+
+
+class EducationalHistoryUpdateItem(BaseModel):
+    """Educational history update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Educational history item ID to update")
+    university: str | None = Field(None, max_length=300)
+    degree: str | None = Field(None, max_length=200)
+    field_of_study: str | None = Field(None, max_length=200)
+    start_date: str | None = Field(None, max_length=50)
+    end_date: str | None = Field(None, max_length=50)
+
+
+class EducationalHistoryUpdate(BaseModel):
+    """Batch educational history operations: add, update, and/or remove (person type)."""
+
+    add: list[EducationalHistoryInput] | None = Field(None, max_length=50)
+    update: list[EducationalHistoryUpdateItem] | None = Field(None, max_length=50)
+    remove: list[str] | None = Field(None, max_length=50)
+
+
+# --- Company type: linked_pages ---
+class LinkedPageItem(BaseModel):
+    """Linked page item (company type)."""
+
+    id: str | None = Field(None, description="Linked page ID")
+    page_name: str = Field(..., description="Page name", max_length=200)
+    page_url: str = Field(..., description="Page URL", max_length=500)
+
+
+class LinkedPageInput(BaseModel):
+    """Linked page input for add operation."""
+
+    page_name: str = Field(..., max_length=200)
+    page_url: str = Field(..., max_length=500)
+
+
+class LinkedPageUpdateItem(BaseModel):
+    """Linked page update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Linked page ID to update")
+    page_name: str | None = Field(None, max_length=200)
+    page_url: str | None = Field(None, max_length=500)
+
+
+class LinkedPagesUpdate(BaseModel):
+    """Batch linked page operations: add, update, and/or remove (company type)."""
+
+    add: list[LinkedPageInput] | None = Field(None, max_length=50)
+    update: list[LinkedPageUpdateItem] | None = Field(None, max_length=50)
+    remove: list[str] | None = Field(None, max_length=50)
+
+
 # Delta update wrappers (add/update/remove) - supports batch operations
 class AddressesUpdate(BaseModel):
     """Batch address operations: add, update, and/or remove."""
@@ -277,6 +390,33 @@ class UpdateClientRequest(BaseModel):
     )
     social_pages: SocialPagesUpdate | None = Field(
         None, description="Batch social page operations: add, update, and/or remove"
+    )
+    # Individual (person) type only: work_history, educational_history, skills
+    work_history: WorkHistoryUpdate | None = Field(
+        None, description="Batch work history operations (person type only)"
+    )
+    educational_history: EducationalHistoryUpdate | None = Field(
+        None, description="Batch educational history operations (person type only)"
+    )
+    skills: list[str] | None = Field(None, max_length=100, description="Skills (person type only)")
+    # Company type only: target_market_segments, current_tech_stack, description, etc.
+    target_market_segments: list[str] | None = Field(
+        None, max_length=50, description="Target market segments (company type only)"
+    )
+    current_tech_stack: list[str] | None = Field(
+        None, max_length=50, description="Current tech stack (company type only)"
+    )
+    description: str | None = Field(
+        None, max_length=10000, description="Description (company type only)"
+    )
+    preferred_communication_channels: list[str] | None = Field(
+        None, max_length=20, description="Preferred communication channels (company type only)"
+    )
+    industry_specific_terminologies: list[str] | None = Field(
+        None, max_length=100, description="Industry-specific terminologies (company type only)"
+    )
+    linked_pages: LinkedPagesUpdate | None = Field(
+        None, description="Batch linked page operations (company type only)"
     )
     lead_management: LeadManagementUpdate | None = None
     billing_preferences: BillingPreferencesUpdate | None = None
@@ -454,6 +594,31 @@ class ClientDetailsResponse(BaseModel):
     )
     social_pages: list[SocialPage] = Field(
         default_factory=list, description="Social platform and URL entries"
+    )
+    # Individual (person) type fields
+    work_history: list[WorkHistoryItem] = Field(
+        default_factory=list, description="Work history (person type)"
+    )
+    educational_history: list[EducationalHistoryItem] = Field(
+        default_factory=list, description="Educational history (person type)"
+    )
+    skills: list[str] = Field(default_factory=list, description="Skills (person type)")
+    # Company type fields
+    target_market_segments: list[str] = Field(
+        default_factory=list, description="Target market segments (company type)"
+    )
+    current_tech_stack: list[str] = Field(
+        default_factory=list, description="Current tech stack (company type)"
+    )
+    description: str | None = Field(None, description="Description (company type)")
+    preferred_communication_channels: list[str] = Field(
+        default_factory=list, description="Preferred communication channels (company type)"
+    )
+    industry_specific_terminologies: list[str] = Field(
+        default_factory=list, description="Industry-specific terminologies (company type)"
+    )
+    linked_pages: list[LinkedPageItem] = Field(
+        default_factory=list, description="Linked pages (company type)"
     )
     enrichment_done: bool = Field(default=False, description="Whether enrichment has been run")
     last_enriched_at: str | None = Field(None, description="Last enrichment timestamp")

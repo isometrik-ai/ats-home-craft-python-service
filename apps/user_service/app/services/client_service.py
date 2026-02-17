@@ -25,14 +25,15 @@ from apps.user_service.app.schemas.clients import (
     ClientListResponse,
     CreateClientFromUserRequest,
     CreateClientRequest,
+    EducationalHistoryItem,
     LeadInfo,
     LeadManagementUpdate,
+    LinkedPageItem,
     PrimaryContactInfo,
     SocialPage,
-    SocialPagesUpdate,
     UpdateClientRequest,
     Website,
-    WebsitesUpdate,
+    WorkHistoryItem,
 )
 from apps.user_service.app.schemas.enums import (
     ClientType,
@@ -54,6 +55,7 @@ from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
     ServiceUnavailableException,
+    ValidationException,
 )
 from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
@@ -674,6 +676,49 @@ class ClientService:
         social_pages_data = parse_json_field(client.get("social_pages")) or []
         social_pages = [SocialPage(**p) for p in social_pages_data] if social_pages_data else []
 
+        work_history_data = parse_json_field(client.get("work_history")) or []
+        work_history = (
+            [WorkHistoryItem(**w) for w in work_history_data]
+            if work_history_data and isinstance(work_history_data, list)
+            else []
+        )
+        educational_history_data = parse_json_field(client.get("educational_history")) or []
+        educational_history = (
+            [EducationalHistoryItem(**e) for e in educational_history_data]
+            if educational_history_data and isinstance(educational_history_data, list)
+            else []
+        )
+        skills = parse_json_field(client.get("skills"))
+        skills = skills if isinstance(skills, list) else []
+        target_market_segments = parse_json_field(client.get("target_market_segments"))
+        target_market_segments = (
+            target_market_segments if isinstance(target_market_segments, list) else []
+        )
+        current_tech_stack = parse_json_field(client.get("current_tech_stack"))
+        current_tech_stack = current_tech_stack if isinstance(current_tech_stack, list) else []
+        preferred_communication_channels = parse_json_field(
+            client.get("preferred_communication_channels")
+        )
+        preferred_communication_channels = (
+            preferred_communication_channels
+            if isinstance(preferred_communication_channels, list)
+            else []
+        )
+        industry_specific_terminologies = parse_json_field(
+            client.get("industry_specific_terminologies")
+        )
+        industry_specific_terminologies = (
+            industry_specific_terminologies
+            if isinstance(industry_specific_terminologies, list)
+            else []
+        )
+        linked_pages_data = parse_json_field(client.get("linked_pages")) or []
+        linked_pages = (
+            [LinkedPageItem(**lp) for lp in linked_pages_data]
+            if linked_pages_data and isinstance(linked_pages_data, list)
+            else []
+        )
+
         # Format lead information if exists
         lead_info = None
         if client.get("lead_id"):
@@ -736,6 +781,15 @@ class ClientService:
             lead=lead_info,
             additional_data=additional_data,
             social_pages=social_pages,
+            work_history=work_history,
+            educational_history=educational_history,
+            skills=skills,
+            target_market_segments=target_market_segments,
+            current_tech_stack=current_tech_stack,
+            description=client.get("description"),
+            preferred_communication_channels=preferred_communication_channels,
+            industry_specific_terminologies=industry_specific_terminologies,
+            linked_pages=linked_pages,
             enrichment_done=bool(client.get("enrichment_done", False)),
             last_enriched_at=format_iso_datetime(client.get("last_enriched_at")),
             created_at=format_iso_datetime(client.get("created_at")) or "",
@@ -790,6 +844,8 @@ class ClientService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+        self._validate_client_type_scope(body, current.get("client_type", ""))
+
         old_data = self._format_client_for_audit(current)
 
         # Validate client name when updating (same as create: non-empty and unique)
@@ -808,17 +864,12 @@ class ClientService:
 
         update_data = self._build_client_update_payload(body, current)
 
-        # Apply batch list operations (addresses, websites, social_pages)
-        if body.addresses is not None:
-            await self._apply_addresses_changes(client_id, body.addresses)
-
-        if body.websites is not None:
-            await self._apply_websites_changes(client_id, organization_id, body.websites, current)
-
-        if body.social_pages is not None:
-            await self._apply_social_pages_changes(
-                client_id, organization_id, body.social_pages, current
-            )
+        await self._apply_batch_jsonb_list_changes(
+            body=body,
+            client_id=client_id,
+            organization_id=organization_id,
+            current=current,
+        )
 
         if body.lead_management is not None:
             await self._apply_lead_update(client_id, body.lead_management)
@@ -852,6 +903,19 @@ class ClientService:
             "custom_fields": parse_json_field(client_data.get("custom_fields")),
             "additional_data": parse_json_field(client_data.get("additional_data")),
             "social_pages": parse_json_field(client_data.get("social_pages")),
+            "work_history": parse_json_field(client_data.get("work_history")),
+            "educational_history": parse_json_field(client_data.get("educational_history")),
+            "skills": parse_json_field(client_data.get("skills")),
+            "target_market_segments": parse_json_field(client_data.get("target_market_segments")),
+            "current_tech_stack": parse_json_field(client_data.get("current_tech_stack")),
+            "description": client_data.get("description"),
+            "preferred_communication_channels": parse_json_field(
+                client_data.get("preferred_communication_channels")
+            ),
+            "industry_specific_terminologies": parse_json_field(
+                client_data.get("industry_specific_terminologies")
+            ),
+            "linked_pages": parse_json_field(client_data.get("linked_pages")),
             "enrichment_done": client_data.get("enrichment_done"),
             "last_enriched_at": client_data.get("last_enriched_at"),
         }
@@ -875,8 +939,48 @@ class ClientService:
                 "social_pages",
                 "enrichment_done",
                 "last_enriched_at",
+                "work_history",
+                "educational_history",
+                "skills",
+                "target_market_segments",
+                "current_tech_stack",
+                "description",
+                "preferred_communication_channels",
+                "industry_specific_terminologies",
+                "linked_pages",
             )
         )
+
+    def _validate_client_type_scope(self, body: UpdateClientRequest, client_type: str) -> None:
+        """Validate that update fields are scoped to the correct client type.
+
+        Person type: work_history, educational_history, skills only.
+        Company type: target_market_segments, current_tech_stack, description,
+        preferred_communication_channels, industry_specific_terminologies, linked_pages only.
+        """
+        person_only = (
+            body.work_history is not None
+            or body.educational_history is not None
+            or body.skills is not None
+        )
+        company_only = (
+            body.target_market_segments is not None
+            or body.current_tech_stack is not None
+            or body.description is not None
+            or body.preferred_communication_channels is not None
+            or body.industry_specific_terminologies is not None
+            or body.linked_pages is not None
+        )
+        if client_type == ClientType.PERSON.value and company_only:
+            raise ValidationException(
+                message_key="clients.errors.company_fields_not_allowed_for_person",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if client_type == ClientType.COMPANY.value and person_only:
+            raise ValidationException(
+                message_key="clients.errors.person_fields_not_allowed_for_company",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
 
     def _apply_simple_client_update_fields(
         self, body: UpdateClientRequest, payload: dict[str, Any]
@@ -890,6 +994,12 @@ class ClientService:
             ("tags", "tags"),
             ("enrichment_done", "enrichment_done"),
             ("last_enriched_at", "last_enriched_at"),
+            ("skills", "skills"),
+            ("target_market_segments", "target_market_segments"),
+            ("current_tech_stack", "current_tech_stack"),
+            ("description", "description"),
+            ("preferred_communication_channels", "preferred_communication_channels"),
+            ("industry_specific_terminologies", "industry_specific_terminologies"),
         ]
         for body_attr, payload_key in simple_fields:
             value = getattr(body, body_attr, None)
@@ -958,6 +1068,133 @@ class ClientService:
             return
         await self.client_repository.update_lead(lead.lead_id, client_id, lead_data)
 
+    async def _apply_jsonb_list_changes(
+        self,
+        client_id: str,
+        organization_id: str,
+        update_obj: Any,
+        current: dict[str, Any],
+        field_name: str,
+        not_found_message_key: str,
+    ) -> None:
+        """Generic helper to apply batch JSONB list operations: add, update, and/or remove.
+
+        This function handles the common pattern of updating JSONB list fields in the client
+        record. It supports three operations:
+        - remove: Remove items by their IDs
+        - update: Update existing items by ID (raises NotFoundException if item not found)
+        - add: Add new items with auto-generated UUIDs
+
+        Args:
+            client_id: Client ID
+            organization_id: Organization ID
+            update_obj: Update object with optional add, update, remove attributes
+            current: Current client data dict
+            field_name: Name of the JSONB field to update (e.g., "websites", "work_history")
+            not_found_message_key: Message key for NotFoundException when update item not found
+
+        Raises:
+            NotFoundException: If an update item ID is not found in the current list
+        """
+        current_list = parse_json_field(current.get(field_name)) or []
+        if not isinstance(current_list, list):
+            current_list = []
+        updated = current_list.copy()
+
+        # Remove operations
+        if hasattr(update_obj, "remove") and update_obj.remove:
+            updated = [item for item in updated if str(item.get("id")) not in update_obj.remove]
+
+        # Update operations
+        if hasattr(update_obj, "update") and update_obj.update:
+            for item in update_obj.update:
+                data = item.model_dump(exclude_none=True, exclude={"id"})
+                found = False
+                for i, existing_item in enumerate(updated):
+                    if str(existing_item.get("id")) == item.id:
+                        updated[i] = {**existing_item, **data}
+                        found = True
+                        break
+                if not found:
+                    raise NotFoundException(
+                        message_key=not_found_message_key,
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )
+
+        # Add operations
+        if hasattr(update_obj, "add") and update_obj.add:
+            for item in update_obj.add:
+                new_item = item.model_dump(exclude_none=True)
+                new_item["id"] = str(uuid.uuid4())
+                updated.append(new_item)
+
+        # Update the JSONB field
+        await self.client_repository.update_client(
+            client_id, organization_id, {field_name: json.dumps(updated)}
+        )
+
+    async def _apply_batch_jsonb_list_changes(
+        self,
+        body: UpdateClientRequest,
+        client_id: str,
+        organization_id: str,
+        current: dict[str, Any],
+    ) -> None:
+        """Apply batch JSONB list changes."""
+        # Apply batch list operations (addresses, websites, social_pages)
+        if body.addresses is not None:
+            await self._apply_addresses_changes(client_id, body.addresses)
+
+        if body.websites is not None:
+            await self._apply_jsonb_list_changes(
+                client_id,
+                organization_id,
+                body.websites,
+                current,
+                "websites",
+                "clients.errors.website_not_found",
+            )
+
+        if body.social_pages is not None:
+            await self._apply_jsonb_list_changes(
+                client_id,
+                organization_id,
+                body.social_pages,
+                current,
+                "social_pages",
+                "clients.errors.social_page_not_found",
+            )
+
+        if body.work_history is not None:
+            await self._apply_jsonb_list_changes(
+                client_id,
+                organization_id,
+                body.work_history,
+                current,
+                "work_history",
+                "clients.errors.work_history_item_not_found",
+            )
+
+        if body.educational_history is not None:
+            await self._apply_jsonb_list_changes(
+                client_id,
+                organization_id,
+                body.educational_history,
+                current,
+                "educational_history",
+                "clients.errors.educational_history_item_not_found",
+            )
+
+        if body.linked_pages is not None:
+            await self._apply_jsonb_list_changes(
+                client_id,
+                organization_id,
+                body.linked_pages,
+                current,
+                "linked_pages",
+                "clients.errors.linked_page_not_found",
+            )
+
     async def _apply_addresses_changes(
         self,
         client_id: str,
@@ -983,101 +1220,3 @@ class ClientService:
                 row.update(add_item.model_dump(exclude_none=True))
                 rows.append(row)
             await self.client_repository.bulk_create_addresses(rows)
-
-    async def _apply_websites_changes(
-        self,
-        client_id: str,
-        organization_id: str,
-        websites_update: WebsitesUpdate,
-        current: dict[str, Any],
-    ) -> None:
-        """Apply batch website operations: add, update, and/or remove to JSONB field."""
-        current_websites = parse_json_field(current.get("websites")) or []
-        if not isinstance(current_websites, list):
-            current_websites = []
-
-        updated_websites = current_websites.copy()
-
-        # Remove operations
-        if websites_update.remove:
-            updated_websites = [
-                w for w in updated_websites if str(w.get("id")) not in websites_update.remove
-            ]
-
-        # Update operations
-        if websites_update.update:
-            for update_item in websites_update.update:
-                update_data = update_item.model_dump(exclude_none=True)
-                found = False
-                for i, website in enumerate(updated_websites):
-                    if str(website.get("id")) == update_item.id:
-                        updated_websites[i] = {**website, **update_data}
-                        found = True
-                        break
-                if not found:
-                    raise NotFoundException(
-                        message_key="clients.errors.website_not_found",
-                        custom_code=CustomStatusCode.NOT_FOUND,
-                    )
-
-        # Add operations
-        if websites_update.add:
-            for add_item in websites_update.add:
-                new_website = add_item.model_dump(exclude_none=True)
-                new_website["id"] = str(uuid.uuid4())
-                updated_websites.append(new_website)
-
-        # Update the JSONB field
-        await self.client_repository.update_client(
-            client_id, organization_id, {"websites": json.dumps(updated_websites)}
-        )
-
-    async def _apply_social_pages_changes(
-        self,
-        client_id: str,
-        organization_id: str,
-        social_pages_update: SocialPagesUpdate,
-        current: dict[str, Any],
-    ) -> None:
-        """Apply batch social page operations: add, update, and/or remove to JSONB field."""
-        current_social_pages = parse_json_field(current.get("social_pages")) or []
-        if not isinstance(current_social_pages, list):
-            current_social_pages = []
-
-        updated_social_pages = current_social_pages.copy()
-
-        # Remove operations
-        if social_pages_update.remove:
-            updated_social_pages = [
-                sp
-                for sp in updated_social_pages
-                if str(sp.get("id")) not in social_pages_update.remove
-            ]
-
-        # Update operations
-        if social_pages_update.update:
-            for update_item in social_pages_update.update:
-                update_data = update_item.model_dump(exclude_none=True, exclude={"id"})
-                found = False
-                for i, social_page in enumerate(updated_social_pages):
-                    if str(social_page.get("id")) == update_item.id:
-                        updated_social_pages[i] = {**social_page, **update_data}
-                        found = True
-                        break
-                if not found:
-                    raise NotFoundException(
-                        message_key="clients.errors.social_page_not_found",
-                        custom_code=CustomStatusCode.NOT_FOUND,
-                    )
-
-        # Add operations
-        if social_pages_update.add:
-            for add_item in social_pages_update.add:
-                new_social_page = add_item.model_dump(exclude_none=True)
-                new_social_page["id"] = str(uuid.uuid4())
-                updated_social_pages.append(new_social_page)
-
-        # Update the JSONB field
-        await self.client_repository.update_client(
-            client_id, organization_id, {"social_pages": json.dumps(updated_social_pages)}
-        )
