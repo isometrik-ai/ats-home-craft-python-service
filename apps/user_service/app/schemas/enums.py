@@ -483,3 +483,72 @@ class ConnectionStatus(str, Enum):
     ERROR = "error"
     PENDING = "pending"
     PENDING_AUTH = "pending_auth"
+
+
+# ============================================================================
+# CUSTOM FIELDS ENUMS
+# ============================================================================
+
+
+class SupportedCurrency(str, Enum):
+    """Supported currency codes for currency field type."""
+
+    USD = "USD"
+    EUR = "EUR"
+    GBP = "GBP"
+    JPY = "JPY"
+    CAD = "CAD"
+    AUD = "AUD"
+    CHF = "CHF"
+    CNY = "CNY"
+    INR = "INR"
+    SGD = "SGD"
+    AED = "AED"
+    BRL = "BRL"
+    MXN = "MXN"
+    ZAR = "ZAR"
+    KRW = "KRW"
+    NZD = "NZD"
+    SEK = "SEK"
+    NOK = "NOK"
+    DKK = "DKK"
+    HKD = "HKD"
+
+
+class EntityType(str, Enum):
+    """Entity type enumeration for custom fields."""
+
+    COMPANY = "company"
+    CONTACT = "contact"
+    LEAD = "lead"
+
+
+class FieldType(str, Enum):
+    """Field type enumeration for custom fields."""
+
+    TEXT = "text"
+    NUMBER = "number"
+    DATE = "date"
+    YES_NO = "yes_no"
+    URL = "url"
+    LONG_TEXT = "long_text"
+    RICH_TEXT = "rich_text"
+    DROPDOWN = "dropdown"
+    RANGE_SLIDER = "range_slider"
+    CURRENCY = "currency"
+    FILE_UPLOAD = "file_upload"
+    IMAGE = "image"
+    ADDRESS = "address"
+    OBJECT = "object"
+
+
+class AcceptedFileTypes(str, Enum):
+    """Accepted file type options for file_upload fields (UI dropdown options)."""
+
+    ANY = "any"  # All Files
+    PDF_ONLY = "pdf_only"
+    DOCUMENTS = "documents"  # .pdf, .doc, .docx
+    SPREADSHEETS = "spreadsheets"  # .xls, .xlsx, .csv
+    HTML = "html"
+    IMAGES = "images"
+    CUSTOM = "custom"  # Custom extensions
