@@ -29,6 +29,11 @@ PROJECTS_MANAGEMENT_VIEW = "projects_management.view"
 PROJECTS_MANAGEMENT_EDIT = "projects_management.edit"
 PROJECTS_MANAGEMENT_DELETE = "projects_management.delete"
 
+CUSTOM_FIELDS_MANAGEMENT_CREATE = "custom_fields_management.create"
+CUSTOM_FIELDS_MANAGEMENT_VIEW = "custom_fields_management.view"
+CUSTOM_FIELDS_MANAGEMENT_EDIT = "custom_fields_management.edit"
+CUSTOM_FIELDS_MANAGEMENT_DELETE = "custom_fields_management.delete"
+
 USERS_MANAGEMENT_DELETE = "users_management.delete"
 
 DEFAULT_PERMISSIONS = [
@@ -275,6 +280,31 @@ DEFAULT_PERMISSIONS = [
         "Delete Projects",
         "Remove projects from the system",
         "projects",
+    ),
+    # custom fields management
+    (
+        "custom_fields_management.view",
+        "View Custom Fields",
+        "View custom field list and details",
+        "custom_fields",
+    ),
+    (
+        "custom_fields_management.create",
+        "Create Custom Fields",
+        "Create new custom fields",
+        "custom_fields",
+    ),
+    (
+        "custom_fields_management.edit",
+        "Edit Custom Fields",
+        "Modify custom field information",
+        "custom_fields",
+    ),
+    (
+        "custom_fields_management.delete",
+        "Delete Custom Fields",
+        "Remove custom fields from the system",
+        "custom_fields",
     ),
 ]
 

@@ -237,5 +237,16 @@
       "project_updated": "Project updated successfully.",
       "project_deleted": "Project deleted successfully."
     }
+  },
+  "custom_fields": {
+    "errors": {
+      "field_key_exists": "A custom field with this field key already exists.",
+      "entity_type_required": "Entity type is required for custom field creation.",
+      "field_not_found": "The custom field you are trying to access does not exist."
+    },
+    "success": {
+      "field_created": "Custom field created successfully.",
+      "fields_retrieved": "Custom fields retrieved successfully."
+    }
   }
 }
