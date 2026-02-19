@@ -12,7 +12,9 @@ from apps.user_service.app.db.repositories.custom_field_repository import (
 from apps.user_service.app.schemas.custom_fields import (
     CreateCustomFieldRequest,
     CustomFieldResponse,
+    FlatFieldUpdateRequest,
     SubFieldResponse,
+    UpdateCustomFieldRequest,
 )
 from apps.user_service.app.schemas.enums import EntityType, FieldType
 from apps.user_service.app.utils.common_utils import UserContext, parse_json_field
@@ -261,9 +263,10 @@ class CustomFieldService:
             ValidationException: If validation fails
         """
         # Queue: (field_request, parent_id, depth)
-        # parent_id is None for top-level fields
+        # parent_id is None for top-level; use request's parent_id when adding nested via update API
+        initial_parent_id = root_field_request.parent_id
         queue: deque[tuple[CreateCustomFieldRequest, str | None, int]] = deque(
-            [(root_field_request, None, 0)]
+            [(root_field_request, initial_parent_id, 0)]
         )
 
         while queue:
@@ -446,3 +449,291 @@ class CustomFieldService:
         children_map = self._rows_to_children_map(rows)
         root_row = next(r for r in rows if str(r["id"]) == str(field_id))
         return self._row_to_custom_field_response(root_row, children_map)
+
+    def _prepare_root_field_update_data(
+        self,
+        request: UpdateCustomFieldRequest,
+        user_id: str,
+    ) -> dict[str, Any]:
+        """Prepare root field update data dictionary for database update.
+
+        Args:
+            request: Update request data
+            user_id: User ID
+
+        Returns:
+            Dictionary with root field update data ready for database update
+        """
+        update_data: dict[str, Any] = {}
+
+        if request.field_name is not None:
+            update_data["field_name"] = request.field_name
+        if request.description is not None:
+            update_data["description"] = request.description
+        if request.field_type is not None:
+            update_data["field_type"] = request.field_type.value
+        if request.type_config is not None:
+            update_data["type_config"] = request.type_config
+        if request.show_on_create is not None:
+            update_data["show_on_create"] = request.show_on_create
+        if request.show_on_detail is not None:
+            update_data["show_on_detail"] = request.show_on_detail
+        if request.is_required is not None:
+            update_data["is_required"] = request.is_required
+        if request.sort_order is not None:
+            update_data["sort_order"] = request.sort_order
+
+        if update_data:
+            update_data["updated_by"] = user_id
+
+        return update_data
+
+    def _prepare_flat_field_update_data(
+        self,
+        request: FlatFieldUpdateRequest,
+        user_id: str,
+    ) -> dict[str, Any]:
+        """Prepare flat field update data dictionary for database update.
+
+        Args:
+            request: Flat field update request data
+            user_id: User ID
+
+        Returns:
+            Dictionary with field update data ready for database update
+        """
+        update_data: dict[str, Any] = {"id": request.id}
+
+        if request.field_name is not None:
+            update_data["field_name"] = request.field_name
+        if request.description is not None:
+            update_data["description"] = request.description
+        if request.field_type is not None:
+            update_data["field_type"] = request.field_type.value
+        if request.type_config is not None:
+            update_data["type_config"] = request.type_config
+        if request.show_on_create is not None:
+            update_data["show_on_create"] = request.show_on_create
+        if request.show_on_detail is not None:
+            update_data["show_on_detail"] = request.show_on_detail
+        if request.is_required is not None:
+            update_data["is_required"] = request.is_required
+        if request.sort_order is not None:
+            update_data["sort_order"] = request.sort_order
+
+        update_data["updated_by"] = user_id
+
+        return update_data
+
+    async def _create_fields_with_nested_children(
+        self,
+        fields_to_add: list[CreateCustomFieldRequest],
+        entity_type: str,
+        user_id: str,
+    ) -> None:
+        """Create fields with nested children recursively (only for object types).
+
+        Groups siblings by parent_id for bulk creation, then processes nested children.
+
+        Args:
+            fields_to_add: List of field requests to create
+            entity_type: Entity type
+            user_id: User ID
+
+        Raises:
+            ValidationException: If max nesting depth exceeded
+        """
+        # Group initial fields by parent_id for bulk creation
+        fields_by_parent: dict[str, list[CreateCustomFieldRequest]] = {}
+        for field_request in fields_to_add:
+            parent_id = field_request.parent_id
+            if not parent_id:
+                raise ValidationException(
+                    message_key="custom_fields.errors.parent_id_required_for_add",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            fields_by_parent.setdefault(parent_id, []).append(field_request)
+
+        # Bulk create siblings grouped by parent_id
+        for parent_id, siblings in fields_by_parent.items():
+            created_ids = await self._prepare_and_create_sub_fields(
+                siblings,
+                self.user_context.organization_id,
+                entity_type,
+                user_id,
+                parent_id,
+            )
+
+            # Process nested children for each created sibling using the same iterative logic
+            for field_request, created_id in zip(siblings, created_ids, strict=True):
+                if field_request.field_type == FieldType.OBJECT and field_request.sub_fields:
+                    # Process each sub_field using the same iterative creation logic
+                    for sub_field in field_request.sub_fields:
+                        # Set parent_id on sub_field to link it to the created parent
+                        sub_field.parent_id = created_id
+                        await self._create_field_iterative(
+                            sub_field,
+                            self.user_context.organization_id,
+                            user_id,
+                            entity_type,
+                        )
+
+    def _build_subtree_lookup_maps(
+        self, subtree_rows: list[dict[str, Any]]
+    ) -> tuple[dict[str, str], dict[str, list[str]]]:
+        """Build field_type_map and direct_children from subtree rows."""
+        field_type_map = {str(row["id"]): row.get("field_type") for row in subtree_rows}
+        direct_children: dict[str, list[str]] = {}
+        for row in subtree_rows:
+            parent_id = row.get("parent_id")
+            if parent_id:
+                parent_id_str = str(parent_id)
+                child_id_str = str(row["id"])
+                direct_children.setdefault(parent_id_str, []).append(child_id_str)
+        return field_type_map, direct_children
+
+    async def _delete_descendants_if_root_type_change(
+        self,
+        subtree_rows: list[dict[str, Any]],
+        field_id: str,
+        new_field_type: str | None,
+        direct_children: dict[str, list[str]],
+        organization_id: str,
+    ) -> None:
+        """Auto-delete root's descendants when root changes from OBJECT to non-OBJECT."""
+        if new_field_type is None:
+            return
+        root_row = next(r for r in subtree_rows if str(r["id"]) == str(field_id))
+        current_root_type = root_row.get("field_type")
+        if current_root_type != FieldType.OBJECT.value or new_field_type == FieldType.OBJECT.value:
+            return
+        root_children = direct_children.get(field_id, [])
+        if not root_children:
+            return
+        await self.custom_field_repository.bulk_delete_custom_fields_with_descendants(
+            organization_id, root_children
+        )
+
+    async def _delete_descendants_for_object_to_non_object(
+        self,
+        update_items: list[FlatFieldUpdateRequest] | None,
+        field_type_map: dict[str, str],
+        direct_children: dict[str, list[str]],
+        organization_id: str,
+    ) -> None:
+        """Auto-delete descendants for update items changing from OBJECT to non-OBJECT."""
+        if not update_items:
+            return
+        for update_item in update_items:
+            if update_item.field_type is None:
+                continue
+            current_type = field_type_map.get(update_item.id)
+            if current_type != FieldType.OBJECT.value or update_item.field_type == FieldType.OBJECT:
+                continue
+            children = direct_children.get(update_item.id, [])
+            if not children:
+                continue
+            await self.custom_field_repository.bulk_delete_custom_fields_with_descendants(
+                organization_id, children
+            )
+
+    async def update_custom_field(
+        self, field_id: str, request_data: UpdateCustomFieldRequest
+    ) -> None:
+        """Update a custom field definition using flat ID-based design.
+
+        Process order: remove → update → add
+        All operations validated against fetched subtree before execution.
+
+        Args:
+            field_id: Custom field ID to update (root of subtree)
+            request_data: Update request data with flat update/remove/add arrays
+
+        Raises:
+            NotFoundException: If field not found or IDs not in subtree
+            ValidationException: If validation fails
+        """
+        organization_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+
+        subtree_rows = await self.custom_field_repository.get_custom_field_with_descendants(
+            field_id, organization_id
+        )
+        if not subtree_rows:
+            raise NotFoundException(
+                message_key="custom_fields.errors.field_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        subtree_ids = {str(row["id"]) for row in subtree_rows}
+        await self._validate_ids_in_subtree(subtree_ids, request_data)
+
+        field_type_map, direct_children = self._build_subtree_lookup_maps(subtree_rows)
+        new_root_type = (
+            request_data.field_type.value if (request_data.field_type is not None) else None
+        )
+        await self._delete_descendants_if_root_type_change(
+            subtree_rows, field_id, new_root_type, direct_children, organization_id
+        )
+        await self._delete_descendants_for_object_to_non_object(
+            request_data.update, field_type_map, direct_children, organization_id
+        )
+
+        root_row = next(r for r in subtree_rows if str(r["id"]) == str(field_id))
+        entity_type = root_row.get("entity_type")
+
+        root_update_data = self._prepare_root_field_update_data(request_data, user_id)
+        if root_update_data:
+            await self.custom_field_repository.update_custom_field(
+                field_id, organization_id, root_update_data
+            )
+
+        if request_data.remove:
+            await self.custom_field_repository.bulk_delete_custom_fields_with_descendants(
+                organization_id, request_data.remove
+            )
+
+        if request_data.update:
+            updates = [
+                self._prepare_flat_field_update_data(update_item, user_id)
+                for update_item in request_data.update
+            ]
+            if updates:
+                await self.custom_field_repository.bulk_update_custom_fields(
+                    organization_id, updates
+                )
+
+        if request_data.add:
+            await self._create_fields_with_nested_children(
+                request_data.add,
+                entity_type,
+                user_id,
+            )
+
+    async def _validate_ids_in_subtree(
+        self, subtree_ids: set[str], request_data: UpdateCustomFieldRequest
+    ) -> None:
+        """Validate all IDs exist in subtree."""
+        if request_data.update:
+            for update_item in request_data.update:
+                if update_item.id not in subtree_ids:
+                    raise NotFoundException(
+                        message_key="custom_fields.errors.field_not_found",
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )
+
+        if request_data.remove:
+            for remove_id in request_data.remove:
+                if remove_id not in subtree_ids:
+                    raise NotFoundException(
+                        message_key="custom_fields.errors.field_not_found",
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )
+
+        if request_data.add:
+            for add_item in request_data.add:
+                if add_item.parent_id not in subtree_ids:
+                    raise NotFoundException(
+                        message_key="custom_fields.errors.field_not_found",
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )

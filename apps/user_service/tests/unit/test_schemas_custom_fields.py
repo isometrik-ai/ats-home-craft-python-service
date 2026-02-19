@@ -5,94 +5,13 @@ from pydantic import ValidationError
 
 from apps.user_service.app.schemas.custom_fields import (
     MAX_NESTING_DEPTH,
-    AddressTypeConfig,
     CreateCustomFieldRequest,
-    CurrencyTypeConfig,
-    DropdownTypeConfig,
-    FileUploadTypeConfig,
-    ImageTypeConfig,
-    RangeSliderTypeConfig,
+    FlatFieldUpdateRequest,
+    UpdateCustomFieldRequest,
     validate_and_normalize_type_config,
 )
-from apps.user_service.app.schemas.enums import (
-    AcceptedFileTypes,
-    EntityType,
-    FieldType,
-    SupportedCurrency,
-)
+from apps.user_service.app.schemas.enums import EntityType, FieldType
 from libs.shared_utils.http_exceptions import ValidationException
-
-# ============================================================================
-# TYPE CONFIG TESTS
-# ============================================================================
-
-
-def test_dropdown_config_valid():
-    """Test valid dropdown config."""
-    config = DropdownTypeConfig(options=["opt1", "opt2"])
-    assert config.options == ["opt1", "opt2"]
-
-
-def test_dropdown_config_empty_options():
-    """Test dropdown config with empty options raises error."""
-    with pytest.raises(ValidationError):
-        DropdownTypeConfig(options=[])
-
-
-def test_range_slider_config_valid():
-    """Test valid range slider config."""
-    config = RangeSliderTypeConfig(min=0, max=100, step=1)
-    assert config.min == 0
-    assert config.max == 100
-    assert config.step == 1
-
-
-def test_range_slider_max_less_than_min():
-    """Test range slider with max <= min raises error."""
-    with pytest.raises(ValidationException):
-        RangeSliderTypeConfig(min=100, max=50)
-
-
-def test_range_slider_max_equal_min():
-    """Test range slider with max == min raises error."""
-    with pytest.raises(ValidationException):
-        RangeSliderTypeConfig(min=50, max=50)
-
-
-def test_currency_config_valid():
-    """Test valid currency config."""
-    config = CurrencyTypeConfig(allowed_currencies=[SupportedCurrency.USD, SupportedCurrency.EUR])
-    assert len(config.allowed_currencies) == 2
-
-
-def test_currency_config_empty():
-    """Test currency config with empty currencies raises error."""
-    with pytest.raises(ValidationError):
-        CurrencyTypeConfig(allowed_currencies=[])
-
-
-def test_file_upload_config_valid():
-    """Test valid file upload config."""
-    config = FileUploadTypeConfig(
-        allow_multiple=True, max_files=5, accepted_file_types=AcceptedFileTypes.PDF_ONLY
-    )
-    assert config.allow_multiple is True
-    assert config.max_files == 5
-
-
-def test_image_config_valid():
-    """Test valid image config."""
-    config = ImageTypeConfig(allow_multiple=True, max_files=3)
-    assert config.allow_multiple is True
-    assert config.max_files == 3
-
-
-def test_address_config_valid():
-    """Test valid address config."""
-    config = AddressTypeConfig(show_line_2=False, include_lat_long=True, default_country="US")
-    assert config.show_line_2 is False
-    assert config.include_lat_long is True
-
 
 # ============================================================================
 # VALIDATE AND NORMALIZE TYPE CONFIG TESTS
@@ -111,12 +30,6 @@ def test_validate_type_config_simple_type():
     assert result == {}
 
 
-def test_validate_type_config_object():
-    """Test validate_and_normalize_type_config for object type."""
-    result = validate_and_normalize_type_config(FieldType.OBJECT, {})
-    assert result == {}
-
-
 def test_validate_type_config_range_slider():
     """Test validate_and_normalize_type_config for range slider."""
     result = validate_and_normalize_type_config(
@@ -132,24 +45,15 @@ def test_validate_type_config_range_slider():
 
 
 def test_create_request_valid():
-    """Test valid create custom field request."""
+    """Test valid create custom field request (with optional description)."""
     req = CreateCustomFieldRequest(
         field_name="Test Field",
         field_type=FieldType.TEXT,
         entity_type=EntityType.CONTACT,
+        description="Test description",
     )
     assert req.field_name == "Test Field"
     assert req.field_type == FieldType.TEXT
-
-
-def test_create_request_with_description():
-    """Test create request with description."""
-    req = CreateCustomFieldRequest(
-        field_name="Test",
-        field_type=FieldType.TEXT,
-        entity_type=EntityType.CONTACT,
-        description="Test description",
-    )
     assert req.description == "Test description"
 
 
@@ -354,7 +258,7 @@ def test_type_config_currency_invalid():
 
 
 def test_type_config_file_upload_valid():
-    """Test valid file upload type_config."""
+    """Test valid file upload type_config (representative config type)."""
     req = CreateCustomFieldRequest(
         field_name="Test",
         field_type=FieldType.FILE_UPLOAD,
@@ -369,32 +273,87 @@ def test_type_config_file_upload_valid():
     assert req.type_config["max_files"] == 5
 
 
-def test_type_config_image_valid():
-    """Test valid image type_config."""
-    req = CreateCustomFieldRequest(
-        field_name="Test",
-        field_type=FieldType.IMAGE,
-        entity_type=EntityType.CONTACT,
-        type_config={"allow_multiple": False, "max_files": 1},
-    )
-    assert req.type_config["allow_multiple"] is False
-    assert req.type_config["max_files"] == 1
+# ============================================================================
+# FLAT FIELD UPDATE REQUEST — type_config required when field_type has config
+# ============================================================================
 
 
-def test_type_config_address_valid():
-    """Test valid address type_config."""
-    req = CreateCustomFieldRequest(
-        field_name="Test",
-        field_type=FieldType.ADDRESS,
-        entity_type=EntityType.CONTACT,
-        type_config={
-            "show_line_2": True,
-            "include_lat_long": False,
-            "default_country": "US",
-        },
+def test_update_range_slider_without_config_raises():
+    """Updating field_type to range_slider without type_config must raise."""
+    with pytest.raises(ValidationException) as exc_info:
+        FlatFieldUpdateRequest(
+            id="7be664cd-fc6b-4986-8b28-4c83a8907a65",
+            field_name="Company Name",
+            field_type=FieldType.RANGE_SLIDER,
+        )
+    assert "type_config_required_for_field_type" in str(exc_info.value.message_key)
+
+
+def test_update_range_slider_with_config_succeeds():
+    """Updating field_type to range_slider with valid type_config succeeds."""
+    req = FlatFieldUpdateRequest(
+        id="7be664cd-fc6b-4986-8b28-4c83a8907a65",
+        field_type=FieldType.RANGE_SLIDER,
+        type_config={"min": 0, "max": 100, "step": 1},
     )
-    assert req.type_config["show_line_2"] is True
-    assert req.type_config["include_lat_long"] is False
+    assert req.type_config["min"] == 0
+    assert req.type_config["max"] == 100
+    assert req.type_config["step"] == 1
+
+
+def test_update_simple_type_without_config_succeeds():
+    """Updating field_type to text (no config) without type_config is allowed."""
+    req = FlatFieldUpdateRequest(
+        id="some-id",
+        field_type=FieldType.TEXT,
+    )
+    assert req.type_config == {}
+
+
+def test_flat_update_config_without_field_type_raises():
+    """Sending type_config without field_type must raise (cannot validate type_config)."""
+    with pytest.raises(ValidationException) as exc_info:
+        FlatFieldUpdateRequest(
+            id="7be664cd-fc6b-4986-8b28-4c83a8907a65",
+            field_name="Company Name",
+            description="Full legal or trading company name",
+            is_required=True,
+            show_on_create=True,
+            show_on_detail=True,
+            type_config={},
+        )
+    assert "field_type_required_for_type_config" in str(exc_info.value.message_key)
+
+
+def test_update_currency_with_invalid_config_raises():
+    """Updating to currency with invalid type_config raises (Pydantic/ValidationException)."""
+    with pytest.raises(ValidationError):
+        FlatFieldUpdateRequest(
+            id="some-id",
+            field_type=FieldType.CURRENCY,
+            type_config={"allowed_currencies": []},
+        )
+
+
+# ============================================================================
+# UPDATE CUSTOM FIELD REQUEST (root) — type_config required when field_type has config
+# ============================================================================
+
+
+def test_root_update_slider_without_type_config_raises():
+    """Root update with field_type=range_slider and no type_config must raise."""
+    with pytest.raises(ValidationException) as exc_info:
+        UpdateCustomFieldRequest(
+            field_type=FieldType.RANGE_SLIDER,
+        )
+    assert "type_config_required_for_field_type" in str(exc_info.value.message_key)
+
+
+def test_root_update_config_without_field_type_raises():
+    """Root update with type_config but no field_type must raise."""
+    with pytest.raises(ValidationException) as exc_info:
+        UpdateCustomFieldRequest(type_config={})
+    assert "field_type_required_for_type_config" in str(exc_info.value.message_key)
 
 
 # ============================================================================

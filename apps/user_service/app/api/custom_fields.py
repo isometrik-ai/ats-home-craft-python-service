@@ -13,6 +13,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.custom_fields import (
     CreateCustomFieldRequest,
+    UpdateCustomFieldRequest,
 )
 from apps.user_service.app.schemas.enums import EntityType
 from apps.user_service.app.services.custom_field_service import CustomFieldService
@@ -23,6 +24,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     CUSTOM_FIELDS_MANAGEMENT_CREATE,
+    CUSTOM_FIELDS_MANAGEMENT_EDIT,
     CUSTOM_FIELDS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.logger import get_logger
@@ -211,4 +213,88 @@ async def get_custom_field_by_id(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=field.model_dump(),
+    )
+
+
+@handle_api_exceptions("update custom field")
+@router.patch(
+    "/{field_id}",
+    status_code=http_status.HTTP_200_OK,
+    description="Update a custom field definition (partial update)",
+    summary="Update custom field",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Custom field updated successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Custom field not found"},
+        http_status.HTTP_409_CONFLICT: {"description": "Field key already exists"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="custom_fields",
+    category="CUSTOM_FIELD",
+)
+async def update_custom_field(
+    request: Request,
+    field_id: str = Path(..., description="Custom field ID"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: UpdateCustomFieldRequest = Body(...),
+):
+    """Update a custom field definition (PATCH semantics, flat ID-based design).
+
+    Supports updating root field and flat delta operations on subtree:
+    - update: Array of field updates (id + updatable fields)
+    - remove: Array of field IDs to delete (cascades to descendants)
+    - add: Array of new field definitions (requires parent_id)
+
+    Returns 200 OK on success.
+    """
+    # Set audit context
+    request.state.audit_table = "custom_fields"
+    request.state.audit_requested_id = field_id
+    add_count = len(body.add) if body.add else 0
+    update_count = len(body.update) if body.update else 0
+    remove_count = len(body.remove) if body.remove else 0
+    audit_desc = (
+        f"Updated custom field: {field_id} "
+        f"(add: {add_count}, update: {update_count}, remove: {remove_count})"
+    )
+    request.state.audit_description = audit_desc
+    request.state.audit_risk_level = "medium"
+
+    # Check permissions and get user context
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CUSTOM_FIELDS_MANAGEMENT_EDIT,
+    )
+
+    # Create service and delegate to service
+    custom_field_service = CustomFieldService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    await custom_field_service.update_custom_field(field_id, body)
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    return success_response(
+        request=request,
+        message_key="custom_fields.success.field_updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
     )

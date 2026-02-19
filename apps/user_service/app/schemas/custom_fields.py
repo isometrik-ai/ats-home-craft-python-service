@@ -99,6 +99,11 @@ FIELD_TYPE_TO_CONFIG_CLASS: dict[FieldType, type[BaseModel] | None] = {
 }
 
 
+def field_type_requires_type_config(field_type: FieldType) -> bool:
+    """Return True if this field type has a type_config schema."""
+    return FIELD_TYPE_TO_CONFIG_CLASS.get(field_type) is not None
+
+
 def validate_and_normalize_type_config(
     field_type: FieldType, type_config: dict[str, Any]
 ) -> dict[str, Any]:
@@ -152,6 +157,9 @@ class CreateCustomFieldRequest(BaseModel):
     entity_type: EntityType | None = Field(
         None, description="Entity type (required for top-level fields, inherited for nested fields)"
     )
+    parent_id: str | None = Field(
+        None, description="Parent field ID (required when adding via update endpoint)"
+    )
     sub_fields: list["CreateCustomFieldRequest"] = Field(
         default_factory=list,
         description="Sub-fields for object type (only valid when field_type='object')",
@@ -203,6 +211,113 @@ class CreateCustomFieldRequest(BaseModel):
                     queue.append((sub_field, depth + 1))
 
 
+class FlatFieldUpdateRequest(BaseModel):
+    """Request schema for updating a field (flat ID-based design).
+
+    All fields are optional except id. Only provided fields will be updated.
+    Parent reassignment is not allowed.
+    """
+
+    id: str = Field(..., description="Field ID to update")
+    field_name: str | None = Field(None, min_length=1, max_length=200, description="Field name")
+    description: str | None = Field(None, max_length=1000, description="Field description")
+    field_type: FieldType | None = Field(None, description="Field type")
+    type_config: dict[str, Any] | None = Field(None, description="Type-specific configuration")
+    show_on_create: bool | None = Field(None, description="Show on create form")
+    show_on_detail: bool | None = Field(None, description="Show on detail page")
+    is_required: bool | None = Field(None, description="Field is required")
+    sort_order: int | None = Field(None, description="Sort order for field")
+
+    @model_validator(mode="after")
+    def validate_type_config(self) -> "FlatFieldUpdateRequest":
+        """Validate type_config is provided and valid when field_type requires it."""
+        if self.type_config is not None and self.field_type is None:
+            raise ValidationException(
+                message_key="custom_fields.errors.field_type_required_for_type_config",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if self.field_type is None:
+            return self
+        if field_type_requires_type_config(self.field_type) and self.type_config is None:
+            raise ValidationException(
+                message_key="custom_fields.errors.type_config_required_for_field_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        self.type_config = validate_and_normalize_type_config(
+            self.field_type, self.type_config or {}
+        )
+        return self
+
+
+class UpdateCustomFieldRequest(BaseModel):
+    """Request schema for updating a custom field (PATCH semantics, flat ID-based design).
+
+    Supports updating root field and flat delta operations on subtree:
+    - update: Array of field updates (id + updatable fields)
+    - remove: Array of field IDs to delete (cascades to descendants)
+    - add: Array of new field definitions
+    """
+
+    field_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Root field name",
+    )
+    description: str | None = Field(None, max_length=1000, description="Root field description")
+    field_type: FieldType | None = Field(None, description="Root field type")
+    type_config: dict[str, Any] | None = Field(
+        None, description="Root field type-specific configuration"
+    )
+    show_on_create: bool | None = Field(None, description="Root field show on create form")
+    show_on_detail: bool | None = Field(None, description="Root field show on detail page")
+    is_required: bool | None = Field(None, description="Root field is required")
+    sort_order: int | None = Field(None, description="Root field sort order")
+    update: list[FlatFieldUpdateRequest] | None = Field(
+        None, description="Fields to update (flat array with id)", max_length=100
+    )
+    remove: list[str] | None = Field(
+        None, description="Field IDs to remove (deletes all descendants)", max_length=100
+    )
+    add: list[CreateCustomFieldRequest] | None = Field(
+        None,
+        description="New fields to add",
+        max_length=100,
+    )
+
+    @model_validator(mode="after")
+    def validate_type_config(self) -> "UpdateCustomFieldRequest":
+        """Validate type_config is provided and valid when field_type requires it."""
+        if self.type_config is not None and self.field_type is None:
+            raise ValidationException(
+                message_key="custom_fields.errors.field_type_required_for_type_config",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if self.field_type is None:
+            return self
+        if field_type_requires_type_config(self.field_type) and self.type_config is None:
+            raise ValidationException(
+                message_key="custom_fields.errors.type_config_required_for_field_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        self.type_config = validate_and_normalize_type_config(
+            self.field_type, self.type_config or {}
+        )
+        return self
+
+    @model_validator(mode="after")
+    def validate_add_has_parent_id(self) -> "UpdateCustomFieldRequest":
+        """Validate all add items have parent_id."""
+        if self.add:
+            for item in self.add:
+                if item.parent_id is None:
+                    raise ValidationException(
+                        message_key="custom_fields.errors.parent_id_required_for_add",
+                        custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    )
+        return self
+
+
 class BaseFieldResponse(BaseModel):
     """Base response schema for field (shared fields)."""
 
@@ -247,3 +362,7 @@ class CustomFieldResponse(BaseFieldResponse):
         default_factory=list,
         description="Nested sub-fields for object type (supports recursive nesting)",
     )
+
+
+# Update forward references for recursive models
+FlatFieldUpdateRequest.model_rebuild()

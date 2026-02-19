@@ -18,6 +18,7 @@ class _FakeConn:
         self.fetchrow_calls = []
         self.fetch_calls = []
         self.fetchval_calls = []
+        self.execute_calls = []
         self.fetchrow_result = None
         self.fetch_result = []
         self.fetchval_result = None
@@ -36,6 +37,10 @@ class _FakeConn:
         """Record fetchval calls."""
         self.fetchval_calls.append((query.strip(), args))
         return self.fetchval_result
+
+    async def execute(self, query, *args):
+        """Record execute calls."""
+        self.execute_calls.append((query.strip(), args))
 
 
 # ============================================================================
@@ -516,3 +521,172 @@ async def test_check_field_key_exists_only_root_fields():
 
     query = conn.fetchrow_calls[0][0]
     assert "parent_id IS NULL" in query
+
+
+# ============================================================================
+# UPDATE CUSTOM FIELD TESTS
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_field_empty_data_returns_none():
+    """Test update_custom_field returns None when update_data empty."""
+    conn = _FakeConn()
+    repo = CustomFieldRepository(db_connection=conn)
+
+    result = await repo.update_custom_field("field-1", "org-1", {})
+
+    assert result is None
+    assert len(conn.fetchrow_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_update_field_with_data():
+    """Test update_custom_field updates and returns row."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "field-1",
+        "field_name": "Updated Name",
+        "field_key": "test_field",
+        "field_type": "text",
+    }
+    repo = CustomFieldRepository(db_connection=conn)
+
+    result = await repo.update_custom_field(
+        "field-1",
+        "org-1",
+        {"field_name": "Updated Name", "updated_by": "user-1"},
+    )
+
+    assert result is not None
+    assert result["field_name"] == "Updated Name"
+    assert len(conn.fetchrow_calls) == 1
+    query = conn.fetchrow_calls[0][0]
+    assert "UPDATE custom_fields" in query
+    assert "SET" in query
+    assert "updated_at = NOW()" in query
+    assert "organization_id" in query
+    args = conn.fetchrow_calls[0][1]
+    assert "org-1" in args
+
+
+@pytest.mark.asyncio
+async def test_update_field_serializes_type_config():
+    """Test update_custom_field serializes type_config to JSON."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {"id": "field-1", "type_config": "{}"}
+    repo = CustomFieldRepository(db_connection=conn)
+
+    await repo.update_custom_field(
+        "field-1",
+        "org-1",
+        {"type_config": {"options": ["a", "b"]}, "updated_by": "user-1"},
+    )
+
+    args = conn.fetchrow_calls[0][1]
+    assert any(isinstance(a, str) and "options" in a for a in args)
+
+
+# ============================================================================
+# BULK UPDATE CUSTOM FIELDS TESTS
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_empty_list():
+    """Test bulk_update_custom_fields no-ops for empty list."""
+    conn = _FakeConn()
+    repo = CustomFieldRepository(db_connection=conn)
+
+    await repo.bulk_update_custom_fields("org-1", [])
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_single_field():
+    """Test bulk_update_custom_fields updates one field."""
+    conn = _FakeConn()
+    repo = CustomFieldRepository(db_connection=conn)
+
+    await repo.bulk_update_custom_fields(
+        "org-1",
+        [
+            {
+                "id": "field-1",
+                "field_name": "New Name",
+                "updated_by": "user-1",
+            },
+        ],
+    )
+
+    assert len(conn.execute_calls) == 1
+    query = conn.execute_calls[0][0]
+    assert "UPDATE custom_fields" in query
+    assert "COALESCE" in query
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_multiple_fields():
+    """Test bulk_update_custom_fields updates multiple fields."""
+    conn = _FakeConn()
+    repo = CustomFieldRepository(db_connection=conn)
+
+    await repo.bulk_update_custom_fields(
+        "org-1",
+        [
+            {"id": "field-1", "field_name": "Name 1", "updated_by": "user-1"},
+            {"id": "field-2", "sort_order": 2, "updated_by": "user-1"},
+        ],
+    )
+
+    assert len(conn.execute_calls) == 1
+    query = conn.execute_calls[0][0]
+    assert "VALUES" in query
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_raises_when_id_missing():
+    """Test bulk_update_custom_fields raises when id missing."""
+    conn = _FakeConn()
+    repo = CustomFieldRepository(db_connection=conn)
+
+    with pytest.raises(ValueError, match="must contain 'id'"):
+        await repo.bulk_update_custom_fields(
+            "org-1",
+            [{"field_name": "No Id", "updated_by": "user-1"}],
+        )
+
+
+# ============================================================================
+# BULK DELETE WITH DESCENDANTS TESTS
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_with_descendants_empty_ids():
+    """Test bulk_delete with empty list does nothing."""
+    conn = _FakeConn()
+    repo = CustomFieldRepository(db_connection=conn)
+
+    await repo.bulk_delete_custom_fields_with_descendants("org-1", [])
+
+    assert len(conn.execute_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_with_descendants_calls_execute():
+    """Test bulk_delete runs recursive delete query."""
+    conn = _FakeConn()
+    repo = CustomFieldRepository(db_connection=conn)
+
+    await repo.bulk_delete_custom_fields_with_descendants(
+        "org-1",
+        ["field-1", "field-2"],
+    )
+
+    assert len(conn.execute_calls) == 1
+    query = conn.execute_calls[0][0]
+    assert "WITH RECURSIVE to_delete" in query
+    assert "DELETE FROM custom_fields" in query
+    assert "field-1" in conn.execute_calls[0][1] or "field-1" in str(conn.execute_calls[0][1])
