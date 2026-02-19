@@ -737,3 +737,32 @@ class CustomFieldService:
                         message_key="custom_fields.errors.field_not_found",
                         custom_code=CustomStatusCode.NOT_FOUND,
                     )
+
+    async def delete_custom_field(self, field_id: str) -> None:
+        """Delete a custom field and all its descendants (hard delete).
+
+        Validates that the field exists and belongs to the organization,
+        then performs a cascading hard delete of the field and all descendants.
+
+        Args:
+            field_id: Custom field ID to delete
+
+        Raises:
+            NotFoundException: If field not found or not in organization
+        """
+        organization_id = self.user_context.organization_id
+
+        # Validate field exists and belongs to organization
+        subtree_rows = await self.custom_field_repository.get_custom_field_with_descendants(
+            field_id, organization_id
+        )
+        if not subtree_rows:
+            raise NotFoundException(
+                message_key="custom_fields.errors.field_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        # Hard delete the field and all its descendants
+        await self.custom_field_repository.bulk_delete_custom_fields_with_descendants(
+            organization_id, [field_id]
+        )

@@ -1299,3 +1299,180 @@ def test_prepare_flat_field_update_data_all_optionals():
     assert data["is_required"] is True
     assert data["sort_order"] == 2
     assert data["updated_by"] == "user-1"
+
+
+# ============================================================================
+# DELETE CUSTOM FIELD TESTS
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_delete_custom_field_not_found(monkeypatch):
+    """Test delete_custom_field raises NotFoundException when field not found."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = []
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.delete_custom_field("field-1")
+    assert "field_not_found" in str(exc_info.value.message_key)
+    assert "get_custom_field_with_descendants" in fake_repo.calls
+    assert "bulk_delete_custom_fields_with_descendants" not in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_delete_custom_field_success(monkeypatch):
+    """Test delete_custom_field successfully deletes field and descendants."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root Field",
+            "field_key": "root_field",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "child-1",
+            "field_name": "Child Field",
+            "field_key": "child_field",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "grandchild-1",
+            "field_name": "Grandchild Field",
+            "field_key": "grandchild_field",
+            "field_type": "text",
+            "parent_id": "child-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    await service.delete_custom_field("field-1")
+
+    # Verify field existence check was called
+    assert "get_custom_field_with_descendants" in fake_repo.calls
+    field_id, org_id = fake_repo.calls["get_custom_field_with_descendants"]
+    assert field_id == "field-1"
+    assert org_id == "org-1"
+
+    # Verify delete was called with correct parameters
+    assert "bulk_delete_custom_fields_with_descendants" in fake_repo.calls
+    delete_org_id, delete_field_ids = fake_repo.calls["bulk_delete_custom_fields_with_descendants"]
+    assert delete_org_id == "org-1"
+    assert delete_field_ids == ["field-1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_custom_field_with_descendants(monkeypatch):
+    """Test delete_custom_field cascades to all descendants."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Parent",
+            "field_key": "parent",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "company",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "child-1",
+            "field_name": "Child 1",
+            "field_key": "child_1",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "company",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "child-2",
+            "field_name": "Child 2",
+            "field_key": "child_2",
+            "field_type": "number",
+            "parent_id": "field-1",
+            "entity_type": "company",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 1,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    await service.delete_custom_field("field-1")
+
+    # Verify delete was called - repository handles cascading
+    assert "bulk_delete_custom_fields_with_descendants" in fake_repo.calls
+    _, delete_field_ids = fake_repo.calls["bulk_delete_custom_fields_with_descendants"]
+    # Only the root field ID is passed; repository handles finding descendants
+    assert delete_field_ids == ["field-1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_custom_field_different_organization(monkeypatch):
+    """Test delete_custom_field raises NotFoundException for different organization."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = []  # Field not found in this organization
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(org_id="org-1"), db_connection=None)
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.delete_custom_field("field-other-org")
+    assert "field_not_found" in str(exc_info.value.message_key)
+    # Verify organization check happened
+    field_id, org_id = fake_repo.calls["get_custom_field_with_descendants"]
+    assert field_id == "field-other-org"
+    assert org_id == "org-1"
+    # Verify delete was not called
+    assert "bulk_delete_custom_fields_with_descendants" not in fake_repo.calls
