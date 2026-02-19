@@ -24,6 +24,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     CUSTOM_FIELDS_MANAGEMENT_CREATE,
+    CUSTOM_FIELDS_MANAGEMENT_DELETE,
     CUSTOM_FIELDS_MANAGEMENT_EDIT,
     CUSTOM_FIELDS_MANAGEMENT_VIEW,
 )
@@ -295,6 +296,78 @@ async def update_custom_field(
     return success_response(
         request=request,
         message_key="custom_fields.success.field_updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("delete custom field")
+@router.delete(
+    "/{field_id}",
+    status_code=http_status.HTTP_200_OK,
+    description="Delete a custom field and all its descendants (hard delete)",
+    summary="Delete custom field",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Custom field deleted successfully"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Custom field not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="confidential",
+    compliance_tags=[
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="custom_fields",
+    category="CUSTOM_FIELD",
+)
+async def delete_custom_field(
+    request: Request,
+    field_id: str = Path(..., description="Custom field ID"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Delete a custom field and all its descendants (hard delete).
+
+    Performs a cascading hard delete of the field and all its descendant fields.
+    This operation cannot be undone.
+
+    Returns 200 OK on success.
+    """
+    # Set audit context
+    request.state.audit_table = "custom_fields"
+    request.state.audit_requested_id = field_id
+    request.state.audit_description = f"Deleted custom field: {field_id} and all descendants"
+    request.state.audit_risk_level = "high"
+
+    # Check permissions and get user context
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CUSTOM_FIELDS_MANAGEMENT_DELETE,
+    )
+
+    # Create service and delegate to service
+    custom_field_service = CustomFieldService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    await custom_field_service.delete_custom_field(field_id)
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    return success_response(
+        request=request,
+        message_key="custom_fields.success.field_deleted",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )

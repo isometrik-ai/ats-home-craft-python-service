@@ -340,3 +340,69 @@ async def test_update_custom_field(monkeypatch, client):
         },
     )
     assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_delete_custom_field(monkeypatch, client):
+    """Delete a custom field and all its descendants."""
+
+    async def fake_check_permissions(current_user, db_connection, permission_codes):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes
+        return _ctx()
+
+    async def fake_delete_custom_field(self, field_id):
+        """Fake delete custom field."""
+        del self
+        assert field_id == "field-789"
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.custom_fields.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        (
+            "apps.user_service.app.services.custom_field_service"
+            ".CustomFieldService.delete_custom_field"
+        ),
+        fake_delete_custom_field,
+    )
+
+    res = await client.delete("/v1/custom-fields/field-789")
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_delete_custom_field_not_found(monkeypatch, client):
+    """Delete custom field returns 404 when field not found."""
+
+    async def fake_check_permissions(current_user, db_connection, permission_codes):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes
+        return _ctx()
+
+    async def fake_delete_custom_field(self, field_id):
+        """Fake delete custom field raises NotFoundException."""
+        del self, field_id
+        from libs.shared_utils.http_exceptions import NotFoundException
+        from libs.shared_utils.status_codes import CustomStatusCode
+
+        raise NotFoundException(
+            message_key="custom_fields.errors.field_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.custom_fields.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        (
+            "apps.user_service.app.services.custom_field_service"
+            ".CustomFieldService.delete_custom_field"
+        ),
+        fake_delete_custom_field,
+    )
+
+    res = await client.delete("/v1/custom-fields/field-nonexistent")
+    assert res.status_code == 404
