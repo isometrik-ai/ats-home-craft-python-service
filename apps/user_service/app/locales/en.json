@@ -242,11 +242,19 @@
     "errors": {
       "field_key_exists": "A custom field with this field key already exists.",
       "entity_type_required": "Entity type is required for custom field creation.",
-      "field_not_found": "The custom field you are trying to access does not exist."
+      "field_not_found": "The custom field you are trying to access does not exist.",
+      "range_max_greater_than_min": "Range max value must be greater than min value.",
+      "sub_fields_only_for_object": "Sub-fields can only be provided for object type fields.",
+      "max_nesting_depth_exceeded": "Maximum nesting depth exceeded. Custom fields cannot be nested beyond the allowed depth.",
+      "field_type_required_for_type_config": "Field type is required when type configuration is provided.",
+      "type_config_required_for_field_type": "Type configuration is required for this field type.",
+      "parent_id_required_for_add": "Parent ID is required when adding sub-fields to an existing field."
     },
     "success": {
       "field_created": "Custom field created successfully.",
-      "fields_retrieved": "Custom fields retrieved successfully."
+      "fields_retrieved": "Custom fields retrieved successfully.",
+      "field_updated": "Custom field updated successfully.",
+      "field_deleted": "Custom field deleted successfully."
     }
   }
 }
