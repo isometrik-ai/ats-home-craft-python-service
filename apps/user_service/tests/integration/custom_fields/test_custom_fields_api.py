@@ -302,3 +302,41 @@ async def test_get_custom_field_with_sub_fields(monkeypatch, client):
     assert body["data"]["field_type"] == "object"
     assert len(body["data"]["sub_fields"]) == 1
     assert body["data"]["sub_fields"][0]["field_name"] == "Street"
+
+
+@pytest.mark.asyncio
+async def test_update_custom_field(monkeypatch, client):
+    """Update a custom field via PATCH."""
+
+    async def fake_check_permissions(current_user, db_connection, permission_codes):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes
+        return _ctx()
+
+    async def fake_update_custom_field(self, field_id, body):
+        """Fake update custom field."""
+        del self
+        assert field_id == "field-456"
+        assert body.field_name == "Updated Field Name"
+        assert body.description == "Updated description"
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.custom_fields.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        (
+            "apps.user_service.app.services.custom_field_service"
+            ".CustomFieldService.update_custom_field"
+        ),
+        fake_update_custom_field,
+    )
+
+    res = await client.patch(
+        "/v1/custom-fields/field-456",
+        json={
+            "field_name": "Updated Field Name",
+            "description": "Updated description",
+        },
+    )
+    assert_success(res, 200)

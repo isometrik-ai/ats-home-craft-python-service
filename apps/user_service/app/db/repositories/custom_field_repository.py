@@ -5,6 +5,7 @@ All SQL queries for custom field management are centralized here.
 """
 
 import json
+from typing import Any
 
 import asyncpg
 
@@ -272,3 +273,189 @@ class CustomFieldRepository:
 
         rows = await self.db_connection.fetch(query, *all_values)
         return [str(row["id"]) for row in rows]
+
+    async def update_custom_field(
+        self, field_id: str, organization_id: str, update_data: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Update a custom field by ID. Only provided keys are updated.
+
+        Args:
+            field_id: Custom field ID
+            organization_id: Organization ID
+            update_data: Dictionary of fields to update
+
+        Returns:
+            Updated custom field or None if not found
+        """
+        if not update_data:
+            return None
+
+        # Serialize type_config to JSON string if present
+        if "type_config" in update_data:
+            type_config = update_data["type_config"]
+            if isinstance(type_config, dict):
+                update_data = {**update_data, "type_config": json.dumps(type_config)}
+
+        set_parts = []
+        values: list[Any] = []
+        param_index = 1
+
+        for key, value in update_data.items():
+            if key == "type_config":
+                set_parts.append(f"{key} = ${param_index}::jsonb")
+            else:
+                set_parts.append(f"{key} = ${param_index}")
+            values.append(value)
+            param_index += 1
+
+        if not set_parts:
+            return None
+
+        set_parts.append("updated_at = NOW()")
+        values.extend([field_id, organization_id])
+
+        query = f"""
+            UPDATE custom_fields
+            SET {", ".join(set_parts)}
+            WHERE id = ${param_index}::uuid AND organization_id = ${param_index + 1}::uuid
+            AND is_active = TRUE
+            RETURNING *
+        """
+
+        row = await self.db_connection.fetchrow(query, *values)
+        return dict(row) if row else None
+
+    async def bulk_update_custom_fields(
+        self, organization_id: str, updates: list[dict[str, Any]]
+    ) -> None:
+        """Bulk update multiple custom fields efficiently using a single UPDATE...FROM VALUES query.
+
+        Uses PostgreSQL's UPDATE...FROM VALUES syntax with COALESCE to handle different
+        field sets per update in a single database round-trip.
+
+        Args:
+            organization_id: Organization ID
+            updates: List of update dictionaries, each must contain 'id' and update fields
+
+        Raises:
+            ValueError: If any update dict is missing 'id'
+        """
+        if not updates:
+            return
+
+        # Validate all updates have 'id' before processing
+        for update_data in updates:
+            if "id" not in update_data:
+                raise ValueError("Each update dict must contain 'id'")
+
+        # Build VALUES clause with all updates
+        # Each row: (id, organization_id, field_name, description, field_type, show_on_create,
+        #            show_on_detail, is_required, type_config, sort_order, updated_by)
+        values_clauses = []
+        all_values = []
+        param_index = 1
+
+        field_order = [
+            "field_name",
+            "description",
+            "field_type",
+            "show_on_create",
+            "show_on_detail",
+            "is_required",
+            "type_config",
+            "sort_order",
+            "updated_by",
+        ]
+
+        # Define type casts for each field
+        type_casts = {
+            "field_name": "text",
+            "description": "text",
+            "field_type": "text",
+            "show_on_create": "boolean",
+            "show_on_detail": "boolean",
+            "is_required": "boolean",
+            "type_config": "jsonb",
+            "sort_order": "integer",
+            "updated_by": "uuid",
+        }
+
+        for update_data in updates:
+            field_id = update_data["id"]
+            update_copy = {**update_data}
+            update_copy.pop("id")
+
+            # Serialize type_config to JSON string if present
+            if "type_config" in update_copy and isinstance(update_copy["type_config"], dict):
+                update_copy["type_config"] = json.dumps(update_copy["type_config"])
+
+            # Build placeholders with CAST for each value: id, organization_id, then all fields
+            placeholders = [f"CAST(${param_index} AS uuid)", f"CAST(${param_index + 1} AS uuid)"]
+            row_values = [field_id, organization_id]
+
+            for i, field in enumerate(field_order):
+                cast_type = type_casts[field]
+                placeholders.append(f"CAST(${param_index + 2 + i} AS {cast_type})")
+                row_values.append(update_copy.get(field))
+
+            all_values.extend(row_values)
+            values_clauses.append(f"({', '.join(placeholders)})")
+            param_index += len(row_values)
+
+        # Build single UPDATE query with COALESCE to only update non-NULL values.
+        # Column types are inferred from VALUES expressions (which use ::uuid, ::jsonb casts).
+        query = f"""
+            UPDATE custom_fields cf
+            SET
+                field_name = COALESCE(v.field_name, cf.field_name),
+                description = COALESCE(v.description, cf.description),
+                field_type = COALESCE(v.field_type, cf.field_type),
+                show_on_create = COALESCE(v.show_on_create::boolean, cf.show_on_create),
+                show_on_detail = COALESCE(v.show_on_detail::boolean, cf.show_on_detail),
+                is_required = COALESCE(v.is_required::boolean, cf.is_required),
+                type_config = COALESCE(v.type_config::jsonb, cf.type_config),
+                sort_order = COALESCE(v.sort_order::integer, cf.sort_order),
+                updated_by = COALESCE(v.updated_by, cf.updated_by),
+                updated_at = NOW()
+            FROM (VALUES {", ".join(values_clauses)}) AS v(
+                id, organization_id, field_name, description, field_type,
+                show_on_create, show_on_detail, is_required,
+                type_config, sort_order, updated_by
+            )
+            WHERE cf.id = v.id
+                AND cf.organization_id = v.organization_id
+                AND cf.is_active = TRUE
+        """
+
+        await self.db_connection.execute(query, *all_values)
+
+    async def bulk_delete_custom_fields_with_descendants(
+        self, organization_id: str, field_ids: list[str]
+    ) -> None:
+        """Bulk delete custom fields and all their descendants.
+
+        Uses a recursive CTE to find all descendants, then hard-deletes them.
+
+        Args:
+            organization_id: Organization ID.
+            field_ids: List of field IDs to delete (each and all its descendants).
+        """
+        if not field_ids:
+            return
+
+        query = """
+            WITH RECURSIVE to_delete AS (
+                SELECT id
+                FROM custom_fields
+                WHERE id = ANY($1::uuid[])
+                  AND organization_id = $2::uuid
+                UNION ALL
+                SELECT c.id
+                FROM custom_fields c
+                INNER JOIN to_delete d ON c.parent_id = d.id
+                WHERE c.organization_id = $2::uuid
+            )
+            DELETE FROM custom_fields
+            WHERE id IN (SELECT id FROM to_delete)
+        """
+        await self.db_connection.execute(query, field_ids, organization_id)

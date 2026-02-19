@@ -2,7 +2,11 @@
 
 import pytest
 
-from apps.user_service.app.schemas.custom_fields import CreateCustomFieldRequest
+from apps.user_service.app.schemas.custom_fields import (
+    CreateCustomFieldRequest,
+    FlatFieldUpdateRequest,
+    UpdateCustomFieldRequest,
+)
 from apps.user_service.app.schemas.enums import EntityType, FieldType
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -61,6 +65,22 @@ class _FakeCustomFieldRepo:
             organization_id,
         )
         return self.get_field_result
+
+    async def update_custom_field(self, field_id, organization_id, update_data):
+        """Record update call."""
+        self.calls["update_custom_field"] = (field_id, organization_id, update_data)
+        return {"id": field_id}
+
+    async def bulk_update_custom_fields(self, organization_id, updates):
+        """Record bulk update call."""
+        self.calls["bulk_update_custom_fields"] = (organization_id, updates)
+
+    async def bulk_delete_custom_fields_with_descendants(self, organization_id, field_ids):
+        """Record bulk delete call."""
+        self.calls["bulk_delete_custom_fields_with_descendants"] = (
+            organization_id,
+            field_ids,
+        )
 
 
 def _ctx(org_id="org-1"):
@@ -215,6 +235,35 @@ async def test_create_field_with_object_sub_fields(monkeypatch):
     assert len(bulk_data) == 2
     assert bulk_data[0]["field_name"] == "Child 1"
     assert bulk_data[1]["field_name"] == "Child 2"
+
+
+@pytest.mark.asyncio
+async def test_create_object_sub_fields_with_description(monkeypatch):
+    """Test create_field with object type and sub_fields that have description (covers line 207)."""
+    fake_repo = _FakeCustomFieldRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    request_data = CreateCustomFieldRequest(
+        field_name="Parent Field",
+        field_type=FieldType.OBJECT,
+        entity_type=EntityType.CONTACT,
+        sub_fields=[
+            CreateCustomFieldRequest(
+                field_name="Child With Desc",
+                field_type=FieldType.TEXT,
+                description="Sub-field description",
+            ),
+        ],
+    )
+
+    await service.create_custom_field(request_data)
+
+    bulk_data = fake_repo.calls["bulk_create_custom_fields"]
+    assert len(bulk_data) == 1
+    assert bulk_data[0]["description"] == "Sub-field description"
 
 
 @pytest.mark.asyncio
@@ -547,3 +596,706 @@ def test_prepare_field_data_no_description():
     data = service._prepare_field_data(request, "org-1", "contact", "test", "user-1", None)
 
     assert "description" not in data
+
+
+# ============================================================================
+# UPDATE CUSTOM FIELD TESTS
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_field_not_found(monkeypatch):
+    """Test update_custom_field raises when field not found."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = []
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest()
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.update_custom_field("field-1", body)
+    assert "field_not_found" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_update_field_root_only(monkeypatch):
+    """Test update_custom_field updates root field only."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Old",
+            "field_key": "old",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(field_name="New Name")
+
+    await service.update_custom_field("field-1", body)
+
+    assert "update_custom_field" in fake_repo.calls
+    _, org_id, update_data = fake_repo.calls["update_custom_field"]
+    assert org_id == "org-1"
+    assert update_data["field_name"] == "New Name"
+    assert "updated_by" in update_data
+
+
+@pytest.mark.asyncio
+async def test_update_field_with_remove(monkeypatch):
+    """Test update_custom_field calls bulk_delete for remove."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "child-1",
+            "field_name": "Child",
+            "field_key": "child",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(remove=["child-1"])
+
+    await service.update_custom_field("field-1", body)
+
+    assert "bulk_delete_custom_fields_with_descendants" in fake_repo.calls
+    _, field_ids = fake_repo.calls["bulk_delete_custom_fields_with_descendants"]
+    assert field_ids == ["child-1"]
+
+
+@pytest.mark.asyncio
+async def test_update_field_with_flat_updates(monkeypatch):
+    """Test update_custom_field calls bulk_update for update list."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "child-1",
+            "field_name": "Child",
+            "field_key": "child",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(
+        update=[
+            FlatFieldUpdateRequest(id="child-1", field_name="Updated Child"),
+        ],
+    )
+
+    await service.update_custom_field("field-1", body)
+
+    assert "bulk_update_custom_fields" in fake_repo.calls
+    _, updates = fake_repo.calls["bulk_update_custom_fields"]
+    assert len(updates) == 1
+    assert updates[0]["id"] == "child-1"
+    assert updates[0]["field_name"] == "Updated Child"
+
+
+@pytest.mark.asyncio
+async def test_update_field_remove_id_not_in_subtree_raises(monkeypatch):
+    """Test update_custom_field raises when remove id not in subtree."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(remove=["other-id"])
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.update_custom_field("field-1", body)
+    assert "field_not_found" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_update_field_update_id_not_in_subtree_raises(monkeypatch):
+    """Test update_custom_field raises when update id not in subtree."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(
+        update=[FlatFieldUpdateRequest(id="other-id", field_name="X")],
+    )
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.update_custom_field("field-1", body)
+    assert "field_not_found" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_update_field_with_add(monkeypatch):
+    """Test update_custom_field calls create for add list."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(
+        add=[
+            CreateCustomFieldRequest(
+                field_name="New Sub",
+                field_type=FieldType.TEXT,
+                parent_id="field-1",
+            ),
+        ],
+    )
+
+    await service.update_custom_field("field-1", body)
+
+    assert "bulk_create_custom_fields" in fake_repo.calls or "create_custom_field" in (
+        fake_repo.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_field_add_without_parent_id_raises(monkeypatch):
+    """Test update_custom_field raises when add item has no parent_id (schema validation)."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    _ = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        UpdateCustomFieldRequest(
+            add=[
+                CreateCustomFieldRequest(
+                    field_name="Orphan",
+                    field_type=FieldType.TEXT,
+                    parent_id=None,
+                ),
+            ],
+        )
+    assert "parent_id_required_for_add" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_add_missing_parent_id_raises(monkeypatch):
+    """Test _create_fields_with_nested_children raises when parent_id is None (covers line 551)."""
+    fake_repo = _FakeCustomFieldRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    fields_to_add = [
+        CreateCustomFieldRequest(
+            field_name="Orphan",
+            field_type=FieldType.TEXT,
+            parent_id=None,
+        ),
+    ]
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service._create_fields_with_nested_children(
+            fields_to_add, "contact", service.user_context.user_id
+        )
+    assert "parent_id_required_for_add" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_add_parent_id_not_in_subtree_raises(monkeypatch):
+    """Test update_custom_field raises when add item parent_id not in subtree (covers line 736)."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(
+        add=[
+            CreateCustomFieldRequest(
+                field_name="New Sub",
+                field_type=FieldType.TEXT,
+                parent_id="nonexistent-parent-id",
+            ),
+        ],
+    )
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.update_custom_field("field-1", body)
+    assert "field_not_found" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_update_field_with_add_object_and_sub_fields(monkeypatch):
+    """Test update_custom_field add with OBJECT type and sub_fields (covers 571-574)."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(
+        add=[
+            CreateCustomFieldRequest(
+                field_name="New Object",
+                field_type=FieldType.OBJECT,
+                parent_id="field-1",
+                sub_fields=[
+                    CreateCustomFieldRequest(
+                        field_name="Nested Child",
+                        field_type=FieldType.TEXT,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    await service.update_custom_field("field-1", body)
+
+    assert "bulk_create_custom_fields" in fake_repo.calls
+    bulk_data = fake_repo.calls["bulk_create_custom_fields"]
+    assert len(bulk_data) >= 1
+    assert bulk_data[0]["field_name"] == "New Object"
+    # Nested child is created via _create_field_iterative (second bulk_create or create)
+    assert fake_repo.calls.get("bulk_create_custom_fields") or fake_repo.calls.get(
+        "create_custom_field"
+    )
+
+
+@pytest.mark.asyncio
+async def test_root_object_to_non_object_deletes_descendants(monkeypatch):
+    """Test update_custom_field when root changes OBJECT->non-OBJECT
+    deletes descendants (606-613)."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "child-1",
+            "field_name": "Child",
+            "field_key": "child",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(field_type=FieldType.TEXT)
+
+    await service.update_custom_field("field-1", body)
+
+    assert "bulk_delete_custom_fields_with_descendants" in fake_repo.calls
+    _, deleted_ids = fake_repo.calls["bulk_delete_custom_fields_with_descendants"]
+    assert "child-1" in deleted_ids
+
+
+@pytest.mark.asyncio
+async def test_child_object_to_non_object_deletes_descendants(monkeypatch):
+    """Test update_custom_field when a child changes
+    OBJECT->non-OBJECT deletes its descendants (630-636)."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "child-obj",
+            "field_name": "Child Object",
+            "field_key": "child_object",
+            "field_type": "object",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "grandchild-1",
+            "field_name": "Grandchild",
+            "field_key": "grandchild",
+            "field_type": "text",
+            "parent_id": "child-obj",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(
+        update=[
+            FlatFieldUpdateRequest(id="child-obj", field_type=FieldType.TEXT),
+        ],
+    )
+
+    await service.update_custom_field("field-1", body)
+
+    assert "bulk_delete_custom_fields_with_descendants" in fake_repo.calls
+    _, deleted_ids = fake_repo.calls["bulk_delete_custom_fields_with_descendants"]
+    assert "grandchild-1" in deleted_ids
+
+
+@pytest.mark.asyncio
+async def test_update_field_root_and_flat_updates_together(monkeypatch):
+    """Test update_custom_field with both root update and flat updates (covers 701-706)."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_field_result = [
+        {
+            "id": "field-1",
+            "field_name": "Root",
+            "field_key": "root",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "child-1",
+            "field_name": "Child",
+            "field_key": "child",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    body = UpdateCustomFieldRequest(
+        field_name="New Root Name",
+        update=[
+            FlatFieldUpdateRequest(id="child-1", field_name="New Child Name"),
+        ],
+    )
+
+    await service.update_custom_field("field-1", body)
+
+    assert "update_custom_field" in fake_repo.calls
+    _, _, root_data = fake_repo.calls["update_custom_field"]
+    assert root_data["field_name"] == "New Root Name"
+    assert "bulk_update_custom_fields" in fake_repo.calls
+    _, updates = fake_repo.calls["bulk_update_custom_fields"]
+    assert len(updates) == 1
+    assert updates[0]["field_name"] == "New Child Name"
+
+
+# ============================================================================
+# PREPARE ROOT / FLAT UPDATE DATA TESTS
+# ============================================================================
+
+
+def test_prepare_root_field_update_data():
+    """Test _prepare_root_field_update_data includes only set fields."""
+    service = CustomFieldService(db_connection=None)
+    req = UpdateCustomFieldRequest(
+        field_name="New Name",
+        description="New desc",
+        sort_order=1,
+    )
+
+    data = service._prepare_root_field_update_data(req, "user-1")
+
+    assert data["field_name"] == "New Name"
+    assert data["description"] == "New desc"
+    assert data["sort_order"] == 1
+    assert data["updated_by"] == "user-1"
+    assert "field_type" not in data
+
+
+def test_prepare_root_field_update_data_empty():
+    """Test _prepare_root_field_update_data returns empty when nothing set."""
+    service = CustomFieldService(db_connection=None)
+    req = UpdateCustomFieldRequest()
+
+    data = service._prepare_root_field_update_data(req, "user-1")
+
+    assert not data
+
+
+def test_prepare_root_field_update_data_all_optionals():
+    """Test _prepare_root_field_update_data includes
+    field_type, type_config, show_on_*, is_required."""
+    service = CustomFieldService(db_connection=None)
+    req = UpdateCustomFieldRequest(
+        field_name="Name",
+        description="Desc",
+        field_type=FieldType.TEXT,
+        type_config={"max_length": 100},
+        show_on_create=False,
+        show_on_detail=True,
+        is_required=True,
+        sort_order=3,
+    )
+
+    data = service._prepare_root_field_update_data(req, "user-1")
+
+    assert data["field_name"] == "Name"
+    assert data["description"] == "Desc"
+    assert data["field_type"] == "text"
+    assert "type_config" in data
+    assert data["show_on_create"] is False
+    assert data["show_on_detail"] is True
+    assert data["is_required"] is True
+    assert data["sort_order"] == 3
+    assert data["updated_by"] == "user-1"
+
+
+def test_prepare_flat_field_update_data():
+    """Test _prepare_flat_field_update_data includes id and updated_by."""
+    service = CustomFieldService(db_connection=None)
+    req = FlatFieldUpdateRequest(
+        id="child-1",
+        field_name="Child Name",
+        sort_order=2,
+    )
+
+    data = service._prepare_flat_field_update_data(req, "user-1")
+
+    assert data["id"] == "child-1"
+    assert data["field_name"] == "Child Name"
+    assert data["sort_order"] == 2
+    assert data["updated_by"] == "user-1"
+
+
+def test_prepare_flat_field_update_data_all_optionals():
+    """Test _prepare_flat_field_update_data includes all optional fields when set."""
+    service = CustomFieldService(db_connection=None)
+    req = FlatFieldUpdateRequest(
+        id="child-1",
+        field_name="Child Name",
+        description="Child desc",
+        field_type=FieldType.NUMBER,
+        type_config={"min": 0, "max": 100},
+        show_on_create=False,
+        show_on_detail=True,
+        is_required=True,
+        sort_order=2,
+    )
+
+    data = service._prepare_flat_field_update_data(req, "user-1")
+
+    assert data["id"] == "child-1"
+    assert data["field_name"] == "Child Name"
+    assert data["description"] == "Child desc"
+    assert data["field_type"] == "number"
+    assert "type_config" in data
+    assert data["show_on_create"] is False
+    assert data["show_on_detail"] is True
+    assert data["is_required"] is True
+    assert data["sort_order"] == 2
+    assert data["updated_by"] == "user-1"
