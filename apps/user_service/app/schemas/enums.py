@@ -322,6 +322,13 @@ class ClientUserStatus(str, Enum):
     DELETED = "deleted"
 
 
+class ClientEnrichmentStatus(str, Enum):
+    """Client enrichment status enumeration."""
+
+    REQUESTED = "requested"
+    COMPLETED = "completed"
+
+
 class LeadStatus(str, Enum):
     """Lead status enumeration."""
 

@@ -30,11 +30,22 @@ class TwoFASettings(BaseSettings):
     verification_attempt_window_hours: int = config("VERIFICATION_ATTEMPT_WINDOW_HOURS", default=24)
 
 
+class EnrichmentServiceSettings(BaseSettings):
+    """Client enrichment service settings."""
+
+    base_url: str = config(
+        "ENRICHMENT_SERVICE_BASE_URL",
+        default="http://91.99.230.218:8071",
+    )
+    timeout_seconds: float = config("ENRICHMENT_SERVICE_TIMEOUT", default=30.0)
+
+
 class ApplicationSettings(BaseSettings):
     """Application settings."""
 
     shared_settings: SharedAppSettings = shared_settings
     two_fa_settings: TwoFASettings = TwoFASettings()
+    enrichment_service: EnrichmentServiceSettings = EnrichmentServiceSettings()
     invite_expiry_days: int = config("INVITE_EXPIRY_DAYS", default=7)
     datadog_tracing_enabled: bool = config("DATADOG_TRACING_ENABLED", default=False)
 

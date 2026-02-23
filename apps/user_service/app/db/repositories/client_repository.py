@@ -473,6 +473,22 @@ class ClientRepository:
         """
         await self.db_connection.execute(query, client_id, address_ids)
 
+    async def get_client_by_enrichment_request_id(self, enrichment_request_id: str) -> dict | None:
+        """Fetch client id and organization_id by enrichment request id (webhook callback).
+
+        Returns:
+            dict | None: Row with id, organization_id or None if not found.
+        """
+        query = """
+            SELECT id, organization_id
+            FROM clients
+            WHERE enrichment_request_id = $1 AND status != $2
+        """
+        row = await self.db_connection.fetchrow(
+            query, enrichment_request_id, ClientStatus.DELETED.value
+        )
+        return dict(row) if row else None
+
     # UPDATE OPERATIONS
     async def get_client_for_update(self, client_id: str, organization_id: str) -> dict | None:
         """Fetch client row for update merges and audit logging.

@@ -4,7 +4,7 @@ All endpoints include proper authentication, validation, and database operations
 """
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 from supabase import AsyncClient
 
@@ -19,6 +19,9 @@ from apps.user_service.app.schemas.clients import (
     UpdateClientRequest,
 )
 from apps.user_service.app.schemas.enums import ClientStatus, ClientType
+from apps.user_service.app.services.client_enrichment_service import (
+    ClientEnrichmentService,
+)
 from apps.user_service.app.services.client_service import ClientService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -147,6 +150,7 @@ async def create_client_from_user(
 )
 async def create_client(
     request: Request,
+    background_tasks: BackgroundTasks,
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
@@ -157,6 +161,8 @@ async def create_client(
     Orchestrates the full client creation process including authentication setup,
     user provisioning across systems (Supabase and Isometrik), client record creation,
     and optional lead and address records. Sends a welcome email upon successful creation.
+    Enrichment is triggered in the background (person or company API); request_id
+    and status are stored on the client after the response is sent.
     """
     # Set audit context for client creation
     client_name = body.name or f"{body.first_name} {body.last_name}"
@@ -176,7 +182,17 @@ async def create_client(
         db_connection=db_connection,
         supabase_client=sb_client,
     )
-    await client_service.create_client(request_data=body)
+    client_record = await client_service.create_client(request_data=body)
+
+    # Schedule enrichment in background (own DB connection; does not block response)
+    enrichment_service = ClientEnrichmentService.from_settings()
+    background_tasks.add_task(
+        enrichment_service.run_client_enrichment,
+        client_id=client_record["id"],
+        organization_id=client_record["organization_id"],
+        client_type=body.client_type.value,
+        payload_data=body.model_dump(),
+    )
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,

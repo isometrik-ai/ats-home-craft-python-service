@@ -508,7 +508,7 @@ class ClientService:
             ]
             await self.client_repository.bulk_create_addresses(addresses_data)
 
-    async def create_client(self, request_data: CreateClientRequest) -> None:
+    async def create_client(self, request_data: CreateClientRequest) -> dict[str, Any]:
         """Create a new client with complete onboarding flow.
 
         Orchestrates the full client creation process: validates organization existence
@@ -518,6 +518,10 @@ class ClientService:
 
         Args:
             request_data: Request data containing client information
+
+        Returns:
+            dict: Created client record (at least id, organization_id) for callers
+                e.g. to schedule background enrichment.
 
         Raises:
             NotFoundException: If organization not found
@@ -558,6 +562,8 @@ class ClientService:
                 )
             except Exception as e:
                 logger.error("Failed to send client creation email: %s", str(e))
+
+        return client_record
 
     async def get_clients_list(
         self,
