@@ -406,3 +406,117 @@ async def test_delete_custom_field_not_found(monkeypatch, client):
 
     res = await client.delete("/v1/custom-fields/field-nonexistent")
     assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_custom_field_list_type(monkeypatch, client):
+    """Create a custom field with list type."""
+
+    async def fake_check_permissions(current_user, db_connection, permission_codes):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes
+        return _ctx()
+
+    async def fake_create_custom_field(self, body):
+        """Fake create custom field with list type."""
+        del self
+        assert body.field_name == "Tags List"
+        assert body.field_type == FieldType.LIST
+        assert len(body.sub_fields) == 1
+        assert body.sub_fields[0].field_type == FieldType.TEXT
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.custom_fields.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        (
+            "apps.user_service.app.services.custom_field_service"
+            ".CustomFieldService.create_custom_field"
+        ),
+        fake_create_custom_field,
+    )
+
+    res = await client.post(
+        "/v1/custom-fields",
+        json={
+            "field_name": "Tags List",
+            "field_type": "list",
+            "entity_type": "contact",
+            "sub_fields": [
+                {
+                    "field_name": "Tag",
+                    "field_type": "text",
+                }
+            ],
+        },
+    )
+    assert_success(res, 201)
+
+
+@pytest.mark.asyncio
+async def test_get_custom_field_with_list_sub_field(monkeypatch, client):
+    """Get a custom field with list type and sub-field."""
+
+    async def fake_check_permissions(current_user, db_connection, permission_codes):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes
+        return _ctx()
+
+    async def fake_get_custom_field_by_id(self, _field_id):
+        """Fake get custom field with list sub-field."""
+        del self
+        from apps.user_service.app.schemas.custom_fields import (
+            SubFieldResponse,
+        )
+
+        sub_field = SubFieldResponse(
+            id="sub-field-1",
+            field_name="Tag",
+            field_key="tag",
+            field_type="text",
+            show_on_create=True,
+            show_on_detail=False,
+            is_required=False,
+            type_config={},
+            sort_order=0,
+            is_active=True,
+            entity_type="contact",
+            parent_id="field-123",
+            sub_fields=[],
+        )
+
+        return CustomFieldResponse(
+            id="field-123",
+            field_name="Tags List",
+            field_key="tags_list",
+            field_type="list",
+            show_on_create=True,
+            show_on_detail=False,
+            is_required=False,
+            type_config={},
+            sort_order=0,
+            is_active=True,
+            entity_type="contact",
+            parent_id=None,
+            sub_fields=[sub_field],
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.custom_fields.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        (
+            "apps.user_service.app.services.custom_field_service"
+            ".CustomFieldService.get_custom_field_by_id"
+        ),
+        fake_get_custom_field_by_id,
+    )
+
+    res = await client.get("/v1/custom-fields/field-123")
+    body = assert_success(res, 200)
+    assert body["data"]["id"] == "field-123"
+    assert body["data"]["field_type"] == "list"
+    assert len(body["data"]["sub_fields"]) == 1
+    assert body["data"]["sub_fields"][0]["field_name"] == "Tag"

@@ -2,6 +2,7 @@
 # pylint: disable=too-many-lines
 
 import datetime
+import json
 from datetime import date
 
 import pytest
@@ -27,11 +28,12 @@ from apps.user_service.app.schemas.clients import (
 )
 from apps.user_service.app.schemas.enums import ClientType, LeadStatus, UserEventStatus
 from apps.user_service.app.services.client_service import ClientService
-from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.common_utils import UserContext, parse_json_field
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
     ServiceUnavailableException,
+    ValidationException,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -201,6 +203,17 @@ class _FakeUserEventRepo:
     async def update_status_by_user_id(self, user_id: str, status: UserEventStatus) -> None:
         """Record call and no-op."""
         self.calls["update_status_by_user_id"] = {"user_id": user_id, "status": status}
+
+
+class _FakeCustomFieldRepo:
+    """Fake custom field repository for client service tests."""
+
+    def __init__(self):
+        self.get_fields_result = []
+
+    async def get_custom_fields_by_entity_type(self, _organization_id, _entity_type):
+        """Return configured custom fields."""
+        return self.get_fields_result
 
 
 def _ctx(org_id="org-1"):
@@ -567,7 +580,7 @@ async def test_build_client_name_for_person():
         last_name="Doe",
     )
 
-    client_data = service._prepare_client_data(request_data, "org-1")
+    client_data = await service._prepare_client_data(request_data, "org-1")
 
     assert client_data["name"] == "John Doe"
 
@@ -586,15 +599,36 @@ async def test_build_client_name_for_company():
         name="Test Company",
     )
 
-    client_data = service._prepare_client_data(request_data, "org-1")
+    client_data = await service._prepare_client_data(request_data, "org-1")
 
     assert client_data["name"] == "Test Company"
 
 
 @pytest.mark.asyncio
-async def test_prepare_client_data_serializes_jsonb_fields():
+async def test_prepare_client_data_serializes_jsonb_fields(monkeypatch):
     """_prepare_client_data serializes JSONB fields to JSON strings."""
-    service = ClientService(db_connection=None)
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Custom Field",
+            "field_key": "key",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
         email="test@example.com",
@@ -607,13 +641,93 @@ async def test_prepare_client_data_serializes_jsonb_fields():
         custom_fields={"key": "value"},
     )
 
-    client_data = service._prepare_client_data(request_data, "org-1")
+    client_data = await service._prepare_client_data(request_data, "org-1")
 
     assert client_data["organization_id"] == "org-1"
     assert client_data["client_type"] == "person"
     assert isinstance(client_data["websites"], str)  # JSON string
     assert client_data["tags"] == ["tag1", "tag2"]
     assert isinstance(client_data["custom_fields"], str)  # JSON string
+
+
+@pytest.mark.asyncio
+async def test_prepare_client_data_validates_custom_fields(monkeypatch):
+    """_prepare_client_data validates custom fields against definitions."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Age",
+            "field_key": "age",
+            "field_type": "number",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.PERSON,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+        custom_fields={"age": 25},
+    )
+
+    client_data = await service._prepare_client_data(request_data, "org-1")
+
+    parsed_fields = parse_json_field(client_data["custom_fields"])
+    assert parsed_fields == {"age": 25.0}
+
+
+@pytest.mark.asyncio
+async def test_prepare_client_data_custom_fields_invalid(monkeypatch):
+    """_prepare_client_data raises when custom fields validation fails."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Age",
+            "field_key": "age",
+            "field_type": "number",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.PERSON,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+        custom_fields={"age": "not a number"},
+    )
+
+    with pytest.raises(ValidationException):
+        await service._prepare_client_data(request_data, "org-1")
 
 
 @pytest.mark.asyncio
@@ -1448,12 +1562,48 @@ async def test_has_any_update_true_when_any_field_set():
 
 
 @pytest.mark.asyncio
-async def test_build_client_update_payload_scalar_and_merge():
+async def test_build_client_update_payload_scalar_and_merge(monkeypatch):
     """_build_client_update_payload sets scalars and merges
     billing_preferences and custom_fields."""
-    service = ClientService(db_connection=None)
+    fake_cf_repo = _FakeCustomFieldRepo()
+    fake_cf_repo.get_fields_result = [
+        {
+            "id": "f1",
+            "field_name": "A",
+            "field_key": "a",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "f2",
+            "field_name": "C",
+            "field_key": "c",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 1,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_cf_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
     current = {
         "name": "Old",
+        "client_type": "person",
         "billing_preferences": '{"method": "invoice"}',
         "custom_fields": '{"a": "1", "b": "2"}',
     }
@@ -1463,14 +1613,15 @@ async def test_build_client_update_payload_scalar_and_merge():
         custom_fields={"a": "updated", "b": None, "c": "new"},
     )
 
-    payload = service._build_client_update_payload(body, current)
+    payload = await service._build_client_update_payload(body, current)
 
     assert payload["name"] == "New Name"
     assert payload["billing_preferences"]["method"] == "invoice"
     assert payload["billing_preferences"]["terms"] == "Net 30"
-    assert payload["custom_fields"]["a"] == "updated"
-    assert "b" not in payload["custom_fields"]
-    assert payload["custom_fields"]["c"] == "new"
+    custom_fields = json.loads(payload["custom_fields"])
+    assert custom_fields["a"] == "updated"
+    assert "b" not in custom_fields
+    assert custom_fields["c"] == "new"
 
 
 @pytest.mark.asyncio
@@ -1482,7 +1633,7 @@ async def test_build_client_update_payload_websites():
         websites=WebsitesUpdate(add=[WebsiteInput(url="https://x.com", type="primary")])
     )
 
-    payload = service._build_client_update_payload(body, current)
+    payload = await service._build_client_update_payload(body, current)
 
     # Websites are handled separately in _apply_jsonb_list_changes, not in payload
     assert "websites" not in payload
@@ -1741,7 +1892,7 @@ async def test_prepare_client_data_optional_fields():
         social_pages=[SocialPage(platform="linkedin", url="https://linkedin.com/in/john")],
     )
 
-    client_data = service._prepare_client_data(request_data, "org-1")
+    client_data = await service._prepare_client_data(request_data, "org-1")
 
     assert client_data["industry"] == "Technology"
     assert client_data["profile_photo_url"] == "https://example.com/photo.jpg"
@@ -1952,9 +2103,140 @@ async def test_build_client_update_payload_additional_data():
     }
     body = UpdateClientRequest(additional_data={"new": "value"})
 
-    payload = service._build_client_update_payload(body, current)
+    payload = await service._build_client_update_payload(body, current)
 
     assert payload["additional_data"] == {"new": "value"}
+
+
+@pytest.mark.asyncio
+async def test_merge_custom_fields_into_payload(monkeypatch):
+    """_merge_custom_fields_into_payload validates and merges custom fields."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Age",
+            "field_key": "age",
+            "field_type": "number",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    current = {
+        "client_type": "person",
+        "custom_fields": '{"existing": "field"}',
+    }
+    body = UpdateClientRequest(custom_fields={"age": 30})
+    payload = {}
+
+    await service._merge_custom_fields_into_payload(body, current, payload)
+
+    assert "custom_fields" in payload
+    parsed = parse_json_field(payload["custom_fields"])
+    assert parsed["age"] == 30.0
+    assert parsed["existing"] == "field"
+
+
+@pytest.mark.asyncio
+async def test_merge_custom_fields_into_payload_remove_field(monkeypatch):
+    """_merge_custom_fields_into_payload removes fields set to None."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Age",
+            "field_key": "age",
+            "field_type": "number",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    current = {
+        "client_type": "person",
+        "custom_fields": '{"age": 25, "other": "value"}',
+    }
+    body = UpdateClientRequest(custom_fields={"age": None})
+    payload = {}
+
+    await service._merge_custom_fields_into_payload(body, current, payload)
+
+    parsed = parse_json_field(payload["custom_fields"])
+    assert "age" not in parsed
+    assert parsed["other"] == "value"
+
+
+@pytest.mark.asyncio
+async def test_merge_custom_fields_into_payload_list_field(monkeypatch):
+    """_merge_custom_fields_into_payload validates list field."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Tags",
+            "field_key": "tags",
+            "field_type": "list",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-2",
+            "field_name": "Tag",
+            "field_key": "tag",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    current = {
+        "client_type": "person",
+        "custom_fields": "{}",
+    }
+    body = UpdateClientRequest(custom_fields={"tags": ["tag1", "tag2"]})
+    payload = {}
+
+    await service._merge_custom_fields_into_payload(body, current, payload)
+
+    parsed = json.loads(payload["custom_fields"])
+    assert parsed["tags"] == ["tag1", "tag2"]
 
 
 @pytest.mark.asyncio
@@ -2028,17 +2310,27 @@ async def test_apply_jsonb_list_changes_websites_not_found(monkeypatch):
     assert exc_info.value.message_key == "clients.errors.website_not_found"
 
 
+def _parse_json_field_as_list(field_value):
+    """Return list for list-type JSONB fields; return [] for invalid/non-list (test helper)."""
+    if field_value is None:
+        return []
+    if isinstance(field_value, list):
+        return field_value
+    if isinstance(field_value, str):
+        if not field_value:
+            return []
+        try:
+            parsed = json.loads(field_value)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
 @pytest.mark.asyncio
 async def test_apply_jsonb_list_changes_websites_non_list(monkeypatch):
     """_apply_jsonb_list_changes handles non-list current websites."""
     fake_repo = _FakeClientRepo()
-
-    def mock_parse_json_field(field_value):
-        if field_value == "invalid":
-            return {}  # Return empty dict for invalid JSON
-        from apps.user_service.app.utils.common_utils import parse_json_field
-
-        return parse_json_field(field_value)
 
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
@@ -2046,7 +2338,7 @@ async def test_apply_jsonb_list_changes_websites_non_list(monkeypatch):
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.parse_json_field",
-        mock_parse_json_field,
+        _parse_json_field_as_list,
     )
     service = ClientService(db_connection=None)
     websites_update = WebsitesUpdate(add=[WebsiteInput(url="https://example.com", type="primary")])
@@ -2121,16 +2413,9 @@ async def test_apply_jsonb_changes_social_pages_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_apply_jsonb_list_changes_social_pages_non_list(monkeypatch):
+async def test_apply_jsonb_social_pages_non_list(monkeypatch):
     """_apply_jsonb_list_changes handles non-list current social pages."""
     fake_repo = _FakeClientRepo()
-
-    def mock_parse_json_field(field_value):
-        if field_value == "invalid":
-            return {}  # Return empty dict for invalid JSON
-        from apps.user_service.app.utils.common_utils import parse_json_field
-
-        return parse_json_field(field_value)
 
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
@@ -2138,7 +2423,7 @@ async def test_apply_jsonb_list_changes_social_pages_non_list(monkeypatch):
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.parse_json_field",
-        mock_parse_json_field,
+        _parse_json_field_as_list,
     )
     service = ClientService(db_connection=None)
     social_pages_update = SocialPagesUpdate(

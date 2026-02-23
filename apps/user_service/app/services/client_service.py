@@ -37,9 +37,11 @@ from apps.user_service.app.schemas.clients import (
 )
 from apps.user_service.app.schemas.enums import (
     ClientType,
+    EntityType,
     IsometrikRole,
     UserEventStatus,
 )
+from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -351,7 +353,7 @@ class ClientService:
 
         return user_id, isometrik_response["userId"], password
 
-    def _prepare_client_data(
+    async def _prepare_client_data(
         self,
         request_data: CreateClientRequest,
         organization_id: str,
@@ -393,8 +395,20 @@ class ClientService:
             serialized_billing = serialize_pydantic_models(request_data.billing_preferences)
             client_data["billing_preferences"] = json.dumps(serialized_billing)
         if request_data.custom_fields:
-            serialized_custom_fields = serialize_pydantic_models(request_data.custom_fields)
-            client_data["custom_fields"] = json.dumps(serialized_custom_fields)
+            # Validate and format custom fields against definitions
+            entity_type = (
+                EntityType.COMPANY
+                if request_data.client_type == ClientType.COMPANY
+                else EntityType.CONTACT
+            )
+            custom_field_service = CustomFieldService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            validated_custom_fields = await custom_field_service.validate_and_format_custom_fields(
+                request_data.custom_fields, entity_type
+            )
+            client_data["custom_fields"] = json.dumps(validated_custom_fields)
 
         if request_data.additional_data:
             client_data["additional_data"] = json.dumps(request_data.additional_data)
@@ -522,7 +536,7 @@ class ClientService:
         )
 
         # Create client record
-        client_data = self._prepare_client_data(request_data, organization_id)
+        client_data = await self._prepare_client_data(request_data, organization_id)
         client_record = await self.client_repository.create_client(client_data)
 
         # Create client_user record
@@ -671,7 +685,9 @@ class ClientService:
         if billing_preferences_data:
             billing_preferences = BillingPreferences(**billing_preferences_data)
 
+        # Format custom fields for response
         custom_fields = parse_json_field(client.get("custom_fields")) or {}
+
         additional_data = parse_json_field(client.get("additional_data")) or {}
         social_pages_data = parse_json_field(client.get("social_pages")) or []
         social_pages = [SocialPage(**p) for p in social_pages_data] if social_pages_data else []
@@ -862,7 +878,7 @@ class ClientService:
                     custom_code=CustomStatusCode.CONFLICT,
                 )
 
-        update_data = self._build_client_update_payload(body, current)
+        update_data = await self._build_client_update_payload(body, current)
 
         await self._apply_batch_jsonb_list_changes(
             body=body,
@@ -1021,25 +1037,48 @@ class ClientService:
             **body.billing_preferences.model_dump(exclude_none=True),
         }
 
-    def _merge_custom_fields_into_payload(
+    async def _merge_custom_fields_into_payload(
         self,
         body: UpdateClientRequest,
         current: dict[str, Any],
         payload: dict[str, Any],
     ) -> None:
-        """Merge body.custom_fields with current and set on payload."""
+        """Merge body.custom_fields with current, validate, and set on payload."""
         if body.custom_fields is None:
             return
-        existing = parse_json_field(current.get("custom_fields"))
+        existing = parse_json_field(current.get("custom_fields")) or {}
         merged = dict(existing)
+
+        # Determine entity type from client type
+        client_type = current.get("client_type", "")
+        entity_type = (
+            EntityType.COMPANY if client_type == ClientType.COMPANY.value else EntityType.CONTACT
+        )
+
+        # Validate and format new/updated custom fields
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+
+        # Merge: remove fields set to None, update/add others
+        fields_to_validate: dict[str, Any] = {}
         for key, value in body.custom_fields.items():
             if value is None:
                 merged.pop(key, None)
             else:
-                merged[key] = value
-        payload["custom_fields"] = merged
+                fields_to_validate[key] = value
 
-    def _build_client_update_payload(
+        # Validate only the fields being updated/added
+        if fields_to_validate:
+            validated_fields = await custom_field_service.validate_and_format_custom_fields(
+                fields_to_validate, entity_type
+            )
+            merged.update(validated_fields)
+
+        payload["custom_fields"] = json.dumps(merged)
+
+    async def _build_client_update_payload(
         self, body: UpdateClientRequest, current: dict[str, Any]
     ) -> dict[str, Any]:
         """Build the client row update dict from body and current row (merge where needed)."""
@@ -1048,7 +1087,7 @@ class ClientService:
         if body.additional_data is not None:
             payload["additional_data"] = body.additional_data
         self._merge_billing_preferences_into_payload(body, current, payload)
-        self._merge_custom_fields_into_payload(body, current, payload)
+        await self._merge_custom_fields_into_payload(body, current, payload)
         return payload
 
     def _ensure_website_ids(self, websites: list[dict[str, Any]]) -> list[dict[str, Any]]:

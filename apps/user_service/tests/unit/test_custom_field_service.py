@@ -1,5 +1,6 @@
 """Unit tests for CustomFieldService business logic."""
 
+# pylint: disable=too-many-lines
 import pytest
 
 from apps.user_service.app.schemas.custom_fields import (
@@ -296,6 +297,64 @@ async def test_create_field_nested_sub_fields(monkeypatch):
     await service.create_custom_field(request_data)
 
     # Should create root, then child, then grandchild
+    assert "create_custom_field" in fake_repo.calls
+    assert "bulk_create_custom_fields" in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_create_field_with_list_type(monkeypatch):
+    """Test create_field with list type and single child field."""
+    fake_repo = _FakeCustomFieldRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    request_data = CreateCustomFieldRequest(
+        field_name="Tags List",
+        field_type=FieldType.LIST,
+        entity_type=EntityType.CONTACT,
+        sub_fields=[
+            CreateCustomFieldRequest(field_name="Tag", field_type=FieldType.TEXT),
+        ],
+    )
+
+    await service.create_custom_field(request_data)
+
+    assert "create_custom_field" in fake_repo.calls
+    assert "bulk_create_custom_fields" in fake_repo.calls
+    bulk_data = fake_repo.calls["bulk_create_custom_fields"]
+    assert len(bulk_data) == 1
+    assert bulk_data[0]["field_name"] == "Tag"
+
+
+@pytest.mark.asyncio
+async def test_create_field_list_with_nested_object(monkeypatch):
+    """Test create_field with list type containing object child."""
+    fake_repo = _FakeCustomFieldRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    request_data = CreateCustomFieldRequest(
+        field_name="Addresses List",
+        field_type=FieldType.LIST,
+        entity_type=EntityType.CONTACT,
+        sub_fields=[
+            CreateCustomFieldRequest(
+                field_name="Address",
+                field_type=FieldType.OBJECT,
+                sub_fields=[
+                    CreateCustomFieldRequest(field_name="Street", field_type=FieldType.TEXT),
+                    CreateCustomFieldRequest(field_name="City", field_type=FieldType.TEXT),
+                ],
+            ),
+        ],
+    )
+
+    await service.create_custom_field(request_data)
+
     assert "create_custom_field" in fake_repo.calls
     assert "bulk_create_custom_fields" in fake_repo.calls
 
@@ -1022,9 +1081,8 @@ async def test_update_field_with_add_object_and_sub_fields(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_root_object_to_non_object_deletes_descendants(monkeypatch):
-    """Test update_custom_field when root changes OBJECT->non-OBJECT
-    deletes descendants (606-613)."""
+async def test_root_object_to_non_obj_deletes_desc(monkeypatch):
+    """Update_custom_field: root OBJECT->non-OBJECT deletes descendants."""
     fake_repo = _FakeCustomFieldRepo()
     fake_repo.get_field_result = [
         {
@@ -1071,9 +1129,8 @@ async def test_root_object_to_non_object_deletes_descendants(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_child_object_to_non_object_deletes_descendants(monkeypatch):
-    """Test update_custom_field when a child changes
-    OBJECT->non-OBJECT deletes its descendants (630-636)."""
+async def test_child_object_to_non_obj_deletes_desc(monkeypatch):
+    """Update_custom_field: child OBJECT->non-OBJECT deletes descendants."""
     fake_repo = _FakeCustomFieldRepo()
     fake_repo.get_field_result = [
         {
@@ -1476,3 +1533,1132 @@ async def test_delete_custom_field_different_organization(monkeypatch):
     assert org_id == "org-1"
     # Verify delete was not called
     assert "bulk_delete_custom_fields_with_descendants" not in fake_repo.calls
+
+
+# ============================================================================
+# VALIDATE AND FORMAT CUSTOM FIELDS TESTS
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_validate_and_format_custom_fields_empty(monkeypatch):
+    """Test validate_and_format_custom_fields with empty dict."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = []
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    result = await service.validate_and_format_custom_fields({}, EntityType.CONTACT)
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_no_definitions(monkeypatch):
+    """validate_and_format raises when no definitions found."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = []
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"field1": "value"}, EntityType.CONTACT)
+    assert "custom_field_definitions_not_found" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_undefined_field(monkeypatch):
+    """validate_and_format raises when field not defined."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Defined Field",
+            "field_key": "defined_field",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields(
+            {"undefined_field": "value"}, EntityType.CONTACT
+        )
+    assert "custom_field_not_defined" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_and_format_custom_fields_text(monkeypatch):
+    """Test validate_and_format_custom_fields validates text field."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Name",
+            "field_key": "name",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    result = await service.validate_and_format_custom_fields(
+        {"name": "John Doe"}, EntityType.CONTACT
+    )
+
+    assert result == {"name": "John Doe"}
+
+
+@pytest.mark.asyncio
+async def test_validate_and_format_custom_fields_number(monkeypatch):
+    """Test validate_and_format_custom_fields validates number field."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Age",
+            "field_key": "age",
+            "field_type": "number",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    result = await service.validate_and_format_custom_fields({"age": 25}, EntityType.CONTACT)
+
+    assert result == {"age": 25.0}
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_required_missing(monkeypatch):
+    """validate_and_format raises when required field missing."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Required Field",
+            "field_key": "required_field",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": True,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-2",
+            "field_name": "Optional Field",
+            "field_key": "optional_field",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 1,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    # Pass only optional field so required_field is missing; service raises.
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields(
+            {"optional_field": "value"}, EntityType.CONTACT
+        )
+    assert "custom_field_required" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_and_format_custom_fields_list(monkeypatch):
+    """Test validate_and_format_custom_fields validates list field."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Tags",
+            "field_key": "tags",
+            "field_type": "list",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-2",
+            "field_name": "Tag",
+            "field_key": "tag",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    result = await service.validate_and_format_custom_fields(
+        {"tags": ["tag1", "tag2", "tag3"]}, EntityType.CONTACT
+    )
+
+    assert result == {"tags": ["tag1", "tag2", "tag3"]}
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_list_invalid_type(monkeypatch):
+    """validate_and_format raises when list field has invalid type."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Tags",
+            "field_key": "tags",
+            "field_type": "list",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-2",
+            "field_name": "Tag",
+            "field_key": "tag",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"tags": "not a list"}, EntityType.CONTACT)
+    assert "custom_field_invalid_type" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_and_format_custom_fields_object(monkeypatch):
+    """Test validate_and_format_custom_fields validates object field."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Address",
+            "field_key": "address",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-2",
+            "field_name": "Street",
+            "field_key": "street",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": True,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-3",
+            "field_name": "City",
+            "field_key": "city",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    result = await service.validate_and_format_custom_fields(
+        {"address": {"street": "123 Main St", "city": "New York"}}, EntityType.CONTACT
+    )
+
+    assert result == {"address": {"street": "123 Main St", "city": "New York"}}
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_object_required_subfield(monkeypatch):
+    """Test validate_and_format_custom_fields raises when required sub-field missing."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Address",
+            "field_key": "address",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-2",
+            "field_name": "Street",
+            "field_key": "street",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": True,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields(
+            {"address": {"city": "New York"}}, EntityType.CONTACT
+        )
+    assert "custom_field_required" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_and_format_custom_fields_dropdown(monkeypatch):
+    """Test validate_and_format_custom_fields validates dropdown field."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Status",
+            "field_key": "status",
+            "field_type": "dropdown",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"options": ["active", "inactive", "pending"]},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    result = await service.validate_and_format_custom_fields(
+        {"status": "active"}, EntityType.CONTACT
+    )
+
+    assert result == {"status": "active"}
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_dropdown_invalid_option(monkeypatch):
+    """Test validate_and_format_custom_fields raises when dropdown option invalid."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Status",
+            "field_key": "status",
+            "field_type": "dropdown",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"options": ["active", "inactive"]},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"status": "invalid"}, EntityType.CONTACT)
+    assert "custom_field_invalid_option" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_and_format_custom_fields_currency(monkeypatch):
+    """Test validate_and_format_custom_fields validates currency field."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Price",
+            "field_key": "price",
+            "field_type": "currency",
+            "parent_id": None,
+            "entity_type": "company",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"allowed_currencies": ["USD", "EUR"]},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    result = await service.validate_and_format_custom_fields(
+        {"price": {"amount": 100.50, "currency_code": "USD"}}, EntityType.COMPANY
+    )
+
+    assert result == {"price": {"amount": 100.5, "currency_code": "USD"}}
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_currency_invalid_format(monkeypatch):
+    """Test validate_and_format_custom_fields raises when currency format invalid."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Price",
+            "field_key": "price",
+            "field_type": "currency",
+            "parent_id": None,
+            "entity_type": "company",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"allowed_currencies": ["USD", "EUR"]},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"price": "invalid"}, EntityType.COMPANY)
+    assert "custom_field_invalid_currency_format" in str(exc_info.value.message_key)
+
+
+# --- validate_and_format: string invalid type ---
+@pytest.mark.asyncio
+async def test_validate_format_cf_text_invalid_type(monkeypatch):
+    """validate_and_format raises when text field value is not string."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Name",
+            "field_key": "name",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"name": 123}, EntityType.CONTACT)
+    assert "custom_field_invalid_type" in str(exc_info.value.message_key)
+
+
+# --- validate_and_format: number invalid type / coerce ---
+@pytest.mark.asyncio
+async def test_validate_format_cf_number_invalid_type(monkeypatch):
+    """validate_and_format raises when number value cannot coerce to float."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Age",
+            "field_key": "age",
+            "field_type": "number",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"age": "not_a_number"}, EntityType.CONTACT)
+    assert "custom_field_invalid_type" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_yes_no_string_and_int(monkeypatch):
+    """validate_and_format yes_no accepts string true/yes/1 and int."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Flag",
+            "field_key": "flag",
+            "field_type": "yes_no",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    result = await service.validate_and_format_custom_fields({"flag": "yes"}, EntityType.CONTACT)
+    assert result["flag"] is True
+    result2 = await service.validate_and_format_custom_fields({"flag": 1}, EntityType.CONTACT)
+    assert result2["flag"] is True
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_yes_no_invalid_type(monkeypatch):
+    """validate_and_format raises when yes_no value is invalid type."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Flag",
+            "field_key": "flag",
+            "field_type": "yes_no",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"flag": ["invalid"]}, EntityType.CONTACT)
+    assert "custom_field_invalid_type" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_url_valid(monkeypatch):
+    """validate_and_format url accepts https URL."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Link",
+            "field_key": "link",
+            "field_type": "url",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    result = await service.validate_and_format_custom_fields(
+        {"link": "https://example.com"}, EntityType.CONTACT
+    )
+    assert result["link"] == "https://example.com"
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_url_invalid(monkeypatch):
+    """validate_and_format raises when url value is not http(s)."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Link",
+            "field_key": "link",
+            "field_type": "url",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields(
+            {"link": "ftp://bad.com"}, EntityType.CONTACT
+        )
+    assert "custom_field_invalid_url" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_range_slider_valid(monkeypatch):
+    """validate_and_format range_slider accepts value in range."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Score",
+            "field_key": "score",
+            "field_type": "range_slider",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"min": 0, "max": 100},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    result = await service.validate_and_format_custom_fields({"score": 50}, EntityType.CONTACT)
+    assert result["score"] == 50.0
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_range_slider_out_of_range(monkeypatch):
+    """validate_and_format raises when range_slider value out of range."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Score",
+            "field_key": "score",
+            "field_type": "range_slider",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"min": 0, "max": 100},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"score": 150}, EntityType.CONTACT)
+    assert "custom_field_out_of_range" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_currency_invalid_currency(monkeypatch):
+    """validate_and_format raises when currency not in allowed_currencies."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Price",
+            "field_key": "price",
+            "field_type": "currency",
+            "parent_id": None,
+            "entity_type": "company",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"allowed_currencies": ["USD", "EUR"]},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields(
+            {"price": {"amount": 10, "currency_code": "GBP"}}, EntityType.COMPANY
+        )
+    assert "custom_field_invalid_currency" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_currency_missing_keys(monkeypatch):
+    """validate_and_format raises when currency missing amount or currency_code."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Price",
+            "field_key": "price",
+            "field_type": "currency",
+            "parent_id": None,
+            "entity_type": "company",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"allowed_currencies": ["USD"]},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields(
+            {"price": {"amount": 10}}, EntityType.COMPANY
+        )
+    assert "custom_field_invalid_currency_format" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_cf_file_upload_too_many(monkeypatch):
+    """validate_and_format raises when file_upload allow_multiple and too many."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Files",
+            "field_key": "files",
+            "field_type": "file_upload",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"allow_multiple": True, "max_files": 2},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields(
+            {"files": ["a", "b", "c"]}, EntityType.CONTACT
+        )
+    assert "custom_field_too_many_files" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_cf_file_upload_single_two(monkeypatch):
+    """validate_and_format raises when file_upload single but list has >1."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "File",
+            "field_key": "file",
+            "field_type": "file_upload",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"allow_multiple": False, "max_files": 1},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"file": ["a", "b"]}, EntityType.CONTACT)
+    assert "custom_field_too_many_files" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_image_multiple_and_single(monkeypatch):
+    """validate_and_format image allow_multiple and single paths."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Pics",
+            "field_key": "pics",
+            "field_type": "image",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"allow_multiple": True, "max_files": 2},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    result = await service.validate_and_format_custom_fields(
+        {"pics": ["url1", "url2"]}, EntityType.CONTACT
+    )
+    assert result["pics"] == ["url1", "url2"]
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_image_single_empty_list(monkeypatch):
+    """validate_and_format image single returns first item or None from list."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Pic",
+            "field_key": "pic",
+            "field_type": "image",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"allow_multiple": False, "max_files": 1},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    result = await service.validate_and_format_custom_fields({"pic": []}, EntityType.CONTACT)
+    assert result["pic"] is None
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_address_with_lat_long(monkeypatch):
+    """validate_and_format address with include_lat_long."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Location",
+            "field_key": "location",
+            "field_type": "address",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"include_lat_long": True},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    val = {
+        "address_line1": "123 Main",
+        "city": "NYC",
+        "latitude": 40.7,
+        "longitude": -74.0,
+    }
+    result = await service.validate_and_format_custom_fields({"location": val}, EntityType.CONTACT)
+    assert result["location"]["latitude"] == 40.7
+    assert result["location"]["longitude"] == -74.0
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_address_invalid_type(monkeypatch):
+    """validate_and_format raises when address value is not dict."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Location",
+            "field_key": "location",
+            "field_type": "address",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields(
+            {"location": "not a dict"}, EntityType.CONTACT
+        )
+    assert "custom_field_invalid_type" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_object_invalid_type(monkeypatch):
+    """validate_and_format raises when object value is not dict."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Data",
+            "field_key": "data",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields(
+            {"data": "not an object"}, EntityType.CONTACT
+        )
+    assert "custom_field_invalid_type" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_required_null_value(monkeypatch):
+    """validate_and_format raises when required field has None value."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Required",
+            "field_key": "required",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": True,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"required": None}, EntityType.CONTACT)
+    assert "custom_field_required" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_optional_null_value(monkeypatch):
+    """validate_and_format allows None for optional field."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Opt",
+            "field_key": "opt",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    result = await service.validate_and_format_custom_fields({"opt": None}, EntityType.CONTACT)
+    assert result["opt"] is None
+
+
+@pytest.mark.asyncio
+async def test_validate_format_cf_file_upload_invalid_type(monkeypatch):
+    """validate_and_format raises when file_upload allow_multiple but value not list."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Files",
+            "field_key": "files",
+            "field_type": "file_upload",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {"allow_multiple": True, "max_files": 2},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.validate_and_format_custom_fields({"files": "not a list"}, EntityType.CONTACT)
+    assert "custom_field_invalid_type" in str(exc_info.value.message_key)
