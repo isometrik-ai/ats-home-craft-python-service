@@ -320,3 +320,79 @@ async def test_list_clients_empty_result(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"] == []
     assert body["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_create_client_with_custom_fields(monkeypatch, client):
+    """Create a client with custom fields."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_create_client(self, request_data):
+        """Fake create client with custom fields."""
+        del self
+        assert request_data.client_type == "person"
+        assert request_data.custom_fields == {"age": 25, "tags": ["tag1", "tag2"]}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientService.create_client",
+        fake_create_client,
+    )
+
+    res = await client.post(
+        "/v1/clients",
+        json={
+            "client_type": "person",
+            "email": "newclient@example.com",
+            "phone_isd_code": "+1",
+            "phone_number": "1234567890",
+            "first_name": "Jane",
+            "last_name": "Smith",
+            "custom_fields": {"age": 25, "tags": ["tag1", "tag2"]},
+        },
+    )
+    assert_success(res, 201)
+
+
+@pytest.mark.asyncio
+async def test_update_client_with_custom_fields(monkeypatch, client):
+    """Update client with custom fields."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_update_client(self, client_id, organization_id, body):
+        """Fake update client with custom fields."""
+        del self
+        assert client_id == "client-123"
+        assert organization_id == "org-1"
+        assert body.custom_fields == {"age": 30}
+        return {"old_data": {"client_id": "client-123", "custom_fields": {"age": 25}}}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientService.update_client",
+        fake_update_client,
+    )
+
+    res = await client.patch(
+        "/v1/clients/client-123",
+        json={"custom_fields": {"age": 30}},
+    )
+    assert_success(res, 200)

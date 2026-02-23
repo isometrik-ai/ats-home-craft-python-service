@@ -174,7 +174,17 @@
       "person_fields_not_allowed_for_company": "Individual-specific fields cannot be updated for company clients",
       "work_history_item_not_found": "Work history item not found",
       "educational_history_item_not_found": "Educational history item not found",
-      "linked_page_not_found": "Linked page not found"
+      "linked_page_not_found": "Linked page not found",
+      "custom_field_not_defined": "Custom field '{field_key}' is not defined for this entity type.",
+      "custom_field_required": "Custom field '{field_key}' is required.",
+      "custom_field_invalid_type": "Custom field '{field_key}' has invalid type. Expected: {expected_type}.",
+      "custom_field_invalid_url": "Custom field '{field_key}' must be a valid URL starting with http:// or https://.",
+      "custom_field_invalid_option": "Custom field '{field_key}' has invalid value '{value}'. Value must be one of the allowed options.",
+      "custom_field_out_of_range": "Custom field '{field_key}' value {value} is out of range. Allowed range: {min} to {max}.",
+      "custom_field_invalid_currency_format": "Custom field '{field_key}' must be an object with 'amount' and 'currency_code' properties.",
+      "custom_field_invalid_currency": "Custom field '{field_key}' has invalid currency '{currency}'. Currency must be one of the allowed currencies.",
+      "custom_field_too_many_files": "Custom field '{field_key}' exceeds the maximum number of files allowed ({max}).",
+      "custom_field_definitions_not_found": "No custom field definitions found for entity type '{entity_type}'. Cannot store custom fields without definitions."
     },
     "success": {
       "client_created": "Client created successfully.",
@@ -242,11 +252,20 @@
     "errors": {
       "field_key_exists": "A custom field with this field key already exists.",
       "entity_type_required": "Entity type is required for custom field creation.",
-      "field_not_found": "The custom field you are trying to access does not exist."
+      "field_not_found": "The custom field you are trying to access does not exist.",
+      "range_max_greater_than_min": "Range max value must be greater than min value.",
+      "sub_fields_only_for_object_or_list": "Sub-fields can only be provided for object or list type fields.",
+      "list_must_have_exactly_one_child": "List type fields must have exactly one child field.",
+      "max_nesting_depth_exceeded": "Maximum nesting depth exceeded. Custom fields cannot be nested beyond the allowed depth.",
+      "field_type_required_for_type_config": "Field type is required when type configuration is provided.",
+      "type_config_required_for_field_type": "Type configuration is required for this field type.",
+      "parent_id_required_for_add": "Parent ID is required when adding sub-fields to an existing field."
     },
     "success": {
       "field_created": "Custom field created successfully.",
-      "fields_retrieved": "Custom fields retrieved successfully."
+      "fields_retrieved": "Custom fields retrieved successfully.",
+      "field_updated": "Custom field updated successfully.",
+      "field_deleted": "Custom field deleted successfully."
     }
   }
 }

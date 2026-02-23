@@ -75,8 +75,10 @@ async def create_custom_field(
     - Top-level fields (with entity_type)
     - Object parent fields with sub-fields in bulk
     (with entity_type, field_type='object', sub_fields array)
+    - List fields with a single child field
+    (with entity_type, field_type='list', sub_fields array with exactly one item)
 
-    When creating an object type field with sub_fields, the parent field is created
+    When creating an object or list type field with sub_fields, the parent field is created
     first, then all sub-fields are bulk created in a single transaction.
 
     Returns 201 Created on success.

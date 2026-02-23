@@ -420,7 +420,12 @@ class UpdateClientRequest(BaseModel):
     )
     lead_management: LeadManagementUpdate | None = None
     billing_preferences: BillingPreferencesUpdate | None = None
-    custom_fields: dict[str, str | None] | None = None
+    custom_fields: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Custom fields (validated against custom field definitions for the client type)"
+        ),
+    )
     additional_data: dict[str, Any] | None = None
     enrichment_done: bool | None = None
     last_enriched_at: datetime | None = None
@@ -456,7 +461,12 @@ class CreateClientRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, description="Tags", max_length=50)
     lead_management: LeadManagement | None = Field(None, description="Lead management")
     billing_preferences: BillingPreferences | None = Field(None, description="Billing preferences")
-    custom_fields: dict[str, str] = Field(default_factory=dict, description="Custom fields")
+    custom_fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Custom fields (validated against custom field definitions for the client type)"
+        ),
+    )
     portal_access: bool = Field(default=False, description="Portal access enabled flag")
     additional_data: dict[str, Any] = Field(
         default_factory=dict, description="Dynamic data stored as passed"
@@ -586,7 +596,10 @@ class ClientDetailsResponse(BaseModel):
     primary_contact: PrimaryContactInfo = Field(..., description="Primary contact information")
     websites: list[Website] = Field(default_factory=list, description="Websites")
     billing_preferences: BillingPreferences | None = Field(None, description="Billing preferences")
-    custom_fields: dict[str, str] = Field(default_factory=dict, description="Custom fields")
+    custom_fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Custom fields (formatted according to custom field definitions)",
+    )
     addresses: list[ClientAddressResponse] = Field(default_factory=list, description="Addresses")
     lead: LeadInfo | None = Field(None, description="Lead information")
     additional_data: dict[str, Any] = Field(

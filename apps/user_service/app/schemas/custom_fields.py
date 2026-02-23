@@ -88,6 +88,7 @@ FIELD_TYPE_TO_CONFIG_CLASS: dict[FieldType, type[BaseModel] | None] = {
     FieldType.IMAGE: ImageTypeConfig,
     FieldType.ADDRESS: AddressTypeConfig,
     FieldType.OBJECT: None,  # Empty dict
+    FieldType.LIST: None,  # Empty dict
     # Simple types (empty dict): text, number, date, yes_no, url, long_text, rich_text
     FieldType.TEXT: None,
     FieldType.NUMBER: None,
@@ -119,7 +120,7 @@ def validate_and_normalize_type_config(
     config_class = FIELD_TYPE_TO_CONFIG_CLASS.get(field_type)
 
     if config_class is None:
-        # Simple types or OBJECT type - return empty dict
+        # Simple types, OBJECT, or LIST type - return empty dict
         return {}
 
     # Validate and convert using the appropriate config class
@@ -139,9 +140,12 @@ class CreateCustomFieldRequest(BaseModel):
     - Top-level fields (with entity_type)
     - Object parent fields with nested sub-fields recursively
     (with entity_type, field_type='object', sub_fields array)
+    - List fields with a single child field
+    (with entity_type, field_type='list', sub_fields array with exactly one item)
 
     This model is recursive - sub_fields can themselves contain sub_fields
-    for nested object structures.
+    for nested object structures. List fields can contain any field type as their child,
+    including object types which can have their own sub_fields.
     """
 
     field_name: str = Field(..., min_length=1, max_length=200, description="Field name")
@@ -162,7 +166,9 @@ class CreateCustomFieldRequest(BaseModel):
     )
     sub_fields: list["CreateCustomFieldRequest"] = Field(
         default_factory=list,
-        description="Sub-fields for object type (only valid when field_type='object')",
+        description=(
+            "Sub-fields for object type (multiple allowed) or list type (exactly one required)"
+        ),
     )
 
     @model_validator(mode="after")
@@ -172,13 +178,24 @@ class CreateCustomFieldRequest(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_sub_fields_only_for_object(self) -> "CreateCustomFieldRequest":
-        """Validate sub_fields can only be provided for object type."""
-        if self.sub_fields and self.field_type != FieldType.OBJECT:
+    def validate_sub_fields_only_for_object_or_list(self) -> "CreateCustomFieldRequest":
+        """Validate sub_fields can only be provided for object or list type."""
+        if self.sub_fields and self.field_type not in (FieldType.OBJECT, FieldType.LIST):
             raise ValidationException(
-                message_key="custom_fields.errors.sub_fields_only_for_object",
+                message_key="custom_fields.errors.sub_fields_only_for_object_or_list",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_list_has_exactly_one_child(self) -> "CreateCustomFieldRequest":
+        """Validate list type has exactly one child field."""
+        if self.field_type == FieldType.LIST:
+            if len(self.sub_fields) != 1:
+                raise ValidationException(
+                    message_key="custom_fields.errors.list_must_have_exactly_one_child",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
         return self
 
     @staticmethod

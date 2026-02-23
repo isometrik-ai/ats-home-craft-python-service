@@ -221,7 +221,7 @@ class CustomFieldService:
         created_sub_field_ids: list[str],
         depth: int,
     ) -> None:
-        """Queue grandchildren for processing if they are OBJECT types.
+        """Queue grandchildren for processing if they are OBJECT or LIST types.
 
         Args:
             queue: Queue of fields to process
@@ -229,9 +229,9 @@ class CustomFieldService:
             created_sub_field_ids: List of created sub-field IDs (order matches sub_fields)
             depth: Current nesting depth
         """
-        # Queue grandchildren: OBJECT sub-fields' children need to be created
+        # Queue grandchildren: OBJECT/LIST sub-fields' children need to be created
         for sub_field, created_id in zip(sub_fields, created_sub_field_ids, strict=True):
-            if sub_field.field_type == FieldType.OBJECT and sub_field.sub_fields:
+            if sub_field.field_type in (FieldType.OBJECT, FieldType.LIST) and sub_field.sub_fields:
                 for grandchild in sub_field.sub_fields:
                     queue.append(
                         (
@@ -296,8 +296,11 @@ class CustomFieldService:
             )
             created_field_id = str(created_field_result["id"])
 
-            # Bulk create sibling sub-fields if this is an object type with sub_fields
-            if field_request.field_type == FieldType.OBJECT and field_request.sub_fields:
+            # Bulk create sibling sub-fields if this is an object or list type with sub_fields
+            if (
+                field_request.field_type in (FieldType.OBJECT, FieldType.LIST)
+                and field_request.sub_fields
+            ):
                 created_sub_fields = await self._prepare_and_create_sub_fields(
                     field_request.sub_fields,
                     organization_id,
@@ -321,6 +324,8 @@ class CustomFieldService:
         - Top-level fields (with entity_type)
         - Object parent fields with nested sub-fields iteratively
         (with entity_type, field_type='object', sub_fields array)
+        - List fields with a single child field
+        (with entity_type, field_type='list', sub_fields array with exactly one item)
 
         Args:
             request_data: Request data for creating custom field
@@ -566,7 +571,10 @@ class CustomFieldService:
 
             # Process nested children for each created sibling using the same iterative logic
             for field_request, created_id in zip(siblings, created_ids, strict=True):
-                if field_request.field_type == FieldType.OBJECT and field_request.sub_fields:
+                if (
+                    field_request.field_type in (FieldType.OBJECT, FieldType.LIST)
+                    and field_request.sub_fields
+                ):
                     # Process each sub_field using the same iterative creation logic
                     for sub_field in field_request.sub_fields:
                         # Set parent_id on sub_field to link it to the created parent
@@ -600,12 +608,18 @@ class CustomFieldService:
         direct_children: dict[str, list[str]],
         organization_id: str,
     ) -> None:
-        """Auto-delete root's descendants when root changes from OBJECT to non-OBJECT."""
+        """Auto-delete root's descendants when root changes from OBJECT/LIST.
+
+        Deletes descendants when changing to non-OBJECT/non-LIST.
+        """
         if new_field_type is None:
             return
         root_row = next(r for r in subtree_rows if str(r["id"]) == str(field_id))
         current_root_type = root_row.get("field_type")
-        if current_root_type != FieldType.OBJECT.value or new_field_type == FieldType.OBJECT.value:
+        if current_root_type not in (
+            FieldType.OBJECT.value,
+            FieldType.LIST.value,
+        ) or new_field_type in (FieldType.OBJECT.value, FieldType.LIST.value):
             return
         root_children = direct_children.get(field_id, [])
         if not root_children:
@@ -621,14 +635,20 @@ class CustomFieldService:
         direct_children: dict[str, list[str]],
         organization_id: str,
     ) -> None:
-        """Auto-delete descendants for update items changing from OBJECT to non-OBJECT."""
+        """Auto-delete descendants for update items changing from OBJECT/LIST.
+
+        Deletes descendants when changing to non-OBJECT/non-LIST.
+        """
         if not update_items:
             return
         for update_item in update_items:
             if update_item.field_type is None:
                 continue
             current_type = field_type_map.get(update_item.id)
-            if current_type != FieldType.OBJECT.value or update_item.field_type == FieldType.OBJECT:
+            if current_type not in (
+                FieldType.OBJECT.value,
+                FieldType.LIST.value,
+            ) or update_item.field_type in (FieldType.OBJECT, FieldType.LIST):
                 continue
             children = direct_children.get(update_item.id, [])
             if not children:
@@ -766,3 +786,421 @@ class CustomFieldService:
         await self.custom_field_repository.bulk_delete_custom_fields_with_descendants(
             organization_id, [field_id]
         )
+
+    async def validate_and_format_custom_fields(
+        self,
+        custom_fields: dict[str, Any],
+        entity_type: EntityType,
+    ) -> dict[str, Any]:
+        """Validate and format custom fields against field definitions.
+
+        Args:
+            custom_fields: Raw custom fields dictionary from request
+            entity_type: Entity type (company or contact)
+
+        Returns:
+            Formatted custom fields dictionary ready for storage
+
+        Raises:
+            ValidationException: If validation fails
+        """
+        if not custom_fields:
+            return {}
+
+        # Get custom field definitions for this entity type
+        field_definitions, _ = await self.get_custom_fields_list(entity_type)
+
+        if not field_definitions:
+            raise ValidationException(
+                message_key="clients.errors.custom_field_definitions_not_found",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"entity_type": entity_type.value},
+            )
+
+        # Build maps: top-level fields for required check, all fields for validation
+        top_level_fields, all_fields = self._build_field_map(field_definitions)
+
+        # Validate and format each custom field
+        formatted_fields: dict[str, Any] = {}
+        for field_key, field_value in custom_fields.items():
+            if field_key not in all_fields:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_not_defined",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key},
+                )
+
+            field_def = all_fields[field_key]
+            validated_value = self._validate_field_value(field_key, field_value, field_def)
+            formatted_fields[field_key] = validated_value
+
+        # Check required fields (only top-level)
+        self._validate_required_fields(top_level_fields, formatted_fields)
+
+        return formatted_fields
+
+    def _build_field_map(
+        self, field_definitions: list[Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build maps of field_key -> field_definition.
+
+        Args:
+            field_definitions: List of CustomFieldResponse objects
+
+        Returns:
+            Tuple of (top_level_fields, all_fields) dictionaries mapping
+            field_key to field definition
+        """
+        top_level_fields: dict[str, Any] = {}
+        all_fields: dict[str, Any] = {}
+
+        def add_field(field: Any, is_top_level: bool = False) -> None:
+            """Recursively add field and its sub-fields to the maps."""
+            all_fields[field.field_key] = field
+            if is_top_level:
+                top_level_fields[field.field_key] = field
+            if hasattr(field, "sub_fields") and field.sub_fields:
+                for sub_field in field.sub_fields:
+                    add_field(sub_field, is_top_level=False)
+
+        for field in field_definitions:
+            add_field(field, is_top_level=True)
+
+        return top_level_fields, all_fields
+
+    def _validate_string_field(self, field_key: str, field_value: Any) -> str:
+        """Validate a string field value."""
+        if not isinstance(field_value, str):
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key, "expected_type": "string"},
+            )
+        return field_value
+
+    def _validate_number_field(self, field_key: str, field_value: Any) -> float:
+        """Validate a number field value."""
+        if not isinstance(field_value, (int, float)):
+            try:
+                return float(field_value)
+            except (ValueError, TypeError) as exc:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_invalid_type",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key, "expected_type": "number"},
+                ) from exc
+        return float(field_value)
+
+    def _validate_yes_no_field(self, field_key: str, field_value: Any) -> bool:
+        """Validate a yes/no (boolean) field value."""
+        if not isinstance(field_value, bool):
+            if isinstance(field_value, str):
+                return field_value.lower() in ("true", "yes", "1")
+            if isinstance(field_value, int):
+                return bool(field_value)
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key, "expected_type": "boolean"},
+            )
+        return field_value
+
+    def _validate_url_field(self, field_key: str, field_value: Any) -> str:
+        """Validate a URL field value."""
+        if not isinstance(field_value, str):
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key, "expected_type": "string"},
+            )
+        if not (field_value.startswith("http://") or field_value.startswith("https://")):
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_url",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key},
+            )
+        return field_value
+
+    def _validate_dropdown_field(self, field_key: str, field_value: Any, field_def: Any) -> str:
+        """Validate a dropdown field value."""
+        if not isinstance(field_value, str):
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key, "expected_type": "string"},
+            )
+        options = field_def.type_config.get("options", [])
+        if options and field_value not in options:
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_option",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key, "value": field_value},
+            )
+        return field_value
+
+    def _validate_range_slider_field(
+        self, field_key: str, field_value: Any, field_def: Any
+    ) -> float:
+        """Validate a range slider field value."""
+        if not isinstance(field_value, (int, float)):
+            try:
+                field_value = float(field_value)
+            except (ValueError, TypeError) as exc:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_invalid_type",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key, "expected_type": "number"},
+                ) from exc
+        type_config = field_def.type_config or {}
+        min_val = type_config.get("min", 0)
+        max_val = type_config.get("max", 100)
+        if not min_val <= field_value <= max_val:
+            raise ValidationException(
+                message_key="clients.errors.custom_field_out_of_range",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={
+                    "field_key": field_key,
+                    "value": field_value,
+                    "min": min_val,
+                    "max": max_val,
+                },
+            )
+        return float(field_value)
+
+    def _validate_currency_field(
+        self, field_key: str, field_value: Any, field_def: Any
+    ) -> dict[str, Any]:
+        """Validate a currency field value."""
+        if not isinstance(field_value, dict):
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_currency_format",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key},
+            )
+        amount = field_value.get("amount")
+        currency_code = field_value.get("currency_code")
+        if amount is None or currency_code is None:
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_currency_format",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key},
+            )
+        allowed_currencies = field_def.type_config.get("allowed_currencies", [])
+        if allowed_currencies and currency_code not in allowed_currencies:
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_currency",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key, "currency": currency_code},
+            )
+        return {"amount": float(amount), "currency_code": str(currency_code)}
+
+    def _validate_file_upload_field(self, field_key: str, field_value: Any, field_def: Any) -> Any:
+        """Validate a file upload field value."""
+        type_config = field_def.type_config or {}
+        allow_multiple = type_config.get("allow_multiple", False)
+        max_files = type_config.get("max_files", 1)
+
+        if allow_multiple:
+            if not isinstance(field_value, list):
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_invalid_type",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key, "expected_type": "array"},
+                )
+            if len(field_value) > max_files:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_too_many_files",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key, "max": max_files},
+                )
+            return field_value
+
+        if isinstance(field_value, list):
+            if len(field_value) > 1:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_too_many_files",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key, "max": 1},
+                )
+            return field_value[0] if field_value else None
+        return field_value
+
+    def _validate_image_field(self, field_key: str, field_value: Any, field_def: Any) -> Any:
+        """Validate an image field value."""
+        type_config = field_def.type_config or {}
+        allow_multiple = type_config.get("allow_multiple", False)
+        max_files = type_config.get("max_files", 1)
+
+        if allow_multiple:
+            if not isinstance(field_value, list):
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_invalid_type",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key, "expected_type": "array"},
+                )
+            if len(field_value) > max_files:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_too_many_files",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key, "max": max_files},
+                )
+            return field_value
+
+        if isinstance(field_value, list):
+            if len(field_value) > 1:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_too_many_files",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key, "max": 1},
+                )
+            return field_value[0] if field_value else None
+        return field_value
+
+    def _validate_address_field(
+        self, field_key: str, field_value: Any, field_def: Any
+    ) -> dict[str, Any]:
+        """Validate an address field value."""
+        if not isinstance(field_value, dict):
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key, "expected_type": "object"},
+            )
+        type_config = field_def.type_config or {}
+        include_lat_long = type_config.get("include_lat_long", False)
+
+        address = {
+            "address_line1": field_value.get("address_line1", ""),
+            "address_line2": field_value.get("address_line2"),
+            "city": field_value.get("city"),
+            "state": field_value.get("state"),
+            "postal_code": field_value.get("postal_code"),
+            "country": field_value.get("country"),
+        }
+
+        if include_lat_long:
+            address["latitude"] = field_value.get("latitude")
+            address["longitude"] = field_value.get("longitude")
+
+        return address
+
+    def _validate_object_field(
+        self, field_key: str, field_value: Any, field_def: Any
+    ) -> dict[str, Any]:
+        """Validate an object field value."""
+        if not isinstance(field_value, dict):
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key, "expected_type": "object"},
+            )
+        validated_object: dict[str, Any] = {}
+        if hasattr(field_def, "sub_fields") and field_def.sub_fields:
+            for sub_field in field_def.sub_fields:
+                sub_key = sub_field.field_key
+                if sub_key in field_value:
+                    validated_object[sub_key] = self._validate_field_value(
+                        sub_key, field_value[sub_key], sub_field
+                    )
+                elif sub_field.is_required:
+                    raise ValidationException(
+                        message_key="clients.errors.custom_field_required",
+                        custom_code=CustomStatusCode.VALIDATION_ERROR,
+                        params={"field_key": sub_key},
+                    )
+        return validated_object
+
+    def _validate_list_field(self, field_key: str, field_value: Any, field_def: Any) -> list[Any]:
+        """Validate a list field value."""
+        if not isinstance(field_value, list):
+            raise ValidationException(
+                message_key="clients.errors.custom_field_invalid_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"field_key": field_key, "expected_type": "array"},
+            )
+        if hasattr(field_def, "sub_fields") and field_def.sub_fields:
+            child_field = field_def.sub_fields[0]  # List has exactly one child
+            validated_list = []
+            for item in field_value:
+                validated_item = self._validate_field_value(f"{field_key}[item]", item, child_field)
+                validated_list.append(validated_item)
+            return validated_list
+        return field_value
+
+    def _validate_field_value(self, field_key: str, field_value: Any, field_def: Any) -> Any:
+        """Validate a single field value against its definition.
+
+        Args:
+            field_key: Field key
+            field_value: Field value to validate
+            field_def: Field definition (CustomFieldResponse or SubFieldResponse)
+
+        Returns:
+            Validated and formatted field value
+
+        Raises:
+            ValidationException: If validation fails
+        """
+        field_type = FieldType(field_def.field_type)
+
+        # Handle None values
+        if field_value is None:
+            if field_def.is_required:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_required",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key},
+                )
+            return None
+
+        # Dispatch to specific validator based on field type
+        validators = {
+            FieldType.TEXT: lambda k, v, d: self._validate_string_field(k, v),
+            FieldType.LONG_TEXT: lambda k, v, d: self._validate_string_field(k, v),
+            FieldType.RICH_TEXT: lambda k, v, d: self._validate_string_field(k, v),
+            FieldType.NUMBER: lambda k, v, d: self._validate_number_field(k, v),
+            FieldType.DATE: lambda k, v, d: self._validate_string_field(k, v),
+            FieldType.YES_NO: lambda k, v, d: self._validate_yes_no_field(k, v),
+            FieldType.URL: lambda k, v, d: self._validate_url_field(k, v),
+            FieldType.DROPDOWN: self._validate_dropdown_field,
+            FieldType.RANGE_SLIDER: self._validate_range_slider_field,
+            FieldType.CURRENCY: self._validate_currency_field,
+            FieldType.FILE_UPLOAD: self._validate_file_upload_field,
+            FieldType.IMAGE: self._validate_image_field,
+            FieldType.ADDRESS: self._validate_address_field,
+            FieldType.OBJECT: self._validate_object_field,
+            FieldType.LIST: self._validate_list_field,
+        }
+
+        validator = validators.get(field_type)
+        if validator:
+            return validator(field_key, field_value, field_def)
+
+        # Unknown field type - not allowed
+        raise ValidationException(
+            message_key="clients.errors.custom_field_invalid_type",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+            params={"field_key": field_key, "expected_type": "supported field type"},
+        )
+
+    def _validate_required_fields(
+        self,
+        field_map: dict[str, Any],
+        formatted_fields: dict[str, Any],
+    ) -> None:
+        """Validate that all required fields are present.
+
+        Args:
+            field_map: Map of field_key -> field_definition
+            formatted_fields: Formatted custom fields dictionary
+
+        Raises:
+            ValidationException: If required field is missing
+        """
+        for field_key, field_def in field_map.items():
+            if field_def.is_required and field_key not in formatted_fields:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_required",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key},
+                )

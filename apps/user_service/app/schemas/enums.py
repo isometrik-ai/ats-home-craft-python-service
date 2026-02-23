@@ -540,6 +540,7 @@ class FieldType(str, Enum):
     IMAGE = "image"
     ADDRESS = "address"
     OBJECT = "object"
+    LIST = "list"
 
 
 class AcceptedFileTypes(str, Enum):
