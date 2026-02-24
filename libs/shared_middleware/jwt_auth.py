@@ -25,6 +25,7 @@ from libs.shared_utils.http_exceptions import (
     UnauthorizedException,
 )
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.response_factory import error_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger(__name__)
@@ -299,11 +300,25 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             payload = await get_claims_from_token(token)
             request.state.user = payload
             request.state.access_token = token
+        except UnauthorizedException as exc:
+            # Return 401 from middleware; exceptions here are not handled by FastAPI
+            logger.error("JWT validation error in middleware: %s", str(exc))
+            return error_response(
+                request=request,
+                message_key=exc.message_key,
+                status_code=exc.status_code,
+                custom_code=exc.custom_code,
+                params=exc.params if exc.params else None,
+                errors=exc.errors,
+                headers=exc.headers if hasattr(exc, "headers") else None,
+            )
         except Exception as e:
             logger.error("JWT validation error: %s", str(e))
-            raise UnauthorizedException(
+            return error_response(
+                request=request,
                 message_key="errors.authentication_failed",
+                status_code=401,
                 custom_code=CustomStatusCode.UNAUTHORIZED,
-            ) from e
+            )
 
         return await call_next(request)
