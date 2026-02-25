@@ -249,6 +249,75 @@ class LinkedPagesUpdate(BaseModel):
     remove: list[str] | None = Field(None, max_length=50)
 
 
+# --- Company type: products, key_people ---
+class Product(BaseModel):
+    """Product item (company type)."""
+
+    id: str | None = Field(None, description="Product item ID")
+    name: str = Field(..., description="Product name", max_length=200)
+    url: str | None = Field(None, description="Product URL", max_length=500)
+    description: str | None = Field(None, description="Product description", max_length=2000)
+
+
+class ProductInput(BaseModel):
+    """Product input for add operation."""
+
+    name: str = Field(..., max_length=200, description="Product name")
+    url: str | None = Field(None, max_length=500, description="Product URL")
+    description: str | None = Field(None, max_length=2000, description="Product description")
+
+
+class ProductUpdateItem(BaseModel):
+    """Product update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Product item ID to update")
+    name: str | None = Field(None, max_length=200)
+    url: str | None = Field(None, max_length=500)
+    description: str | None = Field(None, max_length=2000)
+
+
+class ProductsUpdate(BaseModel):
+    """Batch product operations: add, update, and/or remove (company type)."""
+
+    add: list[ProductInput] | None = Field(None, max_length=50)
+    update: list[ProductUpdateItem] | None = Field(None, max_length=50)
+    remove: list[str] | None = Field(None, max_length=50)
+
+
+class KeyPerson(BaseModel):
+    """Key person item (company type)."""
+
+    id: str | None = Field(None, description="Key person item ID")
+    name: str = Field(..., description="Person name", max_length=200)
+    title: str | None = Field(None, description="Job title", max_length=200)
+    linkedin: str | None = Field(None, description="LinkedIn profile URL", max_length=500)
+
+
+class KeyPersonInput(BaseModel):
+    """Key person input for add operation."""
+
+    name: str = Field(..., max_length=200, description="Person name")
+    title: str | None = Field(None, max_length=200, description="Job title")
+    linkedin: str | None = Field(None, max_length=500, description="LinkedIn profile URL")
+
+
+class KeyPersonUpdateItem(BaseModel):
+    """Key person update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Key person item ID to update")
+    name: str | None = Field(None, max_length=200)
+    title: str | None = Field(None, max_length=200)
+    linkedin: str | None = Field(None, max_length=500)
+
+
+class KeyPeopleUpdate(BaseModel):
+    """Batch key people operations: add, update, and/or remove (company type)."""
+
+    add: list[KeyPersonInput] | None = Field(None, max_length=50)
+    update: list[KeyPersonUpdateItem] | None = Field(None, max_length=50)
+    remove: list[str] | None = Field(None, max_length=50)
+
+
 # Delta update wrappers (add/update/remove) - supports batch operations
 class AddressesUpdate(BaseModel):
     """Batch address operations: add, update, and/or remove."""
@@ -417,6 +486,12 @@ class UpdateClientRequest(BaseModel):
     )
     linked_pages: LinkedPagesUpdate | None = Field(
         None, description="Batch linked page operations (company type only)"
+    )
+    products: ProductsUpdate | None = Field(
+        None, description="Batch product operations (company type only)"
+    )
+    key_people: KeyPeopleUpdate | None = Field(
+        None, description="Batch key people operations (company type only)"
     )
     lead_management: LeadManagementUpdate | None = None
     billing_preferences: BillingPreferencesUpdate | None = None
@@ -632,6 +707,10 @@ class ClientDetailsResponse(BaseModel):
     )
     linked_pages: list[LinkedPageItem] = Field(
         default_factory=list, description="Linked pages (company type)"
+    )
+    products: list[Product] = Field(default_factory=list, description="Products (company type)")
+    key_people: list[KeyPerson] = Field(
+        default_factory=list, description="Key people (company type)"
     )
     enrichment_done: bool = Field(default=False, description="Whether enrichment has been run")
     last_enriched_at: str | None = Field(None, description="Last enrichment timestamp")

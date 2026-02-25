@@ -17,7 +17,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("client_repository")
 
-# JSONB columns in clients table - values must be serialized to JSON string for asyncpg
+# Columns that are JSONB in DB (object/dict or array of objects). Values are serialized
 CLIENT_JSONB_COLUMNS = frozenset(
     {
         "websites",
@@ -28,11 +28,8 @@ CLIENT_JSONB_COLUMNS = frozenset(
         "work_history",
         "educational_history",
         "linked_pages",
-        "skills",
-        "target_market_segments",
-        "current_tech_stack",
-        "preferred_communication_channels",
-        "industry_specific_terminologies",
+        "products",
+        "key_people",
     }
 )
 
@@ -490,27 +487,44 @@ class ClientRepository:
         return dict(row) if row else None
 
     # UPDATE OPERATIONS
-    async def get_client_for_update(self, client_id: str, organization_id: str) -> dict | None:
-        """Fetch client row for update merges and audit logging.
+    async def get_client_for_update(
+        self,
+        client_id: str | None = None,
+        organization_id: str | None = None,
+        enrichment_request_id: str | None = None,
+    ) -> dict | None:
+        """Fetch full client row for update merges and audit logging.
+
+        Call with either (client_id, organization_id) or enrichment_request_id=...
+        (e.g. for enrichment webhooks). Return shape includes id, organization_id,
+        and all merge fields.
 
         Returns:
-            dict | None: Row with id, name, industry, profile_photo_url, portal_access,
-                tags, websites, billing_preferences, custom_fields or None
+            dict | None: Full client row or None if not found.
         """
-        query = """
-            SELECT id, client_type, name, industry, profile_photo_url, portal_access,
-                   tags, websites, billing_preferences, custom_fields,
-                   additional_data, social_pages, enrichment_done, last_enriched_at,
+        if enrichment_request_id is not None:
+            where = "enrichment_request_id = $1 AND status != $2"
+            params = (enrichment_request_id, ClientStatus.DELETED.value)
+        else:
+            if client_id is None or organization_id is None:
+                raise ValueError(
+                    "Provide either (client_id, organization_id) or enrichment_request_id"
+                )
+            where = "id = $1 AND organization_id = $2 AND status != $3"
+            params = (client_id, organization_id, ClientStatus.DELETED.value)
+
+        query = f"""
+            SELECT id, organization_id, client_type, name, industry, profile_photo_url,
+                   portal_access, tags, websites, billing_preferences, custom_fields,
+                   additional_data, social_pages, enrichment_done, enrichment_status, last_enriched_at,
                    work_history, educational_history, skills,
                    target_market_segments, current_tech_stack, description,
                    preferred_communication_channels, industry_specific_terminologies,
-                   linked_pages
+                   linked_pages, products, key_people
             FROM clients
-            WHERE id = $1 AND organization_id = $2 AND status != $3
+            WHERE {where}
         """
-        row = await self.db_connection.fetchrow(
-            query, client_id, organization_id, ClientStatus.DELETED.value
-        )
+        row = await self.db_connection.fetchrow(query, *params)
         return dict(row) if row else None
 
     async def update_client(
@@ -601,7 +615,7 @@ class ClientRepository:
             "organization_id = $2",
             "status != $3",
         ]
-        params: list[str] = [name, organization_id, ClientStatus.DELETED.value]
+        params: list[str] = [name.lower(), organization_id, ClientStatus.DELETED.value]
         next_index = 4
 
         if exclude_client_id is not None:
@@ -777,6 +791,8 @@ class ClientRepository:
                 c.preferred_communication_channels,
                 c.industry_specific_terminologies,
                 c.linked_pages,
+                c.products,
+                c.key_people,
                 c.created_at,
                 c.updated_at,
                 cu.first_name,

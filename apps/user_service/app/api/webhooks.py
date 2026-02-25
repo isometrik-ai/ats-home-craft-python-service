@@ -10,12 +10,14 @@ from apps.user_service.app.dependencies.db import db_uow
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
+from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
 
+@handle_api_exceptions("enrichment webhook")
 @router.post(
     "/enrichment",
     status_code=http_status.HTTP_200_OK,
@@ -31,12 +33,15 @@ async def enrichment_webhook(
     db_connection: asyncpg.Connection = Depends(db_uow),
     body: dict[str, Any] = Body(...),
 ):
-    """Handle POST from enrichment service; process company enrichment
-    when request_id and enriched_company are present."""
-    payload = body.model_dump(exclude_none=True)
-    if body.request_id and body.enriched_company:
+    """Handle POST from enrichment service; process company or person enrichment
+    when request_id and enriched_company (company) or enriched_profile (person) are present."""
+    request_id = body.get("request_id")
+    if request_id:
         enrichment_service = ClientEnrichmentService.from_settings()
-        await enrichment_service.process_company_enrichment_webhook(db_connection, payload)
+        if body.get("enriched_company") is not None:
+            await enrichment_service.process_company_enrichment_webhook(db_connection, body)
+        elif body.get("enriched_profile") is not None:
+            await enrichment_service.process_person_enrichment_webhook(db_connection, body)
     return success_response(
         request=request,
         message_key="webhooks.success.received",

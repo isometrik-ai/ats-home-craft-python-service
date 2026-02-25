@@ -37,6 +37,10 @@ class EnrichmentServiceSettings(BaseSettings):
         "ENRICHMENT_SERVICE_BASE_URL",
         default="http://91.99.230.218:8071",
     )
+    webhook_url: str = config(
+        "ENRICHMENT_SERVICE_WEBHOOK_URL",
+        default="https://api-v2.houseofapps.ai/v1/webhooks/enrichment",
+    )
     timeout_seconds: float = config("ENRICHMENT_SERVICE_TIMEOUT", default=30.0)
 
 
