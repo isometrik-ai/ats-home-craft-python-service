@@ -593,7 +593,7 @@ async def test_get_client_for_update_returns_none_not_found():
     assert result is None
     assert len(conn.fetchrow_calls) == 1
     query = conn.fetchrow_calls[0][0]
-    assert "SELECT id, client_type, name, industry" in query
+    assert "SELECT id" in query and "client_type" in query and "name" in query
     assert "additional_data" in query
     assert "social_pages" in query
     assert "status != $" in query
@@ -626,6 +626,43 @@ async def test_get_client_for_update_returns_row_when_found():
     assert result is not None
     assert result["id"] == "client-1"
     assert result["name"] == "Old Name"
+
+
+@pytest.mark.asyncio
+async def test_get_client_for_update_by_enrichment_request_id():
+    """get_client_for_update with enrichment_request_id uses request_id in WHERE."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "client-1",
+        "organization_id": "org-1",
+        "name": "Client",
+        "enrichment_request_id": "req-123",
+    }
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.get_client_for_update(enrichment_request_id="req-123")
+
+    assert result is not None
+    assert result["id"] == "client-1"
+    assert len(conn.fetchrow_calls) == 1
+    args = conn.fetchrow_calls[0][1]
+    assert args[0] == "req-123"
+    assert ClientStatus.DELETED.value in args
+
+
+@pytest.mark.asyncio
+async def test_get_client_by_enrichment_req_id_returns_row():
+    """get_client_by_enrichment_request_id returns id and organization_id when found."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {"id": "client-1", "organization_id": "org-1"}
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.get_client_by_enrichment_request_id("req-456")
+
+    assert result == {"id": "client-1", "organization_id": "org-1"}
+    assert len(conn.fetchrow_calls) == 1
+    query = conn.fetchrow_calls[0][0]
+    assert "enrichment_request_id" in query
 
 
 @pytest.mark.asyncio

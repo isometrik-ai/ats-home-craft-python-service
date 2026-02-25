@@ -1,0 +1,647 @@
+"""Unit tests for ClientEnrichmentService and enrichment helpers."""
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from apps.user_service.app.services.client_enrichment_service import (
+    ClientEnrichmentService,
+    _first_country_from_addresses,
+    _first_website_url,
+    _is_empty_value,
+    _linkedin_url_from_social_pages,
+    _merge_update_without_overwriting_empty,
+)
+
+# --- Module-level helpers ---
+
+
+def test_enrichment_is_empty_value_none():
+    """_is_empty_value returns True for None."""
+    assert _is_empty_value(None) is True
+
+
+def test_enrichment_is_empty_value_blank_string():
+    """_is_empty_value returns True for blank string."""
+    assert _is_empty_value("") is True
+    assert _is_empty_value("   ") is True
+
+
+def test_enrichment_is_empty_value_non_empty_string():
+    """_is_empty_value returns False for non-empty string."""
+    assert _is_empty_value("x") is False
+
+
+def test_enrichment_is_empty_value_empty_list():
+    """_is_empty_value returns True for empty list/dict."""
+    assert _is_empty_value([]) is True
+    assert _is_empty_value({}) is True
+
+
+def test_enrichment_is_empty_value_non_empty_list():
+    """_is_empty_value returns False for non-empty list/dict."""
+    assert _is_empty_value([1]) is False
+    assert _is_empty_value({"a": 1}) is False
+
+
+def test_merge_keeps_existing_non_empty():
+    """_merge_update removes keys where new is empty and existing is non-empty."""
+    update = {"name": "", "industry": "Tech"}
+    existing = {"name": "Old Name", "industry": "Old"}
+    result = _merge_update_without_overwriting_empty(update, existing)
+    assert "name" not in result
+    assert result["industry"] == "Tech"
+
+
+def test_merge_update_keeps_new_non_empty():
+    """_merge_update keeps keys when new value is non-empty."""
+    update = {"name": "New Name"}
+    existing = {"name": "Old"}
+    result = _merge_update_without_overwriting_empty(update, existing)
+    assert result["name"] == "New Name"
+
+
+def test_merge_update_none_existing_returns_copy():
+    """_merge_update returns copy of update when existing is None."""
+    update = {"name": ""}
+    result = _merge_update_without_overwriting_empty(update, None)
+    assert result == {"name": ""}
+
+
+def test_first_country_from_addresses_empty():
+    """_first_country_from_addresses returns None when no addresses."""
+    assert _first_country_from_addresses({}) is None
+    assert _first_country_from_addresses({"addresses": []}) is None
+
+
+def test_first_country_from_addresses_first_has_country():
+    """_first_country_from_addresses returns first address country."""
+    data = {"addresses": [{"country": " USA "}, {"country": "UK"}]}
+    assert _first_country_from_addresses(data) == "USA"
+
+
+def test_first_website_url_empty():
+    """_first_website_url returns None when no websites."""
+    assert _first_website_url({}) is None
+    assert _first_website_url({"websites": []}) is None
+
+
+def test_first_website_url_returns_first_url():
+    """_first_website_url returns first website url."""
+    data = {"websites": [{"url": " https://example.com "}]}
+    assert _first_website_url(data) == "https://example.com"
+
+
+def test_linkedin_url_from_social_pages_empty():
+    """_linkedin_url_from_social_pages returns None when no LinkedIn."""
+    assert _linkedin_url_from_social_pages({}) is None
+
+
+def test_linkedin_url_from_social_pages_finds_linkedin():
+    """_linkedin_url_from_social_pages returns LinkedIn URL."""
+    data = {
+        "social_pages": [
+            {"platform": "twitter", "url": "https://twitter.com/x"},
+            {"platform": "LinkedIn", "url": " https://linkedin.com/in/foo "},
+        ]
+    }
+    assert _linkedin_url_from_social_pages(data) == "https://linkedin.com/in/foo"
+
+
+# --- ClientEnrichmentService ---
+
+
+def test_from_settings_returns_instance(monkeypatch):
+    """from_settings returns ClientEnrichmentService with config values."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.app_settings",
+        MagicMock(
+            enrichment_service=MagicMock(
+                base_url="http://enrich:8080",
+                webhook_url="http://hook/cb",
+                timeout_seconds=10.0,
+            )
+        ),
+    )
+    svc = ClientEnrichmentService.from_settings()
+    assert isinstance(svc, ClientEnrichmentService)
+    assert svc._base_url == "http://enrich:8080"
+    assert svc._webhook_url == "http://hook/cb"
+    assert svc._timeout == 10.0
+
+
+def test_build_person_payload_minimal():
+    """_build_person_payload includes at least name when rest empty."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    payload = svc._build_person_payload({}, webhook_url=None)
+    assert "name" in payload
+    assert payload.get("name") == ""
+
+
+def test_build_person_payload_with_webhook_url():
+    """_build_person_payload adds webhook_url when provided."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    payload = svc._build_person_payload(
+        {"first_name": "John", "last_name": "Doe", "email": "j@x.com"},
+        webhook_url="http://callback",
+    )
+    assert payload.get("name") == "John Doe"
+    assert payload.get("email") == "j@x.com"
+    assert payload.get("webhook_url") == "http://callback"
+
+
+def test_build_person_payload_phone_country_company():
+    """_build_person_payload includes phone, country, company when present."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    data = {
+        "first_name": "J",
+        "last_name": "D",
+        "phone_isd_code": "+1",
+        "phone_number": "5551234",
+        "company": "Acme",
+        "addresses": [{"country": "USA"}],
+    }
+    payload = svc._build_person_payload(data, webhook_url=None)
+    assert payload.get("phone") == "+15551234"
+    assert payload.get("country") == "USA"
+    assert payload.get("company") == "Acme"
+
+
+def test_build_company_payload_required_fields():
+    """_build_company_payload includes account_id, external_id, company_name."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    payload = svc._build_company_payload("client-1", "org-1", {"name": "Acme"}, webhook_url=None)
+    assert payload["account_id"] == "org-1"
+    assert payload["external_id"] == "client-1"
+    assert payload["company_name"] == "Acme"
+    assert payload["project_id"] == "client-1"
+
+
+def test_build_company_payload_opt_website_linkedin_ind():
+    """_build_company_payload includes website, linkedin, industry, location."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    data = {
+        "name": "Co",
+        "websites": [{"url": "https://co.com"}],
+        "social_pages": [{"platform": "linkedin", "url": "https://li.com"}],
+        "industry": "Tech",
+        "addresses": [{"country": "UK"}],
+    }
+    payload = svc._build_company_payload("c1", "o1", data, webhook_url="http://w")
+    assert payload["website_url"] == "https://co.com"
+    assert payload["linkedin_url"] == "https://li.com"
+    assert payload["industry"] == "Tech"
+    assert payload["location"] == "UK"
+    assert payload["webhook_url"] == "http://w"
+
+
+def test_build_company_enrichment_update_simple():
+    """build_company_enrichment_update maps companyName, industry, website."""
+    enriched = {
+        "companyName": " Acme Inc ",
+        "industry": "Tech",
+        "website": "https://acme.com",
+    }
+    update = ClientEnrichmentService.build_company_enrichment_update(enriched)
+    assert update["name"] == "Acme Inc"
+    assert update["industry"] == "Tech"
+    assert update["enrichment_status"] == "completed"
+    assert update["enrichment_done"] is True
+    assert "last_enriched_at" in update
+
+
+def test_build_company_enrichment_no_overwrite_empty():
+    """build_company_enrichment_update does not overwrite existing with empty."""
+    enriched = {"companyName": "", "industry": ""}
+    existing = {"name": "Existing Name", "industry": "Existing"}
+    update = ClientEnrichmentService.build_company_enrichment_update(
+        enriched, existing_client=existing
+    )
+    assert "name" not in update or update.get("name")
+    assert update.get("enrichment_status") == "completed"
+
+
+def test_build_company_enrichment_update_invalid_input():
+    """build_company_enrichment_update returns {} for non-dict or empty."""
+    assert not ClientEnrichmentService.build_company_enrichment_update(None)
+    assert not ClientEnrichmentService.build_company_enrichment_update({})
+    assert not ClientEnrichmentService.build_company_enrichment_update([])
+
+
+def test_build_person_enrichment_update_simple():
+    """build_person_enrichment_update maps personalInfo name and company website."""
+    enriched = {
+        "personalInfo": {"firstName": " Jane ", "lastName": " Doe "},
+        "companyInfo": {"website": "https://co.com", "industry": "Legal"},
+    }
+    update = ClientEnrichmentService.build_person_enrichment_update(enriched)
+    assert update["name"] == "Jane Doe"
+    assert update["industry"] == "Legal"
+    assert update["enrichment_status"] == "completed"
+    assert update["enrichment_done"] is True
+
+
+def test_build_person_enrichment_update_empty_input():
+    """build_person_enrichment_update returns {} for non-dict or empty."""
+    assert not ClientEnrichmentService.build_person_enrichment_update(None)
+    assert not ClientEnrichmentService.build_person_enrichment_update({})
+
+
+class _FakeConnCM:
+    """Async context manager that yields a mock connection."""
+
+    async def __aenter__(self):
+        return MagicMock()
+
+    async def __aexit__(self, *a):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_run_enrichment_person_calls_api_and_repo(monkeypatch):
+    """run_client_enrichment for person calls enrich API and updates client."""
+    mock_post = AsyncMock(return_value={"request_id": "req-123"})
+    mock_repo_update = AsyncMock()
+    mock_repo_instance = MagicMock()
+    mock_repo_instance.update_client = mock_repo_update
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_pool",
+        AsyncMock(return_value=MagicMock()),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.AcquireConnection",
+        lambda _pool: _FakeConnCM(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda _conn: mock_repo_instance,
+    )
+    monkeypatch.setattr(ClientEnrichmentService, "_post", mock_post)
+
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    await svc.run_client_enrichment(
+        client_id="c1",
+        organization_id="org-1",
+        client_type="person",
+        payload_data={"first_name": "John", "last_name": "Doe"},
+    )
+
+    mock_post.assert_called_once()
+    call_kw = mock_repo_update.call_args
+    assert call_kw[0][0] == "c1"
+    assert call_kw[0][1] == "org-1"
+    assert call_kw[0][2]["enrichment_request_id"] == "req-123"
+    assert call_kw[0][2]["enrichment_status"] == "requested"
+
+
+@pytest.mark.asyncio
+async def test_run_enrichment_no_request_id_skips_update(monkeypatch):
+    """run_client_enrichment does not update when API returns no request_id."""
+    mock_post = AsyncMock(return_value={})
+    mock_repo_update = AsyncMock()
+    mock_repo_instance = MagicMock()
+    mock_repo_instance.update_client = mock_repo_update
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_pool",
+        AsyncMock(return_value=MagicMock()),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.AcquireConnection",
+        lambda _pool: _FakeConnCM(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda _conn: mock_repo_instance,
+    )
+    monkeypatch.setattr(ClientEnrichmentService, "_post", mock_post)
+
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    await svc.run_client_enrichment(
+        client_id="c1",
+        organization_id="org-1",
+        client_type="person",
+        payload_data={"first_name": "John"},
+    )
+
+    mock_repo_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_company_webhook_no_request_id_returns_false():
+    """process_company_enrichment_webhook returns False when request_id missing."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    fake_conn = MagicMock()
+    out = await svc.process_company_enrichment_webhook(fake_conn, {})
+    assert out is False
+    out = await svc.process_company_enrichment_webhook(
+        fake_conn, {"enriched_company": {"companyName": "x"}}
+    )
+    assert out is False
+
+
+@pytest.mark.asyncio
+async def test_company_webhook_finds_client_and_updates(monkeypatch):
+    """process_company_enrichment_webhook finds client by request_id and updates."""
+    existing = {
+        "id": "c1",
+        "organization_id": "org-1",
+        "name": "Old",
+        "additional_data": None,
+    }
+    mock_get = AsyncMock(return_value=existing)
+    mock_update = AsyncMock()
+    mock_bulk_addresses = AsyncMock()
+
+    class FakeRepo:
+        """Minimal ClientRepository double for company webhook tests."""
+
+        get_client_for_update = mock_get
+        update_client = mock_update
+        bulk_create_addresses = mock_bulk_addresses
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda conn: FakeRepo(),
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    body = {
+        "request_id": "req-1",
+        "enriched_company": {"companyName": "New Co", "industry": "Tech"},
+    }
+    result = await svc.process_company_enrichment_webhook(MagicMock(), body)
+    assert result is True
+    mock_update.assert_called_once()
+    assert mock_update.call_args[0][2].get("name") == "New Co"
+
+
+@pytest.mark.asyncio
+async def test_person_webhook_no_request_id_returns_false():
+    """process_person_enrichment_webhook returns False when request_id missing."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    out = await svc.process_person_enrichment_webhook(MagicMock(), {})
+    assert out is False
+
+
+@pytest.mark.asyncio
+async def test_person_webhook_finds_client_and_updates(monkeypatch):
+    """process_person_enrichment_webhook finds client by request_id and updates."""
+    existing = {
+        "id": "c1",
+        "organization_id": "org-1",
+        "name": "Old",
+        "additional_data": None,
+    }
+    mock_get = AsyncMock(return_value=existing)
+    mock_update = AsyncMock()
+
+    class FakeRepo:
+        """Minimal ClientRepository double for person webhook tests."""
+
+        get_client_for_update = mock_get
+        update_client = mock_update
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda conn: FakeRepo(),
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    body = {
+        "request_id": "req-1",
+        "enriched_profile": {
+            "personalInfo": {"firstName": "Jane", "lastName": "Doe"},
+        },
+    }
+    result = await svc.process_person_enrichment_webhook(MagicMock(), body)
+    assert result is True
+    mock_update.assert_called_once()
+    assert mock_update.call_args[0][2].get("name") == "Jane Doe"
+
+
+@pytest.mark.asyncio
+async def test_company_webhook_no_client_returns_false(monkeypatch):
+    """process_company_enrichment_webhook returns False when client not found."""
+    mock_get = AsyncMock(return_value=None)
+
+    class FakeRepo:
+        """Minimal ClientRepository double (get only, returns None)."""
+
+        get_client_for_update = mock_get
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda conn: FakeRepo(),
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    body = {
+        "request_id": "req-1",
+        "enriched_company": {"companyName": "X"},
+    }
+    result = await svc.process_company_enrichment_webhook(MagicMock(), body)
+    assert result is False
+
+
+def test_build_company_enrichment_social_market_tech():
+    """build_company_enrichment_update includes social, market, tech, linked."""
+    enriched = {
+        "companyName": "Co",
+        "socialProfiles": {"linkedin": " https://li.com ", "twitter": "  "},
+        "marketAudience": {"marketSegments": ["B2B", "SMB"]},
+        "platformPreferences": ["AWS", "GCP"],
+        "communication": {
+            "channels": ["email", "slack"],
+            "industryTerminology": ["API"],
+        },
+        "linkedPages": [{"pageName": "Blog", "pageLink": "https://blog.co"}],
+    }
+    update = ClientEnrichmentService.build_company_enrichment_update(enriched)
+    assert update["name"] == "Co"
+    assert len(update["social_pages"]) == 1
+    assert update["target_market_segments"] == ["B2B", "SMB"]
+    assert update["current_tech_stack"] == ["AWS", "GCP"]
+    assert update["preferred_communication_channels"] == ["email", "slack"]
+    assert len(update["linked_pages"]) == 1
+    assert update["linked_pages"][0]["page_name"] == "Blog"
+
+
+def test_build_company_enrichment_key_people_products():
+    """build_company_enrichment_update maps keyPeople and products."""
+    enriched = {
+        "keyPeople": [
+            {"name": "Alice", "title": "CEO", "linkedin": "https://li.com/alice"},
+        ],
+        "products": [{"name": "Widget", "url": "https://w.com", "description": "Desc"}],
+    }
+    update = ClientEnrichmentService.build_company_enrichment_update(enriched)
+    assert len(update["key_people"]) == 1
+    assert update["key_people"][0]["name"] == "Alice"
+    assert update["key_people"][0]["title"] == "CEO"
+    assert len(update["products"]) == 1
+    assert update["products"][0]["name"] == "Widget"
+
+
+def test_build_company_enrichment_comm_not_dict():
+    """build_company_enrichment_update handles communication non-dict."""
+    enriched = {"communication": []}
+    update = ClientEnrichmentService.build_company_enrichment_update(enriched)
+    assert update["preferred_communication_channels"] == []
+    assert update["industry_specific_terminologies"] == []
+
+
+def test_build_person_enrichment_work_and_education():
+    """build_person_enrichment_update maps workHistory and education."""
+    enriched = {
+        "workHistory": [
+            {
+                "companyName": "Acme",
+                "title": "Dev",
+                "startDate": "2020",
+                "endDate": None,
+            },
+        ],
+        "education": [
+            {"school": "Uni", "degree": "BS", "field": "CS", "yearStart": 2016},
+        ],
+    }
+    update = ClientEnrichmentService.build_person_enrichment_update(enriched)
+    assert len(update["work_history"]) == 1
+    assert update["work_history"][0]["company"] == "Acme"
+    assert update["work_history"][0]["job_title"] == "Dev"
+    assert len(update["educational_history"]) == 1
+    assert update["educational_history"][0]["university"] == "Uni"
+
+
+def test_build_person_work_history_skips_non_dict():
+    """workHistory items that are not dict are skipped."""
+    enriched = {"workHistory": ["not-a-dict", {"companyName": "A", "title": "T"}]}
+    update = ClientEnrichmentService.build_person_enrichment_update(enriched)
+    assert len(update["work_history"]) == 1
+    assert update["work_history"][0]["company"] == "A"
+
+
+def test_build_person_education_skips_non_dict():
+    """education items that are not dict are skipped."""
+    enriched = {"education": [None, {"school": "S", "degree": "D"}]}
+    update = ClientEnrichmentService.build_person_enrichment_update(enriched)
+    assert len(update["educational_history"]) == 1
+    assert update["educational_history"][0]["university"] == "S"
+
+
+def test_build_person_enrichment_social_and_skills():
+    """build_person_enrichment_update maps socialProfiles and skills."""
+    enriched = {
+        "socialProfiles": {"linkedin": "https://li.com"},
+        "skills": ["Python", "Go"],
+    }
+    update = ClientEnrichmentService.build_person_enrichment_update(enriched)
+    assert len(update["social_pages"]) == 1
+    assert update["skills"] == ["Python", "Go"]
+
+
+@pytest.mark.asyncio
+async def test_run_enrichment_company_calls_api_and_repo(monkeypatch):
+    """run_client_enrichment for company calls enrich/company and updates client."""
+    mock_post = AsyncMock(return_value={"request_id": "req-co-1"})
+    mock_repo_update = AsyncMock()
+    mock_repo_instance = MagicMock()
+    mock_repo_instance.update_client = mock_repo_update
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_pool",
+        AsyncMock(return_value=MagicMock()),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.AcquireConnection",
+        lambda _pool: _FakeConnCM(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda _conn: mock_repo_instance,
+    )
+    monkeypatch.setattr(ClientEnrichmentService, "_post", mock_post)
+
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    await svc.run_client_enrichment(
+        client_id="c2",
+        organization_id="org-2",
+        client_type="company",
+        payload_data={"name": "Acme Inc", "email": "hi@acme.com"},
+    )
+
+    mock_post.assert_called_once()
+    assert mock_repo_update.call_args[0][2]["enrichment_request_id"] == "req-co-1"
+
+
+@pytest.mark.asyncio
+async def test_process_company_webhook_adds_addresses(monkeypatch):
+    """process_company_webhook calls bulk_create_addresses when HQ/locations."""
+    existing = {
+        "id": "c1",
+        "organization_id": "org-1",
+        "name": "Old",
+        "additional_data": None,
+    }
+    mock_get = AsyncMock(return_value=existing)
+    mock_update = AsyncMock()
+    mock_bulk = AsyncMock()
+
+    class FakeRepo:
+        """Minimal ClientRepository double for company webhook address tests."""
+
+        get_client_for_update = mock_get
+        update_client = mock_update
+        bulk_create_addresses = mock_bulk
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda conn: FakeRepo(),
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    body = {
+        "request_id": "req-1",
+        "enriched_company": {
+            "companyName": "Co",
+            "headquarters": {"address": "123 Main St", "city": "NYC", "country": "USA"},
+        },
+    }
+    result = await svc.process_company_enrichment_webhook(MagicMock(), body)
+    assert result is True
+    mock_bulk.assert_called_once()
+    call_args = mock_bulk.call_args[0][0]
+    assert len(call_args) == 1
+    assert call_args[0]["address_line1"] == "123 Main St"
+    assert call_args[0]["client_id"] == "c1"
+
+
+def test_map_addresses_company_alt_locations():
+    """_map_addresses_from_company includes alternativeLocations."""
+    enriched = {
+        "alternativeLocations": [
+            {"address": "456 Other St", "city": "LA", "country": "USA"},
+        ],
+    }
+    rows = ClientEnrichmentService._map_addresses_from_company(enriched)
+    assert len(rows) == 1
+    assert rows[0]["address_line1"] == "456 Other St"
+    assert rows[0]["city"] == "LA"
+
+
+@pytest.mark.asyncio
+async def test_process_company_webhook_invalid_company_false():
+    """process_company_enrichment_webhook returns False when enriched_company invalid."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    out = await svc.process_company_enrichment_webhook(
+        MagicMock(), {"request_id": "r1", "enriched_company": []}
+    )
+    assert out is False
+
+
+@pytest.mark.asyncio
+async def test_process_person_webhook_invalid_profile_false():
+    """process_person_enrichment_webhook returns False when enriched_profile invalid."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    out = await svc.process_person_enrichment_webhook(
+        MagicMock(), {"request_id": "r1", "enriched_profile": "not-dict"}
+    )
+    assert out is False
