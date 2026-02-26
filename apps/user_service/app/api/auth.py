@@ -4,7 +4,7 @@ Includes login and signup functionality with proper error handling.
 """
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi import status as http_status
 from supabase import AsyncClient
 
@@ -36,6 +36,7 @@ from apps.user_service.app.schemas.auth import (
     ValidateAccountResponse,
     ValidateTokenResponse,
 )
+from apps.user_service.app.schemas.enums import SelectOrganizationType
 from apps.user_service.app.services.auth_service import AuthService
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -435,12 +436,16 @@ async def select_organization(
     data: SelectOrganizationRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    user_type: SelectOrganizationType | None = Query(
+        None,
+        description="client or organization_member",
+    ),
 ):
     """Select organization for the current user session.
 
     This endpoint allows a user to select an organization for their session.
     It validates that:
-    1. The user is a member of the organization
+    1. The user is a member of the organization (or has active client_user when type=client)
     2. The session is not already linked with an organization
     3. Updates the session with the selected organization_id
     4. Returns isometrik details for the organization
@@ -454,6 +459,7 @@ async def select_organization(
         user_id=user_id,
         session_id=session_id,
         organization_id=data.organization_id,
+        user_type=user_type,
     )
 
     return success_response(

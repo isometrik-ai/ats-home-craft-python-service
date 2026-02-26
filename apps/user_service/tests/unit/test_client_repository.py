@@ -651,21 +651,6 @@ async def test_get_client_for_update_by_enrichment_request_id():
 
 
 @pytest.mark.asyncio
-async def test_get_client_by_enrichment_req_id_returns_row():
-    """get_client_by_enrichment_request_id returns id and organization_id when found."""
-    conn = _FakeConn()
-    conn.fetchrow_result = {"id": "client-1", "organization_id": "org-1"}
-    repo = ClientRepository(db_connection=conn)
-
-    result = await repo.get_client_by_enrichment_request_id("req-456")
-
-    assert result == {"id": "client-1", "organization_id": "org-1"}
-    assert len(conn.fetchrow_calls) == 1
-    query = conn.fetchrow_calls[0][0]
-    assert "enrichment_request_id" in query
-
-
-@pytest.mark.asyncio
 async def test_update_client_builds_set_clause():
     """update_client builds SET clause and returns updated row."""
     conn = _FakeConn()

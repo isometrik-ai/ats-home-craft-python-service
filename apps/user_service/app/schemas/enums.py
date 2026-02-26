@@ -50,6 +50,14 @@ class ValidateAccountTrigger(str, Enum):
     SIGNUP = "SIGNUP"
 
 
+class SelectOrganizationType(str, Enum):
+    """Type of user for select-organization;
+    determines which membership source to validate against."""
+
+    CLIENT = "client"
+    ORGANIZATION_MEMBER = "organization_member"
+
+
 # ============================================================================
 # ORGANIZATION ENUMS
 # ============================================================================

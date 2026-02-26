@@ -242,6 +242,32 @@ class ClientRepository:
         exists = await self.db_connection.fetchval(query, user_id, organization_id)
         return bool(exists)
 
+    async def is_active_client_user_for_organization(
+        self, user_id: str, organization_id: str
+    ) -> bool:
+        """Check if user has an active client_user record for the given organization.
+
+        Used when type=client to validate organization from client_users before
+        updating session.
+
+        Args:
+            user_id: User ID (auth.users id)
+            organization_id: Organization ID to validate
+
+        Returns:
+            True if user has an active (non-deleted) client_user for the org, False otherwise
+        """
+        query = """
+            SELECT EXISTS(
+                SELECT 1 FROM client_users
+                WHERE user_id = $1 AND organization_id = $2 AND status != $3
+            )
+        """
+        exists = await self.db_connection.fetchval(
+            query, user_id, organization_id, ClientUserStatus.DELETED.value
+        )
+        return bool(exists)
+
     # READ OPERATIONS
     async def get_clients_list(
         self,
@@ -469,22 +495,6 @@ class ClientRepository:
             WHERE client_id = $1 AND id = ANY($2::uuid[])
         """
         await self.db_connection.execute(query, client_id, address_ids)
-
-    async def get_client_by_enrichment_request_id(self, enrichment_request_id: str) -> dict | None:
-        """Fetch client id and organization_id by enrichment request id (webhook callback).
-
-        Returns:
-            dict | None: Row with id, organization_id or None if not found.
-        """
-        query = """
-            SELECT id, organization_id
-            FROM clients
-            WHERE enrichment_request_id = $1 AND status != $2
-        """
-        row = await self.db_connection.fetchrow(
-            query, enrichment_request_id, ClientStatus.DELETED.value
-        )
-        return dict(row) if row else None
 
     # UPDATE OPERATIONS
     async def get_client_for_update(
