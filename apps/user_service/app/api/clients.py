@@ -4,7 +4,7 @@ All endpoints include proper authentication, validation, and database operations
 """
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 from supabase import AsyncClient
 
@@ -19,6 +19,9 @@ from apps.user_service.app.schemas.clients import (
     UpdateClientRequest,
 )
 from apps.user_service.app.schemas.enums import ClientStatus, ClientType
+from apps.user_service.app.services.client_enrichment_service import (
+    ClientEnrichmentService,
+)
 from apps.user_service.app.services.client_service import ClientService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -147,7 +150,8 @@ async def create_client_from_user(
 )
 async def create_client(
     request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    background_tasks: BackgroundTasks,
+    db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
     body: CreateClientRequest = Body(...),
@@ -157,6 +161,9 @@ async def create_client(
     Orchestrates the full client creation process including authentication setup,
     user provisioning across systems (Supabase and Isometrik), client record creation,
     and optional lead and address records. Sends a welcome email upon successful creation.
+    Enrichment runs as a background task after the response; it uses its own DB connection
+    so it is independent of the API request. We commit the client-creation transaction
+    before scheduling the task and returning, so the enrichment task always sees the row.
     """
     # Set audit context for client creation
     client_name = body.name or f"{body.first_name} {body.last_name}"
@@ -164,19 +171,30 @@ async def create_client(
     request.state.audit_description = f"Created new client: {client_name}"
     request.state.audit_risk_level = "high"
 
-    # Check permissions and get user context
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_CREATE,
-    )
+    # Single transaction for permissions + client creation
+    async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CLIENTS_MANAGEMENT_CREATE,
+        )
 
-    client_service = ClientService(
-        user_context=user_context,
-        db_connection=db_connection,
-        supabase_client=sb_client,
+        client_service = ClientService(
+            user_context=user_context,
+            db_connection=db_connection,
+            supabase_client=sb_client,
+        )
+        client_record = await client_service.create_client(request_data=body)
+
+    # Committed; enrichment runs independently after response (own connection)
+    enrichment_service = ClientEnrichmentService.from_settings()
+    background_tasks.add_task(
+        enrichment_service.run_client_enrichment,
+        client_id=str(client_record["id"]),
+        organization_id=str(client_record["organization_id"]),
+        client_type=body.client_type.value,
+        payload_data=body.model_dump(mode="json"),
     )
-    await client_service.create_client(request_data=body)
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,

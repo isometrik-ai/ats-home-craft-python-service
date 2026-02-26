@@ -26,10 +26,12 @@ from apps.user_service.app.schemas.clients import (
     CreateClientFromUserRequest,
     CreateClientRequest,
     EducationalHistoryItem,
+    KeyPerson,
     LeadInfo,
     LeadManagementUpdate,
     LinkedPageItem,
     PrimaryContactInfo,
+    Product,
     SocialPage,
     UpdateClientRequest,
     Website,
@@ -390,7 +392,7 @@ class ClientService:
         # Serialize JSONB fields for asyncpg (business logic in service layer)
         if request_data.websites:
             serialized_websites = serialize_pydantic_models(request_data.websites)
-            client_data["websites"] = json.dumps(self._ensure_website_ids(serialized_websites))
+            client_data["websites"] = json.dumps(self._ensure_list_item_ids(serialized_websites))
         if request_data.billing_preferences:
             serialized_billing = serialize_pydantic_models(request_data.billing_preferences)
             client_data["billing_preferences"] = json.dumps(serialized_billing)
@@ -413,9 +415,8 @@ class ClientService:
         if request_data.additional_data:
             client_data["additional_data"] = json.dumps(request_data.additional_data)
         if request_data.social_pages:
-            client_data["social_pages"] = json.dumps(
-                [p.model_dump() for p in request_data.social_pages]
-            )
+            serialized = [p.model_dump() for p in request_data.social_pages]
+            client_data["social_pages"] = json.dumps(self._ensure_list_item_ids(serialized))
 
         return client_data
 
@@ -508,7 +509,7 @@ class ClientService:
             ]
             await self.client_repository.bulk_create_addresses(addresses_data)
 
-    async def create_client(self, request_data: CreateClientRequest) -> None:
+    async def create_client(self, request_data: CreateClientRequest) -> dict[str, Any]:
         """Create a new client with complete onboarding flow.
 
         Orchestrates the full client creation process: validates organization existence
@@ -518,6 +519,10 @@ class ClientService:
 
         Args:
             request_data: Request data containing client information
+
+        Returns:
+            dict: Created client record (at least id, organization_id) for callers
+                e.g. to schedule background enrichment.
 
         Raises:
             NotFoundException: If organization not found
@@ -558,6 +563,8 @@ class ClientService:
                 )
             except Exception as e:
                 logger.error("Failed to send client creation email: %s", str(e))
+
+        return client_record
 
     async def get_clients_list(
         self,
@@ -734,6 +741,18 @@ class ClientService:
             if linked_pages_data and isinstance(linked_pages_data, list)
             else []
         )
+        products_data = parse_json_field(client.get("products")) or []
+        products = (
+            [Product(**p) for p in products_data]
+            if products_data and isinstance(products_data, list)
+            else []
+        )
+        key_people_data = parse_json_field(client.get("key_people")) or []
+        key_people = (
+            [KeyPerson(**kp) for kp in key_people_data]
+            if key_people_data and isinstance(key_people_data, list)
+            else []
+        )
 
         # Format lead information if exists
         lead_info = None
@@ -806,6 +825,8 @@ class ClientService:
             preferred_communication_channels=preferred_communication_channels,
             industry_specific_terminologies=industry_specific_terminologies,
             linked_pages=linked_pages,
+            products=products,
+            key_people=key_people,
             enrichment_done=bool(client.get("enrichment_done", False)),
             last_enriched_at=format_iso_datetime(client.get("last_enriched_at")),
             created_at=format_iso_datetime(client.get("created_at")) or "",
@@ -932,6 +953,8 @@ class ClientService:
                 client_data.get("industry_specific_terminologies")
             ),
             "linked_pages": parse_json_field(client_data.get("linked_pages")),
+            "products": parse_json_field(client_data.get("products")),
+            "key_people": parse_json_field(client_data.get("key_people")),
             "enrichment_done": client_data.get("enrichment_done"),
             "last_enriched_at": client_data.get("last_enriched_at"),
         }
@@ -964,6 +987,8 @@ class ClientService:
                 "preferred_communication_channels",
                 "industry_specific_terminologies",
                 "linked_pages",
+                "products",
+                "key_people",
             )
         )
 
@@ -1090,14 +1115,16 @@ class ClientService:
         await self._merge_custom_fields_into_payload(body, current, payload)
         return payload
 
-    def _ensure_website_ids(self, websites: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Return a copy of websites with an id set on each item (generated if missing)."""
+    @staticmethod
+    def _ensure_list_item_ids(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return a copy of list items with an id set on each (generated if missing).
+        Use for all JSONB list fields so create, patch, and enrichment behave the same."""
         result: list[dict[str, Any]] = []
-        for website in websites:
-            item = dict(website)
-            if not item.get("id"):
-                item["id"] = str(uuid.uuid4())
-            result.append(item)
+        for item in items:
+            row = dict(item)
+            if not row.get("id"):
+                row["id"] = str(uuid.uuid4())
+            result.append(row)
         return result
 
     async def _apply_lead_update(self, client_id: str, lead: LeadManagementUpdate) -> None:
@@ -1232,6 +1259,26 @@ class ClientService:
                 current,
                 "linked_pages",
                 "clients.errors.linked_page_not_found",
+            )
+
+        if body.products is not None:
+            await self._apply_jsonb_list_changes(
+                client_id,
+                organization_id,
+                body.products,
+                current,
+                "products",
+                "clients.errors.product_not_found",
+            )
+
+        if body.key_people is not None:
+            await self._apply_jsonb_list_changes(
+                client_id,
+                organization_id,
+                body.key_people,
+                current,
+                "key_people",
+                "clients.errors.key_person_not_found",
             )
 
     async def _apply_addresses_changes(

@@ -50,6 +50,14 @@ class ValidateAccountTrigger(str, Enum):
     SIGNUP = "SIGNUP"
 
 
+class SelectOrganizationType(str, Enum):
+    """Type of user for select-organization;
+    determines which membership source to validate against."""
+
+    CLIENT = "client"
+    ORGANIZATION_MEMBER = "organization_member"
+
+
 # ============================================================================
 # ORGANIZATION ENUMS
 # ============================================================================
@@ -320,6 +328,13 @@ class ClientUserStatus(str, Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     DELETED = "deleted"
+
+
+class ClientEnrichmentStatus(str, Enum):
+    """Client enrichment status enumeration."""
+
+    REQUESTED = "requested"
+    COMPLETED = "completed"
 
 
 class LeadStatus(str, Enum):

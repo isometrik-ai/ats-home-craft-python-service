@@ -18,6 +18,7 @@ from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
 )
+from apps.user_service.app.api.webhooks import router as webhooks_router
 
 router = APIRouter(prefix="/v1")
 
@@ -35,6 +36,7 @@ router.include_router(teams_router)
 router.include_router(clients_router)
 router.include_router(projects_router)
 router.include_router(custom_fields_router)
+router.include_router(webhooks_router)
 
 
 @router.get("/status")

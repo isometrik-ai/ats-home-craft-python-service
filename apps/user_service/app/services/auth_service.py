@@ -16,6 +16,7 @@ from supabase import AsyncClient, AuthApiError
 
 # repositories
 from apps.user_service.app.db.repositories import (
+    ClientRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     SessionRepository,
@@ -37,6 +38,7 @@ from apps.user_service.app.schemas.auth import (
     ValidateAccountTrigger,
 )
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
+from apps.user_service.app.schemas.enums import SelectOrganizationType
 from apps.user_service.app.schemas.verification_codes import (
     VerificationType,
     VerifyVerificationCodeRequest,
@@ -1109,11 +1111,12 @@ class AuthService:
         user_id: str,
         session_id: str,
         organization_id: str,
+        user_type: SelectOrganizationType = SelectOrganizationType.ORGANIZATION_MEMBER,
     ) -> SelectOrganizationResponse:
         """Select organization for a user session.
 
         This method validates that:
-        1. User is a member of the organization
+        1. User is a member of the organization (or has active client_user for org when type=client)
         2. Session is not already linked with an organization
         3. Updates the session with the selected organization_id
         4. Returns isometrik details for the organization
@@ -1122,6 +1125,7 @@ class AuthService:
             user_id: User ID from JWT token
             session_id: Session ID from JWT token
             organization_id: Organization ID to select
+            user_type: Type of user to validate membership for (client or organization_member)
 
         Returns:
             SelectOrganizationResponse: Response containing isometrik details
@@ -1132,16 +1136,20 @@ class AuthService:
             BadRequestException: If session is invalid or inactive
             InternalServerErrorException: For internal server errors
         """
-        # Initialize repositories
-        organization_member_repository = OrganizationMemberRepository(
-            db_connection=self.db_connection
-        )
         session_repository = SessionRepository(db_connection=self.db_connection)
 
-        # Check if user is a member of the organization
-        is_member = await organization_member_repository.check_user_membership_by_user_id(
-            user_id=user_id, organization_id=organization_id
-        )
+        if user_type == SelectOrganizationType.CLIENT:
+            client_repository = ClientRepository(db_connection=self.db_connection)
+            is_member = await client_repository.is_active_client_user_for_organization(
+                user_id=user_id, organization_id=organization_id
+            )
+        else:
+            organization_member_repository = OrganizationMemberRepository(
+                db_connection=self.db_connection
+            )
+            is_member = await organization_member_repository.check_user_membership_by_user_id(
+                user_id=user_id, organization_id=organization_id
+            )
         if not is_member:
             raise NotFoundException(
                 message_key="auth.errors.user_not_member_of_organization",

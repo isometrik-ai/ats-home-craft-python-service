@@ -1,5 +1,7 @@
 """Integration tests for clients API endpoints."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from apps.user_service.app.schemas.clients import ClientDetailsResponse
@@ -133,13 +135,13 @@ async def test_create_client(monkeypatch, client):
         return _ctx()
 
     async def fake_create_client(self, request_data):
-        """Fake create client."""
+        """Fake create client; returns record so route can schedule enrichment."""
         del self
         assert request_data.client_type == "person"
         assert request_data.email == "newclient@example.com"
         assert request_data.first_name == "Jane"
         assert request_data.last_name == "Smith"
-        return None
+        return {"id": "client-new-1", "organization_id": "org-1"}
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",
@@ -148,6 +150,12 @@ async def test_create_client(monkeypatch, client):
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientService.create_client",
         fake_create_client,
+    )
+    mock_enrichment = MagicMock()
+    mock_enrichment.run_client_enrichment = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.ClientEnrichmentService.from_settings",
+        lambda: mock_enrichment,
     )
 
     res = await client.post(
@@ -159,6 +167,54 @@ async def test_create_client(monkeypatch, client):
             "phone_number": "1234567890",
             "first_name": "Jane",
             "last_name": "Smith",
+        },
+    )
+    assert_success(res, 201)
+
+
+@pytest.mark.asyncio
+async def test_create_client_company_returns_201(monkeypatch, client):
+    """Create a company client returns 201; route schedules company enrichment."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_create_client(self, request_data):
+        """Fake create client for company; return record for enrichment."""
+        del self
+        assert request_data.client_type == "company"
+        assert request_data.name == "Acme Corp"
+        return {"id": "client-co-1", "organization_id": "org-1"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientService.create_client",
+        fake_create_client,
+    )
+    mock_enrichment = MagicMock()
+    mock_enrichment.run_client_enrichment = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.ClientEnrichmentService.from_settings",
+        lambda: mock_enrichment,
+    )
+
+    res = await client.post(
+        "/v1/clients",
+        json={
+            "client_type": "company",
+            "name": "Acme Corp",
+            "email": "contact@acme.com",
+            "phone_isd_code": "+1",
+            "phone_number": "5551234567",
+            "first_name": "Contact",
+            "last_name": "Person",
         },
     )
     assert_success(res, 201)
@@ -334,10 +390,11 @@ async def test_create_client_with_custom_fields(monkeypatch, client):
         return _ctx()
 
     async def fake_create_client(self, request_data):
-        """Fake create client with custom fields."""
+        """Fake create client with custom fields; return record for enrichment."""
         del self
         assert request_data.client_type == "person"
         assert request_data.custom_fields == {"age": 25, "tags": ["tag1", "tag2"]}
+        return {"id": "client-cf-1", "organization_id": "org-1"}
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",
@@ -346,6 +403,12 @@ async def test_create_client_with_custom_fields(monkeypatch, client):
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientService.create_client",
         fake_create_client,
+    )
+    mock_enrichment = MagicMock()
+    mock_enrichment.run_client_enrichment = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.ClientEnrichmentService.from_settings",
+        lambda: mock_enrichment,
     )
 
     res = await client.post(
