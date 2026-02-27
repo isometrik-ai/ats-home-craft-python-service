@@ -1158,19 +1158,31 @@ class AuthService:
             )
 
         # Check if session already has an organization linked
-        has_org = await session_repository.check_session_has_organization(session_id=session_id)
-        if has_org:
+        session_data = await session_repository.check_session_has_organization(
+            session_id=session_id
+        )
+
+        if not session_data:
+            raise BadRequestException(
+                message_key="auth.errors.session_not_found",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+
+        if session_data.get("organization_id") is None:
+            # Session is not linked to an organization, update it
+            # Update session with organization_id
+            await session_repository.update_session_organization_context(
+                session_id=session_id,
+                user_id=user_id,
+                organization_id=organization_id,
+            )
+        elif str(session_data.get("organization_id")) != organization_id:
+            # Session is already linked to an organization,
+            # but it's not the same as the selected organization
             raise ConflictException(
                 message_key="auth.errors.session_already_has_organization",
                 custom_code=CustomStatusCode.CONFLICT,
             )
-
-        # Update session with organization_id
-        await session_repository.update_session_organization_context(
-            session_id=session_id,
-            user_id=user_id,
-            organization_id=organization_id,
-        )
 
         # Get isometrik details for the organization
         isometrik_details = await get_isometrik_details(

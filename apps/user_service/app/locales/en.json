@@ -91,7 +91,8 @@
       "user_already_registered": "User already registered with this email.",
       "session_cannot_access_organization": "Your current session cannot access this organization. Please login with the appropriate organization.",
       "user_not_member_of_organization": "You are not a member of this organization.",
-      "session_already_has_organization": "Your session is already linked to an organization. Please logout and login again to switch organizations."
+      "session_already_has_organization": "Your session is already linked to an organization. Please logout and login again to switch organizations.",
+      "session_not_found": "Session not found. Please login again."
     },
     "success": {
       "login_successful": "Login successful.",

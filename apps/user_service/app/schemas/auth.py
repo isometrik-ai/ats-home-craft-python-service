@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.enums import (
     LoginMethod,
     PracticeArea,
     PreferredIntegration,
+    SelectOrganizationType,
     SessionStatus,
     Specialization,
     SupportServiceOption,
@@ -246,6 +247,19 @@ class SelectOrganizationRequest(BaseModel):
     """Request model for selecting organization"""
 
     organization_id: str = Field(..., description="Organization ID to select")
+    user_type: SelectOrganizationType = Field(
+        default=SelectOrganizationType.ORGANIZATION_MEMBER,
+        description="Type of user to select organization for",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "organization_id": "1234567890",
+                "user_type": "organization_member",
+            }
+        }
+    }
 
 
 class SelectOrganizationResponse(BaseModel):

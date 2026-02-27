@@ -344,19 +344,16 @@ class SessionRepository:
             session_id: Session ID
 
         Returns:
-            bool: True if session has organization_id, False otherwise
+            dict: Session data if session has organization_id, None otherwise
         """
         query = """
-            SELECT EXISTS(
-                SELECT 1
-                FROM user_sessions
-                WHERE id = $1
-                    AND session_status = $2
-                    AND organization_id IS NOT NULL
-            )
+            SELECT organization_id
+            FROM user_sessions
+            WHERE id = $1
+                AND session_status = $2
         """
-        exists = await self.db_connection.fetchval(query, session_id, SessionStatus.ACTIVE.value)
-        return bool(exists)
+        result = await self.db_connection.fetchrow(query, session_id, SessionStatus.ACTIVE.value)
+        return dict(result) if result else None
 
     async def update_session_organization_context(
         self,
