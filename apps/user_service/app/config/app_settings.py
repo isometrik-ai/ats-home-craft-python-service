@@ -43,6 +43,10 @@ class EnrichmentServiceSettings(BaseSettings):
     )
     timeout_seconds: float = config("ENRICHMENT_SERVICE_TIMEOUT", default=30.0)
 
+class ExternalServiceSettings(BaseSettings):
+    """External service settings."""
+
+    social_service_url: str | None = config("SOCIAL_SERVICE_URL", default=None)
 
 class ApplicationSettings(BaseSettings):
     """Application settings."""
@@ -52,6 +56,8 @@ class ApplicationSettings(BaseSettings):
     enrichment_service: EnrichmentServiceSettings = EnrichmentServiceSettings()
     invite_expiry_days: int = config("INVITE_EXPIRY_DAYS", default=7)
     datadog_tracing_enabled: bool = config("DATADOG_TRACING_ENABLED", default=False)
+    external_service: ExternalServiceSettings = ExternalServiceSettings()
+
 
 
 app_settings = ApplicationSettings()

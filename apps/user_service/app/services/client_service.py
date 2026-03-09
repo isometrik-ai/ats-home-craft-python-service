@@ -10,6 +10,7 @@ from typing import Any
 
 import asyncpg
 from supabase import AsyncClient
+import httpx
 
 from apps.user_service.app.db.repositories import (
     ClientRepository,
@@ -67,6 +68,7 @@ from libs.shared_utils.isometrik_service import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+from apps.user_service.app.config.app_settings import app_settings, shared_settings
 
 logger = get_logger("client_service")
 
@@ -182,6 +184,7 @@ class ClientService:
                 custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
             )
 
+
         isometrik_user_id = isometrik_response["userId"]
         # Create client record
         client_record = await self.client_repository.create_client(
@@ -198,6 +201,14 @@ class ClientService:
                 "user_id": user_id,
                 "isometrik_user_id": isometrik_user_id,
             }
+        )
+
+        # Sync user with external social service (best-effort, non-blocking)
+        await self._sync_user_with_social_service(
+            user_id=user_id,
+            organization_id=organization_id,
+            email=user_details.get("email"),
+            isometrik_user_id=isometrik_user_id,
         )
 
         # Mark user_event as completed
@@ -1306,3 +1317,68 @@ class ClientService:
                 row.update(add_item.model_dump(exclude_none=True))
                 rows.append(row)
             await self.client_repository.bulk_create_addresses(rows)
+
+    async def _sync_user_with_social_service(
+        self,
+        user_id: str,
+        organization_id: str,
+        email: str,
+        isometrik_user_id: str,
+    ) -> bool:
+        """Sync user with social service.
+
+        Args:
+            user_id: User ID
+            organization_id: Organization ID
+            email: User email
+            isometrik_user_id: Isometrik user ID
+
+        Returns:
+            bool: True if sync is successful, False otherwise
+        """
+        if app_settings.external_service.social_service_url:
+            username = email.split("@")[0] if email else str(user_id)
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{app_settings.external_service.social_service_url}/api/v1/users",
+                        json={
+                            "id": str(user_id),
+                            "username": username,
+                            "user_metadata": {
+                                "isometrik_user_id": isometrik_user_id,
+                            },
+                        },
+                        headers={
+                            "lan": "en",
+                            "x-tenant-id": shared_settings.isometrik.client_name,
+                            "x-project-id": organization_id,
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    if response.status_code == 200 or response.status_code == 201:
+                        return True
+                    else:
+                        logger.error(
+                            "Failed to sync user with social service: %s",
+                            response.text,
+                            extra={
+                                "user_id": str(user_id),
+                                "organization_id": str(organization_id),
+                                "email": email,
+                                "isometrik_user_id": isometrik_user_id,
+                            },
+                        )
+                        return False
+            except Exception as e:
+                logger.error(
+                    "Failed to sync user with social service: %s",
+                    str(e),
+                    extra={
+                        "user_id": str(user_id),
+                        "organization_id": str(organization_id),
+                        "email": email,
+                        "isometrik_user_id": isometrik_user_id,
+                    },
+                )
+        return False
