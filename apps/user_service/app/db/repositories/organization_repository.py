@@ -299,6 +299,34 @@ class OrganizationRepository:
             )
         return dict(row)
 
+    async def update_subscription_licenses_used(
+        self,
+        organization_id: str,
+        increment_by: int = 1,
+    ) -> None:
+        """Increment licenses_used in subscription via a single in-DB UPDATE (no read into memory)."""
+        deleted_status = OrganizationStatus.DELETED.value
+        query = """
+            UPDATE organizations
+            SET
+                subscription = jsonb_set(
+                    COALESCE(subscription::jsonb, '{}'::jsonb),
+                    '{licenses_used}',
+                    to_jsonb(GREATEST(COALESCE((subscription::jsonb->>'licenses_used')::int, 0) + $2, 0)::int)
+                ),
+                updated_at = NOW()
+            WHERE id = $1 AND status != $3
+            RETURNING id
+        """
+        row = await self.db_connection.fetchrow(
+            query, organization_id, increment_by, deleted_status
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="organizations.errors.organization_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
     async def get_user_active_organizations(self, user_id: str) -> list[dict[str, Any]]:
         """Get user's active organizations with basic details.
 
