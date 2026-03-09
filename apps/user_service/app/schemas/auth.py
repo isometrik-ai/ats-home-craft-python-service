@@ -139,6 +139,8 @@ class IsometrikDetails(BaseModel):
     license_key: str = Field(None, description="Isometrik license key")
     user_secret: str = Field(None, description="Isometrik user secret")
     app_secret: str = Field(None, description="Isometrik app secret")
+    project_id: str = Field(None, description="Isometrik project ID")
+    keyset_id: str = Field(None, description="Isometrik keyset ID")
 
 
 class AuthResponse(BaseModel):

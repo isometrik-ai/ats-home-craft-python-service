@@ -239,5 +239,7 @@ async def get_isometrik_details(
             license_key=isometrik_credentials.get("licenseKey"),
             user_secret=isometrik_credentials.get("userSecret"),
             app_secret=isometrik_credentials.get("appSecret"),
+            project_id=isometrik_credentials.get("projectId"),
+            keyset_id=isometrik_credentials.get("keysetId"),
         )
     return isometrik_details
