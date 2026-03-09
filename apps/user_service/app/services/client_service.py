@@ -9,9 +9,10 @@ import uuid
 from typing import Any
 
 import asyncpg
-from supabase import AsyncClient
 import httpx
+from supabase import AsyncClient
 
+from apps.user_service.app.config.app_settings import app_settings, shared_settings
 from apps.user_service.app.db.repositories import (
     ClientRepository,
     OrganizationRepository,
@@ -68,7 +69,6 @@ from libs.shared_utils.isometrik_service import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
-from apps.user_service.app.config.app_settings import app_settings, shared_settings
 
 logger = get_logger("client_service")
 
@@ -183,7 +183,6 @@ class ClientService:
                 message_key="clients.errors.isometrik_user_creation_failed",
                 custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
             )
-
 
         isometrik_user_id = isometrik_response["userId"]
         # Create client record
@@ -1356,20 +1355,20 @@ class ClientService:
                             "Content-Type": "application/json",
                         },
                     )
-                    if response.status_code == 200 or response.status_code == 201:
+                    if response.status_code in {200, 201}:
                         return True
-                    else:
-                        logger.error(
-                            "Failed to sync user with social service: %s",
-                            response.text,
-                            extra={
-                                "user_id": str(user_id),
-                                "organization_id": str(organization_id),
-                                "email": email,
-                                "isometrik_user_id": isometrik_user_id,
-                            },
-                        )
-                        return False
+
+                    logger.error(
+                        "Failed to sync user with social service: %s",
+                        response.text,
+                        extra={
+                            "user_id": str(user_id),
+                            "organization_id": str(organization_id),
+                            "email": email,
+                            "isometrik_user_id": isometrik_user_id,
+                        },
+                    )
+                    return False
             except Exception as e:
                 logger.error(
                     "Failed to sync user with social service: %s",
