@@ -108,6 +108,9 @@ class UserService:
         if not user_id or not user_id.strip():
             return None
 
+        if not organization_id:
+            return None
+
         # Get user from organization_members
         user_profile = await self.organization_member_repository.get_user_profile_by_id(
             user_id=user_id, organization_id=organization_id
@@ -447,26 +450,31 @@ class UserService:
         if identities:
             user_profile["identities"] = identities
 
-        permissions_data = await self._get_permissions_with_activity(user_id, organization_id)
-
-        if user_profile.get("roles") and isinstance(user_profile["roles"], dict):
-            user_profile["role_description"] = user_profile["roles"].get("description", "")
-
-        user_profile["permissions"] = permissions_data
-
-        role_info = self._build_role_info(user_profile)
-        permissions = self._format_permissions(permissions_data)
-
-        organization_details = await self._build_organization_details(organization_id)
-
-        # Get isometrik_details if organization_id is available
-        isometrik_details = None
         if organization_id:
+            permissions_data = await self._get_permissions_with_activity(user_id, organization_id)
+
+            if user_profile.get("roles") and isinstance(user_profile["roles"], dict):
+                user_profile["role_description"] = user_profile["roles"].get("description", "")
+
+            user_profile["permissions"] = permissions_data
+
+            role_info = self._build_role_info(user_profile)
+            permissions = self._format_permissions(permissions_data)
+
+            organization_details = await self._build_organization_details(organization_id)
+
             isometrik_details = await get_isometrik_details(
                 user_id=user_id,
                 organization_id=organization_id,
                 organization_repository=self.organization_repository,
             )
+        else:
+            # No organization context
+            permissions_data = []
+            role_info = None
+            permissions = []
+            organization_details = None
+            isometrik_details = None
 
         profile_data = self._create_user_profile_data(
             user_profile=user_profile,
