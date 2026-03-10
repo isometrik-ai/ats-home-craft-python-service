@@ -447,7 +447,6 @@ class ClientService:
 
         return client_data
 
-
     async def _build_create_client_payloads(
         self, request_data: CreateClientRequest, organization_id: str
     ) -> list[dict[str, Any]]:
@@ -456,9 +455,7 @@ class ClientService:
         if request_data.client_type == ClientType.COMPANY:
             return [
                 await self._prepare_client_data(request_data, organization_id),
-                self._prepare_primary_contact_person_client_data(
-                    request_data, organization_id
-                ),
+                self._prepare_primary_contact_person_client_data(request_data, organization_id),
             ]
         if request_data.client_type == ClientType.PERSON:
             company_name = (request_data.name or "").strip()
@@ -502,7 +499,7 @@ class ClientService:
         company_name: str,
     ) -> dict[str, Any]:
         """Build minimal client payload for a company created when linking a person to a company.
-        Used when creating a person with company/name provided; 
+        Used when creating a person with company/name provided;
         creates the company and links person via client_company_id.
         """
         return {
@@ -648,9 +645,7 @@ class ClientService:
         payloads = await self._build_create_client_payloads(request_data, organization_id)
         records = await self.client_repository.create_client(payloads)
         primary_record, client_id_for_user, client_company_id = (
-            self._resolve_created_client_records(
-                records, request_data
-            )
+            self._resolve_created_client_records(records, request_data)
         )
 
         client_user_data = self._prepare_client_user_data(

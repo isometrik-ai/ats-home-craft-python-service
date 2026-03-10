@@ -77,9 +77,17 @@ class ClientRepository:
             return []
 
         optional_fields = [
-            "name", "industry", "status", "profile_photo_url", "tags",
-            "websites", "billing_preferences", "custom_fields", "portal_access",
-            "additional_data", "social_pages",
+            "name",
+            "industry",
+            "status",
+            "profile_photo_url",
+            "tags",
+            "websites",
+            "billing_preferences",
+            "custom_fields",
+            "portal_access",
+            "additional_data",
+            "social_pages",
         ]
         present_optional = set()
         for row in clients_data:
