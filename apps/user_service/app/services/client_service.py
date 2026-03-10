@@ -186,11 +186,13 @@ class ClientService:
 
         isometrik_user_id = isometrik_response["userId"]
         # Create client record
-        client_record = await self.client_repository.create_client(
-            {
-                "organization_id": organization_id,
-                "client_type": ClientType.PERSON.value,
-            }
+        [client_record] = await self.client_repository.create_client(
+            [
+                {
+                    "organization_id": organization_id,
+                    "client_type": ClientType.PERSON.value,
+                }
+            ]
         )
         # Create client_user record
         await self.client_repository.create_client_user(
@@ -284,6 +286,21 @@ class ClientService:
                 message_key="clients.errors.client_name_already_exists",
                 custom_code=CustomStatusCode.CONFLICT,
             )
+
+        # When creating a person with a company name (and not linking to existing company),
+        # validate that the company name does not already exist (we will create a new company).
+        if request_data.client_type == ClientType.PERSON and not request_data.client_company_id:
+            company_name_for_person = (request_data.company or request_data.name or "").strip()
+            if company_name_for_person:
+                company_name_exists = await self.client_repository.check_client_name_exists(
+                    name=company_name_for_person,
+                    organization_id=organization_id,
+                )
+                if company_name_exists:
+                    raise ConflictException(
+                        message_key="clients.errors.client_name_already_exists",
+                        custom_code=CustomStatusCode.CONFLICT,
+                    )
 
         return organization
 
@@ -430,6 +447,87 @@ class ClientService:
 
         return client_data
 
+
+    async def _build_create_client_payloads(
+        self, request_data: CreateClientRequest, organization_id: str
+    ) -> list[dict[str, Any]]:
+        """Build the ordered list of client payloads for create_client
+        based on client type and linking rules."""
+        if request_data.client_type == ClientType.COMPANY:
+            return [
+                await self._prepare_client_data(request_data, organization_id),
+                self._prepare_primary_contact_person_client_data(
+                    request_data, organization_id
+                ),
+            ]
+        if request_data.client_type == ClientType.PERSON:
+            company_name = (request_data.name or "").strip()
+            if company_name and not request_data.client_company_id:
+                return [
+                    self._prepare_company_client_data_for_linked_company(
+                        request_data, organization_id, company_name
+                    ),
+                    await self._prepare_client_data(request_data, organization_id),
+                ]
+        return [await self._prepare_client_data(request_data, organization_id)]
+
+    def _resolve_created_client_records(
+        self,
+        records: list[dict[str, Any]],
+        request_data: CreateClientRequest,
+    ) -> tuple[dict[str, Any], str, str | None]:
+        """Resolve primary record, client_id for user link, and client_company_id."""
+        is_company = request_data.client_type == ClientType.COMPANY
+        person_with_linked_company = (
+            request_data.client_type == ClientType.PERSON
+            and bool((request_data.name or "").strip())
+            and not request_data.client_company_id
+        )
+        if is_company:
+            return records[0], records[1]["id"], records[0]["id"]
+        if person_with_linked_company:
+            return records[1], records[1]["id"], records[0]["id"]
+        primary = records[0]
+        client_company_id = (
+            request_data.client_company_id
+            if request_data.client_type == ClientType.PERSON
+            else None
+        )
+        return primary, primary["id"], client_company_id
+
+    def _prepare_company_client_data_for_linked_company(
+        self,
+        request_data: CreateClientRequest,
+        organization_id: str,
+        company_name: str,
+    ) -> dict[str, Any]:
+        """Build minimal client payload for a company created when linking a person to a company.
+        Used when creating a person with company/name provided; 
+        creates the company and links person via client_company_id.
+        """
+        return {
+            "organization_id": organization_id,
+            "client_type": ClientType.COMPANY.value,
+            "name": company_name,
+            "portal_access": request_data.portal_access,
+        }
+
+    def _prepare_primary_contact_person_client_data(
+        self,
+        request_data: CreateClientRequest,
+        organization_id: str,
+    ) -> dict[str, Any]:
+        """Build minimal client payload for the primary-contact person when creating a company.
+        Company link is on client_user (client_company_id), not on this client row.
+        """
+        name = build_full_name(request_data.first_name, request_data.last_name)
+        return {
+            "organization_id": organization_id,
+            "client_type": ClientType.PERSON.value,
+            "name": name,
+            "portal_access": request_data.portal_access,
+        }
+
     def _prepare_client_user_data(
         self,
         request_data: CreateClientRequest,
@@ -437,18 +535,17 @@ class ClientService:
         organization_id: str,
         user_id: str,
         isometrik_user_id: str,
+        client_company_id: str | None = None,
     ) -> dict[str, Any]:
         """Prepare client_user data dictionary.
 
         Args:
             request_data: Request data
-            client_id: Client ID
+            client_id: Client ID (person client when creating a company)
             organization_id: Organization ID
             user_id: User ID
             isometrik_user_id: Isometrik user ID
-
-        Returns:
-            dict: Client user data
+            client_company_id: Optional; set when linking this user to a company.
         """
         client_user_data = {
             "client_id": client_id,
@@ -459,7 +556,8 @@ class ClientService:
             "first_name": request_data.first_name,
             "last_name": request_data.last_name,
         }
-
+        if client_company_id is not None:
+            client_user_data["client_company_id"] = client_company_id
         # Add optional fields only if provided
         if request_data.middle_name:
             client_user_data["middle_name"] = request_data.middle_name
@@ -542,28 +640,30 @@ class ClientService:
         """
         organization_id = self.user_context.organization_id
 
-        # Validate and get organization
         organization = await self._validate_client_creation(request_data, organization_id)
-
-        # Create auth and Isometrik users
         user_id, isometrik_user_id, password = await self._create_auth_and_isometrik_user(
             request_data, organization, organization_id
         )
 
-        # Create client record
-        client_data = await self._prepare_client_data(request_data, organization_id)
-        client_record = await self.client_repository.create_client(client_data)
+        payloads = await self._build_create_client_payloads(request_data, organization_id)
+        records = await self.client_repository.create_client(payloads)
+        primary_record, client_id_for_user, client_company_id = (
+            self._resolve_created_client_records(
+                records, request_data
+            )
+        )
 
-        # Create client_user record
         client_user_data = self._prepare_client_user_data(
-            request_data, client_record["id"], organization_id, user_id, isometrik_user_id
+            request_data,
+            client_id_for_user,
+            organization_id,
+            user_id,
+            isometrik_user_id,
+            client_company_id=client_company_id,
         )
         await self.client_repository.create_client_user(client_user_data)
+        await self._create_optional_records(request_data, primary_record["id"])
 
-        # Create optional records (lead, address)
-        await self._create_optional_records(request_data, client_record["id"])
-
-        # Send creation email with password
         if request_data.portal_access:
             try:
                 send_client_creation_email(
@@ -573,8 +673,7 @@ class ClientService:
                 )
             except Exception as e:
                 logger.error("Failed to send client creation email: %s", str(e))
-
-        return client_record
+        return primary_record
 
     async def get_clients_list(
         self,
@@ -642,6 +741,7 @@ class ClientService:
             client_response = ClientListResponse(
                 id=str(client.get("id")),
                 name=client.get("name") or "",
+                company_name=client.get("company_name"),
                 primary_contact=primary_contact,
                 company_type=client.get("client_type"),
                 status=client.get("status"),
@@ -814,6 +914,7 @@ class ClientService:
             organization_id=str(client.get("organization_id")),
             client_type=client.get("client_type"),
             name=client.get("name") or "",
+            company_name=client.get("company_name"),
             status=client.get("status"),
             industry=client.get("industry"),
             profile_photo_url=client.get("profile_photo_url"),

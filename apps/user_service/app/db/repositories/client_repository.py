@@ -55,88 +55,55 @@ class ClientRepository:
         return value
 
     # CREATE OPERATIONS
-    async def create_client(self, client_data: dict) -> dict:
-        """Create a new client record.
+    async def create_client(self, clients_data: list[dict]) -> list[dict]:
+        """Bulk insert client rows in a single INSERT statement.
 
-        Only includes fields that are explicitly provided in client_data.
-        Database defaults are used for fields not provided (status='active',
-        tags='{}', websites='[]', billing_preferences='{}', custom_fields='{}').
+        Only includes columns that appear in at least one row of clients_data.
+        Required fields in each row: organization_id, client_type. Optional
+        fields (name, industry, status, profile_photo_url, tags, websites,
+        billing_preferences, custom_fields, portal_access, additional_data,
+        social_pages) are included only when present. Callers must pass
+        JSON strings for JSONB columns (websites, billing_preferences, etc.).
 
         Args:
-            client_data: Dictionary containing client fields:
-                - organization_id (required): Organization ID
-                - client_type (required): Client type ('person' or 'company')
-                - name (optional): Client name
-                - industry (optional): Industry sector (for companies)
-                - status (optional): Client status, defaults to 'active' in DB
-                - profile_photo_url (optional): URL to profile photo
-                - tags (optional): Array of tags, defaults to '{}' in DB
-                - websites (optional): JSONB array of website objects, defaults to '[]' in DB
-                - billing_preferences (optional): JSONB billing settings, defaults to '{}' in DB
-                - custom_fields (optional):
-                     JSONB custom field key-value pairs, defaults to '{}' in DB
+            clients_data: List of client row dictionaries. Each dict must
+                contain organization_id and client_type; other keys are optional.
 
         Returns:
-            dict: Created client record
-
-        Raises:
-            ValueError: If required fields (organization_id, client_type) are missing
+            list[dict]: Created client records in the same order as clients_data,
+                or empty list if clients_data is empty.
         """
-        # Validate required fields
-        organization_id = client_data.get("organization_id")
-        client_type = client_data.get("client_type")
+        if not clients_data:
+            return []
 
-        if not organization_id or not client_type:
-            raise ValueError("organization_id and client_type are required fields")
-
-        # Build dynamic query - only include fields that are explicitly provided
-        fields = []
-        placeholders = []
-        values = []
-        param_index = 1
-
-        # Required fields
-        fields.append("organization_id")
-        placeholders.append(f"${param_index}")
-        values.append(organization_id)
-        param_index += 1
-
-        fields.append("client_type")
-        placeholders.append(f"${param_index}")
-        values.append(client_type)
-        param_index += 1
-
-        # Optional fields - only include if explicitly provided (not None)
-        optional_field_mapping = [
-            "name",
-            "industry",
-            "status",
-            "profile_photo_url",
-            "tags",
-            "websites",
-            "billing_preferences",
-            "custom_fields",
-            "portal_access",
-            "additional_data",
-            "social_pages",
+        optional_fields = [
+            "name", "industry", "status", "profile_photo_url", "tags",
+            "websites", "billing_preferences", "custom_fields", "portal_access",
+            "additional_data", "social_pages",
         ]
+        present_optional = set()
+        for row in clients_data:
+            present_optional.update(k for k in optional_fields if k in row)
 
-        for field_name in optional_field_mapping:
-            if field_name in client_data and client_data[field_name] is not None:
-                fields.append(field_name)
-                placeholders.append(f"${param_index}")
-                values.append(client_data[field_name])
-                param_index += 1
+        columns = ["organization_id", "client_type"] + [
+            c for c in optional_fields if c in present_optional
+        ]
+        ncols = len(columns)
+        placeholders = [
+            "(" + ", ".join(f"${i * ncols + j + 1}" for j in range(ncols)) + ")"
+            for i in range(len(clients_data))
+        ]
+        values_flat = []
+        for row in clients_data:
+            for col in columns:
+                values_flat.append(row.get(col))
 
-        # Build and execute query
-        query = f"""
-            INSERT INTO clients ({", ".join(fields)})
-            VALUES ({", ".join(placeholders)})
-            RETURNING *
-        """
-
-        row = await self.db_connection.fetchrow(query, *values)
-        return dict(row)
+        query = (
+            f"INSERT INTO clients ({', '.join(columns)}) "
+            f"VALUES {', '.join(placeholders)} RETURNING *"
+        )
+        rows = await self.db_connection.fetch(query, *values_flat)
+        return [dict(r) for r in rows]
 
     async def create_client_user(self, client_user_data: dict) -> dict:
         """Create a new client user record.
@@ -205,6 +172,7 @@ class ClientRepository:
             "profile_photo_url",
             "status",
             "is_primary_contact",
+            "client_company_id",
         ]
 
         for field_name in optional_field_mapping:
@@ -316,13 +284,16 @@ class ClientRepository:
 
         where_clause = " AND ".join(conditions)
 
-        # Add join for primary contact
+        # Add join for primary contact and linked company (for person clients)
         deleted_client_user_status = ClientUserStatus.DELETED.value
+        deleted_client_status = ClientStatus.DELETED.value
         primary_contact_join = f"""
             LEFT JOIN client_users cu ON cu.client_id = c.id
                 AND cu.is_primary_contact = true
                 AND cu.status != '{deleted_client_user_status}'
             LEFT JOIN auth.users au ON au.id = cu.user_id
+            LEFT JOIN clients company_c ON company_c.id = cu.client_company_id
+                AND company_c.status != '{deleted_client_status}'
         """
 
         query = f"""
@@ -330,6 +301,7 @@ class ClientRepository:
                 c.id,
                 c.client_type,
                 c.name,
+                company_c.name AS company_name,
                 c.status,
                 c.tags,
                 c.created_at,
@@ -781,6 +753,7 @@ class ClientRepository:
                 c.organization_id,
                 c.client_type,
                 c.name,
+                company_c.name AS company_name,
                 c.status,
                 c.industry,
                 c.profile_photo_url,
@@ -825,6 +798,8 @@ class ClientRepository:
             LEFT JOIN client_users cu ON cu.client_id = c.id
                 AND cu.is_primary_contact = true
                 AND cu.status != $3
+            LEFT JOIN clients company_c ON company_c.id = cu.client_company_id
+                AND company_c.status != $4
             LEFT JOIN auth.users au ON au.id = cu.user_id
             LEFT JOIN leads l ON l.client_id = c.id
             WHERE c.id = $1

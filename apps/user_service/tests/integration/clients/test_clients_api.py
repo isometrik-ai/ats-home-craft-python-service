@@ -173,6 +173,54 @@ async def test_create_client(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_create_person_client_with_company_id(monkeypatch, client):
+    """Create a person client with linked company id."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_create_client(self, request_data):
+        """Fake create client; ensure company id is passed through for person."""
+        del self
+        assert request_data.client_type == "person"
+        assert request_data.client_company_id == "company-client-1"
+        return {"id": "client-new-2", "organization_id": "org-1"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientService.create_client",
+        fake_create_client,
+    )
+    mock_enrichment = MagicMock()
+    mock_enrichment.run_client_enrichment = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.ClientEnrichmentService.from_settings",
+        lambda: mock_enrichment,
+    )
+
+    res = await client.post(
+        "/v1/clients",
+        json={
+            "client_type": "person",
+            "email": "linkedclient@example.com",
+            "phone_isd_code": "+1",
+            "phone_number": "9876543210",
+            "first_name": "Alice",
+            "last_name": "Doe",
+            "client_company_id": "company-client-1",
+        },
+    )
+    assert_success(res, 201)
+
+
+@pytest.mark.asyncio
 async def test_create_client_company_returns_201(monkeypatch, client):
     """Create a company client returns 201; route schedules company enrichment."""
 

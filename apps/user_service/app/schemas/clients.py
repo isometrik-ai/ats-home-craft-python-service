@@ -524,6 +524,13 @@ class CreateClientRequest(BaseModel):
     company: str | None = Field(None, description="Company name", max_length=200)
     title: str | None = Field(None, description="Job title", max_length=100)
     date_of_birth: date | None = Field(None, description="Date of birth")
+    client_company_id: str | None = Field(
+        None,
+        description=(
+            "Linked company client ID when client_type is 'person' "
+            "(used to associate the person with a company client)"
+        ),
+    )
 
     # Company type fields
     name: str | None = Field(None, description="Company name", max_length=200)
@@ -610,6 +617,9 @@ class ClientListResponse(BaseModel):
 
     id: str = Field(..., description="Client ID")
     name: str = Field(..., description="Client name")
+    company_name: str | None = Field(
+        None, description="Linked company name when client is a person"
+    )
     primary_contact: PrimaryContactInfo = Field(..., description="Primary contact information")
     company_type: ClientType = Field(..., description="Client type")
     status: ClientStatus = Field(..., description="Client status")
@@ -664,6 +674,10 @@ class ClientDetailsResponse(BaseModel):
     organization_id: str = Field(..., description="Organization ID")
     client_type: ClientType = Field(..., description="Client type")
     name: str = Field(..., description="Client name")
+    company_name: str | None = Field(
+        None,
+        description="Linked company name when client is a person and client_company_id is set",
+    )
     status: ClientStatus = Field(..., description="Client status")
     industry: str | None = Field(None, description="Industry")
     profile_photo_url: str | None = Field(None, description="Profile photo URL")
