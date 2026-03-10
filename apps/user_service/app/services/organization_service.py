@@ -657,9 +657,7 @@ class OrganizationService:
         prefix = "personal" if account_type == AccountType.PERSONAL.value else "business"
         return f"{prefix}-{compact}"
 
-    def _build_subscription(
-        self, body: NewOrganizationBody
-    ) -> dict:
+    def _build_subscription(self, body: NewOrganizationBody) -> dict:
         """Create subscription payload with trial defaults when missing."""
         subscription = getattr(body.company_data, "subscription", None)
         if subscription:
