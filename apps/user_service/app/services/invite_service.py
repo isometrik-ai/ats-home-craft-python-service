@@ -471,9 +471,9 @@ class InviteService:
             invitation_data["id"], InviteStatus.ACCEPTED.value, user.id
         )
 
-        # Increment subscription licenses_used after successful membership creation
+        # Increment subscription users after successful membership creation
         org_id = invitation_data["organization_id"]
-        await self.organization_repository.update_subscription_licenses_used(org_id)
+        await self.organization_repository.update_subscription_users(org_id)
 
         return self._build_invite_accept_response(
             session=session,

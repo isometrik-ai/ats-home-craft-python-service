@@ -299,20 +299,20 @@ class OrganizationRepository:
             )
         return dict(row)
 
-    async def update_subscription_licenses_used(
+    async def update_subscription_users(
         self,
         organization_id: str,
         increment_by: int = 1,
     ) -> None:
-        """Increment licenses_used in subscription via a single in-DB UPDATE (no read into memory)."""
+        """Increment users in subscription via a single in-DB UPDATE (no read into memory)."""
         deleted_status = OrganizationStatus.DELETED.value
         query = """
             UPDATE organizations
             SET
                 subscription = jsonb_set(
                     COALESCE(subscription::jsonb, '{}'::jsonb),
-                    '{licenses_used}',
-                    to_jsonb(GREATEST(COALESCE((subscription::jsonb->>'licenses_used')::int, 0) + $2, 0)::int)
+                    '{users}',
+                    to_jsonb(GREATEST(COALESCE((subscription::jsonb->>'users')::int, 0) + $2, 0)::int)
                 ),
                 updated_at = NOW()
             WHERE id = $1 AND status != $3
