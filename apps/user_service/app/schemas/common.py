@@ -26,8 +26,8 @@ class Subscription(BaseModel):
         ge=1,
         description="Maximum number of licensed seats for the organization",
     )
-    users: int | None = Field(
-        default=None,
+    users: int = Field(
+        default=1,
         ge=0,
         description="Current number of organization members (licensed seats in use)",
     )
