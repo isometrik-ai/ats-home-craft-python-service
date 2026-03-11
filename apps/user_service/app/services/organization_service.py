@@ -671,6 +671,7 @@ class OrganizationService:
             "max_users": 5,
             "start_date": now.isoformat(),
             "end_date": (now + timedelta(days=7)).isoformat(),
+            "users": 1,
         }
 
     def _build_settings(self, body: NewOrganizationBody) -> dict:
