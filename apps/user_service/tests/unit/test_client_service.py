@@ -1127,10 +1127,9 @@ async def test_create_client_success(monkeypatch):
     result = await service.create_client(request_data)
     assert "create_client" in fake_repo.calls
     assert "create_client_user" in fake_repo.calls
-    # Service now returns a list of enrichment items (one per created client)
-    assert isinstance(result, list)
-    assert len(result) >= 1
-    first = result[0]
+    assert len(result.records) >= 1
+    assert len(result.enrichment_items) >= 1
+    first = result.enrichment_items[0]
     assert "client_id" in first
     assert "organization_id" in first
     assert "client_type" in first

@@ -333,12 +333,13 @@ async def test_bulk_enrichment_invokes_run_per_item(monkeypatch):
     """run_bulk_client_enrichment runs enrichment for each item (parallel)."""
     run_calls = []
 
-    async def capture_run(_self, client_id, organization_id, client_type, _payload_data):
+    async def capture_run(_self, client_id, organization_id, client_type, payload_data):
         run_calls.append(
             {
                 "client_id": client_id,
                 "organization_id": organization_id,
                 "client_type": client_type,
+                "payload_data": payload_data,
             }
         )
 

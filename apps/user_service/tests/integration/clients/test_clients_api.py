@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from apps.user_service.app.schemas.clients import ClientDetailsResponse
+from apps.user_service.app.services.client_service import CreateClientResult
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.tests.utils.assertions import assert_success
 
@@ -135,19 +136,22 @@ async def test_create_client(monkeypatch, client):
         return _ctx()
 
     async def fake_create_client(self, request_data):
-        """Fake create client; returns record so route can schedule enrichment."""
+        """Fake create client; returns result so route can schedule enrichment."""
         del self
         assert request_data.client_type == "person"
         assert request_data.email == "newclient@example.com"
         assert request_data.first_name == "Jane"
         assert request_data.last_name == "Smith"
-        return [
-            {
-                "client_id": "client-new-1",
-                "organization_id": "org-1",
-                "client_type": "person",
-            }
-        ]
+        return CreateClientResult(
+            records=[],
+            enrichment_items=[
+                {
+                    "client_id": "client-new-1",
+                    "organization_id": "org-1",
+                    "client_type": "person",
+                }
+            ],
+        )
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",
@@ -194,13 +198,16 @@ async def test_create_person_client_with_company_id(monkeypatch, client):
         del self
         assert request_data.client_type == "person"
         assert request_data.client_company_id == "company-client-1"
-        return [
-            {
-                "client_id": "client-new-2",
-                "organization_id": "org-1",
-                "client_type": "person",
-            }
-        ]
+        return CreateClientResult(
+            records=[],
+            enrichment_items=[
+                {
+                    "client_id": "client-new-2",
+                    "organization_id": "org-1",
+                    "client_type": "person",
+                }
+            ],
+        )
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",
@@ -244,19 +251,22 @@ async def test_create_client_company_returns_201(monkeypatch, client):
         return _ctx()
 
     async def fake_create_client(self, request_data):
-        """Fake create client for company; return record for enrichment."""
+        """Fake create client for company; return result for enrichment."""
         del self
         assert request_data.client_type == "company"
         assert request_data.name == "Acme Corp"
         # Company flow creates company + primary contact; both get enrichment
-        return [
-            {"client_id": "client-co-1", "organization_id": "org-1", "client_type": "company"},
-            {
-                "client_id": "client-co-person-1",
-                "organization_id": "org-1",
-                "client_type": "person",
-            },
-        ]
+        return CreateClientResult(
+            records=[],
+            enrichment_items=[
+                {"client_id": "client-co-1", "organization_id": "org-1", "client_type": "company"},
+                {
+                    "client_id": "client-co-person-1",
+                    "organization_id": "org-1",
+                    "client_type": "person",
+                },
+            ],
+        )
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",
@@ -462,17 +472,20 @@ async def test_create_client_with_custom_fields(monkeypatch, client):
         return _ctx()
 
     async def fake_create_client(self, request_data):
-        """Fake create client with custom fields; return record for enrichment."""
+        """Fake create client with custom fields; return result for enrichment."""
         del self
         assert request_data.client_type == "person"
         assert request_data.custom_fields == {"age": 25, "tags": ["tag1", "tag2"]}
-        return [
-            {
-                "client_id": "client-cf-1",
-                "organization_id": "org-1",
-                "client_type": "person",
-            }
-        ]
+        return CreateClientResult(
+            records=[],
+            enrichment_items=[
+                {
+                    "client_id": "client-cf-1",
+                    "organization_id": "org-1",
+                    "client_type": "person",
+                }
+            ],
+        )
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",

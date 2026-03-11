@@ -6,6 +6,7 @@ validation, formatting, and orchestration of client operations.
 
 import json
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 import asyncpg
@@ -71,6 +72,14 @@ from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("client_service")
+
+
+@dataclass
+class CreateClientResult:
+    """Result of client creation: persisted records and items to run enrichment on."""
+
+    records: list[dict[str, Any]]
+    enrichment_items: list[dict[str, Any]]
 
 
 class ClientService:
@@ -661,7 +670,7 @@ class ClientService:
             ]
             await self.client_repository.bulk_create_addresses(addresses_data)
 
-    async def create_client(self, request_data: CreateClientRequest) -> list[dict[str, Any]]:
+    async def create_client(self, request_data: CreateClientRequest) -> CreateClientResult:
         """Create a new client with complete onboarding flow.
 
         Orchestrates the full client creation process: validates organization existence
@@ -673,11 +682,10 @@ class ClientService:
             request_data: Request data containing client information
 
         Returns:
-            list[dict[str, Any]]: Enrichment items, one per created client that
-                should be enriched. Each item is a dict with keys
-                {client_id, organization_id, client_type}. When both person and
-                company are created, the list contains two items so enrichment
-                runs for both.
+            CreateClientResult: Created client records and enrichment items (one per
+                created client). Enrichment items have keys {client_id, organization_id,
+                client_type}. When both person and company are created, enrichment_items
+                contains two items so enrichment runs for both.
 
         Raises:
             NotFoundException: If organization not found
@@ -719,7 +727,7 @@ class ClientService:
             except Exception as e:
                 logger.error("Failed to send client creation email: %s", str(e))
         enrichment_items = self._get_enrichment_items_for_created_clients(records, organization_id)
-        return enrichment_items
+        return CreateClientResult(records=records, enrichment_items=enrichment_items)
 
     async def get_clients_list(
         self,
