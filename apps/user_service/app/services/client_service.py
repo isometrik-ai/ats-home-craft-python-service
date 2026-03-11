@@ -498,7 +498,8 @@ class ClientService:
                 raise creation_failed
             return records[0], records[1]["id"], records[0]["id"]
 
-        # Person with new linked company (name given, no client_company_id): expect [company, person]
+        # Person with new linked company (name given, no client_company_id)
+        # : expect [company, person]
         if person_with_new_company:
             if len(records) != 2:
                 raise creation_failed
