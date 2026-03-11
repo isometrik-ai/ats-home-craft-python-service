@@ -474,23 +474,48 @@ class ClientService:
         request_data: CreateClientRequest,
     ) -> tuple[dict[str, Any], str, str | None]:
         """Resolve primary record, client_id for user link, and client_company_id."""
+        creation_failed = ServiceUnavailableException(
+            message_key="clients.errors.creation_failed",
+            custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+        )
+        if not records:
+            raise creation_failed
+
         is_company = request_data.client_type == ClientType.COMPANY
-        person_with_linked_company = (
+        person_with_new_company = (
             request_data.client_type == ClientType.PERSON
-            and bool((request_data.name or "").strip())
-            and not request_data.client_company_id
+            and (request_data.name or "").strip()
+            and request_data.client_company_id is None
         )
+        person_with_existing_company = (
+            request_data.client_type == ClientType.PERSON
+            and request_data.client_company_id is not None
+        )
+
+        # Company: expect [company, primary_contact_person]
         if is_company:
+            if len(records) != 2:
+                raise creation_failed
             return records[0], records[1]["id"], records[0]["id"]
-        if person_with_linked_company:
+
+        # Person with new linked company (name given, no client_company_id): expect [company, person]
+        if person_with_new_company:
+            if len(records) != 2:
+                raise creation_failed
             return records[1], records[1]["id"], records[0]["id"]
+
+        # Person with existing company link: expect [person]
+        if person_with_existing_company:
+            if len(records) != 1:
+                raise creation_failed
+            primary = records[0]
+            return primary, primary["id"], request_data.client_company_id
+
+        # Standalone person (no company association): expect [person]
+        if len(records) != 1:
+            raise creation_failed
         primary = records[0]
-        client_company_id = (
-            request_data.client_company_id
-            if request_data.client_type == ClientType.PERSON
-            else None
-        )
-        return primary, primary["id"], client_company_id
+        return primary, primary["id"], None
 
     def _prepare_company_client_data_for_linked_company(
         self,

@@ -156,6 +156,7 @@
   },
   "clients": {
     "errors": {
+      "creation_failed": "Client creation failed. Please try again.",
       "isometrik_user_creation_failed": "Failed to create Isometrik user",
       "user_already_a_client": "User is already a client of this organization",
       "user_event_not_available": "User event does not exist or has already been processed",
