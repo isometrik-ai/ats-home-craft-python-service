@@ -458,7 +458,7 @@ class ClientService:
                 self._prepare_primary_contact_person_client_data(request_data, organization_id),
             ]
         if request_data.client_type == ClientType.PERSON:
-            company_name = (request_data.name or "").strip()
+            company_name = (request_data.company or "").strip()
             if company_name and not request_data.client_company_id:
                 return [
                     self._prepare_company_client_data_for_linked_company(
@@ -467,6 +467,27 @@ class ClientService:
                     await self._prepare_client_data(request_data, organization_id),
                 ]
         return [await self._prepare_client_data(request_data, organization_id)]
+
+    def _get_enrichment_items_for_created_clients(
+        self, records: list[dict[str, Any]], organization_id: str
+    ) -> list[dict[str, Any]]:
+        """Build list of enrichment descriptors for created clients.
+
+        When both a person and a company are created (e.g. company + primary contact,
+        or person + linked company), returns one item per record so enrichment runs
+        for both. Only includes client_type 'person' and 'company'.
+        """
+        items: list[dict[str, Any]] = []
+        for rec in records:
+            client_type = rec.get("client_type")
+            items.append(
+                {
+                    "client_id": str(rec["id"]),
+                    "organization_id": str(rec.get("organization_id") or organization_id),
+                    "client_type": client_type,
+                }
+            )
+        return items
 
     def _resolve_created_client_records(
         self,
@@ -484,7 +505,7 @@ class ClientService:
         is_company = request_data.client_type == ClientType.COMPANY
         person_with_new_company = (
             request_data.client_type == ClientType.PERSON
-            and (request_data.name or "").strip()
+            and (request_data.company or "").strip()
             and request_data.client_company_id is None
         )
         person_with_existing_company = (
@@ -640,7 +661,7 @@ class ClientService:
             ]
             await self.client_repository.bulk_create_addresses(addresses_data)
 
-    async def create_client(self, request_data: CreateClientRequest) -> dict[str, Any]:
+    async def create_client(self, request_data: CreateClientRequest) -> list[dict[str, Any]]:
         """Create a new client with complete onboarding flow.
 
         Orchestrates the full client creation process: validates organization existence
@@ -652,8 +673,11 @@ class ClientService:
             request_data: Request data containing client information
 
         Returns:
-            dict: Created client record (at least id, organization_id) for callers
-                e.g. to schedule background enrichment.
+            list[dict[str, Any]]: Enrichment items, one per created client that
+                should be enriched. Each item is a dict with keys
+                {client_id, organization_id, client_type}. When both person and
+                company are created, the list contains two items so enrichment
+                runs for both.
 
         Raises:
             NotFoundException: If organization not found
@@ -694,7 +718,8 @@ class ClientService:
                 )
             except Exception as e:
                 logger.error("Failed to send client creation email: %s", str(e))
-        return primary_record
+        enrichment_items = self._get_enrichment_items_for_created_clients(records, organization_id)
+        return enrichment_items
 
     async def get_clients_list(
         self,

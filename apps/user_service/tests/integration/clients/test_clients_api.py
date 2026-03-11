@@ -141,7 +141,13 @@ async def test_create_client(monkeypatch, client):
         assert request_data.email == "newclient@example.com"
         assert request_data.first_name == "Jane"
         assert request_data.last_name == "Smith"
-        return {"id": "client-new-1", "organization_id": "org-1"}
+        return [
+            {
+                "client_id": "client-new-1",
+                "organization_id": "org-1",
+                "client_type": "person",
+            }
+        ]
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",
@@ -152,7 +158,7 @@ async def test_create_client(monkeypatch, client):
         fake_create_client,
     )
     mock_enrichment = MagicMock()
-    mock_enrichment.run_client_enrichment = AsyncMock()
+    mock_enrichment.run_bulk_client_enrichment = AsyncMock()
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.ClientEnrichmentService.from_settings",
         lambda: mock_enrichment,
@@ -188,7 +194,13 @@ async def test_create_person_client_with_company_id(monkeypatch, client):
         del self
         assert request_data.client_type == "person"
         assert request_data.client_company_id == "company-client-1"
-        return {"id": "client-new-2", "organization_id": "org-1"}
+        return [
+            {
+                "client_id": "client-new-2",
+                "organization_id": "org-1",
+                "client_type": "person",
+            }
+        ]
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",
@@ -199,7 +211,7 @@ async def test_create_person_client_with_company_id(monkeypatch, client):
         fake_create_client,
     )
     mock_enrichment = MagicMock()
-    mock_enrichment.run_client_enrichment = AsyncMock()
+    mock_enrichment.run_bulk_client_enrichment = AsyncMock()
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.ClientEnrichmentService.from_settings",
         lambda: mock_enrichment,
@@ -236,7 +248,15 @@ async def test_create_client_company_returns_201(monkeypatch, client):
         del self
         assert request_data.client_type == "company"
         assert request_data.name == "Acme Corp"
-        return {"id": "client-co-1", "organization_id": "org-1"}
+        # Company flow creates company + primary contact; both get enrichment
+        return [
+            {"client_id": "client-co-1", "organization_id": "org-1", "client_type": "company"},
+            {
+                "client_id": "client-co-person-1",
+                "organization_id": "org-1",
+                "client_type": "person",
+            },
+        ]
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",
@@ -247,7 +267,7 @@ async def test_create_client_company_returns_201(monkeypatch, client):
         fake_create_client,
     )
     mock_enrichment = MagicMock()
-    mock_enrichment.run_client_enrichment = AsyncMock()
+    mock_enrichment.run_bulk_client_enrichment = AsyncMock()
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.ClientEnrichmentService.from_settings",
         lambda: mock_enrichment,
@@ -266,6 +286,10 @@ async def test_create_client_company_returns_201(monkeypatch, client):
         },
     )
     assert_success(res, 201)
+    # One bulk enrichment task for company + primary contact
+    bulk = mock_enrichment.run_bulk_client_enrichment
+    assert bulk.call_count == 1
+    assert len(bulk.call_args[0][0]) == 2
 
 
 @pytest.mark.asyncio
@@ -442,7 +466,13 @@ async def test_create_client_with_custom_fields(monkeypatch, client):
         del self
         assert request_data.client_type == "person"
         assert request_data.custom_fields == {"age": 25, "tags": ["tag1", "tag2"]}
-        return {"id": "client-cf-1", "organization_id": "org-1"}
+        return [
+            {
+                "client_id": "client-cf-1",
+                "organization_id": "org-1",
+                "client_type": "person",
+            }
+        ]
 
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.check_permissions",
@@ -453,7 +483,7 @@ async def test_create_client_with_custom_fields(monkeypatch, client):
         fake_create_client,
     )
     mock_enrichment = MagicMock()
-    mock_enrichment.run_client_enrichment = AsyncMock()
+    mock_enrichment.run_bulk_client_enrichment = AsyncMock()
     monkeypatch.setattr(
         "apps.user_service.app.api.clients.ClientEnrichmentService.from_settings",
         lambda: mock_enrichment,

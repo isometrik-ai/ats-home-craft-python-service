@@ -184,16 +184,15 @@ async def create_client(
             db_connection=db_connection,
             supabase_client=sb_client,
         )
-        client_record = await client_service.create_client(request_data=body)
+        enrichment_items = await client_service.create_client(request_data=body)
 
-    # Committed; enrichment runs independently after response (own connection)
+    # Committed; run enrichment for each created client (person and/or company)
+    payload_data = body.model_dump(mode="json")
     enrichment_service = ClientEnrichmentService.from_settings()
     background_tasks.add_task(
-        enrichment_service.run_client_enrichment,
-        client_id=str(client_record["id"]),
-        organization_id=str(client_record["organization_id"]),
-        client_type=body.client_type.value,
-        payload_data=body.model_dump(mode="json"),
+        enrichment_service.run_bulk_client_enrichment,
+        enrichment_items,
+        payload_data,
     )
 
     request.state.audit_user_context = {

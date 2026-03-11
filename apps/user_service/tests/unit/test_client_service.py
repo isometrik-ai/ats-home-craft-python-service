@@ -1127,8 +1127,13 @@ async def test_create_client_success(monkeypatch):
     result = await service.create_client(request_data)
     assert "create_client" in fake_repo.calls
     assert "create_client_user" in fake_repo.calls
-    assert "id" in result
-    assert "organization_id" in result
+    # Service now returns a list of enrichment items (one per created client)
+    assert isinstance(result, list)
+    assert len(result) >= 1
+    first = result[0]
+    assert "client_id" in first
+    assert "organization_id" in first
+    assert "client_type" in first
 
 
 @pytest.mark.asyncio
