@@ -716,7 +716,20 @@ class ClientService:
             isometrik_user_id,
             client_company_id=client_company_id,
         )
-        await self.client_repository.create_client_user(client_user_data)
+        try:
+            await self.client_repository.create_client_user(client_user_data)
+        except asyncpg.UniqueViolationError as exc:
+            constraint = getattr(exc, "constraint_name", None)
+            if constraint in {
+                "client_users_one_primary_per_client",
+                "client_users_one_primary_contact_per_company",
+            }:
+                raise ConflictException(
+                    message_key="clients.errors.primary_contact_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                ) from exc
+            raise
+
         await self._create_optional_records(request_data, primary_record["id"])
 
         if request_data.portal_access:

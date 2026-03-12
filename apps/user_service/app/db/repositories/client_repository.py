@@ -54,6 +54,28 @@ class ClientRepository:
             return json.dumps(value)
         return value
 
+    @staticmethod
+    def _build_primary_contact_join(
+        client_user_status_condition: str,
+        company_status_condition: str,
+    ) -> str:
+        """Build SQL LEFT JOIN snippet for primary contact and linked company.
+
+        The caller is responsible for providing fully-formed conditions that may
+        use either literal values or positional parameters.
+        """
+        return f"""
+            LEFT JOIN client_users cu ON cu.is_primary_contact = true
+                AND {client_user_status_condition}
+                AND (
+                    (c.client_type = 'person' AND cu.client_id = c.id)
+                    OR (c.client_type = 'company' AND cu.client_company_id = c.id)
+                )
+            LEFT JOIN clients company_c ON company_c.id = cu.client_company_id
+                AND {company_status_condition}
+            LEFT JOIN auth.users au ON au.id = cu.user_id
+        """
+
     # CREATE OPERATIONS
     async def create_client(self, clients_data: list[dict]) -> list[dict]:
         """Bulk insert client rows in a single INSERT statement.
@@ -295,17 +317,10 @@ class ClientRepository:
         # Add join for primary contact and linked company (for person clients)
         deleted_client_user_status = ClientUserStatus.DELETED.value
         deleted_client_status = ClientStatus.DELETED.value
-        primary_contact_join = f"""
-            LEFT JOIN client_users cu ON cu.is_primary_contact = true
-                AND cu.status != '{deleted_client_user_status}'
-                AND (
-                    (c.client_type = 'person' AND cu.client_id = c.id)
-                    OR (c.client_type = 'company' AND cu.client_company_id = c.id)
-                )
-            LEFT JOIN auth.users au ON au.id = cu.user_id
-            LEFT JOIN clients company_c ON company_c.id = cu.client_company_id
-                AND company_c.status != '{deleted_client_status}'
-        """
+        primary_contact_join = self._build_primary_contact_join(
+            f"cu.status != '{deleted_client_user_status}'",
+            f"company_c.status != '{deleted_client_status}'",
+        )
 
         query = f"""
             SELECT
@@ -759,7 +774,12 @@ class ClientRepository:
             dict | None: Client record with primary contact and lead info or None if not found
         """
         deleted_client_user_status = ClientUserStatus.DELETED.value
-        query = """
+        deleted_client_status = ClientStatus.DELETED.value
+        primary_contact_join = self._build_primary_contact_join(
+            "cu.status != $3",
+            "company_c.status != $4",
+        )
+        query = f"""
             SELECT
                 c.id,
                 c.organization_id,
@@ -810,15 +830,7 @@ class ClientRepository:
                 l.created_at as lead_created_at,
                 l.updated_at as lead_updated_at
             FROM clients c
-            LEFT JOIN client_users cu ON cu.is_primary_contact = true
-                AND cu.status != $3
-                AND (
-                    (c.client_type = 'person' AND cu.client_id = c.id)
-                    OR (c.client_type = 'company' AND cu.client_company_id = c.id)
-                )
-            LEFT JOIN clients company_c ON company_c.id = cu.client_company_id
-                AND company_c.status != $4
-            LEFT JOIN auth.users au ON au.id = cu.user_id
+            {primary_contact_join}
             LEFT JOIN leads l ON l.client_id = c.id
             WHERE c.id = $1
                 AND c.organization_id = $2
@@ -829,6 +841,6 @@ class ClientRepository:
             client_id,
             organization_id,
             deleted_client_user_status,
-            ClientStatus.DELETED.value,
+            deleted_client_status,
         )
         return dict(row) if row else None
