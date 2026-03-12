@@ -296,9 +296,12 @@ class ClientRepository:
         deleted_client_user_status = ClientUserStatus.DELETED.value
         deleted_client_status = ClientStatus.DELETED.value
         primary_contact_join = f"""
-            LEFT JOIN client_users cu ON cu.client_id = c.id
-                AND cu.is_primary_contact = true
+            LEFT JOIN client_users cu ON cu.is_primary_contact = true
                 AND cu.status != '{deleted_client_user_status}'
+                AND (
+                    (c.client_type = 'person' AND cu.client_id = c.id)
+                    OR (c.client_type = 'company' AND cu.client_company_id = c.id)
+                )
             LEFT JOIN auth.users au ON au.id = cu.user_id
             LEFT JOIN clients company_c ON company_c.id = cu.client_company_id
                 AND company_c.status != '{deleted_client_status}'
@@ -312,6 +315,7 @@ class ClientRepository:
                 company_c.name AS company_name,
                 c.status,
                 c.tags,
+                c.profile_photo_url,
                 c.created_at,
                 c.updated_at,
                 cu.first_name,
@@ -786,9 +790,12 @@ class ClientRepository:
                 c.key_people,
                 c.created_at,
                 c.updated_at,
+                cu.prefix,
                 cu.first_name,
+                cu.middle_name,
                 cu.last_name,
                 cu.title,
+                cu.profile_photo_url AS contact_profile_photo_url,
                 au.email,
                 au.raw_user_meta_data->>'phone_isd_code' as phone_isd_code,
                 au.raw_user_meta_data->>'phone_number' as phone,
@@ -803,9 +810,12 @@ class ClientRepository:
                 l.created_at as lead_created_at,
                 l.updated_at as lead_updated_at
             FROM clients c
-            LEFT JOIN client_users cu ON cu.client_id = c.id
-                AND cu.is_primary_contact = true
+            LEFT JOIN client_users cu ON cu.is_primary_contact = true
                 AND cu.status != $3
+                AND (
+                    (c.client_type = 'person' AND cu.client_id = c.id)
+                    OR (c.client_type = 'company' AND cu.client_company_id = c.id)
+                )
             LEFT JOIN clients company_c ON company_c.id = cu.client_company_id
                 AND company_c.status != $4
             LEFT JOIN auth.users au ON au.id = cu.user_id

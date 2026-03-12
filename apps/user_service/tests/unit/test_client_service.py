@@ -555,6 +555,43 @@ async def test_get_clients_list_returns_results(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_clients_list_company_omits_company_name(monkeypatch):
+    """get_clients_list does not include company_name for company clients."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.clients_list_result = [
+        {
+            "id": "client-company-1",
+            "name": "Company 1",
+            "client_type": "company",
+            "status": "active",
+            "created_at": datetime.datetime.now(),
+            "updated_at": datetime.datetime.now(),
+            "first_name": None,
+            "last_name": None,
+            "tags": [],
+        }
+    ]
+    fake_repo.clients_count_result = 1
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    result = await service.get_clients_list(
+        "org-1",
+        {"page": 1, "page_size": 20, "search": None, "client_type": None, "status": None},
+    )
+
+    assert result["total"] == 1
+    assert len(result["clients"]) == 1
+    assert result["clients"][0]["id"] == "client-company-1"
+    assert result["clients"][0]["name"] == "Company 1"
+    assert "company_name" not in result["clients"][0]
+
+
+@pytest.mark.asyncio
 async def test_delete_client_calls_delete_methods(monkeypatch):
     """delete_client calls all related delete methods."""
     fake_repo = _FakeClientRepo()
@@ -765,6 +802,28 @@ async def test_prepare_client_user_data_includes_optional():
     assert client_user_data["date_of_birth"] == date(1990, 1, 1)
     assert client_user_data["profile_photo_url"] == "https://example.com/photo.jpg"
     assert client_user_data["is_primary_contact"] is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_user_non_primary_company_linked():
+    """_prepare_client_user_data sets is_primary_contact False when client_company_id provided."""
+    service = ClientService(db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.PERSON,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+        client_company_id="company-1",
+    )
+    client_user_data = service._prepare_client_user_data(
+        request_data, "client-1", "org-1", "user-1", "isometrik-1", client_company_id="company-1"
+    )
+
+    assert client_user_data["client_id"] == "client-1"
+    assert client_user_data["client_company_id"] == "company-1"
+    assert client_user_data["is_primary_contact"] is False
 
 
 @pytest.mark.asyncio

@@ -605,7 +605,9 @@ class ClientService:
             "organization_id": organization_id,
             "user_id": user_id,
             "isometrik_user_id": isometrik_user_id,
-            "is_primary_contact": True,
+            # When linked to a company (client_company_id set),
+            # this client_user should not be primary.
+            "is_primary_contact": client_company_id is None,
             "first_name": request_data.first_name,
             "last_name": request_data.last_name,
         }
@@ -800,12 +802,14 @@ class ClientService:
                 company_type=client.get("client_type"),
                 status=client.get("status"),
                 projects=[],
+                image_url=client.get("contact_profile_photo_url")
+                or client.get("profile_photo_url"),
                 created_at=format_iso_datetime(client.get("created_at")) or "",
                 updated_at=format_iso_datetime(client.get("updated_at")) or "",
                 outstanding=None,
                 tags=client.get("tags") or [],
             )
-            transformed_clients.append(client_response.model_dump())
+            transformed_clients.append(client_response.model_dump(exclude_none=True))
 
         return {"clients": transformed_clients, "total": total}
 
@@ -839,7 +843,9 @@ class ClientService:
 
         # Build primary contact info
         primary_contact = PrimaryContactInfo(
+            salutation=client.get("prefix"),
             first_name=client.get("first_name"),
+            middle_name=client.get("middle_name"),
             last_name=client.get("last_name"),
             title=client.get("title"),
             email=client.get("email"),
@@ -971,7 +977,7 @@ class ClientService:
             company_name=client.get("company_name"),
             status=client.get("status"),
             industry=client.get("industry"),
-            profile_photo_url=client.get("profile_photo_url"),
+            image_url=client.get("contact_profile_photo_url") or client.get("profile_photo_url"),
             tags=client.get("tags") or [],
             primary_contact=primary_contact,
             websites=websites,
