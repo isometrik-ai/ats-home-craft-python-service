@@ -3,6 +3,8 @@
 This module contains all client-related database operations using asyncpg.
 All SQL queries for client management are centralized here with proper
 transaction handling and efficient batch operations.
+
+Requires client_users.phones JSONB (default '[]') for primary contact phone list.
 """
 
 import json
@@ -203,12 +205,15 @@ class ClientRepository:
             "status",
             "is_primary_contact",
             "client_company_id",
+            "phones",
         ]
 
         for field_name in optional_field_mapping:
             if field_name in client_user_data and client_user_data[field_name] is not None:
                 fields.append(field_name)
-                placeholders.append(f"${param_index}")
+                placeholders.append(
+                    f"${param_index}::jsonb" if field_name == "phones" else f"${param_index}"
+                )
                 values.append(client_user_data[field_name])
                 param_index += 1
 
@@ -337,8 +342,7 @@ class ClientRepository:
                 cu.last_name,
                 cu.title,
                 au.email,
-                au.raw_user_meta_data->>'phone_isd_code' as phone_isd_code,
-                au.raw_user_meta_data->>'phone_number' as phone
+                cu.phones
             FROM clients c
             {primary_contact_join}
             WHERE {where_clause}
@@ -635,6 +639,57 @@ class ClientRepository:
         exists = await self.db_connection.fetchval(query, *params)
         return bool(exists)
 
+    async def _check_client_email_exists(
+        self,
+        email: str,
+        organization_id: str,
+        exclude_client_id: str | None = None,
+    ) -> bool:
+        """Check if a client with the given email exists for this organization.
+
+        Email is resolved via the linked auth user for active client_users.
+
+        Args:
+            email: Email address to check (case-insensitive).
+            organization_id: Organization ID.
+            exclude_client_id: Optional client ID to exclude from the check
+                (useful when updating an existing client).
+
+        Returns:
+            True if a non-deleted client in this organization is already linked
+            to an auth user with the given email, False otherwise.
+        """
+        conditions = [
+            "LOWER(au.email) = LOWER($1)",
+            "cu.organization_id = $2",
+            "cu.status != $3",
+            "c.status != $4",
+        ]
+        params: list[Any] = [
+            email,
+            organization_id,
+            ClientUserStatus.DELETED.value,
+            ClientStatus.DELETED.value,
+        ]
+        next_index = 5
+
+        if exclude_client_id is not None:
+            conditions.append(f"c.id != ${next_index}")
+            params.append(exclude_client_id)
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT EXISTS(
+                SELECT 1
+                FROM client_users cu
+                JOIN clients c ON c.id = cu.client_id
+                JOIN auth.users au ON au.id = cu.user_id
+                WHERE {where_clause}
+            )
+        """
+        exists = await self.db_connection.fetchval(query, *params)
+        return bool(exists)
+
     # LEAD OPERATIONS
     async def create_lead(self, lead_data: dict) -> dict:
         """Create a new lead record.
@@ -817,8 +872,7 @@ class ClientRepository:
                 cu.title,
                 cu.profile_photo_url AS contact_profile_photo_url,
                 au.email,
-                au.raw_user_meta_data->>'phone_isd_code' as phone_isd_code,
-                au.raw_user_meta_data->>'phone_number' as phone,
+                cu.phones,
                 l.id as lead_id,
                 l.lead_status,
                 l.intake_stage,
@@ -844,3 +898,64 @@ class ClientRepository:
             deleted_client_status,
         )
         return dict(row) if row else None
+
+    async def _get_primary_contact_for_update(
+        self, client_id: str, organization_id: str
+    ) -> dict | None:
+        """Get primary contact client_user id and phones for update (e.g. phones batch).
+
+        Returns the client_user row that is the primary contact for this client:
+        for person client, the one with client_id = client_id and is_primary_contact;
+        for company client, the one with client_company_id = client_id and is_primary_contact.
+
+        Returns:
+            dict with id, phones (raw JSONB), or None if no primary contact.
+        """
+        query = """
+            SELECT cu.id, cu.phones
+            FROM client_users cu
+            JOIN clients c ON (c.id = cu.client_id OR c.id = cu.client_company_id)
+            WHERE c.id = $1 AND c.organization_id = $2
+                AND cu.is_primary_contact = true
+                AND cu.status != $3
+                AND c.status != $4
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(
+            query,
+            client_id,
+            organization_id,
+            ClientUserStatus.DELETED.value,
+            ClientStatus.DELETED.value,
+        )
+        return dict(row) if row else None
+
+    async def _update_client_user(self, client_user_id: str, update_data: dict[str, Any]) -> bool:
+        """Update a client_user by id. Only provided keys are updated.
+
+        Args:
+            client_user_id: Client user ID
+            update_data: Keys to update (e.g. phones). For phones pass JSON string.
+
+        Returns:
+            True if a row was updated.
+        """
+        if not update_data:
+            return True
+        set_parts = [
+            f"{k} = ${i}::jsonb" if k == "phones" else f"{k} = ${i}"
+            for i, k in enumerate(update_data, start=1)
+        ]
+        set_expr = ", ".join(set_parts) + ", updated_at = NOW()"
+        params = list(update_data.values()) + [client_user_id]
+        num_params = len(update_data)
+        row = await self.db_connection.fetchrow(
+            f"""
+            UPDATE client_users
+            SET {set_expr}
+            WHERE id = ${num_params + 1}
+            RETURNING id
+            """,
+            *params,
+        )
+        return row is not None

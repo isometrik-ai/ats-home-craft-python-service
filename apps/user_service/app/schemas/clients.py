@@ -136,6 +136,74 @@ class SocialPageUpdateItem(BaseModel):
     url: str | None = Field(None, max_length=500)
 
 
+# --- Primary contact phones (stored on client_users) ---
+class Phone(BaseModel):
+    """Phone number item: id, phone_number, phone_isd_code, label, is_primary."""
+
+    id: str | None = Field(None, description="Phone item ID")
+    phone_number: str = Field(..., description="Phone number", max_length=50)
+    phone_isd_code: str = Field(..., description="Phone ISD code", max_length=10)
+    label: str | None = Field(None, description="Label (e.g. mobile, work)", max_length=50)
+    is_primary: bool = Field(default=False, description="Primary phone flag")
+
+
+class PhoneInput(BaseModel):
+    """Phone input for add operation (no id)."""
+
+    phone_number: str = Field(..., max_length=50, description="Phone number")
+    phone_isd_code: str = Field(..., max_length=10, description="Phone ISD code")
+    label: str | None = Field(None, max_length=50, description="Label (e.g. mobile, work)")
+    is_primary: bool = Field(default=False, description="Primary phone flag")
+
+
+class PhoneUpdateItem(BaseModel):
+    """Phone update item; only provided fields are updated."""
+
+    id: str = Field(..., description="Phone item ID to update")
+    phone_number: str | None = Field(None, max_length=50)
+    phone_isd_code: str | None = Field(None, max_length=10)
+    label: str | None = Field(None, max_length=50)
+    is_primary: bool | None = None
+
+
+class PhonesUpdate(BaseModel):
+    """Batch phone operations: add, update, and/or remove (primary contact)."""
+
+    add: list[PhoneInput] | None = Field(None, max_length=20)
+    update: list[PhoneUpdateItem] | None = Field(None, max_length=20)
+    remove: list[str] | None = Field(None, max_length=20)
+
+    @field_validator("add")
+    @classmethod
+    def validate_primary_phone_add(
+        cls, add_list: list[PhoneInput] | None
+    ) -> list[PhoneInput] | None:
+        """Validate only one primary phone on add."""
+        if not add_list:
+            return add_list
+        if sum(1 for p in add_list if p.is_primary) > 1:
+            raise ValidationException(
+                message_key="clients.errors.only_one_primary_phone",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return add_list
+
+    @field_validator("update")
+    @classmethod
+    def validate_primary_phone_update(
+        cls, update_list: list[PhoneUpdateItem] | None
+    ) -> list[PhoneUpdateItem] | None:
+        """Validate only one primary phone on update."""
+        if not update_list:
+            return update_list
+        if sum(1 for p in update_list if p.is_primary is True) > 1:
+            raise ValidationException(
+                message_key="clients.errors.only_one_primary_phone",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return update_list
+
+
 # --- Individual (person) type: work_history, educational_history ---
 class WorkHistoryItem(BaseModel):
     """Work history item (person type)."""
@@ -437,6 +505,14 @@ class BillingPreferencesUpdate(BaseModel):
     terms: str | None = Field(None, max_length=50)
 
 
+class PrimaryContactUpdate(BaseModel):
+    """Primary contact PATCH; only provided fields are applied."""
+
+    phones: PhonesUpdate | None = Field(
+        None, description="Batch phone operations: add, update, and/or remove"
+    )
+
+
 class UpdateClientRequest(BaseModel):
     """Client PATCH payload; only provided fields are applied.
 
@@ -447,6 +523,7 @@ class UpdateClientRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     client_name: str | None = Field(None, max_length=200)
+    primary_contact: PrimaryContactUpdate | None = None
     industry: str | None = Field(None, max_length=100)
     profile_photo_url: str | None = Field(None, max_length=500)
     portal_access: bool | None = None
@@ -511,8 +588,16 @@ class CreateClientRequest(BaseModel):
 
     client_type: ClientType = Field(..., description="Client type")
     email: str = Field(..., description="Email address")
-    phone_isd_code: str = Field(..., description="Phone ISD code")
-    phone_number: str = Field(..., description="Phone number")
+    phone_isd_code: str = Field(default="", description="Phone ISD code (used if phones empty)")
+    phone_number: str = Field(default="", description="Phone number (used if phones empty)")
+
+    # Primary contact phones (stored on client_users).
+    # If empty, one phone is built from phone_isd_code/phone_number.
+    phones: list[PhoneInput] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Phone numbers for primary contact",
+    )
 
     # Name fields (required for both types)
     first_name: str = Field(..., description="First name", max_length=100)
@@ -593,6 +678,17 @@ class CreateClientRequest(BaseModel):
                 )
         return company_name
 
+    @field_validator("phones")
+    @classmethod
+    def validate_primary_phone_create(cls, phones: list[PhoneInput]) -> list[PhoneInput]:
+        """At most one primary phone on create."""
+        if sum(1 for p in phones if p.is_primary) > 1:
+            raise ValidationException(
+                message_key="clients.errors.only_one_primary_phone",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return phones
+
 
 class CreateClientFromUserRequest(BaseModel):
     """Request schema for creating a client from user ID."""
@@ -610,8 +706,7 @@ class PrimaryContactInfo(BaseModel):
     last_name: str | None = Field(None, description="Last name")
     title: str | None = Field(None, description="Job title")
     email: str | None = Field(None, description="Email address")
-    phone_isd_code: str | None = Field(None, description="Phone ISD code")
-    phone: str | None = Field(None, description="Phone number")
+    phones: list[Phone] = Field(default_factory=list, description="Phone numbers")
 
 
 class ClientListResponse(BaseModel):
