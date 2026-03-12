@@ -604,7 +604,9 @@ class CreateClientFromUserRequest(BaseModel):
 class PrimaryContactInfo(BaseModel):
     """Primary contact information schema."""
 
+    salutation: str | None = Field(None, description="Salutation / prefix (Mr., Ms., etc.)")
     first_name: str | None = Field(None, description="First name")
+    middle_name: str | None = Field(None, description="Middle name")
     last_name: str | None = Field(None, description="Last name")
     title: str | None = Field(None, description="Job title")
     email: str | None = Field(None, description="Email address")
@@ -624,6 +626,7 @@ class ClientListResponse(BaseModel):
     company_type: ClientType = Field(..., description="Client type")
     status: ClientStatus = Field(..., description="Client status")
     projects: list[Any] = Field(default_factory=list, description="Projects list")
+    image_url: str | None = Field(None, description="Primary profile image URL")
     created_at: str = Field(..., description="Creation timestamp")
     updated_at: str = Field(..., description="Update timestamp")
     outstanding: None = Field(None, description="Outstanding balance")
@@ -680,7 +683,7 @@ class ClientDetailsResponse(BaseModel):
     )
     status: ClientStatus = Field(..., description="Client status")
     industry: str | None = Field(None, description="Industry")
-    profile_photo_url: str | None = Field(None, description="Profile photo URL")
+    image_url: str | None = Field(None, description="Primary profile image URL")
     tags: list[str] = Field(default_factory=list, description="Tags")
     primary_contact: PrimaryContactInfo = Field(..., description="Primary contact information")
     websites: list[Website] = Field(default_factory=list, description="Websites")
