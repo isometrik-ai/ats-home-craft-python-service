@@ -65,10 +65,13 @@ class _FakeClientRepo:
         }
         return self.name_exists
 
-    async def create_client(self, client_data):
-        """Create client and return result."""
-        self.calls["create_client"] = client_data
-        return self.client_result or {"id": "client-1", **client_data}
+    async def create_client(self, clients_data):
+        """Create clients; accepts list of dicts, returns list of records."""
+        self.calls["create_client"] = clients_data
+        return [
+            (self.client_result if i == 0 else None) or {"id": f"client-{i + 1}", **data}
+            for i, data in enumerate(clients_data)
+        ]
 
     async def create_client_user(self, client_user_data):
         """Create client user."""
@@ -521,6 +524,7 @@ async def test_get_clients_list_returns_results(monkeypatch):
         {
             "id": "client-1",
             "name": "Client 1",
+            "company_name": "Acme Corp",
             "client_type": "person",
             "status": "active",
             "created_at": datetime.datetime.now(),
@@ -547,6 +551,7 @@ async def test_get_clients_list_returns_results(monkeypatch):
     assert len(result["clients"]) == 1
     assert result["clients"][0]["id"] == "client-1"
     assert result["clients"][0]["name"] == "Client 1"
+    assert result["clients"][0]["company_name"] == "Acme Corp"
 
 
 @pytest.mark.asyncio
@@ -731,7 +736,7 @@ async def test_prepare_client_data_custom_fields_invalid(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_prepare_client_user_data_includes_fields():
+async def test_prepare_client_user_data_includes_optional():
     """_prepare_client_user_data includes optional fields when provided."""
     service = ClientService(db_connection=None)
     request_data = CreateClientRequest(
@@ -744,6 +749,8 @@ async def test_prepare_client_user_data_includes_fields():
         prefix="Mr.",
         middle_name="Middle",
         title="CEO",
+        date_of_birth=date(1990, 1, 1),
+        profile_photo_url="https://example.com/photo.jpg",
     )
     client_user_data = service._prepare_client_user_data(
         request_data, "client-1", "org-1", "user-1", "isometrik-1"
@@ -755,11 +762,13 @@ async def test_prepare_client_user_data_includes_fields():
     assert client_user_data["prefix"] == "Mr."
     assert client_user_data["middle_name"] == "Middle"
     assert client_user_data["title"] == "CEO"
+    assert client_user_data["date_of_birth"] == date(1990, 1, 1)
+    assert client_user_data["profile_photo_url"] == "https://example.com/photo.jpg"
     assert client_user_data["is_primary_contact"] is True
 
 
 @pytest.mark.asyncio
-async def test_create_records_creates_lead(monkeypatch):
+async def test_create_optional_records_creates_lead(monkeypatch):
     """_create_optional_records creates lead when lead_management enabled."""
     fake_repo = _FakeClientRepo()
     monkeypatch.setattr(
@@ -1115,9 +1124,15 @@ async def test_create_client_success(monkeypatch):
         portal_access=True,
     )
 
-    await service.create_client(request_data)
+    result = await service.create_client(request_data)
     assert "create_client" in fake_repo.calls
     assert "create_client_user" in fake_repo.calls
+    assert len(result.records) >= 1
+    assert len(result.enrichment_items) >= 1
+    first = result.enrichment_items[0]
+    assert "client_id" in first
+    assert "organization_id" in first
+    assert "client_type" in first
 
 
 @pytest.mark.asyncio
@@ -1187,6 +1202,7 @@ async def test_get_client_details_with_full_data(monkeypatch):
         "organization_id": "org-1",
         "client_type": "person",
         "name": "John Doe",
+        "company_name": "Acme Corp",
         "status": "active",
         "first_name": "John",
         "last_name": "Doe",
@@ -1899,28 +1915,6 @@ async def test_prepare_client_data_optional_fields():
     assert isinstance(client_data["billing_preferences"], str)
     assert isinstance(client_data["additional_data"], str)
     assert isinstance(client_data["social_pages"], str)
-
-
-@pytest.mark.asyncio
-async def test_prepare_client_user_data_with_optional_fields():
-    """_prepare_client_user_data includes optional fields when provided."""
-    service = ClientService(db_connection=None)
-    request_data = CreateClientRequest(
-        client_type=ClientType.PERSON,
-        email="test@example.com",
-        phone_isd_code="+1",
-        phone_number="1234567890",
-        first_name="John",
-        last_name="Doe",
-        date_of_birth=datetime.date(1990, 1, 1),
-        profile_photo_url="https://example.com/photo.jpg",
-    )
-    client_user_data = service._prepare_client_user_data(
-        request_data, "client-1", "org-1", "user-1", "isometrik-1"
-    )
-
-    assert client_user_data["date_of_birth"] == date(1990, 1, 1)
-    assert client_user_data["profile_photo_url"] == "https://example.com/photo.jpg"
 
 
 @pytest.mark.asyncio

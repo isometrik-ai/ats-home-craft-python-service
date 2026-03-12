@@ -7,6 +7,7 @@ Enrichment updates only fields allowed in the Update API; never overwrites
 non-empty existing data with empty enrichment values.
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -249,6 +250,42 @@ class ClientEnrichmentService:
             "Client enrichment requested and record updated",
             extra={"client_id": client_id, "enrichment_request_id": request_id},
         )
+
+    async def run_bulk_client_enrichment(
+        self,
+        items: list[dict[str, Any]],
+        payload_data: dict[str, Any],
+    ) -> None:
+        """Run enrichment for multiple clients in parallel.
+
+        Uses asyncio.gather so person/company enrichment HTTP calls execute concurrently.
+        Any exception from an individual task is logged and does not prevent others from running.
+        """
+        if not items:
+            return
+
+        tasks = [
+            self.run_client_enrichment(
+                client_id=item["client_id"],
+                organization_id=item["organization_id"],
+                client_type=item["client_type"],
+                payload_data=payload_data,
+            )
+            for item in items
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for item, result in zip(items, results, strict=False):
+            if isinstance(result, Exception):
+                logger.error(
+                    "Client enrichment task failed",
+                    extra={
+                        "client_id": item.get("client_id"),
+                        "organization_id": item.get("organization_id"),
+                        "client_type": item.get("client_type"),
+                        "error": str(result),
+                    },
+                )
 
     # Company enrichment webhook (mapping + processing)
     @staticmethod

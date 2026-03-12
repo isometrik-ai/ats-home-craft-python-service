@@ -44,48 +44,73 @@ class _FakeConn:
 
 
 @pytest.mark.asyncio
-async def test_create_client_raises_required_fields_missing():
-    """create_client raises ValueError when required fields missing."""
-    conn = _FakeConn()
-    repo = ClientRepository(db_connection=conn)
-
-    with pytest.raises(ValueError, match="organization_id and client_type are required"):
-        await repo.create_client({})
-
-    with pytest.raises(ValueError, match="organization_id and client_type are required"):
-        await repo.create_client({"organization_id": "org-1"})
-
-    with pytest.raises(ValueError, match="organization_id and client_type are required"):
-        await repo.create_client({"client_type": "person"})
-
-
-@pytest.mark.asyncio
 async def test_create_client_includes_only_provided_fields():
     """create_client only includes fields that are explicitly provided."""
     conn = _FakeConn()
-    conn.fetchrow_result = {
-        "id": "client-1",
-        "organization_id": "org-1",
-        "client_type": "person",
-        "name": "John Doe",
-    }
-    repo = ClientRepository(db_connection=conn)
-
-    result = await repo.create_client(
+    conn.fetch_result = [
         {
+            "id": "client-1",
             "organization_id": "org-1",
             "client_type": "person",
             "name": "John Doe",
         }
+    ]
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.create_client(
+        [
+            {
+                "organization_id": "org-1",
+                "client_type": "person",
+                "name": "John Doe",
+            }
+        ]
     )
 
-    assert result["id"] == "client-1"
-    assert len(conn.fetchrow_calls) == 1
-    query = conn.fetchrow_calls[0][0]
+    assert len(result) == 1
+    assert result[0]["id"] == "client-1"
+    assert len(conn.fetch_calls) == 1
+    query = conn.fetch_calls[0][0]
     assert "INSERT INTO clients" in query
     assert "organization_id" in query
     assert "client_type" in query
     assert "name" in query
+
+
+@pytest.mark.asyncio
+async def test_create_client_empty_list_returns_empty():
+    """create_client with empty list returns []."""
+    conn = _FakeConn()
+    repo = ClientRepository(db_connection=conn)
+    result = await repo.create_client([])
+    assert result == []
+    assert len(conn.fetch_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_create_client_list_returns_list():
+    """create_client with list inserts all rows in one call and returns list."""
+    conn = _FakeConn()
+    conn.fetch_result = [
+        {"id": "client-1", "organization_id": "org-1", "client_type": "company", "name": "Acme"},
+        {"id": "client-2", "organization_id": "org-1", "client_type": "person", "name": "John"},
+    ]
+    repo = ClientRepository(db_connection=conn)
+
+    result = await repo.create_client(
+        [
+            {"organization_id": "org-1", "client_type": "company", "name": "Acme"},
+            {"organization_id": "org-1", "client_type": "person", "name": "John"},
+        ]
+    )
+
+    assert len(result) == 2
+    assert result[0]["id"] == "client-1"
+    assert result[1]["id"] == "client-2"
+    assert len(conn.fetch_calls) == 1
+    query = conn.fetch_calls[0][0]
+    assert "INSERT INTO clients" in query
+    assert "VALUES" in query and "), (" in query
 
 
 @pytest.mark.asyncio

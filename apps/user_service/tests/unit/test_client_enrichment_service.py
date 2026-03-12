@@ -329,6 +329,47 @@ async def test_run_enrichment_no_request_id_skips_update(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_bulk_enrichment_invokes_run_per_item(monkeypatch):
+    """run_bulk_client_enrichment runs enrichment for each item (parallel)."""
+    run_calls = []
+
+    async def capture_run(_self, client_id, organization_id, client_type, payload_data):
+        run_calls.append(
+            {
+                "client_id": client_id,
+                "organization_id": organization_id,
+                "client_type": client_type,
+                "payload_data": payload_data,
+            }
+        )
+
+    monkeypatch.setattr(
+        ClientEnrichmentService,
+        "run_client_enrichment",
+        capture_run,
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    items = [
+        {"client_id": "c1", "organization_id": "org-1", "client_type": "person"},
+        {"client_id": "c2", "organization_id": "org-1", "client_type": "company"},
+    ]
+    payload = {"name": "Acme"}
+    await svc.run_bulk_client_enrichment(items, payload)
+    assert len(run_calls) == 2
+    assert run_calls[0]["client_id"] == "c1"
+    assert run_calls[0]["client_type"] == "person"
+    assert run_calls[1]["client_id"] == "c2"
+    assert run_calls[1]["client_type"] == "company"
+
+
+@pytest.mark.asyncio
+async def test_run_client_enrichment_empty_items():
+    """run_bulk_client_enrichment with empty list does nothing."""
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    await svc.run_bulk_client_enrichment([], {"name": "x"})
+
+
+@pytest.mark.asyncio
 async def test_company_webhook_no_request_id_returns_false():
     """process_company_enrichment_webhook returns False when request_id missing."""
     svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
