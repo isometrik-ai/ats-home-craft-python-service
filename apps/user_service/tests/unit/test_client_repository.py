@@ -779,11 +779,11 @@ async def test_update_address_calls_fetchrow():
 
 @pytest.mark.asyncio
 async def test_delete_addresses_by_ids_executes_delete():
-    """delete_addresses_by_ids executes DELETE with client_id and address_ids."""
+    """_delete_addresses_by_ids executes DELETE with client_id and address_ids."""
     conn = _FakeConn()
     repo = ClientRepository(db_connection=conn)
 
-    await repo.delete_addresses_by_ids("client-1", ["addr-1", "addr-2"])
+    await repo._delete_addresses_by_ids("client-1", ["addr-1", "addr-2"])
 
     assert len(conn.execute_calls) == 1
     query = conn.execute_calls[0][0]
@@ -796,11 +796,11 @@ async def test_delete_addresses_by_ids_executes_delete():
 
 @pytest.mark.asyncio
 async def test_delete_addresses_by_ids_no_op_when_empty():
-    """delete_addresses_by_ids does nothing when address_ids is empty."""
+    """_delete_addresses_by_ids does nothing when address_ids is empty."""
     conn = _FakeConn()
     repo = ClientRepository(db_connection=conn)
 
-    await repo.delete_addresses_by_ids("client-1", [])
+    await repo._delete_addresses_by_ids("client-1", [])
 
     assert len(conn.execute_calls) == 0
 

@@ -167,7 +167,7 @@ class _FakeClientRepo:
         self.calls["update_address"] = (address_id, client_id, update_data)
         return True
 
-    async def delete_addresses_by_ids(self, client_id, address_ids):
+    async def _delete_addresses_by_ids(self, client_id, address_ids):
         """Delete addresses by ids."""
         self.calls["delete_addresses_by_ids"] = (client_id, address_ids)
 

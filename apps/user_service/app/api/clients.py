@@ -307,7 +307,7 @@ async def list_clients(
 async def get_client_details(
     request: Request,
     client_id: str = Path(..., description="Client ID"),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Get client details by ID with all fields and addresses."""

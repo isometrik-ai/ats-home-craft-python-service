@@ -501,8 +501,11 @@ class ClientRepository:
         await self.db_connection.execute(query, client_id)
         return True
 
-    async def delete_addresses_by_ids(self, client_id: str, address_ids: list[str]) -> None:
-        """Delete addresses by ids for a client."""
+    async def _delete_addresses_by_ids(self, client_id: str, address_ids: list[str]) -> None:
+        """Delete addresses by ids for a client.
+
+        This is an internal helper used by service-layer batch address operations.
+        """
         if not address_ids:
             return
         query = """
