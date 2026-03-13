@@ -779,7 +779,7 @@ async def test_update_address_calls_fetchrow():
 
 @pytest.mark.asyncio
 async def test_delete_addresses_by_ids_executes_delete():
-    """_delete_addresses_by_ids executes DELETE with client_id and address_ids."""
+    """async _delete_addresses_by_ids executes DELETE with client_id and address_ids."""
     conn = _FakeConn()
     repo = ClientRepository(db_connection=conn)
 
