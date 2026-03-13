@@ -748,13 +748,15 @@ class InviteService:
         """Add user to organization as a member."""
         isometrik_user_id = None
         isometrik_response = await create_isometrik_user(
-            user_id=invite_data["user_id"],
-            first_name=invite_data.get("first_name", None),
-            last_name=invite_data.get("last_name", None),
-            email=email,
+            user={
+                "user_id": invite_data["user_id"],
+                "first_name": invite_data.get("first_name", None),
+                "last_name": invite_data.get("last_name", None),
+                "email": email,
+                "organization_id": organization_id,
+                "role": OrganizationMemberRole.MEMBER.value,
+            },
             isometrik_credentials=isometrik_credentials,
-            organization_id=organization_id,
-            role=OrganizationMemberRole.MEMBER.value,
         )
         if isometrik_response:
             isometrik_user_id = isometrik_response.get("userId", None)

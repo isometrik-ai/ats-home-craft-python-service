@@ -33,6 +33,8 @@ from apps.user_service.app.schemas.clients import (
     LeadInfo,
     LeadManagementUpdate,
     LinkedPageItem,
+    Phone,
+    PhonesUpdate,
     PrimaryContactInfo,
     Product,
     SocialPage,
@@ -72,6 +74,22 @@ from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("client_service")
+
+
+def should_mark_primary_on_create(
+    client_type: ClientType,
+    has_company_link: bool,
+) -> bool:
+    """Single source of truth for when a client_user is primary.
+
+    Current behavior:
+    - For a person without a company link, mark as primary.
+    - For a person linked to a company, do not mark as primary.
+    - For other types, do not mark as primary.
+    """
+    if client_type == ClientType.PERSON:
+        return not has_company_link
+    return False
 
 
 @dataclass
@@ -181,11 +199,14 @@ class ClientService:
 
         # Create Isometrik user
         isometrik_response = await create_isometrik_user(
-            user_id=user_id,
-            email=user_details.get("email"),
+            user={
+                "user_id": user_id,
+                "email": user_details.get("email"),
+                "organization_id": organization_id,
+                "role": IsometrikRole.CLIENT.value,
+                "user_identifier": str(uuid.uuid4()),
+            },
             isometrik_credentials=isometrik_credentials,
-            organization_id=organization_id,
-            role=IsometrikRole.CLIENT.value,
         )
         if not isometrik_response or not isometrik_response.get("userId"):
             raise ServiceUnavailableException(
@@ -261,21 +282,14 @@ class ClientService:
                 params={"organization_id": organization_id},
             )
 
-        # Validate email uniqueness (check across all auth.users)
-        user_repository = UserRepository(db_connection=self.db_connection)
-        existing_user = await user_repository.get_auth_user_by_email(request_data.email)
-        if existing_user:
+        # Validate email uniqueness at organization level (via client + client_user linkage)
+        email_exists = await self.client_repository._check_client_email_exists(
+            email=request_data.email,
+            organization_id=organization_id,
+        )
+        if email_exists:
             raise ConflictException(
                 message_key="clients.errors.email_already_exists",
-                custom_code=CustomStatusCode.CONFLICT,
-            )
-        # Validate phone uniqueness (check across all auth.users)
-        phone_exists = await user_repository.phone_exists_for_other_user(
-            phone=f"{request_data.phone_isd_code}{request_data.phone_number}",
-        )
-        if phone_exists:
-            raise ConflictException(
-                message_key="clients.errors.phone_number_already_exists",
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
@@ -314,56 +328,60 @@ class ClientService:
         return organization
 
     async def _create_auth_and_isometrik_user(
-        self, request_data: CreateClientRequest, organization: dict[str, Any], organization_id: str
-    ) -> tuple[str, str, str]:
-        """Create Supabase auth user and Isometrik user.
+        self,
+        request_data: CreateClientRequest,
+        organization: dict[str, Any],
+        organization_id: str,
+        existing_user: dict[str, Any] | None = None,
+    ) -> tuple[str, str, str | None]:
+        """Create or reuse Supabase auth user and create Isometrik user.
 
         Args:
             request_data: Request data
-            organization: Organization data
+            organization: Organization dataz
             organization_id: Organization ID
+            existing_user: Existing user data
 
         Returns:
-            tuple: (user_id, isometrik_user_id, password)
+            tuple: (user_id, isometrik_user_id, password or None if reused)
 
         Raises:
             ServiceUnavailableException: If auth or Isometrik creation fails
         """
-        # Generate a random password for the client user
-        password = generate_random_password()
+        # When an auth user already exists for this email, reuse it instead of creating a new one.
+        # In that case, we do not generate or return a password.
+        if existing_user and existing_user.get("id"):
+            user_id = str(existing_user["id"])
+            password: str | None = None
+        else:
+            # Generate a random password for the new client user
+            password = generate_random_password()
 
-        # Build phone number for auth
-        phone = f"{request_data.phone_isd_code}{request_data.phone_number}"
+            # Build user metadata same as signup/invite accept flow (without phone fields)
+            user_metadata: dict[str, Any] = {
+                "timezone": "UTC",
+                "first_name": request_data.first_name,
+                "last_name": request_data.last_name,
+            }
 
-        # Build user metadata same as signup/invite accept flow
-        user_metadata: dict[str, Any] = {
-            "phone_number": request_data.phone_number,
-            "phone_isd_code": request_data.phone_isd_code,
-            "timezone": "UTC",
-            "first_name": request_data.first_name,
-            "last_name": request_data.last_name,
-        }
-
-        # Add person-specific fields if client type is PERSON
-        if request_data.client_type == ClientType.PERSON:
-            if request_data.prefix:
+            # Add person-specific fields if client type is PERSON
+            if request_data.client_type == ClientType.PERSON and request_data.prefix:
                 user_metadata["salutation"] = request_data.prefix
 
-        # Create Supabase auth user with generated password
-        auth_user = await create_user(
-            sb_client=self.supabase_client,
-            email=request_data.email,
-            password=password,
-            phone=phone,
-            email_confirm=True,
-            user_metadata=user_metadata,
-        )
-        if not auth_user or not auth_user.get("id"):
-            raise ServiceUnavailableException(
-                message_key="clients.errors.auth_user_creation_failed",
-                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            # Create Supabase auth user with generated password
+            auth_user = await create_user(
+                sb_client=self.supabase_client,
+                email=request_data.email,
+                password=password,
+                email_confirm=True,
+                user_metadata=user_metadata,
             )
-        user_id = auth_user["id"]
+            if not auth_user or not auth_user.get("id"):
+                raise ServiceUnavailableException(
+                    message_key="clients.errors.auth_user_creation_failed",
+                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+                )
+            user_id = auth_user["id"]
 
         # Get Isometrik credentials
         org_settings = parse_json_field(organization.get("settings"))
@@ -375,13 +393,16 @@ class ClientService:
 
         # Create Isometrik user
         isometrik_response = await create_isometrik_user(
-            user_id=user_id,
-            email=request_data.email,
+            user={
+                "user_id": user_id,
+                "email": request_data.email,
+                "organization_id": organization_id,
+                "role": IsometrikRole.CLIENT.value,
+                "first_name": isometrik_first_name,
+                "last_name": isometrik_last_name,
+                "user_identifier": str(uuid.uuid4()) if existing_user else None,
+            },
             isometrik_credentials=isometrik_credentials,
-            organization_id=organization_id,
-            role=IsometrikRole.CLIENT.value,
-            first_name=isometrik_first_name,
-            last_name=isometrik_last_name,
         )
         if not isometrik_response or not isometrik_response.get("userId"):
             raise ServiceUnavailableException(
@@ -600,14 +621,19 @@ class ClientService:
             isometrik_user_id: Isometrik user ID
             client_company_id: Optional; set when linking this user to a company.
         """
+        # For primary-contact decision, rely solely on request_data.client_company_id:
+        # - None  => treat as not linked to an existing company (primary allowed)
+        # - value => treat as linked to an existing company (primary not allowed)
+        has_company_link = request_data.client_company_id is not None
         client_user_data = {
             "client_id": client_id,
             "organization_id": organization_id,
             "user_id": user_id,
             "isometrik_user_id": isometrik_user_id,
-            # When linked to a company (client_company_id set),
-            # this client_user should not be primary.
-            "is_primary_contact": client_company_id is None,
+            "is_primary_contact": should_mark_primary_on_create(
+                request_data.client_type,
+                has_company_link,
+            ),
             "first_name": request_data.first_name,
             "last_name": request_data.last_name,
         }
@@ -624,6 +650,11 @@ class ClientService:
             client_user_data["date_of_birth"] = request_data.date_of_birth
         if request_data.profile_photo_url:
             client_user_data["profile_photo_url"] = request_data.profile_photo_url
+
+        # Phones: required via request_data.phones
+        phones_list = self._ensure_list_item_ids([p.model_dump() for p in request_data.phones])
+        if phones_list:
+            client_user_data["phones"] = json.dumps(phones_list)
 
         return client_user_data
 
@@ -698,8 +729,16 @@ class ClientService:
         organization_id = self.user_context.organization_id
 
         organization = await self._validate_client_creation(request_data, organization_id)
+
+        # Reuse existing auth user for this email when possible; otherwise create a new one.
+        user_repository = UserRepository(db_connection=self.db_connection)
+        existing_user = await user_repository.get_auth_user_by_email(request_data.email)
+
         user_id, isometrik_user_id, password = await self._create_auth_and_isometrik_user(
-            request_data, organization, organization_id
+            request_data,
+            organization,
+            organization_id,
+            existing_user=existing_user,
         )
 
         payloads = await self._build_create_client_payloads(request_data, organization_id)
@@ -798,13 +837,13 @@ class ClientService:
         # Transform to response model
         transformed_clients = []
         for client in clients:
+            phones = self._parse_primary_contact_phones(client.get("phones"))
             primary_contact = {
                 "first_name": client.get("first_name"),
                 "last_name": client.get("last_name"),
                 "title": client.get("title"),
                 "email": client.get("email"),
-                "phone_isd_code": client.get("phone_isd_code"),
-                "phone": client.get("phone"),
+                "phones": phones,
             }
 
             client_response = ClientListResponse(
@@ -854,7 +893,8 @@ class ClientService:
         # Get addresses
         addresses = await self.client_repository.get_client_addresses(client_id)
 
-        # Build primary contact info
+        # Build primary contact info (phones from client_users.phones)
+        phones_list = self._parse_primary_contact_phones(client.get("phones"))
         primary_contact = PrimaryContactInfo(
             salutation=client.get("prefix"),
             first_name=client.get("first_name"),
@@ -862,8 +902,7 @@ class ClientService:
             last_name=client.get("last_name"),
             title=client.get("title"),
             email=client.get("email"),
-            phone_isd_code=client.get("phone_isd_code"),
-            phone=client.get("phone"),
+            phones=phones_list,
         )
 
         # Parse JSONB fields
@@ -1092,6 +1131,11 @@ class ClientService:
             current=current,
         )
 
+        if body.primary_contact is not None and body.primary_contact.phones is not None:
+            await self._apply_primary_contact_phones(
+                client_id, organization_id, body.primary_contact.phones
+            )
+
         if body.lead_management is not None:
             await self._apply_lead_update(client_id, body.lead_management)
 
@@ -1173,6 +1217,7 @@ class ClientService:
                 "linked_pages",
                 "products",
                 "key_people",
+                "primary_contact",
             )
         )
 
@@ -1310,6 +1355,30 @@ class ClientService:
                 row["id"] = str(uuid.uuid4())
             result.append(row)
         return result
+
+    @staticmethod
+    def _parse_primary_contact_phones(raw_phones: Any) -> list[Phone]:
+        """Parse phones from DB (JSON string or list) to list[Phone] objects."""
+        parsed = parse_json_field(raw_phones)
+        if not isinstance(parsed, list):
+            parsed = []
+        phones_list: list[Phone] = []
+        for phone in parsed:
+            if not isinstance(phone, dict):
+                continue
+            try:
+                phones_list.append(
+                    Phone(
+                        id=str(phone["id"]) if phone.get("id") else None,
+                        phone_number=phone.get("phone_number") or "",
+                        phone_isd_code=phone.get("phone_isd_code") or "",
+                        label=phone.get("label"),
+                        is_primary=bool(phone.get("is_primary", False)),
+                    )
+                )
+            except (KeyError, TypeError):
+                continue
+        return phones_list
 
     async def _apply_lead_update(self, client_id: str, lead: LeadManagementUpdate) -> None:
         """Apply lead update by lead_id; only provided fields are sent to repository."""
@@ -1464,6 +1533,47 @@ class ClientService:
                 "key_people",
                 "clients.errors.key_person_not_found",
             )
+
+    async def _apply_primary_contact_phones(
+        self,
+        client_id: str,
+        organization_id: str,
+        phones_update: PhonesUpdate,
+    ) -> None:
+        """Apply batch phone add/update/remove to the primary contact client_user."""
+        primary = await self.client_repository._get_primary_contact_for_update(
+            client_id, organization_id
+        )
+        current_list = parse_json_field(primary.get("phones")) or []
+        if not isinstance(current_list, list):
+            current_list = []
+        updated = current_list.copy()
+
+        if phones_update.remove:
+            updated = [p for p in updated if str(p.get("id")) not in phones_update.remove]
+        if phones_update.update:
+            for item in phones_update.update:
+                data = item.model_dump(exclude_none=True, exclude={"id"})
+                found = False
+                for i, existing in enumerate(updated):
+                    if str(existing.get("id")) == item.id:
+                        updated[i] = {**existing, **data}
+                        found = True
+                        break
+                if not found:
+                    raise NotFoundException(
+                        message_key="clients.errors.phone_not_found",
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )
+        if phones_update.add:
+            for item in phones_update.add:
+                new_item = item.model_dump(exclude_none=True)
+                new_item["id"] = str(uuid.uuid4())
+                updated.append(new_item)
+
+        await self.client_repository._update_client_user(
+            primary["id"], {"phones": json.dumps(updated)}
+        )
 
     async def _apply_addresses_changes(
         self,

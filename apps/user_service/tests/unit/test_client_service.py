@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.clients import (
     CreateClientRequest,
     LeadManagement,
     LeadManagementUpdate,
+    PhoneInput,
     SocialPageInput,
     SocialPagesUpdate,
     SocialPageUpdateItem,
@@ -46,6 +47,7 @@ class _FakeClientRepo:
         self.client_user_exists = False
         self.name_exists = False
         self.client_result = None
+        self.client_email_exists = False
         self.client_details_result = None
         self.clients_list_result = []
         self.clients_count_result = 0
@@ -64,6 +66,15 @@ class _FakeClientRepo:
             "exclude_client_id": exclude_client_id,
         }
         return self.name_exists
+
+    async def _check_client_email_exists(self, email, organization_id, exclude_client_id=None):
+        """Return email existence flag at org level."""
+        self.calls["check_client_email_exists"] = {
+            "email": email,
+            "organization_id": organization_id,
+            "exclude_client_id": exclude_client_id,
+        }
+        return self.client_email_exists
 
     async def create_client(self, clients_data):
         """Create clients; accepts list of dicts, returns list of records."""
@@ -360,10 +371,10 @@ async def test_client_from_user_raises_org_not_found(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_create_client_raises_email_exists(monkeypatch):
-    """Raises ConflictException when email already exists."""
+    """Raises ConflictException when email already exists for organization."""
     fake_repo = _FakeClientRepo()
+    fake_repo.client_email_exists = True
     fake_user_repo = _FakeUserRepo()
-    fake_user_repo.email_exists = True
     fake_org_repo = _FakeOrgRepo()
 
     monkeypatch.setattr(
@@ -383,10 +394,16 @@ async def test_create_client_raises_email_exists(monkeypatch):
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
         email="test@example.com",
-        phone_isd_code="+1",
-        phone_number="1234567890",
         first_name="John",
         last_name="Doe",
+        phones=[
+            PhoneInput(
+                phone_number="1234567890",
+                phone_isd_code="+1",
+                label="mobile",
+                is_primary=True,
+            )
+        ],
     )
 
     with pytest.raises(ConflictException):
@@ -394,12 +411,18 @@ async def test_create_client_raises_email_exists(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_client_phone_exists(monkeypatch):
-    """Raises ConflictException when phone already exists."""
+async def test_create_client_does_not_check_phone_uniqueness(monkeypatch):
+    """Phone uniqueness is not validated during client creation."""
     fake_repo = _FakeClientRepo()
     fake_user_repo = _FakeUserRepo()
     fake_user_repo.phone_exists = True
     fake_org_repo = _FakeOrgRepo()
+
+    async def fake_create_user(*_args, **_kwargs):
+        return {"id": "auth-user-123"}
+
+    async def fake_create_isometrik_user(*_args, **_kwargs):
+        return {"userId": "isometrik-123"}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
@@ -413,19 +436,37 @@ async def test_create_client_phone_exists(monkeypatch):
         "apps.user_service.app.services.client_service.OrganizationRepository",
         lambda db_connection=None: fake_org_repo,
     )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.create_user",
+        fake_create_user,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.create_isometrik_user",
+        fake_create_isometrik_user,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.send_client_creation_email",
+        lambda *_args, **_kwargs: None,
+    )
 
     service = ClientService(user_context=_ctx(), db_connection=None)
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
         email="test@example.com",
-        phone_isd_code="+1",
-        phone_number="1234567890",
         first_name="John",
         last_name="Doe",
+        phones=[
+            PhoneInput(
+                phone_number="1234567890",
+                phone_isd_code="+1",
+                label="mobile",
+                is_primary=True,
+            )
+        ],
     )
 
-    with pytest.raises(ConflictException):
-        await service.create_client(request_data)
+    # Should not raise ConflictException for phone uniqueness anymore
+    await service.create_client(request_data)
 
 
 @pytest.mark.asyncio
@@ -453,10 +494,16 @@ async def test_create_client_raises_when_name_exists(monkeypatch):
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
         email="test@example.com",
-        phone_isd_code="+1",
-        phone_number="1234567890",
         first_name="John",
         last_name="Doe",
+        phones=[
+            PhoneInput(
+                phone_number="1234567890",
+                phone_isd_code="+1",
+                label="mobile",
+                is_primary=True,
+            )
+        ],
     )
 
     with pytest.raises(ConflictException):
@@ -1009,7 +1056,10 @@ async def test_create_auth_isometrik_user_person(monkeypatch):
     )
 
     user_id, isometrik_user_id, password = await service._create_auth_and_isometrik_user(
-        request_data, fake_org_repo.organization, "org-1"
+        request_data,
+        fake_org_repo.organization,
+        "org-1",
+        existing_user=None,
     )
 
     assert user_id == "auth-user-123"
@@ -1053,7 +1103,10 @@ async def test_create_auth_isometrik_user_company(monkeypatch):
     )
 
     user_id, isometrik_user_id, password = await service._create_auth_and_isometrik_user(
-        request_data, fake_org_repo.organization, "org-1"
+        request_data,
+        fake_org_repo.organization,
+        "org-1",
+        existing_user=None,
     )
 
     assert user_id == "auth-user-123"
