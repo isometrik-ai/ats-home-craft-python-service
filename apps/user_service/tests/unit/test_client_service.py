@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.clients import (
     CreateClientRequest,
     LeadManagement,
     LeadManagementUpdate,
+    PhoneInput,
     SocialPageInput,
     SocialPagesUpdate,
     SocialPageUpdateItem,
@@ -393,10 +394,16 @@ async def test_create_client_raises_email_exists(monkeypatch):
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
         email="test@example.com",
-        phone_isd_code="+1",
-        phone_number="1234567890",
         first_name="John",
         last_name="Doe",
+        phones=[
+            PhoneInput(
+                phone_number="1234567890",
+                phone_isd_code="+1",
+                label="mobile",
+                is_primary=True,
+            )
+        ],
     )
 
     with pytest.raises(ConflictException):
@@ -446,10 +453,16 @@ async def test_create_client_does_not_check_phone_uniqueness(monkeypatch):
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
         email="test@example.com",
-        phone_isd_code="+1",
-        phone_number="1234567890",
         first_name="John",
         last_name="Doe",
+        phones=[
+            PhoneInput(
+                phone_number="1234567890",
+                phone_isd_code="+1",
+                label="mobile",
+                is_primary=True,
+            )
+        ],
     )
 
     # Should not raise ConflictException for phone uniqueness anymore
@@ -481,10 +494,16 @@ async def test_create_client_raises_when_name_exists(monkeypatch):
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
         email="test@example.com",
-        phone_isd_code="+1",
-        phone_number="1234567890",
         first_name="John",
         last_name="Doe",
+        phones=[
+            PhoneInput(
+                phone_number="1234567890",
+                phone_isd_code="+1",
+                label="mobile",
+                is_primary=True,
+            )
+        ],
     )
 
     with pytest.raises(ConflictException):

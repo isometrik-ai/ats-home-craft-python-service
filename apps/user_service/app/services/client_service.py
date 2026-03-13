@@ -183,11 +183,14 @@ class ClientService:
 
         # Create Isometrik user
         isometrik_response = await create_isometrik_user(
-            user_id=user_id,
-            email=user_details.get("email"),
+            user={
+                "user_id": user_id,
+                "email": user_details.get("email"),
+                "organization_id": organization_id,
+                "role": IsometrikRole.CLIENT.value,
+                "user_identifier": str(uuid.uuid4()),
+            },
             isometrik_credentials=isometrik_credentials,
-            organization_id=organization_id,
-            role=IsometrikRole.CLIENT.value,
         )
         if not isometrik_response or not isometrik_response.get("userId"):
             raise ServiceUnavailableException(
@@ -332,7 +335,7 @@ class ClientService:
         # When an auth user already exists for this email, reuse it instead of creating a new one.
         # In that case, we do not generate or return a password.
         if existing_user and existing_user.get("id"):
-            user_id = existing_user["id"]
+            user_id = str(existing_user["id"])
             password: str | None = None
         else:
             # Generate a random password for the new client user
@@ -374,13 +377,16 @@ class ClientService:
 
         # Create Isometrik user
         isometrik_response = await create_isometrik_user(
-            user_id=user_id,
-            email=request_data.email,
+            user={
+                "user_id": user_id,
+                "email": request_data.email,
+                "organization_id": organization_id,
+                "role": IsometrikRole.CLIENT.value,
+                "first_name": isometrik_first_name,
+                "last_name": isometrik_last_name,
+                "user_identifier": str(uuid.uuid4()) if existing_user else None,
+            },
             isometrik_credentials=isometrik_credentials,
-            organization_id=organization_id,
-            role=IsometrikRole.CLIENT.value,
-            first_name=isometrik_first_name,
-            last_name=isometrik_last_name,
         )
         if not isometrik_response or not isometrik_response.get("userId"):
             raise ServiceUnavailableException(
@@ -606,7 +612,7 @@ class ClientService:
             "isometrik_user_id": isometrik_user_id,
             # When linked to a company (client_company_id set),
             # this client_user should not be primary.
-            "is_primary_contact": client_company_id is None,
+            "is_primary_contact": request_data.client_company_id is None,
             "first_name": request_data.first_name,
             "last_name": request_data.last_name,
         }
@@ -624,23 +630,8 @@ class ClientService:
         if request_data.profile_photo_url:
             client_user_data["profile_photo_url"] = request_data.profile_photo_url
 
-        # Phones: use request_data.phones if non-empty,
-        #  else one entry from phone_isd_code/phone_number
-        phones_list: list[dict[str, Any]]
-        if request_data.phones:
-            phones_list = self._ensure_list_item_ids([p.model_dump() for p in request_data.phones])
-        else:
-            phones_list = []
-            if request_data.phone_isd_code or request_data.phone_number:
-                phones_list = [
-                    {
-                        "id": str(uuid.uuid4()),
-                        "phone_number": request_data.phone_number or "",
-                        "phone_isd_code": request_data.phone_isd_code or "",
-                        "label": None,
-                        "is_primary": True,
-                    }
-                ]
+        # Phones: required via request_data.phones
+        phones_list = self._ensure_list_item_ids([p.model_dump() for p in request_data.phones])
         if phones_list:
             client_user_data["phones"] = json.dumps(phones_list)
 

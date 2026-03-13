@@ -588,11 +588,6 @@ class CreateClientRequest(BaseModel):
 
     client_type: ClientType = Field(..., description="Client type")
     email: str = Field(..., description="Email address")
-    phone_isd_code: str = Field(default="", description="Phone ISD code (used if phones empty)")
-    phone_number: str = Field(default="", description="Phone number (used if phones empty)")
-
-    # Primary contact phones (stored on client_users).
-    # If empty, one phone is built from phone_isd_code/phone_number.
     phones: list[PhoneInput] = Field(
         default_factory=list,
         max_length=20,

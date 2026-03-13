@@ -173,27 +173,22 @@ async def create_isometrik_application(
 
 
 async def create_isometrik_user(
-    user_id: str,
-    email: str,
+    user: dict[str, Any],
     isometrik_credentials: dict[str, Any],
-    organization_id: str,
-    role: str,
-    first_name: str | None = None,
-    last_name: str | None = None,
-    avatar_url: str | None = "https://example.com/default-avatar.jpg",
 ) -> dict[str, Any]:
     """Create a new Isometrik user for an organization.
 
     Args:
-        user_id (str): User ID
-        email (str): User's email address
-        isometrik_credentials (dict[str, Any]): Isometrik credentials from settings
-            Should contain: userSecret, licenseKey, appSecret
-        organization_id (str): Organization ID
-        role (str): Role of the user
-        first_name (str | None): User's first name (optional)
-        last_name (str | None): User's last name (optional)
-        avatar_url (str | None): URL to user's avatar
+        user (dict[str, Any]): User data containing:
+            - ``user_id`` (str): User ID.
+            - ``email`` (str): User's email address.
+            - ``organization_id`` (str): Organization ID.
+            - ``role`` (str): Role of the user.
+            - ``first_name`` (str | None): User's first name (optional).
+            - ``last_name`` (str | None): User's last name (optional).
+            - ``user_identifier`` (str | None): External identifier for the user (optional).
+        isometrik_credentials (dict[str, Any]): Isometrik credentials from settings.
+            Should contain: ``userSecret``, ``licenseKey``, ``appSecret``.
     Returns:
         dict[str, Any]: Response from Isometrik API containing user details
 
@@ -205,13 +200,22 @@ async def create_isometrik_user(
         InternalServerErrorException: If unexpected error occurs
     """
     try:
+        user_id = str(user["user_id"])
+        email = user["email"]
+        organization_id = str(user["organization_id"])
+        role = user["role"]
+        first_name = user.get("first_name")
+        last_name = user.get("last_name")
+        user_identifier = user.get("user_identifier")
+        avatar_url = user.get("avatar_url", "https://example.com/default-avatar.jpg")
+
         user_name = " ".join(filter(None, [first_name, last_name])) or email.split("@")[0]
 
         password = user_id.replace("-", "")[:12] + "Ai$"
 
         payload = {
             "userName": user_name,
-            "userIdentifier": str(user_id),
+            "userIdentifier": user_identifier or str(user_id),
             "userProfileImageUrl": avatar_url,
             "password": password,
             "metaData": {

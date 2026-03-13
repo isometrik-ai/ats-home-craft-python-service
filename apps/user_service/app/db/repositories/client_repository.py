@@ -61,18 +61,29 @@ class ClientRepository:
         client_user_status_condition: str,
         company_status_condition: str,
     ) -> str:
-        """Build SQL LEFT JOIN snippet for primary contact and linked company.
+        """Build SQL LEFT JOIN snippet for contact user and linked company.
 
         The caller is responsible for providing fully-formed conditions that may
         use either literal values or positional parameters.
         """
-        return f"""
-            LEFT JOIN client_users cu ON cu.is_primary_contact = true
-                AND {client_user_status_condition}
-                AND (
-                    (c.client_type = 'person' AND cu.client_id = c.id)
-                    OR (c.client_type = 'company' AND cu.client_company_id = c.id)
+        join_conditions = []
+        join_conditions.append(client_user_status_condition)
+        join_conditions.append(
+            """
+            (
+                (c.client_type = 'person' AND cu.client_id = c.id)
+                OR (
+                    c.client_type = 'company'
+                    AND cu.client_company_id = c.id
+                    AND cu.is_primary_contact = true
                 )
+            )
+            """.strip()
+        )
+        join_on_clause = " AND ".join(join_conditions)
+
+        return f"""
+            LEFT JOIN client_users cu ON {join_on_clause}
             LEFT JOIN clients company_c ON company_c.id = cu.client_company_id
                 AND {company_status_condition}
             LEFT JOIN auth.users au ON au.id = cu.user_id
@@ -319,7 +330,9 @@ class ClientRepository:
 
         where_clause = " AND ".join(conditions)
 
-        # Add join for primary contact and linked company (for person clients)
+        # Add join for contact and linked company.
+        # When listing contacts (client_type='person'), include all non-deleted client_users.
+        # For companies (client_type='company') or mixed, restrict to primary contacts only.
         deleted_client_user_status = ClientUserStatus.DELETED.value
         deleted_client_status = ClientStatus.DELETED.value
         primary_contact_join = self._build_primary_contact_join(

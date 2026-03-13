@@ -811,13 +811,15 @@ class OrganizationService:
         # Create Isometrik user if enabled and credentials are provided
         if isometrik_creds:
             isometrik_user = await create_isometrik_user(
-                user_id=member_data["user_id"],
-                first_name=member_data["first_name"],
-                last_name=member_data["last_name"],
-                email=member_data["email"],
+                user={
+                    "user_id": member_data["user_id"],
+                    "first_name": member_data["first_name"],
+                    "last_name": member_data["last_name"],
+                    "email": member_data["email"],
+                    "organization_id": organization_id,
+                    "role": OrganizationMemberRole.OWNER.value,
+                },
                 isometrik_credentials=isometrik_creds,
-                organization_id=organization_id,
-                role=OrganizationMemberRole.OWNER.value,
             )
             if isometrik_user and (user_id := isometrik_user.get("userId")):
                 member_data["isometrik_user_id"] = user_id
