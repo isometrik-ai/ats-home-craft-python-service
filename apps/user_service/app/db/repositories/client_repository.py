@@ -19,6 +19,18 @@ from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("client_repository")
 
+PRIMARY_CONTACT_JOIN_PREDICATE = """
+(
+    (c.client_type = 'person' AND cu.client_id = c.id)
+    OR (
+        c.client_type = 'company'
+        AND cu.client_company_id = c.id
+        AND cu.is_primary_contact = true
+    )
+)
+""".strip()
+
+
 # Columns that are JSONB in DB (object/dict or array of objects). Values are serialized
 CLIENT_JSONB_COLUMNS = frozenset(
     {
@@ -66,20 +78,7 @@ class ClientRepository:
         The caller is responsible for providing fully-formed conditions that may
         use either literal values or positional parameters.
         """
-        join_conditions = []
-        join_conditions.append(client_user_status_condition)
-        join_conditions.append(
-            """
-            (
-                (c.client_type = 'person' AND cu.client_id = c.id)
-                OR (
-                    c.client_type = 'company'
-                    AND cu.client_company_id = c.id
-                    AND cu.is_primary_contact = true
-                )
-            )
-            """.strip()
-        )
+        join_conditions = [client_user_status_condition, PRIMARY_CONTACT_JOIN_PREDICATE]
         join_on_clause = " AND ".join(join_conditions)
 
         return f"""

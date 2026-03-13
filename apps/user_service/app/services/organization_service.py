@@ -57,6 +57,7 @@ from libs.shared_utils.http_exceptions import (
     NotFoundException,
 )
 from libs.shared_utils.isometrik_service import (
+    DEFAULT_ORG_ROLE,
     create_isometrik_application,
     create_isometrik_user,
 )
@@ -817,7 +818,7 @@ class OrganizationService:
                     "last_name": member_data["last_name"],
                     "email": member_data["email"],
                     "organization_id": organization_id,
-                    "role": OrganizationMemberRole.OWNER.value,
+                    "role": DEFAULT_ORG_ROLE,
                 },
                 isometrik_credentials=isometrik_creds,
             )

@@ -20,6 +20,10 @@ from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("isometrik_service")
 
+# Default organization-level role used when interacting with Isometrik.
+# Kept as a simple string to avoid coupling to application enums.
+DEFAULT_ORG_ROLE = "owner"
+
 
 def _handle_isometrik_error(
     e: Exception, operation: str, response: httpx.Response | None = None

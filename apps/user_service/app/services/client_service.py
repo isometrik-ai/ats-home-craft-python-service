@@ -76,6 +76,22 @@ from libs.shared_utils.status_codes import CustomStatusCode
 logger = get_logger("client_service")
 
 
+def should_mark_primary_on_create(
+    client_type: ClientType,
+    has_company_link: bool,
+) -> bool:
+    """Single source of truth for when a client_user is primary.
+
+    Current behavior:
+    - For a person without a company link, mark as primary.
+    - For a person linked to a company, do not mark as primary.
+    - For other types, do not mark as primary.
+    """
+    if client_type == ClientType.PERSON:
+        return not has_company_link
+    return False
+
+
 @dataclass
 class CreateClientResult:
     """Result of client creation: persisted records and items to run enrichment on."""
@@ -605,14 +621,19 @@ class ClientService:
             isometrik_user_id: Isometrik user ID
             client_company_id: Optional; set when linking this user to a company.
         """
+        # For primary-contact decision, rely solely on request_data.client_company_id:
+        # - None  => treat as not linked to an existing company (primary allowed)
+        # - value => treat as linked to an existing company (primary not allowed)
+        has_company_link = request_data.client_company_id is not None
         client_user_data = {
             "client_id": client_id,
             "organization_id": organization_id,
             "user_id": user_id,
             "isometrik_user_id": isometrik_user_id,
-            # When linked to a company (client_company_id set),
-            # this client_user should not be primary.
-            "is_primary_contact": request_data.client_company_id is None,
+            "is_primary_contact": should_mark_primary_on_create(
+                request_data.client_type,
+                has_company_link,
+            ),
             "first_name": request_data.first_name,
             "last_name": request_data.last_name,
         }
