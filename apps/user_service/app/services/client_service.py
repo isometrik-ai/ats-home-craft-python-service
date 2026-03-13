@@ -85,11 +85,11 @@ def should_mark_primary_on_create(
     Current behavior:
     - For a person without a company link, mark as primary.
     - For a person linked to a company, do not mark as primary.
-    - For other types, do not mark as primary.
+    - For other types (e.g. company), mark as primary.
     """
     if client_type == ClientType.PERSON:
         return not has_company_link
-    return False
+    return True
 
 
 @dataclass
