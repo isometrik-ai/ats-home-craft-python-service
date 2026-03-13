@@ -52,6 +52,7 @@ class _FakeClientRepo:
         self.clients_list_result = []
         self.clients_count_result = 0
         self.address_result = []
+        self.company_contacts_result = []
 
     async def check_client_user_exists(self, user_id, organization_id):
         """Return existence flag."""
@@ -138,6 +139,11 @@ class _FakeClientRepo:
         """Get client addresses."""
         self.calls["get_client_addresses"] = client_id
         return self.address_result
+
+    async def get_company_contacts(self, company_client_id, organization_id):
+        """Get company contacts for a company client."""
+        self.calls["get_company_contacts"] = (company_client_id, organization_id)
+        return self.company_contacts_result
 
     get_client_for_update_result = None
 
@@ -1379,6 +1385,69 @@ async def test_get_client_details_with_full_data(monkeypatch):
     assert result.lead.lead_status == "prospect"
     assert len(result.addresses) == 1
     assert result.addresses[0].address_line1 == "123 Main St"
+
+
+@pytest.mark.asyncio
+async def test_get_client_details_includes_contacts(monkeypatch):
+    """get_client_details includes company_contacts for company clients."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.client_details_result = {
+        "id": "company-1",
+        "organization_id": "org-1",
+        "client_type": "company",
+        "name": "Acme Corp",
+        "status": "active",
+        "first_name": "Primary",
+        "last_name": "Contact",
+        "email": "primary@example.com",
+        "websites": "[]",
+        "billing_preferences": None,
+        "custom_fields": None,
+        "lead_id": None,
+    }
+    fake_repo.address_result = []
+    fake_repo.company_contacts_result = [
+        {
+            "first_name": "Primary",
+            "last_name": "Contact",
+            "title": "CEO",
+            "email": "primary@example.com",
+            "is_primary_contact": True,
+        },
+        {
+            "first_name": "Mike",
+            "last_name": "Chen",
+            "title": "CTO",
+            "email": "mike@example.com",
+            "is_primary_contact": False,
+        },
+    ]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    result = await service.get_client_details("company-1", "org-1")
+
+    # Ensure repository method was called with correct identifiers
+    assert fake_repo.calls["get_company_contacts"] == ("company-1", "org-1")
+
+    # Validate mapped contacts
+    assert len(result.company_contacts) == 2
+    primary = result.company_contacts[0]
+    secondary = result.company_contacts[1]
+
+    assert primary.name == "Primary Contact"
+    assert primary.designation == "CEO"
+    assert primary.email == "primary@example.com"
+    assert primary.is_primary_contact is True
+
+    assert secondary.name == "Mike Chen"
+    assert secondary.designation == "CTO"
+    assert secondary.email == "mike@example.com"
+    assert secondary.is_primary_contact is False
 
 
 @pytest.mark.asyncio

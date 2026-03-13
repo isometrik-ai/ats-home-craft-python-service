@@ -26,6 +26,7 @@ from apps.user_service.app.schemas.clients import (
     ClientAddressResponse,
     ClientDetailsResponse,
     ClientListResponse,
+    CompanyContact,
     CreateClientFromUserRequest,
     CreateClientRequest,
     EducationalHistoryItem,
@@ -905,6 +906,23 @@ class ClientService:
             phones=phones_list,
         )
 
+        # Build all company contacts when client type is company
+        company_contacts: list[CompanyContact] = []
+        if client.get("client_type") == ClientType.COMPANY.value:
+            raw_contacts = await self.client_repository.get_company_contacts(
+                company_client_id=client_id,
+                organization_id=organization_id,
+            )
+            company_contacts = [
+                CompanyContact(
+                    name=build_full_name(r.get("first_name"), r.get("last_name")) or None,
+                    designation=r.get("title"),
+                    email=r.get("email"),
+                    is_primary_contact=bool(r.get("is_primary_contact", False)),
+                )
+                for r in raw_contacts
+            ]
+
         # Parse JSONB fields
         websites_data = safe_json_loads(client.get("websites"), [])
         websites = [Website(**website) for website in websites_data] if websites_data else []
@@ -1032,6 +1050,7 @@ class ClientService:
             image_url=client.get("contact_profile_photo_url") or client.get("profile_photo_url"),
             tags=client.get("tags") or [],
             primary_contact=primary_contact,
+            company_contacts=company_contacts,
             websites=websites,
             billing_preferences=billing_preferences,
             custom_fields=custom_fields,
