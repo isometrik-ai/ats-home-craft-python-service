@@ -211,9 +211,12 @@ class ClientEnrichmentService:
         payload_data: dict[str, Any],
         conn: asyncpg.Connection | None = None,
     ) -> None:
-        """Run enrichment after client creation: call API,
-        then update client with request_id and status.
-        Only runs for client_type 'person' or 'company'. Uses its own DB connection.
+        """Run enrichment after client creation: call API, then update client with
+        request_id and status.
+
+        Runs only for client_type 'person' or 'company'. If conn is provided, uses
+        the caller-managed connection (the caller is responsible for closing it);
+        otherwise acquires a connection from the pool for the duration of this call.
         """
         webhook_url = self._webhook_url
         if client_type == ClientType.PERSON.value:
@@ -236,23 +239,45 @@ class ClientEnrichmentService:
             )
             return
 
+        await self.update_client_enrichment_status(
+            client_id=client_id,
+            organization_id=organization_id,
+            request_id=request_id,
+            status=ClientEnrichmentStatus.REQUESTED.value,
+            conn=conn,
+        )
+        logger.info(
+            "Client enrichment requested and record updated",
+            extra={"client_id": client_id, "enrichment_request_id": request_id},
+        )
+
+    async def update_client_enrichment_status(
+        self,
+        client_id: str,
+        organization_id: str,
+        request_id: str,
+        status: str,
+        conn: asyncpg.Connection | None = None,
+    ) -> None:
+        """Update client enrichment request id and status.
+
+        Centralizes logic for updating enrichment_request_id/enrichment_status using an
+        optional caller-managed connection or acquiring one from the pool.
+        """
         update_data = {
             "enrichment_request_id": request_id,
-            "enrichment_status": ClientEnrichmentStatus.REQUESTED.value,
+            "enrichment_status": status,
         }
 
         if conn is not None:
             repo = ClientRepository(conn)
             await repo.update_client(client_id, organization_id, update_data)
-        else:
-            pool = await get_pool()
-            async with AcquireConnection(pool) as acquired_conn:
-                repo = ClientRepository(acquired_conn)
-                await repo.update_client(client_id, organization_id, update_data)
-        logger.info(
-            "Client enrichment requested and record updated",
-            extra={"client_id": client_id, "enrichment_request_id": request_id},
-        )
+            return
+
+        pool = await get_pool()
+        async with AcquireConnection(pool) as acquired_conn:
+            repo = ClientRepository(acquired_conn)
+            await repo.update_client(client_id, organization_id, update_data)
 
     async def run_bulk_client_enrichment(
         self,

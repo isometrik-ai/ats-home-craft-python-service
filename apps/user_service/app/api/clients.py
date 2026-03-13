@@ -514,7 +514,11 @@ async def enrich_client(
         user_context=user_context,
         db_connection=db_connection,
     )
-    await client_service.trigger_enrichment(client_id, user_context.organization_id)
+    await client_service.trigger_enrichment(
+        client_id=client_id,
+        organization_id=user_context.organization_id,
+        conn=db_connection,
+    )
 
     return success_response(
         request=request,

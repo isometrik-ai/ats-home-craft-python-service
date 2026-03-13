@@ -2730,6 +2730,9 @@ async def test_trigger_enrichment_person_uses_conn(monkeypatch):
 
     service = ClientService(user_context=_ctx(), db_connection="db-conn")
 
+    expected_client_id = "00000000-0000-0000-0000-000000000001"
+    expected_organization_id = "00000000-0000-0000-0000-000000000101"
+
     primary = _FakePrimaryContactForEnrichment(
         first_name="John",
         last_name="Doe",
@@ -2747,18 +2750,18 @@ async def test_trigger_enrichment_person_uses_conn(monkeypatch):
 
     async def fake_get_client_details(client_id, organization_id):
         """Return fake details for trigger_enrichment tests."""
-        assert client_id == "client-1"
-        assert organization_id == "org-1"
+        assert client_id == expected_client_id
+        assert organization_id == expected_organization_id
         return details
 
     monkeypatch.setattr(service, "get_client_details", fake_get_client_details)
 
-    await service.trigger_enrichment("client-1", "org-1")
+    await service.trigger_enrichment(expected_client_id, expected_organization_id)
 
     assert len(fake_enrichment.calls) == 1
     call = fake_enrichment.calls[0]
-    assert call["client_id"] == "client-1"
-    assert call["organization_id"] == "org-1"
+    assert call["client_id"] == expected_client_id
+    assert call["organization_id"] == expected_organization_id
     assert call["client_type"] == ClientType.PERSON.value
     assert call["conn"] == "db-conn"
     payload = call["payload_data"]
@@ -2791,6 +2794,9 @@ async def test_trigger_enrichment_company_uses_conn(monkeypatch):
 
     service = ClientService(user_context=_ctx(), db_connection="db-conn-2")
 
+    expected_client_id = "00000000-0000-0000-0000-000000000002"
+    expected_organization_id = "00000000-0000-0000-0000-000000000202"
+
     primary = _FakePrimaryContactForEnrichment(
         first_name="Jane",
         last_name="Smith",
@@ -2812,18 +2818,18 @@ async def test_trigger_enrichment_company_uses_conn(monkeypatch):
 
     async def fake_get_client_details(client_id, organization_id):
         """Return fake company details for trigger_enrichment tests."""
-        assert client_id == "client-2"
-        assert organization_id == "org-2"
+        assert client_id == expected_client_id
+        assert organization_id == expected_organization_id
         return details
 
     monkeypatch.setattr(service, "get_client_details", fake_get_client_details)
 
-    await service.trigger_enrichment("client-2", "org-2")
+    await service.trigger_enrichment(expected_client_id, expected_organization_id)
 
     assert len(fake_enrichment.calls) == 1
     call = fake_enrichment.calls[0]
-    assert call["client_id"] == "client-2"
-    assert call["organization_id"] == "org-2"
+    assert call["client_id"] == expected_client_id
+    assert call["organization_id"] == expected_organization_id
     assert call["client_type"] == ClientType.COMPANY.value
     assert call["conn"] == "db-conn-2"
     payload = call["payload_data"]

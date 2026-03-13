@@ -61,6 +61,7 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_field,
     safe_json_loads,
     serialize_pydantic_models,
+    validate_uuid_format,
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 from apps.user_service.app.utils.user_utils import build_full_name
@@ -1073,12 +1074,25 @@ class ClientService:
             updated_at=format_iso_datetime(client.get("updated_at")) or "",
         )
 
-    async def trigger_enrichment(self, client_id: str, organization_id: str) -> None:
+    async def trigger_enrichment(
+        self,
+        client_id: str,
+        organization_id: str,
+        conn: asyncpg.Connection | None = None,
+    ) -> None:
         """Trigger enrichment for an existing client using current persisted data.
 
         Rebuilds the minimal enrichment payload from the latest client details and
         calls the existing ClientEnrichmentService.run_client_enrichment helper.
+
+        If conn is provided, it is passed through to the enrichment service and its
+        lifecycle is managed by the caller. When conn is None, the service falls back
+        to using the ClientService.db_connection (which is typically managed by the
+        FastAPI dependency layer).
         """
+        # Validate client_id format early to avoid DB layer errors
+        validate_uuid_format(client_id, "client_id")
+
         details = await self.get_client_details(client_id, organization_id)
 
         # Build payload from current details; only fields used by enrichment builders.
@@ -1122,7 +1136,7 @@ class ClientService:
             organization_id=organization_id,
             client_type=details.client_type.value,
             payload_data=payload_data,
-            conn=self.db_connection,
+            conn=conn or self.db_connection,
         )
 
     async def delete_client(self, client_id: str, organization_id: str) -> None:
