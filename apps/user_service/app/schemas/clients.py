@@ -760,6 +760,17 @@ class LeadInfo(BaseModel):
     updated_at: str = Field(..., description="Update timestamp")
 
 
+class CompanyContact(BaseModel):
+    """Contact linked to a company client (for All Contacts section)."""
+
+    name: str | None = Field(None, description="Full name of the contact")
+    designation: str | None = Field(None, description="Job title/designation")
+    email: str | None = Field(None, description="Email address")
+    is_primary_contact: bool = Field(
+        default=False, description="Whether this contact is the primary contact for the company"
+    )
+
+
 class ClientDetailsResponse(BaseModel):
     """Client details response schema."""
 
@@ -776,6 +787,10 @@ class ClientDetailsResponse(BaseModel):
     image_url: str | None = Field(None, description="Primary profile image URL")
     tags: list[str] = Field(default_factory=list, description="Tags")
     primary_contact: PrimaryContactInfo = Field(..., description="Primary contact information")
+    company_contacts: list[CompanyContact] = Field(
+        default_factory=list,
+        description="All contacts linked to this company (company type only)",
+    )
     websites: list[Website] = Field(default_factory=list, description="Websites")
     billing_preferences: BillingPreferences | None = Field(None, description="Billing preferences")
     custom_fields: dict[str, Any] = Field(

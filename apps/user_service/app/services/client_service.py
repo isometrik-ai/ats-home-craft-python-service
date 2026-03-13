@@ -6,6 +6,7 @@ validation, formatting, and orchestration of client operations.
 
 import json
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +27,7 @@ from apps.user_service.app.schemas.clients import (
     ClientAddressResponse,
     ClientDetailsResponse,
     ClientListResponse,
+    CompanyContact,
     CreateClientFromUserRequest,
     CreateClientRequest,
     EducationalHistoryItem,
@@ -905,6 +907,17 @@ class ClientService:
             phones=phones_list,
         )
 
+        # Build all company contacts when client type is company
+        company_contacts: list[CompanyContact] = []
+        if client.get("client_type") == ClientType.COMPANY.value:
+            raw_contacts = await self.client_repository.get_company_contacts(
+                company_client_id=client_id,
+                organization_id=organization_id,
+            )
+            company_contacts = self._map_company_contacts(raw_contacts)
+        else:
+            company_contacts = []
+
         # Parse JSONB fields
         websites_data = safe_json_loads(client.get("websites"), [])
         websites = [Website(**website) for website in websites_data] if websites_data else []
@@ -1032,6 +1045,7 @@ class ClientService:
             image_url=client.get("contact_profile_photo_url") or client.get("profile_photo_url"),
             tags=client.get("tags") or [],
             primary_contact=primary_contact,
+            company_contacts=company_contacts,
             websites=websites,
             billing_preferences=billing_preferences,
             custom_fields=custom_fields,
@@ -1380,6 +1394,21 @@ class ClientService:
                 continue
         return phones_list
 
+    @staticmethod
+    def _map_company_contacts(
+        raw_contacts: Iterable[dict[str, Any]],
+    ) -> list[CompanyContact]:
+        """Map raw DB contact rows into CompanyContact domain models."""
+        return [
+            CompanyContact(
+                name=build_full_name(r.get("first_name"), r.get("last_name")) or None,
+                designation=r.get("title"),
+                email=r.get("email"),
+                is_primary_contact=bool(r.get("is_primary_contact", False)),
+            )
+            for r in raw_contacts
+        ]
+
     async def _apply_lead_update(self, client_id: str, lead: LeadManagementUpdate) -> None:
         """Apply lead update by lead_id; only provided fields are sent to repository."""
         lead_data = lead.model_dump(exclude={"lead_id"}, exclude_none=True)
@@ -1583,7 +1612,9 @@ class ClientService:
         """Apply batch address operations: add, update, and/or remove."""
         # Remove operations
         if addresses_update.remove:
-            await self.client_repository.delete_addresses_by_ids(client_id, addresses_update.remove)
+            await self.client_repository._delete_addresses_by_ids(
+                client_id, addresses_update.remove
+            )
 
         # Update operations
         if addresses_update.update:

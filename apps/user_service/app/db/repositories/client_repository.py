@@ -501,8 +501,11 @@ class ClientRepository:
         await self.db_connection.execute(query, client_id)
         return True
 
-    async def delete_addresses_by_ids(self, client_id: str, address_ids: list[str]) -> None:
-        """Delete addresses by ids for a client."""
+    async def _delete_addresses_by_ids(self, client_id: str, address_ids: list[str]) -> None:
+        """Delete addresses by ids for a client.
+
+        This is an internal helper used by service-layer batch address operations.
+        """
         if not address_ids:
             return
         query = """
@@ -910,6 +913,33 @@ class ClientRepository:
             deleted_client_status,
         )
         return dict(row) if row else None
+
+    async def get_company_contacts(
+        self,
+        company_client_id: str,
+        organization_id: str,
+    ) -> list[dict]:
+        """Get all active contacts linked to a company client via client_company_id."""
+        query = """
+            SELECT
+                cu.first_name,
+                cu.last_name,
+                cu.title,
+                au.email,
+                cu.is_primary_contact
+            FROM client_users cu
+            LEFT JOIN auth.users au ON au.id = cu.user_id
+            WHERE cu.client_company_id = $1
+                AND cu.organization_id = $2
+                AND cu.status != $3
+        """
+        rows = await self.db_connection.fetch(
+            query,
+            company_client_id,
+            organization_id,
+            ClientUserStatus.DELETED.value,
+        )
+        return [dict(row) for row in rows]
 
     async def _get_primary_contact_for_update(
         self, client_id: str, organization_id: str
