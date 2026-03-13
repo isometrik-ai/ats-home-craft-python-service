@@ -44,6 +44,7 @@ CLIENT_JSONB_COLUMNS = frozenset(
         "linked_pages",
         "products",
         "key_people",
+        "sales_intelligence",
     }
 )
 

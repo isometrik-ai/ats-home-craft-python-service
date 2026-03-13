@@ -3,8 +3,9 @@
 Calls the external enrichment API for person (/enrich) and company (/enrich/company).
 Used after client creation to trigger async enrichment; request_id and status
 are stored on the client. Webhook handling for company and person enrichment.
-Enrichment updates only fields allowed in the Update API; never overwrites
-non-empty existing data with empty enrichment values.
+On enrichment completion, calls /enrich/sales-intelligence and stores the result
+in the client's sales_intelligence field. Enrichment updates only fields allowed
+in the Update API; never overwrites non-empty existing data with empty enrichment values.
 """
 
 import asyncio
@@ -202,6 +203,23 @@ class ClientEnrichmentService:
     async def enrich_company(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST /enrich/company for company. Returns dict with request_id, status, message."""
         return await self._post("/enrich/company", payload)
+
+    async def _fetch_sales_intelligence(
+        self, person_info: dict[str, Any], company_info: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """POST /enrich/sales-intelligence; returns sales_intelligence payload or None on error."""
+        payload = {"person_info": person_info or {}, "company_info": company_info or {}}
+        try:
+            data = await self._post("/enrich/sales-intelligence", payload)
+            if data.get("success") and isinstance(data.get("sales_intelligence"), dict):
+                return data["sales_intelligence"]
+            return None
+        except Exception as e:
+            logger.warning(
+                "Sales intelligence API failed",
+                extra={"error": str(e)},
+            )
+            return None
 
     async def run_client_enrichment(
         self,
@@ -623,6 +641,13 @@ class ClientEnrichmentService:
             addresses_data = [{"client_id": client_id, **row} for row in new_address_rows]
             await repo.bulk_create_addresses(addresses_data)
 
+        # Fetch and store sales intelligence (same base URL as enrichment)
+        sales_data = await self._fetch_sales_intelligence(
+            person_info={}, company_info=enriched_company
+        )
+        if sales_data:
+            await repo.update_client(client_id, organization_id, {"sales_intelligence": sales_data})
+
         logger.info(
             "Client updated from enrichment webhook",
             extra={"client_id": client_id, "request_id": request_id},
@@ -819,6 +844,16 @@ class ClientEnrichmentService:
         )
         _normalize_webhook_update_payload(update_data, CLIENT_JSONB_COLUMNS)
         await repo.update_client(client_id, organization_id, update_data)
+
+        # Fetch and store sales intelligence (person_info + companyInfo from profile)
+        raw_company = enriched_profile.get("companyInfo")
+        company_info = raw_company if isinstance(raw_company, dict) else {}
+        sales_data = await self._fetch_sales_intelligence(
+            person_info=enriched_profile, company_info=company_info
+        )
+        if sales_data:
+            await repo.update_client(client_id, organization_id, {"sales_intelligence": sales_data})
+
         logger.info(
             "Client updated from person enrichment webhook",
             extra={"client_id": client_id, "request_id": request_id},
