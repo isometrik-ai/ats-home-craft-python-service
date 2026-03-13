@@ -209,6 +209,7 @@ class ClientEnrichmentService:
         organization_id: str,
         client_type: str,
         payload_data: dict[str, Any],
+        conn: asyncpg.Connection | None = None,
     ) -> None:
         """Run enrichment after client creation: call API,
         then update client with request_id and status.
@@ -235,17 +236,19 @@ class ClientEnrichmentService:
             )
             return
 
-        pool = await get_pool()
-        async with AcquireConnection(pool) as conn:
+        update_data = {
+            "enrichment_request_id": request_id,
+            "enrichment_status": ClientEnrichmentStatus.REQUESTED.value,
+        }
+
+        if conn is not None:
             repo = ClientRepository(conn)
-            await repo.update_client(
-                client_id,
-                organization_id,
-                {
-                    "enrichment_request_id": request_id,
-                    "enrichment_status": ClientEnrichmentStatus.REQUESTED.value,
-                },
-            )
+            await repo.update_client(client_id, organization_id, update_data)
+        else:
+            pool = await get_pool()
+            async with AcquireConnection(pool) as acquired_conn:
+                repo = ClientRepository(acquired_conn)
+                await repo.update_client(client_id, organization_id, update_data)
         logger.info(
             "Client enrichment requested and record updated",
             extra={"client_id": client_id, "enrichment_request_id": request_id},

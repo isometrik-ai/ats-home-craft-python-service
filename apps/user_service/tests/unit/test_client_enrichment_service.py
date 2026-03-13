@@ -615,6 +615,61 @@ async def test_run_enrichment_company_calls_api_and_repo(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_enrichment_uses_existing_conn(monkeypatch):
+    """run_client_enrichment uses provided connection and skips pool."""
+    fake_conn = object()
+    mock_post = AsyncMock(return_value={"request_id": "req-xyz"})
+    mock_repo_update = AsyncMock()
+    mock_repo_instance = MagicMock()
+    mock_repo_instance.update_client = mock_repo_update
+    captured_conn = {}
+
+    def fake_client_repository(conn):
+        """Capture connection passed to ClientRepository."""
+        captured_conn["value"] = conn
+        return mock_repo_instance
+
+    def fail_get_pool():
+        """Fail if get_pool is used when conn is provided."""
+        raise AssertionError("get_pool should not be called when conn is provided")
+
+    def fail_acquire_connection(_pool):
+        """Fail if AcquireConnection is used when conn is provided."""
+        raise AssertionError("AcquireConnection should not be used when conn is provided")
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_pool",
+        AsyncMock(side_effect=fail_get_pool),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.AcquireConnection",
+        fail_acquire_connection,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        fake_client_repository,
+    )
+    monkeypatch.setattr(ClientEnrichmentService, "_post", mock_post)
+
+    svc = ClientEnrichmentService(
+        base_url="http://e",
+        webhook_url="http://w",
+        timeout_seconds=30.0,
+    )
+    await svc.run_client_enrichment(
+        client_id="c3",
+        organization_id="org-3",
+        client_type="company",
+        payload_data={"name": "Co", "email": "co@example.com"},
+        conn=fake_conn,
+    )
+
+    mock_post.assert_called_once()
+    mock_repo_update.assert_called_once()
+    assert captured_conn["value"] is fake_conn
+
+
+@pytest.mark.asyncio
 async def test_process_company_webhook_adds_addresses(monkeypatch):
     """process_company_webhook calls bulk_create_addresses when HQ/locations."""
     existing = {

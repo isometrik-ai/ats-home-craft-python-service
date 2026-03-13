@@ -50,6 +50,9 @@ from apps.user_service.app.schemas.enums import (
     IsometrikRole,
     UserEventStatus,
 )
+from apps.user_service.app.services.client_enrichment_service import (
+    ClientEnrichmentService,
+)
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -1068,6 +1071,58 @@ class ClientService:
             last_enriched_at=format_iso_datetime(client.get("last_enriched_at")),
             created_at=format_iso_datetime(client.get("created_at")) or "",
             updated_at=format_iso_datetime(client.get("updated_at")) or "",
+        )
+
+    async def trigger_enrichment(self, client_id: str, organization_id: str) -> None:
+        """Trigger enrichment for an existing client using current persisted data.
+
+        Rebuilds the minimal enrichment payload from the latest client details and
+        calls the existing ClientEnrichmentService.run_client_enrichment helper.
+        """
+        details = await self.get_client_details(client_id, organization_id)
+
+        # Build payload from current details; only fields used by enrichment builders.
+        addresses_payload = [
+            {"country": addr.country} for addr in details.addresses if addr.country
+        ]
+
+        primary = details.primary_contact
+        primary_phone = None
+        for phone in primary.phones:
+            if phone.is_primary:
+                primary_phone = phone
+                break
+        if primary_phone is None and primary.phones:
+            primary_phone = primary.phones[0]
+
+        if details.client_type == ClientType.PERSON:
+            payload_data: dict[str, Any] = {
+                "first_name": primary.first_name or "",
+                "last_name": primary.last_name or "",
+                "email": primary.email,
+                "company": details.company_name,
+                "addresses": addresses_payload,
+            }
+            if primary_phone:
+                payload_data["phone_isd_code"] = primary_phone.phone_isd_code
+                payload_data["phone_number"] = primary_phone.phone_number
+        else:
+            payload_data = {
+                "name": details.name,
+                "industry": details.industry,
+                "email": primary.email,
+                "websites": [w.model_dump(mode="json") for w in details.websites],
+                "social_pages": [s.model_dump(mode="json") for s in details.social_pages],
+                "addresses": addresses_payload,
+            }
+
+        enrichment_service = ClientEnrichmentService.from_settings()
+        await enrichment_service.run_client_enrichment(
+            client_id=client_id,
+            organization_id=organization_id,
+            client_type=details.client_type.value,
+            payload_data=payload_data,
+            conn=self.db_connection,
         )
 
     async def delete_client(self, client_id: str, organization_id: str) -> None:

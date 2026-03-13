@@ -2616,3 +2616,220 @@ async def test_apply_jsonb_social_pages_non_list(monkeypatch):
     )
 
     assert "update_client" in fake_repo.calls
+
+
+class _FakeAddressForEnrichment:
+    """Simple address object for enrichment trigger tests."""
+
+    def __init__(self, country: str):
+        self.country = country
+        self.countrycle = country
+
+
+class _FakePhoneForEnrichment:
+    """Simple phone object for enrichment trigger tests."""
+
+    def __init__(self, code: str, number: str, is_primary: bool = True):
+        self.phone_isd_code = code
+        self.phone_number = number
+        self.is_primary = is_primary
+
+
+class _FakePrimaryContactForEnrichment:
+    """Primary contact object with minimal fields for enrichment."""
+
+    def __init__(self, first_name: str, last_name: str, email: str, phones):
+        self.first_name = first_name
+        self.last_name = last_name
+        self.email = email
+        self.phones = phones
+
+
+class _FakeWebsiteModel:
+    """Website model stub with model_dump method."""
+
+    def __init__(self, url: str):
+        self._url = url
+
+    def model_dump(self, mode: str = "json"):
+        """Return a dict in the same shape as real Website."""
+        del mode
+        return {"url": self._url}
+
+
+class _FakeSocialPageModel:
+    """Social page model stub with model_dump method."""
+
+    def __init__(self, platform: str, url: str):
+        self._platform = platform
+        self._url = url
+
+    def model_dump(self, mode: str = "json"):
+        """Return a dict in the same shape as real SocialPage."""
+        del mode
+        return {"platform": self._platform, "url": self._url}
+
+
+class _FakeDetailsForEnrichment:
+    """Details object used by trigger_enrichment tests."""
+
+    def __init__(self, client_type, name, company_name, industry, primary_contact, addresses):
+        self.client_type = client_type
+        self.name = name
+        self.company_name = company_name
+        self.industry = industry
+        self.primary_contact = primary_contact
+        self.addresses = addresses
+        self.websites = []
+        self.social_pages = []
+
+
+class _FakeEnrichmentService:
+    """Fake enrichment service recording run_client_enrichment calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def run_client_enrichment(
+        self,
+        client_id,
+        organization_id,
+        client_type,
+        payload_data,
+        conn=None,
+    ):
+        """Record enrichment call parameters."""
+        self.calls.append(
+            {
+                "client_id": client_id,
+                "organization_id": organization_id,
+                "client_type": client_type,
+                "payload_data": payload_data,
+                "conn": conn,
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_trigger_enrichment_person_uses_conn(monkeypatch):
+    """trigger_enrichment builds person payload and passes db connection."""
+    fake_enrichment = _FakeEnrichmentService()
+
+    class _FakeEnrichmentFactory:
+        """Factory exposing from_settings for enrichment tests."""
+
+        @staticmethod
+        def from_settings():
+            """Return pre-configured fake enrichment service."""
+            return fake_enrichment
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientEnrichmentService",
+        _FakeEnrichmentFactory,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection="db-conn")
+
+    primary = _FakePrimaryContactForEnrichment(
+        first_name="John",
+        last_name="Doe",
+        email="john@example.com",
+        phones=[_FakePhoneForEnrichment(code="+1", number="1234567890")],
+    )
+    details = _FakeDetailsForEnrichment(
+        client_type=ClientType.PERSON,
+        name="John Doe",
+        company_name="Acme Corp",
+        industry="Tech",
+        primary_contact=primary,
+        addresses=[_FakeAddressForEnrichment(country="United States")],
+    )
+
+    async def fake_get_client_details(client_id, organization_id):
+        """Return fake details for trigger_enrichment tests."""
+        assert client_id == "client-1"
+        assert organization_id == "org-1"
+        return details
+
+    monkeypatch.setattr(service, "get_client_details", fake_get_client_details)
+
+    await service.trigger_enrichment("client-1", "org-1")
+
+    assert len(fake_enrichment.calls) == 1
+    call = fake_enrichment.calls[0]
+    assert call["client_id"] == "client-1"
+    assert call["organization_id"] == "org-1"
+    assert call["client_type"] == ClientType.PERSON.value
+    assert call["conn"] == "db-conn"
+    payload = call["payload_data"]
+    assert payload["first_name"] == "John"
+    assert payload["last_name"] == "Doe"
+    assert payload["email"] == "john@example.com"
+    assert payload["company"] == "Acme Corp"
+    assert payload["addresses"] == [{"country": "United States"}]
+    assert payload["phone_isd_code"] == "+1"
+    assert payload["phone_number"] == "1234567890"
+
+
+@pytest.mark.asyncio
+async def test_trigger_enrichment_company_uses_conn(monkeypatch):
+    """trigger_enrichment builds company payload and passes db connection."""
+    fake_enrichment = _FakeEnrichmentService()
+
+    class _FakeEnrichmentFactory:
+        """Factory exposing from_settings for company enrichment tests."""
+
+        @staticmethod
+        def from_settings():
+            """Return pre-configured fake enrichment service."""
+            return fake_enrichment
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientEnrichmentService",
+        _FakeEnrichmentFactory,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection="db-conn-2")
+
+    primary = _FakePrimaryContactForEnrichment(
+        first_name="Jane",
+        last_name="Smith",
+        email="jane@example.com",
+        phones=[_FakePhoneForEnrichment(code="+44", number="987654321")],
+    )
+    details = _FakeDetailsForEnrichment(
+        client_type=ClientType.COMPANY,
+        name="Example Co",
+        company_name="Example Co",
+        industry="Legal",
+        primary_contact=primary,
+        addresses=[_FakeAddressForEnrichment(country="United Kingdom")],
+    )
+    details.websites = [_FakeWebsiteModel(url="https://example.com")]
+    details.social_pages = [
+        _FakeSocialPageModel(platform="linkedin", url="https://linkedin.com/company/x")
+    ]
+
+    async def fake_get_client_details(client_id, organization_id):
+        """Return fake company details for trigger_enrichment tests."""
+        assert client_id == "client-2"
+        assert organization_id == "org-2"
+        return details
+
+    monkeypatch.setattr(service, "get_client_details", fake_get_client_details)
+
+    await service.trigger_enrichment("client-2", "org-2")
+
+    assert len(fake_enrichment.calls) == 1
+    call = fake_enrichment.calls[0]
+    assert call["client_id"] == "client-2"
+    assert call["organization_id"] == "org-2"
+    assert call["client_type"] == ClientType.COMPANY.value
+    assert call["conn"] == "db-conn-2"
+    payload = call["payload_data"]
+    assert payload["name"] == "Example Co"
+    assert payload["industry"] == "Legal"
+    assert payload["email"] == "jane@example.com"
+    assert payload["addresses"] == [{"country": "United Kingdom"}]
+    assert payload["websites"][0]["url"] == "https://example.com"
+    assert payload["social_pages"][0]["platform"] == "linkedin"
