@@ -731,6 +731,7 @@ class ClientService:
             ConflictException: If email/phone/name already exists
             ServiceUnavailableException: If auth or Isometrik creation fails
             ValidationException: If validation fails
+            UniqueViolationError: If primary contact already exists
         """
         organization_id = self.user_context.organization_id
 
