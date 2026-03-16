@@ -85,6 +85,26 @@ class CloudflareR2Settings(BaseSettings):
     media_url: str = config("R2_MEDIA_URL")
 
 
+class TypesenseSettings(BaseSettings):
+    """Typesense cluster and API key configuration."""
+
+    host: str = config("TYPESENSE_HOST")
+    port: int = config("TYPESENSE_PORT", default=8108)
+    protocol: str = config("TYPESENSE_PROTOCOL", default="https")
+    admin_api_key: str = config("TYPESENSE_ADMIN_API_KEY")
+    search_only_api_key: str = config("TYPESENSE_SEARCH_ONLY_KEY")
+    collection_name: str = config("TYPESENSE_COLLECTION_NAME", default="clients")
+    connection_timeout_seconds: float = config(
+        "TYPESENSE_CONNECTION_TIMEOUT_SECONDS",
+        default=5.0,
+    )
+    num_retries: int = config("TYPESENSE_NUM_RETRIES", default=3)
+    retry_interval_seconds: float = config(
+        "TYPESENSE_RETRY_INTERVAL_SECONDS",
+        default=0.1,
+    )
+
+
 class SharedAppSettings(BaseSettings):
     """Application settings."""
 
@@ -92,6 +112,7 @@ class SharedAppSettings(BaseSettings):
     supabase: SupabaseSettings = SupabaseSettings()
     isometrik: IsometrikSettings = IsometrikSettings()
     cloudflare_r2: CloudflareR2Settings = CloudflareR2Settings()
+    typesense: TypesenseSettings = TypesenseSettings()
     environment: EnvironmentOption = config("ENVIRONMENT", default=EnvironmentOption.LOCAL)
     log_level: LogLevelOption = config("LOG_LEVEL", default=LogLevelOption.INFO.value)
     website_url: str = config("WEBSITE_URL")
