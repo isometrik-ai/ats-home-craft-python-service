@@ -68,6 +68,7 @@ from apps.user_service.app.utils.common_utils import (
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 from apps.user_service.app.utils.user_utils import build_full_name
+from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.supabase_db.auth_repository import create_user
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -84,6 +85,23 @@ from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.typesense_service import TypesenseService
 
 logger = get_logger("client_service")
+
+
+async def index_clients_in_typesense_background(
+    client_refs: Iterable[tuple[str, str]],
+) -> None:
+    """Index the given client refs into Typesense using a pool connection.
+
+    For use from background tasks (e.g. webhooks, post-create) where no
+    request-scoped DB connection is available. Acquires its own connection.
+    """
+    refs = list(client_refs)
+    if not refs:
+        return
+    pool = await get_pool()
+    async with AcquireConnection(pool) as conn:
+        service = ClientService(db_connection=conn)
+        await service._index_clients_in_typesense(refs)
 
 
 def should_mark_primary_on_create(

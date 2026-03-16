@@ -22,7 +22,10 @@ from apps.user_service.app.schemas.enums import ClientStatus, ClientType
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
-from apps.user_service.app.services.client_service import ClientService
+from apps.user_service.app.services.client_service import (
+    ClientService,
+    index_clients_in_typesense_background,
+)
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
@@ -196,13 +199,10 @@ async def create_client(
             payload_data,
         )
 
-    # a background task so it does not impact request latency.
+    # Best-effort Typesense indexing, offloaded to background task (uses own DB connection).
     if result.records:
         client_refs = [(str(r["id"]), str(r["organization_id"])) for r in result.records]
-        background_tasks.add_task(
-            client_service._index_clients_in_typesense,
-            client_refs,
-        )
+        background_tasks.add_task(index_clients_in_typesense_background, client_refs)
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
@@ -467,7 +467,7 @@ async def update_client(
         request.state.raw_audit_new_data = body.model_dump(exclude_unset=True, exclude_none=True)
         # Best-effort Typesense indexing after update, offloaded to background task.
         background_tasks.add_task(
-            client_service._index_clients_in_typesense,
+            index_clients_in_typesense_background,
             [(client_id, user_context.organization_id)],
         )
 
