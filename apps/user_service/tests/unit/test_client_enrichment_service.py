@@ -491,7 +491,7 @@ async def test_person_webhook_finds_client_and_updates(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_company_webhook_updates_client_only_sales_intel_in_bg(monkeypatch):
+async def test_company_webhook_updates_client_sales_intel(monkeypatch):
     """Company webhook updates client record only; sales intelligence runs in background task."""
     existing = {
         "id": "c1",
@@ -504,6 +504,8 @@ async def test_company_webhook_updates_client_only_sales_intel_in_bg(monkeypatch
     mock_bulk_addresses = AsyncMock()
 
     class FakeRepo:
+        """Minimal ClientRepository double for company webhook tests."""
+
         get_client_for_update = mock_get
         update_client = mock_update
         bulk_create_addresses = mock_bulk_addresses
@@ -700,7 +702,7 @@ async def test_sales_intel_client_not_found(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sales_intel_company_webhook_path(monkeypatch):
-    """fetch_and_store_sales_intelligence with enriched_company stores sales intel (company webhook bg task)."""
+    """fetch_and_store_sales_intelligence with enriched_company stores sales intel"""
     existing = {
         "id": "c1",
         "organization_id": "org-1",
@@ -711,6 +713,8 @@ async def test_sales_intel_company_webhook_path(monkeypatch):
     sales_payload = {"summary": "company report"}
 
     class FakeRepo:
+        """Minimal ClientRepository double for sales intelligence tests."""
+
         get_client_for_update = mock_get
         update_client = mock_update
 

@@ -72,14 +72,12 @@ async def enrichment_webhook(
             db_connection, body
         )
     else:
-        client_ref = await enrichment_service.process_person_enrichment_webhook(
-            db_connection, body
-        )
+        client_ref = await enrichment_service.process_person_enrichment_webhook(db_connection, body)
 
     # Single generic background task: pass both payloads when present; service uses the right one.
     background_tasks.add_task(
         enrichment_service.fetch_and_store_sales_intelligence_for_request,
-        request_id=request_id, 
+        request_id=request_id,
         enriched_company=body.get("enriched_company"),
         enriched_profile=body.get("enriched_profile"),
     )

@@ -672,7 +672,6 @@ class ClientEnrichmentService:
             addresses_data = [{"client_id": client_id, **row} for row in new_address_rows]
             await repo.bulk_create_addresses(addresses_data)
 
-
         logger.info(
             "Client updated from enrichment webhook",
             extra={"client_id": client_id, "request_id": request_id},
