@@ -463,3 +463,66 @@ async def update_client(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
+
+
+@handle_api_exceptions("enrich client")
+@router.post(
+    "/enrich/{client_id}",
+    status_code=http_status.HTTP_202_ACCEPTED,
+    description="Trigger enrichment for a client using current data",
+    summary="Enrich client",
+    responses={
+        http_status.HTTP_202_ACCEPTED: {"description": "Client enrichment requested"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Client not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("50/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="clients",
+    category="CLIENT",
+)
+async def enrich_client(
+    request: Request,
+    client_id: str = Path(..., description="Client ID"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Trigger client enrichment by client ID."""
+    request.state.audit_table = "clients"
+    request.state.audit_requested_id = client_id
+    request.state.audit_description = f"Enriched client: {client_id}"
+    request.state.audit_risk_level = "medium"
+
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CLIENTS_MANAGEMENT_EDIT,
+    )
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    client_service = ClientService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    await client_service.trigger_enrichment(
+        client_id=client_id,
+        organization_id=user_context.organization_id,
+        conn=db_connection,
+    )
+
+    return success_response(
+        request=request,
+        message_key="clients.success.client_enrichment_requested",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_202_ACCEPTED,
+    )

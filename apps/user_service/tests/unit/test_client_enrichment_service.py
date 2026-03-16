@@ -370,6 +370,32 @@ async def test_run_client_enrichment_empty_items():
 
 
 @pytest.mark.asyncio
+async def test_fetch_sales_intelligence_returns_payload(monkeypatch):
+    """_fetch_sales_intelligence returns sales_intelligence dict when API succeeds."""
+    payload = {"summary": "report", "scores": {"a": 1}}
+    mock_post = AsyncMock(return_value={"success": True, "sales_intelligence": payload})
+    monkeypatch.setattr(ClientEnrichmentService, "_post", mock_post)
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    result = await svc._fetch_sales_intelligence(
+        person_info={"name": "Jane"}, company_info={"companyName": "Co"}
+    )
+    assert result == payload
+    mock_post.assert_called_once_with(
+        "/enrich/sales-intelligence",
+        {"person_info": {"name": "Jane"}, "company_info": {"companyName": "Co"}},
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_sales_intelligence_none_on_failure(monkeypatch):
+    """_fetch_sales_intelligence returns None when API fails or returns invalid data."""
+    monkeypatch.setattr(ClientEnrichmentService, "_post", AsyncMock(side_effect=Exception("err")))
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    result = await svc._fetch_sales_intelligence(person_info={}, company_info={})
+    assert result is None
+
+
+@pytest.mark.asyncio
 async def test_company_webhook_no_request_id_returns_false():
     """process_company_enrichment_webhook returns False when request_id missing."""
     svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
@@ -406,6 +432,8 @@ async def test_company_webhook_finds_client_and_updates(monkeypatch):
         "apps.user_service.app.services.client_enrichment_service.ClientRepository",
         lambda conn: FakeRepo(),
     )
+    mock_fetch_sales = AsyncMock(return_value=None)
+    monkeypatch.setattr(ClientEnrichmentService, "_fetch_sales_intelligence", mock_fetch_sales)
     svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
     body = {
         "request_id": "req-1",
@@ -447,6 +475,8 @@ async def test_person_webhook_finds_client_and_updates(monkeypatch):
         "apps.user_service.app.services.client_enrichment_service.ClientRepository",
         lambda conn: FakeRepo(),
     )
+    mock_fetch_sales = AsyncMock(return_value=None)
+    monkeypatch.setattr(ClientEnrichmentService, "_fetch_sales_intelligence", mock_fetch_sales)
     svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
     body = {
         "request_id": "req-1",
@@ -458,6 +488,47 @@ async def test_person_webhook_finds_client_and_updates(monkeypatch):
     assert result is True
     mock_update.assert_called_once()
     assert mock_update.call_args[0][2].get("name") == "Jane Doe"
+
+
+@pytest.mark.asyncio
+async def test_company_webhook_persists_sales_intelligence(monkeypatch):
+    """When sales intelligence API returns data, it is stored on the client."""
+    existing = {
+        "id": "c1",
+        "organization_id": "org-1",
+        "name": "Old",
+        "additional_data": None,
+    }
+    mock_get = AsyncMock(return_value=existing)
+    mock_update = AsyncMock()
+    mock_bulk_addresses = AsyncMock()
+
+    class FakeRepo:
+        """Minimal ClientRepository double for company webhook sales intelligence tests."""
+
+        get_client_for_update = mock_get
+        update_client = mock_update
+        bulk_create_addresses = mock_bulk_addresses
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda conn: FakeRepo(),
+    )
+    sales_payload = {"summary": "test report", "scores": {}}
+    mock_fetch_sales = AsyncMock(return_value=sales_payload)
+    monkeypatch.setattr(ClientEnrichmentService, "_fetch_sales_intelligence", mock_fetch_sales)
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    body = {
+        "request_id": "req-1",
+        "enriched_company": {"companyName": "New Co", "industry": "Tech"},
+    }
+    result = await svc.process_company_enrichment_webhook(MagicMock(), body)
+    assert result is True
+    assert mock_update.call_count == 2
+    first_call_data = mock_update.call_args_list[0][0][2]
+    assert first_call_data.get("name") == "New Co"
+    second_call_data = mock_update.call_args_list[1][0][2]
+    assert second_call_data == {"sales_intelligence": sales_payload}
 
 
 @pytest.mark.asyncio
@@ -580,6 +651,182 @@ def test_build_person_enrichment_social_and_skills():
     assert update["skills"] == ["Python", "Go"]
 
 
+class _FakePool:
+    """Minimal pool double used for sales intelligence tests."""
+
+
+@pytest.mark.asyncio
+async def test_sales_intel_empty_request_id(monkeypatch):
+    """fetch_and_store_sales_intelligence_for_request ignores empty request_id."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_pool",
+        AsyncMock(return_value=_FakePool()),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.AcquireConnection",
+        lambda _pool: _FakeConnCM(),
+    )
+    svc = ClientEnrichmentService(
+        base_url="http://e",
+        webhook_url="http://w",
+        timeout_seconds=30.0,
+    )
+    await svc.fetch_and_store_sales_intelligence_for_request("", {})
+
+
+@pytest.mark.asyncio
+async def test_sales_intel_client_not_found(monkeypatch):
+    """fetch_and_store_sales_intelligence logs when client not found."""
+    mock_get = AsyncMock(return_value=None)
+
+    class FakeRepo:
+        """Minimal ClientRepository double for sales intelligence tests."""
+
+        get_client_for_update = mock_get
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_pool",
+        AsyncMock(return_value=_FakePool()),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.AcquireConnection",
+        lambda _pool: _FakeConnCM(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda conn: FakeRepo(),
+    )
+
+    svc = ClientEnrichmentService(
+        base_url="http://e",
+        webhook_url="http://w",
+        timeout_seconds=30.0,
+    )
+    await svc.fetch_and_store_sales_intelligence_for_request("req-404")
+    mock_get.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sales_intel_uses_body_profile(monkeypatch):
+    """fetch_and_store_sales_intelligence prefers enriched_profile from body."""
+    existing = {
+        "id": "c1",
+        "organization_id": "org-1",
+        "additional_data": None,
+    }
+    mock_get = AsyncMock(return_value=existing)
+    mock_update = AsyncMock()
+    sales_payload = {"summary": "sales", "scores": {}}
+
+    class FakeRepo:
+        """Minimal ClientRepository double for sales intelligence tests."""
+
+        get_client_for_update = mock_get
+        update_client = mock_update
+
+    async def fake_fetch_sales(_self, person_info, company_info):
+        assert person_info.get("personalInfo", {}).get("firstName") == "Jane"
+        assert company_info == {"website": "https://co.com"}
+        return sales_payload
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_pool",
+        AsyncMock(return_value=_FakePool()),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.AcquireConnection",
+        lambda _pool: _FakeConnCM(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda conn: FakeRepo(),
+    )
+    monkeypatch.setattr(
+        ClientEnrichmentService,
+        "_fetch_sales_intelligence",
+        fake_fetch_sales,
+    )
+
+    svc = ClientEnrichmentService(
+        base_url="http://e",
+        webhook_url="http://w",
+        timeout_seconds=30.0,
+    )
+    profile = {
+        "personalInfo": {"firstName": "Jane"},
+        "companyInfo": {"website": "https://co.com"},
+    }
+    await svc.fetch_and_store_sales_intelligence_for_request(
+        "req-1",
+        enriched_profile=profile,
+    )
+    mock_get.assert_awaited_once()
+    mock_update.assert_awaited_once()
+    call_args = mock_update.call_args[0]
+    assert call_args[0] == "c1"
+    assert call_args[1] == "org-1"
+    assert call_args[2] == {"sales_intelligence": sales_payload}
+
+
+@pytest.mark.asyncio
+async def test_sales_intel_uses_stored_profile(monkeypatch):
+    """fetch_and_store_sales_intelligence falls back to stored profile."""
+    existing = {
+        "id": "c1",
+        "organization_id": "org-1",
+        "additional_data": '{"enriched_profile": {"personalInfo": {"firstName": "John"},'
+        '"companyInfo": {"website": "https://stored.com"}}}',
+    }
+    mock_get = AsyncMock(return_value=existing)
+    mock_update = AsyncMock()
+    sales_payload = {"summary": "stored", "scores": {}}
+
+    class FakeRepo:
+        """Minimal ClientRepository double for sales intelligence tests."""
+
+        get_client_for_update = mock_get
+        update_client = mock_update
+
+    async def fake_fetch_sales(*_args, **kwargs):
+        person_info = kwargs["person_info"]
+        assert person_info["companyInfo"]["website"] == "https://stored.com"
+        return sales_payload
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_pool",
+        AsyncMock(return_value=_FakePool()),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.AcquireConnection",
+        lambda _pool: _FakeConnCM(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        lambda conn: FakeRepo(),
+    )
+    monkeypatch.setattr(
+        ClientEnrichmentService,
+        "_fetch_sales_intelligence",
+        fake_fetch_sales,
+    )
+
+    svc = ClientEnrichmentService(
+        base_url="http://e",
+        webhook_url="http://w",
+        timeout_seconds=30.0,
+    )
+    await svc.fetch_and_store_sales_intelligence_for_request(
+        "req-1",
+        enriched_profile=None,
+    )
+    mock_get.assert_awaited_once()
+    mock_update.assert_awaited_once()
+    call_args = mock_update.call_args[0]
+    assert call_args[0] == "c1"
+    assert call_args[1] == "org-1"
+    assert call_args[2] == {"sales_intelligence": sales_payload}
+
+
 @pytest.mark.asyncio
 async def test_run_enrichment_company_calls_api_and_repo(monkeypatch):
     """run_client_enrichment for company calls enrich/company and updates client."""
@@ -615,6 +862,61 @@ async def test_run_enrichment_company_calls_api_and_repo(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_enrichment_uses_existing_conn(monkeypatch):
+    """run_client_enrichment uses provided connection and skips pool."""
+    fake_conn = object()
+    mock_post = AsyncMock(return_value={"request_id": "req-xyz"})
+    mock_repo_update = AsyncMock()
+    mock_repo_instance = MagicMock()
+    mock_repo_instance.update_client = mock_repo_update
+    captured_conn = {}
+
+    def fake_client_repository(conn):
+        """Capture connection passed to ClientRepository."""
+        captured_conn["value"] = conn
+        return mock_repo_instance
+
+    def fail_get_pool():
+        """Fail if get_pool is used when conn is provided."""
+        raise AssertionError("get_pool should not be called when conn is provided")
+
+    def fail_acquire_connection(_pool):
+        """Fail if AcquireConnection is used when conn is provided."""
+        raise AssertionError("AcquireConnection should not be used when conn is provided")
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_pool",
+        AsyncMock(side_effect=fail_get_pool),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.AcquireConnection",
+        fail_acquire_connection,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ClientRepository",
+        fake_client_repository,
+    )
+    monkeypatch.setattr(ClientEnrichmentService, "_post", mock_post)
+
+    svc = ClientEnrichmentService(
+        base_url="http://e",
+        webhook_url="http://w",
+        timeout_seconds=30.0,
+    )
+    await svc.run_client_enrichment(
+        client_id="c3",
+        organization_id="org-3",
+        client_type="company",
+        payload_data={"name": "Co", "email": "co@example.com"},
+        conn=fake_conn,
+    )
+
+    mock_post.assert_called_once()
+    mock_repo_update.assert_called_once()
+    assert captured_conn["value"] is fake_conn
+
+
+@pytest.mark.asyncio
 async def test_process_company_webhook_adds_addresses(monkeypatch):
     """process_company_webhook calls bulk_create_addresses when HQ/locations."""
     existing = {
@@ -638,6 +940,8 @@ async def test_process_company_webhook_adds_addresses(monkeypatch):
         "apps.user_service.app.services.client_enrichment_service.ClientRepository",
         lambda conn: FakeRepo(),
     )
+    mock_fetch_sales = AsyncMock(return_value=None)
+    monkeypatch.setattr(ClientEnrichmentService, "_fetch_sales_intelligence", mock_fetch_sales)
     svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
     body = {
         "request_id": "req-1",

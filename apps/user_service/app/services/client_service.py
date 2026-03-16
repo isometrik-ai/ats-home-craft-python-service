@@ -12,6 +12,7 @@ from typing import Any
 
 import asyncpg
 import httpx
+from asyncpg import UniqueViolationError
 from supabase import AsyncClient
 
 from apps.user_service.app.config.app_settings import app_settings, shared_settings
@@ -50,6 +51,9 @@ from apps.user_service.app.schemas.enums import (
     IsometrikRole,
     UserEventStatus,
 )
+from apps.user_service.app.services.client_enrichment_service import (
+    ClientEnrichmentService,
+)
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -58,6 +62,7 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_field,
     safe_json_loads,
     serialize_pydantic_models,
+    validate_uuid_format,
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 from apps.user_service.app.utils.user_utils import build_full_name
@@ -727,6 +732,7 @@ class ClientService:
             ConflictException: If email/phone/name already exists
             ServiceUnavailableException: If auth or Isometrik creation fails
             ValidationException: If validation fails
+            UniqueViolationError: If primary contact already exists
         """
         organization_id = self.user_context.organization_id
 
@@ -759,7 +765,7 @@ class ClientService:
         )
         try:
             await self.client_repository.create_client_user(client_user_data)
-        except asyncpg.UniqueViolationError as exc:
+        except UniqueViolationError as exc:
             constraint = getattr(exc, "constraint_name", None)
             if constraint in {
                 "client_users_one_primary_per_client",
@@ -1068,6 +1074,71 @@ class ClientService:
             last_enriched_at=format_iso_datetime(client.get("last_enriched_at")),
             created_at=format_iso_datetime(client.get("created_at")) or "",
             updated_at=format_iso_datetime(client.get("updated_at")) or "",
+        )
+
+    async def trigger_enrichment(
+        self,
+        client_id: str,
+        organization_id: str,
+        conn: asyncpg.Connection | None = None,
+    ) -> None:
+        """Trigger enrichment for an existing client using current persisted data.
+
+        Rebuilds the minimal enrichment payload from the latest client details and
+        calls the existing ClientEnrichmentService.run_client_enrichment helper.
+
+        If conn is provided, it is passed through to the enrichment service and its
+        lifecycle is managed by the caller. When conn is None, the service falls back
+        to using the ClientService.db_connection (which is typically managed by the
+        FastAPI dependency layer).
+        """
+        # Validate client_id format early to avoid DB layer errors
+        validate_uuid_format(client_id, "client_id")
+
+        details = await self.get_client_details(client_id, organization_id)
+
+        # Build payload from current details; only fields used by enrichment builders.
+        addresses_payload = [
+            {"country": addr.country} for addr in details.addresses if addr.country
+        ]
+
+        primary = details.primary_contact
+        primary_phone = None
+        for phone in primary.phones:
+            if phone.is_primary:
+                primary_phone = phone
+                break
+        if primary_phone is None and primary.phones:
+            primary_phone = primary.phones[0]
+
+        if details.client_type == ClientType.PERSON:
+            payload_data: dict[str, Any] = {
+                "first_name": primary.first_name or "",
+                "last_name": primary.last_name or "",
+                "email": primary.email,
+                "company": details.company_name,
+                "addresses": addresses_payload,
+            }
+            if primary_phone:
+                payload_data["phone_isd_code"] = primary_phone.phone_isd_code
+                payload_data["phone_number"] = primary_phone.phone_number
+        else:
+            payload_data = {
+                "name": details.name,
+                "industry": details.industry,
+                "email": primary.email,
+                "websites": [w.model_dump(mode="json") for w in details.websites],
+                "social_pages": [s.model_dump(mode="json") for s in details.social_pages],
+                "addresses": addresses_payload,
+            }
+
+        enrichment_service = ClientEnrichmentService.from_settings()
+        await enrichment_service.run_client_enrichment(
+            client_id=client_id,
+            organization_id=organization_id,
+            client_type=details.client_type.value,
+            payload_data=payload_data,
+            conn=conn or self.db_connection,
         )
 
     async def delete_client(self, client_id: str, organization_id: str) -> None:

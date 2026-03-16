@@ -3,8 +3,9 @@
 Calls the external enrichment API for person (/enrich) and company (/enrich/company).
 Used after client creation to trigger async enrichment; request_id and status
 are stored on the client. Webhook handling for company and person enrichment.
-Enrichment updates only fields allowed in the Update API; never overwrites
-non-empty existing data with empty enrichment values.
+On enrichment completion, calls /enrich/sales-intelligence and stores the result
+in the client's sales_intelligence field. Enrichment updates only fields allowed
+in the Update API; never overwrites non-empty existing data with empty enrichment values.
 """
 
 import asyncio
@@ -203,16 +204,37 @@ class ClientEnrichmentService:
         """POST /enrich/company for company. Returns dict with request_id, status, message."""
         return await self._post("/enrich/company", payload)
 
+    async def _fetch_sales_intelligence(
+        self, person_info: dict[str, Any], company_info: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """POST /enrich/sales-intelligence; returns sales_intelligence payload or None on error."""
+        payload = {"person_info": person_info or {}, "company_info": company_info or {}}
+        try:
+            data = await self._post("/enrich/sales-intelligence", payload)
+            if data.get("success") and isinstance(data.get("sales_intelligence"), dict):
+                return data["sales_intelligence"]
+            return None
+        except Exception as e:
+            logger.warning(
+                "Sales intelligence API failed",
+                extra={"error": str(e)},
+            )
+            return None
+
     async def run_client_enrichment(
         self,
         client_id: str,
         organization_id: str,
         client_type: str,
         payload_data: dict[str, Any],
+        conn: asyncpg.Connection | None = None,
     ) -> None:
-        """Run enrichment after client creation: call API,
-        then update client with request_id and status.
-        Only runs for client_type 'person' or 'company'. Uses its own DB connection.
+        """Run enrichment after client creation: call API, then update client with
+        request_id and status.
+
+        Runs only for client_type 'person' or 'company'. If conn is provided, uses
+        the caller-managed connection (the caller is responsible for closing it);
+        otherwise acquires a connection from the pool for the duration of this call.
         """
         webhook_url = self._webhook_url
         if client_type == ClientType.PERSON.value:
@@ -235,21 +257,45 @@ class ClientEnrichmentService:
             )
             return
 
-        pool = await get_pool()
-        async with AcquireConnection(pool) as conn:
-            repo = ClientRepository(conn)
-            await repo.update_client(
-                client_id,
-                organization_id,
-                {
-                    "enrichment_request_id": request_id,
-                    "enrichment_status": ClientEnrichmentStatus.REQUESTED.value,
-                },
-            )
+        await self.update_client_enrichment_status(
+            client_id=client_id,
+            organization_id=organization_id,
+            request_id=request_id,
+            status=ClientEnrichmentStatus.REQUESTED.value,
+            conn=conn,
+        )
         logger.info(
             "Client enrichment requested and record updated",
             extra={"client_id": client_id, "enrichment_request_id": request_id},
         )
+
+    async def update_client_enrichment_status(
+        self,
+        client_id: str,
+        organization_id: str,
+        request_id: str,
+        status: str,
+        conn: asyncpg.Connection | None = None,
+    ) -> None:
+        """Update client enrichment request id and status.
+
+        Centralizes logic for updating enrichment_request_id/enrichment_status using an
+        optional caller-managed connection or acquiring one from the pool.
+        """
+        update_data = {
+            "enrichment_request_id": request_id,
+            "enrichment_status": status,
+        }
+
+        if conn is not None:
+            repo = ClientRepository(conn)
+            await repo.update_client(client_id, organization_id, update_data)
+            return
+
+        pool = await get_pool()
+        async with AcquireConnection(pool) as acquired_conn:
+            repo = ClientRepository(acquired_conn)
+            await repo.update_client(client_id, organization_id, update_data)
 
     async def run_bulk_client_enrichment(
         self,
@@ -595,6 +641,13 @@ class ClientEnrichmentService:
             addresses_data = [{"client_id": client_id, **row} for row in new_address_rows]
             await repo.bulk_create_addresses(addresses_data)
 
+        # Fetch and store sales intelligence (same base URL as enrichment)
+        sales_data = await self._fetch_sales_intelligence(
+            person_info={}, company_info=enriched_company
+        )
+        if sales_data:
+            await repo.update_client(client_id, organization_id, {"sales_intelligence": sales_data})
+
         logger.info(
             "Client updated from enrichment webhook",
             extra={"client_id": client_id, "request_id": request_id},
@@ -791,8 +844,77 @@ class ClientEnrichmentService:
         )
         _normalize_webhook_update_payload(update_data, CLIENT_JSONB_COLUMNS)
         await repo.update_client(client_id, organization_id, update_data)
+
         logger.info(
             "Client updated from person enrichment webhook",
             extra={"client_id": client_id, "request_id": request_id},
         )
         return True
+
+    async def fetch_and_store_sales_intelligence_for_request(
+        self, request_id: str, enriched_profile: dict[str, Any] | None = None
+    ) -> None:
+        """Fetch sales intelligence for a given enrichment request and persist it.
+
+        This is designed to be called from a background task so that the main
+        webhook processing path is not blocked by the external sales-intelligence
+        service. It is safe to call multiple times for the same request_id; the
+        latest successful response will simply overwrite the existing
+        sales_intelligence field for the client.
+        """
+        if not request_id or not isinstance(request_id, str):
+            return
+
+        pool = await get_pool()
+        async with AcquireConnection(pool) as conn:
+            repo = ClientRepository(conn)
+            existing = await repo.get_client_for_update(enrichment_request_id=request_id)
+            if not existing:
+                logger.error(
+                    "Sales intelligence: no client found for request_id",
+                    extra={"request_id": request_id},
+                )
+                return
+
+            client_id = existing["id"]
+            organization_id = existing["organization_id"]
+
+            # Prefer the enriched_profile passed from the webhook body if available;
+            # otherwise, fall back to the stored additional_data.enriched_profile.
+            profile: dict[str, Any] | None = None
+            if isinstance(enriched_profile, dict) and enriched_profile:
+                profile = enriched_profile
+            else:
+                existing_additional_raw = existing.get("additional_data")
+                existing_additional = safe_json_loads(existing_additional_raw)
+                if isinstance(existing_additional, dict):
+                    stored_profile = existing_additional.get("enriched_profile")
+                    if isinstance(stored_profile, dict):
+                        profile = stored_profile
+
+            if not isinstance(profile, dict) or not profile:
+                logger.warning(
+                    "Sales intelligence: no enriched_profile available for request_id",
+                    extra={"request_id": request_id, "client_id": client_id},
+                )
+                return
+
+            raw_company = profile.get("companyInfo")
+            company_info = raw_company if isinstance(raw_company, dict) else {}
+
+            sales_data = await self._fetch_sales_intelligence(
+                person_info=profile, company_info=company_info
+            )
+            if not sales_data:
+                return
+
+            await repo.update_client(
+                client_id,
+                organization_id,
+                {"sales_intelligence": sales_data},
+            )
+
+            logger.info(
+                "Sales intelligence stored for client",
+                extra={"client_id": client_id, "request_id": request_id},
+            )

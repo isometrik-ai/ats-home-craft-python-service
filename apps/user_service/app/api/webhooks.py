@@ -3,7 +3,7 @@
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.dependencies.db import db_uow
@@ -30,6 +30,7 @@ router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 )
 async def enrichment_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     db_connection: asyncpg.Connection = Depends(db_uow),
     body: dict[str, Any] = Body(...),
 ):
@@ -41,7 +42,15 @@ async def enrichment_webhook(
         if body.get("enriched_company") is not None:
             await enrichment_service.process_company_enrichment_webhook(db_connection, body)
         elif body.get("enriched_profile") is not None:
+            enriched_profile = body.get("enriched_profile")
             await enrichment_service.process_person_enrichment_webhook(db_connection, body)
+            # Trigger sales intelligence fetch/store in the background so the webhook
+            # response is not blocked by the external sales-intelligence service.
+            background_tasks.add_task(
+                enrichment_service.fetch_and_store_sales_intelligence_for_request,
+                request_id=request_id,
+                enriched_profile=enriched_profile,
+            )
     return success_response(
         request=request,
         message_key="webhooks.success.received",
