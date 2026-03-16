@@ -10,9 +10,7 @@ from apps.user_service.app.dependencies.db import db_uow
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
-from apps.user_service.app.services.client_service import (
-    index_clients_in_typesense_background,
-)
+from apps.user_service.app.services.client_service import ClientService
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -86,7 +84,7 @@ async def enrichment_webhook(
     if client_ref:
         client_id, organization_id = client_ref
         background_tasks.add_task(
-            index_clients_in_typesense_background,
+            ClientService.index_clients_in_typesense_background,
             [(client_id, organization_id)],
         )
 

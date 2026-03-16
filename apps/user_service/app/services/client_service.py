@@ -87,23 +87,6 @@ from libs.shared_utils.typesense_service import TypesenseService
 logger = get_logger("client_service")
 
 
-async def index_clients_in_typesense_background(
-    client_refs: Iterable[tuple[str, str]],
-) -> None:
-    """Index the given client refs into Typesense using a pool connection.
-
-    For use from background tasks (e.g. webhooks, post-create) where no
-    request-scoped DB connection is available. Acquires its own connection.
-    """
-    refs = list(client_refs)
-    if not refs:
-        return
-    pool = await get_pool()
-    async with AcquireConnection(pool) as conn:
-        service = ClientService(db_connection=conn)
-        await service._index_clients_in_typesense(refs)
-
-
 def should_mark_primary_on_create(
     client_type: ClientType,
     has_company_link: bool,
@@ -152,6 +135,23 @@ class ClientService:
         self.client_repository = ClientRepository(db_connection=db_connection)
         self.supabase_client = supabase_client
         self._typesense_service: TypesenseService | None = None
+
+    @staticmethod
+    async def index_clients_in_typesense_background(
+        client_refs: Iterable[tuple[str, str]],
+    ) -> None:
+        """Index the given client refs into Typesense using a pool connection.
+
+        For use from background tasks (e.g. webhooks, post-create) where no
+        request-scoped DB connection is available. Acquires its own connection.
+        """
+        refs = list(client_refs)
+        if not refs:
+            return
+        pool = await get_pool()
+        async with AcquireConnection(pool) as conn:
+            service = ClientService(db_connection=conn)
+            await service._index_clients_in_typesense(refs)
 
     async def _build_typesense_document_for_index(
         self,
