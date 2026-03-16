@@ -848,12 +848,17 @@ class ClientService:
                 "phones": phones,
             }
 
+            is_person = client.get("client_type") == ClientType.PERSON.value
+            company_id = str(client.get("company_id")) if is_person else None
+            company_name = str(client.get("company_name")) if is_person else None
+
             client_response = ClientListResponse(
                 id=str(client.get("id")),
                 name=client.get("name") or "",
-                company_name=client.get("company_name"),
+                company_id=company_id,
+                company_name=company_name,
                 primary_contact=primary_contact,
-                company_type=client.get("client_type"),
+                client_type=client.get("client_type"),
                 status=client.get("status"),
                 projects=[],
                 image_url=client.get("contact_profile_photo_url")
@@ -1034,12 +1039,17 @@ class ClientService:
             )
 
         # Build response
+        is_person = client.get("client_type") == ClientType.PERSON.value
+        company_id = client.get("company_id") if is_person else None
+        company_name = client.get("company_name") if is_person else None
+
         return ClientDetailsResponse(
             id=str(client.get("id")),
             organization_id=str(client.get("organization_id")),
             client_type=client.get("client_type"),
             name=client.get("name") or "",
-            company_name=client.get("company_name"),
+            company_id=str(company_id),
+            company_name=company_name,
             status=client.get("status"),
             industry=client.get("industry"),
             image_url=client.get("contact_profile_photo_url") or client.get("profile_photo_url"),

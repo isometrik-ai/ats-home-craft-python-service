@@ -44,7 +44,7 @@ async def test_list_clients(monkeypatch, client):
                         "last_name": "Doe",
                         "email": "john@example.com",
                     },
-                    "company_type": "person",
+                    "client_type": "person",
                     "status": "active",
                     "matters": [],
                     "created_at": "2024-01-01T00:00:00Z",

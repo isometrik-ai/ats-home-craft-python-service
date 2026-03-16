@@ -330,7 +330,7 @@ async def get_client_details(
         message_key="clients.success.client_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
-        data=client_details.model_dump(),
+        data=client_details.model_dump(exclude_none=True),
     )
 
 
