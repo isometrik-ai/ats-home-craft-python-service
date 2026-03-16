@@ -12,6 +12,7 @@ from typing import Any
 
 import asyncpg
 import httpx
+from asyncpg import UniqueViolationError
 from supabase import AsyncClient
 
 from apps.user_service.app.config.app_settings import app_settings, shared_settings
@@ -764,7 +765,7 @@ class ClientService:
         )
         try:
             await self.client_repository.create_client_user(client_user_data)
-        except asyncpg.UniqueViolationError as exc:
+        except UniqueViolationError as exc:
             constraint = getattr(exc, "constraint_name", None)
             if constraint in {
                 "client_users_one_primary_per_client",
