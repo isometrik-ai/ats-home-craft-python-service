@@ -709,11 +709,15 @@ class ClientListResponse(BaseModel):
 
     id: str = Field(..., description="Client ID")
     name: str = Field(..., description="Client name")
+    company_id: str | None = Field(
+        None,
+        description="Linked company client ID when client is a person",
+    )
     company_name: str | None = Field(
         None, description="Linked company name when client is a person"
     )
     primary_contact: PrimaryContactInfo = Field(..., description="Primary contact information")
-    company_type: ClientType = Field(..., description="Client type")
+    client_type: ClientType = Field(..., description="Client type")
     status: ClientStatus = Field(..., description="Client status")
     projects: list[Any] = Field(default_factory=list, description="Projects list")
     image_url: str | None = Field(None, description="Primary profile image URL")
@@ -778,6 +782,10 @@ class ClientDetailsResponse(BaseModel):
     organization_id: str = Field(..., description="Organization ID")
     client_type: ClientType = Field(..., description="Client type")
     name: str = Field(..., description="Client name")
+    company_id: str | None = Field(
+        None,
+        description="Linked company client ID when client is a person and client_company_id is set",
+    )
     company_name: str | None = Field(
         None,
         description="Linked company name when client is a person and client_company_id is set",
