@@ -196,6 +196,14 @@ async def create_client(
             payload_data,
         )
 
+    # a background task so it does not impact request latency.
+    if result.records:
+        client_refs = [(str(r["id"]), str(r["organization_id"])) for r in result.records]
+        background_tasks.add_task(
+            client_service._index_clients_in_typesense,
+            client_refs,
+        )
+
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
         "user_email": user_context.email,
@@ -427,6 +435,7 @@ async def delete_client(
 )
 async def update_client(
     request: Request,
+    background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
@@ -456,6 +465,11 @@ async def update_client(
     if result:
         request.state.raw_audit_old_data = result.get("old_data")
         request.state.raw_audit_new_data = body.model_dump(exclude_unset=True, exclude_none=True)
+        # Best-effort Typesense indexing after update, offloaded to background task.
+        background_tasks.add_task(
+            client_service._index_clients_in_typesense,
+            [(client_id, user_context.organization_id)],
+        )
 
     return success_response(
         request=request,

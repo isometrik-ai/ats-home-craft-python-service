@@ -4,6 +4,7 @@ This service handles all business logic related to clients, including
 validation, formatting, and orchestration of client operations.
 """
 
+import asyncio
 import json
 import uuid
 from collections.abc import Iterable
@@ -51,6 +52,7 @@ from apps.user_service.app.schemas.enums import (
     IsometrikRole,
     UserEventStatus,
 )
+from apps.user_service.app.search.client_typesense_schema import CLIENTS_COLLECTION_NAME
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
@@ -79,6 +81,7 @@ from libs.shared_utils.isometrik_service import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+from libs.shared_utils.typesense_service import TypesenseService
 
 logger = get_logger("client_service")
 
@@ -130,6 +133,166 @@ class ClientService:
         self.db_connection = db_connection
         self.client_repository = ClientRepository(db_connection=db_connection)
         self.supabase_client = supabase_client
+        self._typesense_service: TypesenseService | None = None
+
+    async def _build_typesense_document_for_index(
+        self,
+        client_id: str,
+        organization_id: str,
+    ) -> dict[str, Any] | None:
+        """Build a full Typesense document for a client using the ADR-compliant schema."""
+        details = await self.client_repository.get_client_details_with_primary_contact(
+            client_id=client_id,
+            organization_id=organization_id,
+        )
+        if not details:
+            return None
+
+        addresses = await self.client_repository.get_client_addresses(client_id)
+
+        work_history = parse_json_field(details.get("work_history")) or []
+        educational_history = parse_json_field(details.get("educational_history")) or []
+        key_people = parse_json_field(details.get("key_people")) or []
+        products = parse_json_field(details.get("products")) or []
+        custom_fields = parse_json_field(details.get("custom_fields")) or {}
+
+        phones_raw = details.get("phones") or []
+        phones = phones_raw or []
+
+        custom_field_keys: list[str] = []
+        custom_field_values: list[str] = []
+        for key, value in (custom_fields or {}).items():
+            custom_field_keys.append(str(key))
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    if item is not None:
+                        custom_field_values.append(str(item))
+            else:
+                custom_field_values.append(str(value))
+
+        created_at_dt = details.get("created_at")
+        updated_at_dt = details.get("updated_at")
+
+        primary_contact_full_name = " ".join(
+            part
+            for part in (
+                details.get("prefix"),
+                details.get("first_name"),
+                details.get("middle_name"),
+                details.get("last_name"),
+            )
+            if part
+        )
+
+        address_cities = [a.get("city", "") for a in addresses if a.get("city")]
+        address_states = [a.get("state", "") for a in addresses if a.get("state")]
+        address_countries = [a.get("country", "") for a in addresses if a.get("country")]
+        address_postal_codes = [a.get("postal_code", "") for a in addresses if a.get("postal_code")]
+
+        document: dict[str, Any] = {
+            "id": str(details["id"]),
+            "organization_id": str(details["organization_id"]),
+            "client_type": details.get("client_type"),
+            "status": details.get("status"),
+            "name": details.get("name") or "",
+            "company_name": details.get("company_name") or "",
+            "primary_contact_first_name": details.get("first_name") or "",
+            "primary_contact_last_name": details.get("last_name") or "",
+            "primary_contact_full_name": primary_contact_full_name,
+            "primary_contact_title": details.get("title") or "",
+            "email": (details.get("email") or "").lower(),
+            "phone_numbers": [
+                p.get("phone_number")
+                for p in (phones or [])
+                if isinstance(p, dict) and p.get("phone_number")
+            ],
+            "tags": details.get("tags") or [],
+            "industry": details.get("industry") or "",
+            "description": details.get("description") or "",
+            "target_market_segments": details.get("target_market_segments") or [],
+            "current_tech_stack": details.get("current_tech_stack") or [],
+            "industry_specific_terminologies": details.get("industry_specific_terminologies") or [],
+            "preferred_communication_channels": details.get("preferred_communication_channels")
+            or [],
+            "key_people_names": [
+                kp.get("name", "")
+                for kp in (key_people or [])
+                if isinstance(kp, dict) and kp.get("name")
+            ],
+            "product_names": [
+                p.get("name", "") for p in (products or []) if isinstance(p, dict) and p.get("name")
+            ],
+            "skills": details.get("skills") or [],
+            "work_history_companies": [
+                j.get("company", "")
+                for j in (work_history or [])
+                if isinstance(j, dict) and j.get("company")
+            ],
+            "work_history_titles": [
+                j.get("title", "")
+                for j in (work_history or [])
+                if isinstance(j, dict) and j.get("title")
+            ],
+            "educational_institutions": [
+                e.get("institution", "")
+                for e in (educational_history or [])
+                if isinstance(e, dict) and e.get("institution")
+            ],
+            "address_cities": address_cities,
+            "address_states": address_states,
+            "address_countries": address_countries,
+            "address_postal_codes": address_postal_codes,
+            "lead_status": details.get("lead_status") or "",
+            "lead_score": details.get("lead_score"),
+            "intake_stage": details.get("intake_stage") or "",
+            "custom_field_values": custom_field_values,
+            "custom_field_keys": custom_field_keys,
+            "enrichment_done": bool(details.get("enrichment_done")),
+            "created_at": int(created_at_dt.timestamp()) if created_at_dt else 0,
+            "updated_at": int(updated_at_dt.timestamp()) if updated_at_dt else 0,
+            "company_id": str(details["company_id"]) if details.get("company_id") else "",
+        }
+
+        return document
+
+    async def _index_clients_in_typesense(
+        self,
+        client_refs: Iterable[tuple[str, str]],
+    ) -> None:
+        """Best-effort indexing of clients into Typesense using the full schema.
+
+        This method is designed to be called from a background context. It builds
+        full denormalized documents for the provided client references and then
+        performs a single bulk upsert into Typesense for efficiency.
+        """
+        refs = list(client_refs)
+        if not refs:
+            return
+
+        documents: list[dict[str, Any]] = []
+        for client_id, organization_id in refs:
+            document = await self._build_typesense_document_for_index(
+                client_id=client_id,
+                organization_id=organization_id,
+            )
+            if document:
+                documents.append(document)
+
+        if not documents:
+            return
+
+        await asyncio.to_thread(self.typesense_service.upsert_documents_bulk, documents)
+
+    @property
+    def typesense_service(self) -> TypesenseService:
+        """Lazily initialized Typesense service for client indexing."""
+        if self._typesense_service is None:
+            self._typesense_service = TypesenseService.from_settings(
+                collection_name=CLIENTS_COLLECTION_NAME,
+            )
+        return self._typesense_service
 
     async def create_client_from_user(self, request_data: CreateClientFromUserRequest) -> None:
         """Create a client and client_user from user ID.
@@ -251,7 +414,8 @@ class ClientService:
 
         # Mark user_event as completed
         await user_event_repository.update_status_by_user_id(
-            user_id=user_id, status=UserEventStatus.COMPLETED
+            user_id=user_id,
+            status=UserEventStatus.COMPLETED,
         )
 
         # Send creation email

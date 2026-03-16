@@ -35,7 +35,11 @@ class TypesenseService:
         self._collection_name = collection_name
 
     @classmethod
-    def from_settings(cls, settings: SharedAppSettings | None = None) -> "TypesenseService":
+    def from_settings(
+        cls,
+        collection_name: str,
+        settings: SharedAppSettings | None = None,
+    ) -> "TypesenseService":
         """Create a `TypesenseService` instance from shared application settings.
 
         This factory method wires up the Typesense client using `SharedAppSettings`,
@@ -44,6 +48,7 @@ class TypesenseService:
 
         Args:
             settings: Optional settings object; defaults to `shared_settings` when omitted.
+            collection_name: The name of the collection to use.
         """
         settings = settings or shared_settings
         typesense_settings = settings.typesense
@@ -63,7 +68,7 @@ class TypesenseService:
                 "retry_interval_seconds": typesense_settings.retry_interval_seconds,
             }
         )
-        service = cls(client=client, collection_name=typesense_settings.collection_name)
+        service = cls(client=client, collection_name=collection_name)
         service.ensure_collection()
         return service
 
@@ -100,6 +105,25 @@ class TypesenseService:
         """
         self.collection.documents.upsert(document)
         logger.debug("typesense_upsert", client_id=document.get("id"))
+
+    def upsert_documents_bulk(self, documents: list[Mapping[str, Any]]) -> None:
+        """Insert or update multiple documents in a single bulk operation.
+
+        Uses Typesense's `documents.import_` API with `action=upsert`, which is
+        both idempotent and significantly more efficient than many single-row
+        upserts for batch operations.
+
+        Args:
+            documents: List of fully-formed Typesense documents.
+        """
+        if not documents:
+            return
+
+        self.collection.documents.import_(
+            documents,
+            {"action": "upsert"},
+        )
+        logger.debug("typesense_bulk_upsert", count=len(documents))
 
     def delete_document(self, client_id: str) -> None:
         """Delete a single document from the collection by its client identifier.
