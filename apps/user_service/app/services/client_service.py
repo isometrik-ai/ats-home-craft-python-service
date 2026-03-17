@@ -173,11 +173,21 @@ class ClientService:
         pool = await get_pool()
         async with AcquireConnection(pool) as conn:
             service = ClientService(db_connection=conn)
-            await service.trigger_enrichment(
-                client_id=client_id,
-                organization_id=organization_id,
-                conn=conn,
-            )
+            try:
+                await service.trigger_enrichment(
+                    client_id=client_id,
+                    organization_id=organization_id,
+                    conn=conn,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to trigger client enrichment in background",
+                    extra={
+                        "client_id": client_id,
+                        "organization_id": organization_id,
+                    },
+                )
+                raise
 
     async def _build_typesense_document_for_index(
         self,
