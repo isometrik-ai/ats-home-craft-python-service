@@ -553,6 +553,7 @@ class ClientRepository:
                    linked_pages, products, key_people
             FROM clients
             WHERE {where}
+            FOR UPDATE
         """
         row = await self.db_connection.fetchrow(query, *params)
         return dict(row) if row else None

@@ -55,7 +55,11 @@ from apps.user_service.app.schemas.enums import (
     IsometrikRole,
     UserEventStatus,
 )
-from apps.user_service.app.search.client_typesense_schema import CLIENTS_COLLECTION_NAME
+from apps.user_service.app.search.client_typesense_schema import (
+    CLIENT_COLLECTION_SCHEMA,
+    CLIENTS_COLLECTION_NAME,
+    build_document_from_schema,
+)
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
@@ -155,6 +159,25 @@ class ClientService:
         async with AcquireConnection(pool) as conn:
             service = ClientService(db_connection=conn)
             await service._index_clients_in_typesense(refs)
+
+    @staticmethod
+    async def trigger_enrichment_background(
+        client_id: str,
+        organization_id: str,
+    ) -> None:
+        """Trigger enrichment using a pool connection.
+
+        Intended for FastAPI BackgroundTasks, where request-scoped connections are not safe
+        to reuse after the response is sent.
+        """
+        pool = await get_pool()
+        async with AcquireConnection(pool) as conn:
+            service = ClientService(db_connection=conn)
+            await service.trigger_enrichment(
+                client_id=client_id,
+                organization_id=organization_id,
+                conn=conn,
+            )
 
     async def _build_typesense_document_for_index(
         self,
@@ -276,7 +299,10 @@ class ClientService:
             "company_id": str(details["company_id"]) if details.get("company_id") else "",
         }
 
-        return document
+        return build_document_from_schema(
+            schema=CLIENT_COLLECTION_SCHEMA,
+            raw_document=document,
+        )
 
     async def _index_clients_in_typesense(
         self,

@@ -261,44 +261,66 @@ class ClientEnrichmentService:
         conn: asyncpg.Connection | None = None,
     ) -> None:
         """Run enrichment after client creation: call API, then update client with
-        request_id and status.
+        request_id and status. Handles exceptions internally to prevent resource leaks.
 
         Runs only for client_type 'person' or 'company'. If conn is provided, uses
         the caller-managed connection (the caller is responsible for closing it);
         otherwise acquires a connection from the pool for the duration of this call.
         """
         webhook_url = self._webhook_url
-        if client_type == ClientType.PERSON.value:
-            body = self._build_person_payload(payload_data, webhook_url=webhook_url)
-            response = await self.enrich_person(body)
-        else:
-            body = self._build_company_payload(
-                client_id,
-                organization_id,
-                payload_data,
-                webhook_url=webhook_url,
-            )
-            response = await self.enrich_company(body)
 
-        request_id = response.get("request_id") if isinstance(response, dict) else None
-        if not request_id:
+        if client_type not in (ClientType.PERSON.value, ClientType.COMPANY.value):
             logger.error(
-                "Enrichment API did not return request_id",
-                extra={"client_id": client_id, "response": response},
+                "Unsupported client_type for enrichment; skipping",
+                extra={
+                    "client_id": client_id,
+                    "organization_id": organization_id,
+                    "client_type": client_type,
+                },
             )
             return
 
-        await self.update_client_enrichment_status(
-            client_id=client_id,
-            organization_id=organization_id,
-            request_id=request_id,
-            status=ClientEnrichmentStatus.REQUESTED.value,
-            conn=conn,
-        )
-        logger.info(
-            "Client enrichment requested and record updated",
-            extra={"client_id": client_id, "enrichment_request_id": request_id},
-        )
+        try:
+            if client_type == ClientType.PERSON.value:
+                body = self._build_person_payload(payload_data or {}, webhook_url=webhook_url)
+                response = await self.enrich_person(body)
+            else:
+                body = self._build_company_payload(
+                    client_id,
+                    organization_id,
+                    payload_data or {},
+                    webhook_url=webhook_url,
+                )
+                response = await self.enrich_company(body)
+
+            request_id = response.get("request_id") if isinstance(response, dict) else None
+            if not request_id:
+                logger.error(
+                    "Enrichment API did not return request_id",
+                    extra={"client_id": client_id, "response": response},
+                )
+                return
+
+            await self.update_client_enrichment_status(
+                client_id=client_id,
+                organization_id=organization_id,
+                request_id=request_id,
+                status=ClientEnrichmentStatus.REQUESTED.value,
+                conn=conn,
+            )
+            logger.info(
+                "Client enrichment requested and record updated",
+                extra={"client_id": client_id, "enrichment_request_id": request_id},
+            )
+        except Exception:
+            logger.exception(
+                "Error during run_client_enrichment",
+                extra={
+                    "client_id": client_id,
+                    "organization_id": organization_id,
+                    "client_type": client_type,
+                },
+            )
 
     async def update_client_enrichment_status(
         self,
@@ -335,34 +357,49 @@ class ClientEnrichmentService:
     ) -> None:
         """Run enrichment for multiple clients in parallel.
 
-        Uses asyncio.gather so person/company enrichment HTTP calls execute concurrently.
-        Any exception from an individual task is logged and does not prevent others from running.
+        Uses bounded asyncio.gather so person/company enrichment HTTP calls execute
+        concurrently without unbounded task creation. Any exception from an individual
+        task is logged and does not prevent others from running.
         """
         if not items:
             return
 
-        tasks = [
-            self.run_client_enrichment(
-                client_id=item["client_id"],
-                organization_id=item["organization_id"],
-                client_type=item["client_type"],
-                payload_data=payload_data,
-            )
+        # Basic input validation to avoid key errors on untrusted data
+        valid_items = [
+            item
             for item in items
+            if isinstance(item, dict)
+            and all(k in item for k in ("client_id", "organization_id", "client_type"))
         ]
+        if not valid_items:
+            return
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for item, result in zip(items, results, strict=False):
-            if isinstance(result, Exception):
-                logger.error(
-                    "Client enrichment task failed",
-                    extra={
-                        "client_id": item.get("client_id"),
-                        "organization_id": item.get("organization_id"),
-                        "client_type": item.get("client_type"),
-                        "error": str(result),
-                    },
+        max_concurrency = 5
+
+        for i in range(0, len(valid_items), max_concurrency):
+            batch = valid_items[i : i + max_concurrency]
+            tasks = [
+                self.run_client_enrichment(
+                    client_id=item["client_id"],
+                    organization_id=item["organization_id"],
+                    client_type=item["client_type"],
+                    payload_data=payload_data,
                 )
+                for item in batch
+            ]
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for item, result in zip(batch, results, strict=False):
+                if isinstance(result, Exception):
+                    logger.error(
+                        "Client enrichment task failed",
+                        extra={
+                            "client_id": item.get("client_id"),
+                            "organization_id": item.get("organization_id"),
+                            "client_type": item.get("client_type"),
+                            "error": str(result),
+                        },
+                    )
 
     # Company enrichment webhook (mapping + processing)
     @staticmethod

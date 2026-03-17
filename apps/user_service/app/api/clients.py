@@ -486,10 +486,9 @@ async def update_client(
         )
         if enrichment_inputs_changed:
             background_tasks.add_task(
-                client_service.trigger_enrichment,
+                ClientService.trigger_enrichment_background,
                 client_id,
                 user_context.organization_id,
-                conn=db_connection,
             )
 
     return success_response(
@@ -524,6 +523,7 @@ async def update_client(
 )
 async def enrich_client(
     request: Request,
+    background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
@@ -545,14 +545,10 @@ async def enrich_client(
         "organization_id": user_context.organization_id,
     }
 
-    client_service = ClientService(
-        user_context=user_context,
-        db_connection=db_connection,
-    )
-    await client_service.trigger_enrichment(
-        client_id=client_id,
-        organization_id=user_context.organization_id,
-        conn=db_connection,
+    background_tasks.add_task(
+        ClientService.trigger_enrichment_background,
+        client_id,
+        user_context.organization_id,
     )
 
     return success_response(

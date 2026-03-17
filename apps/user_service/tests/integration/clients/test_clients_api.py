@@ -360,7 +360,7 @@ async def test_update_client(monkeypatch, client):
         AsyncMock(),
     )
     monkeypatch.setattr(
-        "apps.user_service.app.api.clients.ClientService.trigger_enrichment",
+        "apps.user_service.app.api.clients.ClientService.trigger_enrichment_background",
         AsyncMock(),
     )
 

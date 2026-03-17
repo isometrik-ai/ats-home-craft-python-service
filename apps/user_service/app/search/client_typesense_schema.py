@@ -5,6 +5,27 @@ from typing import Any
 CLIENTS_COLLECTION_NAME = "isometrik-clients"
 
 
+def _schema_field_names(schema: dict[str, Any]) -> list[str]:
+    """Return a list of field names from the schema."""
+    fields = schema.get("fields") or []
+    return [f["name"] for f in fields if isinstance(f, dict) and f.get("name")]
+
+
+def build_document_from_schema(
+    *,
+    schema: dict[str, Any],
+    raw_document: dict[str, Any],
+) -> dict[str, Any]:
+    """Return a document containing exactly the schema's field names.
+
+    This is intentionally a light-touch normalizer (no casting/validation) so we can
+    keep existing document-building logic unchanged while preventing accidental
+    schema drift (extra fields, typos) from being indexed.
+    """
+    allowed = set(_schema_field_names(schema))
+    return {k: v for k, v in raw_document.items() if k in allowed}
+
+
 # ---------------------------------------------------------------------------
 # Collection Schema
 #
