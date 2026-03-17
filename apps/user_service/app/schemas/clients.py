@@ -508,6 +508,11 @@ class BillingPreferencesUpdate(BaseModel):
 class PrimaryContactUpdate(BaseModel):
     """Primary contact PATCH; only provided fields are applied."""
 
+    salutation: str | None = Field(None, max_length=100)
+    first_name: str | None = Field(None, max_length=100)
+    middle_name: str | None = Field(None, max_length=100)
+    last_name: str | None = Field(None, max_length=100)
+    title: str | None = Field(None, max_length=100)
     phones: PhonesUpdate | None = Field(
         None, description="Batch phone operations: add, update, and/or remove"
     )
@@ -522,7 +527,11 @@ class UpdateClientRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    client_name: str | None = Field(None, max_length=200)
+    company_name: str | None = Field(
+        None,
+        max_length=200,
+        description="Company name (company type only)",
+    )
     primary_contact: PrimaryContactUpdate | None = None
     industry: str | None = Field(None, max_length=100)
     profile_photo_url: str | None = Field(None, max_length=500)

@@ -139,7 +139,11 @@ class ClientEnrichmentService:
     ) -> dict[str, Any]:
         """Build payload for POST /enrich (person).
         At least one of name, email, company, phone required."""
-        name = build_full_name(data.get("first_name") or "", data.get("last_name") or "").strip()
+        name = build_full_name(
+            data.get("first_name") or "",
+            data.get("middle_name") or "",
+            data.get("last_name") or "",
+        ).strip()
         phone_isd = data.get("phone_isd_code") or ""
         phone_num = data.get("phone_number") or ""
         phone = f"{phone_isd}{phone_num}".strip() or None

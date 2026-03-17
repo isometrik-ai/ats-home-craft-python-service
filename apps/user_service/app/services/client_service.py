@@ -4,6 +4,8 @@ This service handles all business logic related to clients, including
 validation, formatting, and orchestration of client operations.
 """
 
+# pylint: disable=too-many-lines
+
 import asyncio
 import json
 import uuid
@@ -40,6 +42,7 @@ from apps.user_service.app.schemas.clients import (
     Phone,
     PhonesUpdate,
     PrimaryContactInfo,
+    PrimaryContactUpdate,
     Product,
     SocialPage,
     UpdateClientRequest,
@@ -481,38 +484,6 @@ class ClientService:
                 message_key="clients.errors.email_already_exists",
                 custom_code=CustomStatusCode.CONFLICT,
             )
-
-        # Validate name uniqueness (use same name as stored in DB)
-        name_to_check = None
-        if request_data.client_type == ClientType.PERSON:
-            name_to_check = build_full_name(request_data.first_name, request_data.last_name).strip()
-        elif request_data.client_type == ClientType.COMPANY:
-            name_to_check = (request_data.name or "").strip()
-
-        name_exists = await self.client_repository.check_client_name_exists(
-            name=name_to_check,
-            organization_id=organization_id,
-        )
-        if name_exists:
-            raise ConflictException(
-                message_key="clients.errors.client_name_already_exists",
-                custom_code=CustomStatusCode.CONFLICT,
-            )
-
-        # When creating a person with a company name (and not linking to existing company),
-        # validate that the company name does not already exist (we will create a new company).
-        if request_data.client_type == ClientType.PERSON and not request_data.client_company_id:
-            company_name_for_person = (request_data.company or request_data.name or "").strip()
-            if company_name_for_person:
-                company_name_exists = await self.client_repository.check_client_name_exists(
-                    name=company_name_for_person,
-                    organization_id=organization_id,
-                )
-                if company_name_exists:
-                    raise ConflictException(
-                        message_key="clients.errors.client_name_already_exists",
-                        custom_code=CustomStatusCode.CONFLICT,
-                    )
 
         return organization
 
@@ -1306,6 +1277,7 @@ class ClientService:
         if details.client_type == ClientType.PERSON:
             payload_data: dict[str, Any] = {
                 "first_name": primary.first_name or "",
+                "middle_name": primary.middle_name or "",
                 "last_name": primary.last_name or "",
                 "email": primary.email,
                 "company": details.company_name,
@@ -1385,20 +1357,6 @@ class ClientService:
 
         old_data = self._format_client_for_audit(current)
 
-        # Validate client name when updating (same as create: non-empty and unique)
-        if body.client_name is not None:
-            name_to_check = body.client_name.lower().strip()
-            name_exists = await self.client_repository.check_client_name_exists(
-                name=name_to_check,
-                organization_id=organization_id,
-                exclude_client_id=client_id,
-            )
-            if name_exists:
-                raise ConflictException(
-                    message_key="clients.errors.client_name_already_exists",
-                    custom_code=CustomStatusCode.CONFLICT,
-                )
-
         update_data = await self._build_client_update_payload(body, current)
 
         await self._apply_batch_jsonb_list_changes(
@@ -1408,18 +1366,50 @@ class ClientService:
             current=current,
         )
 
-        if body.primary_contact is not None and body.primary_contact.phones is not None:
-            await self._apply_primary_contact_phones(
-                client_id, organization_id, body.primary_contact.phones
-            )
+        person_name_from_primary_contact = await self._apply_primary_contact_update_if_needed(
+            client_id=client_id,
+            organization_id=organization_id,
+            primary_contact=body.primary_contact,
+            is_person=current.get("client_type") == ClientType.PERSON.value,
+        )
 
         if body.lead_management is not None:
             await self._apply_lead_update(client_id, body.lead_management)
+
+        if (
+            current.get("client_type") == ClientType.PERSON.value
+            and person_name_from_primary_contact
+            and person_name_from_primary_contact != (current.get("name") or "")
+        ):
+            update_data["name"] = person_name_from_primary_contact
 
         if update_data:
             await self.client_repository.update_client(client_id, organization_id, update_data)
 
         return {"old_data": old_data}
+
+    async def _apply_primary_contact_update_if_needed(
+        self,
+        client_id: str,
+        organization_id: str,
+        primary_contact: PrimaryContactUpdate | None,
+        is_person: bool,
+    ) -> str | None:
+        """Apply primary_contact updates if present and return person full name if applicable."""
+        if primary_contact is None:
+            return None
+
+        primary_contact_row = await self.client_repository._get_primary_contact_for_update(
+            client_id, organization_id
+        )
+        if not primary_contact_row:
+            return None
+
+        return await self._apply_primary_contact_updates(
+            primary_contact_row=primary_contact_row,
+            primary_contact=primary_contact,
+            is_person=is_person,
+        )
 
     @staticmethod
     def _format_client_for_audit(client_data: dict[str, Any]) -> dict[str, Any]:
@@ -1469,7 +1459,7 @@ class ClientService:
         return any(
             getattr(body, name) is not None
             for name in (
-                "client_name",
+                "company_name",
                 "industry",
                 "profile_photo_url",
                 "portal_access",
@@ -1505,6 +1495,12 @@ class ClientService:
         Company type: target_market_segments, current_tech_stack, description,
         preferred_communication_channels, industry_specific_terminologies, linked_pages only.
         """
+        if client_type == ClientType.PERSON.value and body.company_name is not None:
+            raise ValidationException(
+                message_key="clients.errors.company_fields_not_allowed_for_person",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
         person_only = (
             body.work_history is not None
             or body.educational_history is not None
@@ -1534,7 +1530,7 @@ class ClientService:
     ) -> None:
         """Apply simple (no-merge) client fields from body onto payload."""
         simple_fields = [
-            ("client_name", "name"),
+            ("company_name", "name"),
             ("industry", "industry"),
             ("profile_photo_url", "profile_photo_url"),
             ("portal_access", "portal_access"),
@@ -1866,6 +1862,134 @@ class ClientService:
         await self.client_repository._update_client_user(
             primary["id"], {"phones": json.dumps(updated)}
         )
+
+    async def _apply_primary_contact_updates(
+        self,
+        primary_contact_row: dict[str, Any],
+        primary_contact: PrimaryContactUpdate,
+        is_person: bool,
+    ) -> str | None:
+        """Apply primary contact scalar fields and phones.
+
+        Returns computed full name (person only) when name parts provided; otherwise None.
+        """
+        primary_id = primary_contact_row["id"]
+
+        update_data = self._build_primary_contact_update_data(primary_contact)
+        if primary_contact.phones is not None:
+            update_data["phones"] = self._build_primary_contact_phones_json(
+                existing_phones_json=primary_contact_row.get("phones"),
+                phones_update=primary_contact.phones,
+            )
+
+        if update_data:
+            await self.client_repository._update_client_user(primary_id, update_data)
+
+        # Person only: return computed full name so caller can fold it into client update_data.
+        if self._should_compute_person_full_name(is_person=is_person, update=primary_contact):
+            return self._compute_person_full_name(
+                primary_contact_row=primary_contact_row,
+                update=primary_contact,
+            )
+
+        return None
+
+    @staticmethod
+    def _build_primary_contact_update_data(update: PrimaryContactUpdate) -> dict[str, Any]:
+        """Build DB update payload for primary contact scalar fields."""
+        update_data: dict[str, Any] = {}
+        if update.salutation is not None:
+            update_data["prefix"] = update.salutation
+        if update.first_name is not None:
+            update_data["first_name"] = update.first_name
+        if update.middle_name is not None:
+            update_data["middle_name"] = update.middle_name
+        if update.last_name is not None:
+            update_data["last_name"] = update.last_name
+        if update.title is not None:
+            update_data["title"] = update.title
+        return update_data
+
+    @staticmethod
+    def _build_primary_contact_phones_json(
+        *,
+        existing_phones_json: Any,
+        phones_update: PhonesUpdate,
+    ) -> str:
+        """Apply phones add/update/remove operations and return JSON string."""
+        # Semantics intentionally match _apply_primary_contact_phones / inlined prior logic.
+        current_list = parse_json_field(existing_phones_json) or []
+        if not isinstance(current_list, list):
+            current_list = []
+        updated = current_list.copy()
+
+        if phones_update.remove:
+            updated = [p for p in updated if str(p.get("id")) not in phones_update.remove]
+
+        if phones_update.update:
+            for item in phones_update.update:
+                data = item.model_dump(exclude_none=True, exclude={"id"})
+                found = False
+                for i, existing in enumerate(updated):
+                    if str(existing.get("id")) == item.id:
+                        updated[i] = {**existing, **data}
+                        found = True
+                        break
+                if not found:
+                    raise NotFoundException(
+                        message_key="clients.errors.phone_not_found",
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )
+
+        if phones_update.add:
+            for item in phones_update.add:
+                new_item = item.model_dump(exclude_none=True)
+                new_item["id"] = str(uuid.uuid4())
+                updated.append(new_item)
+
+        return json.dumps(updated)
+
+    @staticmethod
+    def _should_compute_person_full_name(
+        *,
+        is_person: bool,
+        update: PrimaryContactUpdate,
+    ) -> bool:
+        """Return True when person name parts were provided in update."""
+        return is_person and (
+            update.first_name is not None
+            or update.middle_name is not None
+            or update.last_name is not None
+        )
+
+    @staticmethod
+    def _compute_person_full_name(
+        *,
+        primary_contact_row: dict[str, Any],
+        update: PrimaryContactUpdate,
+    ) -> str | None:
+        """Compute full name from updated + existing name parts."""
+        first = (
+            update.first_name
+            if update.first_name is not None
+            else (primary_contact_row.get("first_name") or "")
+        )
+        middle = (
+            update.middle_name
+            if update.middle_name is not None
+            else (primary_contact_row.get("middle_name") or "")
+        )
+        last = (
+            update.last_name
+            if update.last_name is not None
+            else (primary_contact_row.get("last_name") or "")
+        )
+        new_name = build_full_name(
+            str(first).strip(),
+            str(middle).strip(),
+            str(last).strip(),
+        ).strip()
+        return new_name or None
 
     async def _apply_addresses_changes(
         self,

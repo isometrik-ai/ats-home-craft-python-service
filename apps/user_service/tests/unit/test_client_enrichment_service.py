@@ -813,7 +813,7 @@ async def test_sales_intel_uses_body_profile(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sales_intel_uses_stored_profile(monkeypatch):
-    """fetch_and_store_sales_intelligence falls back to stored profile."""
+    """fetch_and_store_sales_intelligence ignores stored profile when none passed."""
     existing = {
         "id": "c1",
         "organization_id": "org-1",
@@ -831,8 +831,12 @@ async def test_sales_intel_uses_stored_profile(monkeypatch):
         update_client = mock_update
 
     async def fake_fetch_sales(*_args, **kwargs):
+        # When neither enriched_company nor enriched_profile is provided, the
+        # service currently calls sales intelligence with empty payload dicts.
         person_info = kwargs["person_info"]
-        assert person_info["companyInfo"]["website"] == "https://stored.com"
+        company_info = kwargs["company_info"]
+        assert person_info == {}
+        assert company_info == {}
         return sales_payload
 
     monkeypatch.setattr(

@@ -227,21 +227,6 @@ async def test_delete_client_users():
 
 
 @pytest.mark.asyncio
-async def test_check_client_name_exists():
-    """check_client_name_exists checks name uniqueness."""
-    conn = _FakeConn()
-    conn.fetchval_result = True
-    repo = ClientRepository(db_connection=conn)
-
-    result = await repo.check_client_name_exists("Test Client", "org-1")
-
-    assert result is True
-    query = conn.fetchval_calls[0][0]
-    assert "clients" in query
-    assert "LOWER(name) = $" in query
-
-
-@pytest.mark.asyncio
 async def test_create_lead_requires_client_id_and_lead_status():
     """create_lead raises ValueError when required fields missing."""
     conn = _FakeConn()
@@ -569,20 +554,6 @@ async def test_delete_addresses():
     assert "DELETE FROM client_addresses" in query
     assert "client_id = $1" in query
     assert "client-1" in conn.execute_calls[0][1]
-
-
-@pytest.mark.asyncio
-async def test_client_name_exists_excludes_client_id():
-    """check_client_name_exists excludes client_id when provided."""
-    conn = _FakeConn()
-    conn.fetchval_result = False
-    repo = ClientRepository(db_connection=conn)
-
-    await repo.check_client_name_exists("Test Client", "org-1", exclude_client_id="client-1")
-
-    query = conn.fetchval_calls[0][0]
-    assert "id != $" in query
-    assert "client-1" in conn.fetchval_calls[0][1]
 
 
 @pytest.mark.asyncio

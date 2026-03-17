@@ -465,11 +465,32 @@ async def update_client(
     if result:
         request.state.raw_audit_old_data = result.get("old_data")
         request.state.raw_audit_new_data = body.model_dump(exclude_unset=True, exclude_none=True)
+
         # Best-effort Typesense indexing after update, offloaded to background task.
         background_tasks.add_task(
             ClientService.index_clients_in_typesense_background,
             [(client_id, user_context.organization_id)],
         )
+
+        # Trigger enrichment only when enrichment-relevant inputs have changed.
+        enrichment_input_fields = (
+            "company_name",
+            "industry",
+            "websites",
+            "social_pages",
+            "addresses",
+            "primary_contact",
+        )
+        enrichment_inputs_changed = any(
+            getattr(body, field_name) is not None for field_name in enrichment_input_fields
+        )
+        if enrichment_inputs_changed:
+            background_tasks.add_task(
+                client_service.trigger_enrichment,
+                client_id,
+                user_context.organization_id,
+                conn=db_connection,
+            )
 
     return success_response(
         request=request,
