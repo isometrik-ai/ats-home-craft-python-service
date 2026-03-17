@@ -12,6 +12,10 @@ from fastapi import FastAPI
 from apps.user_service.app.dependencies.audit_logs.audit_logger import audit_logger
 from libs.shared_db.drivers.asyncpg_client import close_pool, get_pool
 from libs.shared_utils.logger import app_logger
+from libs.shared_utils.typesense_service import (
+    close_typesense_http_client,
+    get_typesense_http_client,
+)
 
 
 @asynccontextmanager
@@ -30,10 +34,16 @@ async def lifespan(app: FastAPI):
     await audit_logger.start_processing()
     app_logger.info("Audit logger processing started successfully")
 
+    # Initialize cached Typesense HTTP client (connection pooled)
+    await get_typesense_http_client()
+    app_logger.info("Typesense HTTP client initialized successfully")
+
     try:
         yield
     finally:
         # Shutdown (if needed)
         app_logger.info("Shutting down user service application")
+        await close_typesense_http_client()
+        app_logger.info("Typesense HTTP client closed successfully")
         await close_pool()
         app_logger.info("Database pool closed successfully")

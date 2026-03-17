@@ -6,7 +6,6 @@ validation, formatting, and orchestration of client operations.
 
 # pylint: disable=too-many-lines
 
-import asyncio
 import json
 import uuid
 from collections.abc import Iterable
@@ -340,7 +339,7 @@ class ClientService:
         if not documents:
             return
 
-        await asyncio.to_thread(self.typesense_service.upsert_documents_bulk, documents)
+        await self.typesense_service.upsert_documents_bulk(documents)
 
     @property
     def typesense_service(self) -> TypesenseService:

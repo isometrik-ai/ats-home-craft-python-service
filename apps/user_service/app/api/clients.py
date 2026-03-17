@@ -19,9 +19,6 @@ from apps.user_service.app.schemas.clients import (
     UpdateClientRequest,
 )
 from apps.user_service.app.schemas.enums import ClientStatus, ClientType
-from apps.user_service.app.services.client_enrichment_service import (
-    ClientEnrichmentService,
-)
 from apps.user_service.app.services.client_service import ClientService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -187,14 +184,14 @@ async def create_client(
         result = await client_service.create_client(request_data=body)
 
     # Committed; run enrichment for each created client (person and/or company).
-    if result.enrichment_items:
-        payload_data = body.model_dump(mode="json")
-        enrichment_service = ClientEnrichmentService.from_settings()
-        background_tasks.add_task(
-            enrichment_service.run_bulk_client_enrichment,
-            result.enrichment_items,
-            payload_data,
-        )
+    # if result.enrichment_items:
+    #     payload_data = body.model_dump(mode="json")
+    #     enrichment_service = ClientEnrichmentService.from_settings()
+    #     background_tasks.add_task(
+    #         enrichment_service.run_bulk_client_enrichment,
+    #         result.enrichment_items,
+    #         payload_data,
+    #     )
 
     # Best-effort Typesense indexing, offloaded to background task (uses own DB connection).
     if result.records:
