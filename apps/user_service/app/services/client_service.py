@@ -678,8 +678,10 @@ class ClientService:
         if request_data.billing_preferences:
             serialized_billing = serialize_pydantic_models(request_data.billing_preferences)
             client_data["billing_preferences"] = json.dumps(serialized_billing)
-        if request_data.custom_fields:
-            # Validate and format custom fields against definitions
+
+        # Custom fields:
+        # - minimal required-fields check only when nothing is provided
+        if self.user_context and self.user_context.organization_id:
             entity_type = (
                 EntityType.COMPANY
                 if request_data.client_type == ClientType.COMPANY
@@ -689,10 +691,17 @@ class ClientService:
                 db_connection=self.db_connection,
                 user_context=self.user_context,
             )
-            validated_custom_fields = await custom_field_service.validate_and_format_custom_fields(
-                request_data.custom_fields, entity_type
-            )
-            client_data["custom_fields"] = json.dumps(validated_custom_fields)
+            if request_data.custom_fields:
+                validated_custom_fields = (
+                    await custom_field_service.validate_and_format_custom_fields(
+                        request_data.custom_fields, entity_type
+                    )
+                )
+                client_data["custom_fields"] = json.dumps(validated_custom_fields)
+            else:
+                await custom_field_service.ensure_required_fields_present(
+                    request_data.custom_fields, entity_type
+                )
 
         if request_data.additional_data:
             client_data["additional_data"] = json.dumps(request_data.additional_data)

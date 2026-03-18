@@ -787,6 +787,46 @@ class CustomFieldService:
             organization_id, [field_id]
         )
 
+    async def ensure_required_fields_present(
+        self,
+        custom_fields: Any,
+        entity_type: EntityType,
+    ) -> None:
+        """Fail fast if required custom fields exist but none are provided.
+
+        This is intentionally a minimal check used by client creation paths to preserve
+        the existing behavior: full validation/formatting only happens when a non-empty
+        `custom_fields` dict is provided.
+        """
+        # Treat None / "" / {} as "no custom fields provided"
+        if custom_fields is None or custom_fields == "" or custom_fields == {}:
+            custom_fields_dict: dict[str, Any] = {}
+        elif isinstance(custom_fields, dict):
+            custom_fields_dict = custom_fields
+        else:
+            raise ValidationException(
+                message_key="clients.errors.invalid_custom_fields_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"expected_type": "object"},
+            )
+
+        # If caller provided any values, do nothing (full validation happens elsewhere)
+        if custom_fields_dict:
+            return
+
+        field_definitions, _ = await self.get_custom_fields_list(entity_type)
+        if not field_definitions:
+            return
+
+        top_level_fields, _ = self._build_field_map(field_definitions)
+        for field_key, field_def in top_level_fields.items():
+            if field_def.is_required:
+                raise ValidationException(
+                    message_key="clients.errors.custom_field_required",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"field_key": field_key},
+                )
+
     async def validate_and_format_custom_fields(
         self,
         custom_fields: dict[str, Any],
