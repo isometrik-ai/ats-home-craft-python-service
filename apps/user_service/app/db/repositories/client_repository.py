@@ -866,7 +866,7 @@ class ClientRepository:
                 l.intake_stage,
                 l.lead_source,
                 l.referral_source,
-                l.lead_score,
+                NULLIF(l.lead_score, '')::int AS lead_score,
                 l.converted_at,
                 l.notes as lead_notes,
                 l.created_at as lead_created_at,

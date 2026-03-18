@@ -114,6 +114,16 @@ CLIENT_COLLECTION_SCHEMA: dict[str, Any] = {
         {"name": "custom_field_keys", "type": "string[]", "optional": True},
         # ── Enrichment ─────────────────────────────────────────────────────
         {"name": "enrichment_done", "type": "bool", "optional": True},
+        {
+            "name": "embedding",
+            "type": "float[]",
+            "num_dim": 3072,
+            # Required for vector_query. If the collection already exists without
+            # a vector index, you must recreate it (Typesense cannot always
+            # retrofit vector indexing onto an existing float[] field).
+            "vec_index": True,
+            "optional": True,
+        },
         # ── Sort Keys ──────────────────────────────────────────────────────
         {"name": "created_at", "type": "int64", "sort": True},
         {"name": "updated_at", "type": "int64", "sort": True},

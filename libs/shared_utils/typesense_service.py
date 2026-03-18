@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 import httpx
+from openai import AsyncOpenAI
 
 from apps.user_service.app.search.client_typesense_schema import (
     CLIENT_COLLECTION_SCHEMA,
@@ -35,6 +36,9 @@ from libs.shared_utils.logger import get_logger
 # ---------------------------------------------------------------------------
 
 _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 502, 503, 504})
+_EMBEDDING_MODEL: Final[str] = "text-embedding-3-large"
+_EMBEDDING_DIMENSIONS: Final[int] = 3072
+_EMBEDDING_FIELD_NAME: Final[str] = "embedding"
 _SCOPED_KEY_TTL_SECONDS: Final[int] = 3_600  # 1 hour
 
 logger = get_logger("typesense_service")
@@ -117,11 +121,126 @@ async def close_typesense_http_client() -> None:
     logger.info("typesense_http_client_closed")
 
 
-# ---------------------------------------------------------------------------
+@dataclass(slots=True)
+class _EmbeddingClientState:
+    """Process-global cached OpenAI client state for embeddings."""
+
+    client: AsyncOpenAI | None = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+_embedding_state = _EmbeddingClientState()
+
+
+async def _get_embedding_client() -> AsyncOpenAI:
+    """Return (or lazily create) the process-global ``AsyncOpenAI`` client."""
+    if _embedding_state.client is not None:
+        return _embedding_state.client
+
+    async with _embedding_state.lock:
+        if _embedding_state.client is not None:
+            return _embedding_state.client
+
+        # Uses standard OpenAI environment variables (e.g. OPENAI_API_KEY, OPENAI_BASE_URL).
+        _embedding_state.client = AsyncOpenAI()
+        logger.info("openai_embedding_client_created")
+
+    return _embedding_state.client
+
+
+def _build_embedding_text(document: Mapping[str, Any]) -> str:
+    """Return a concatenated text payload for embedding based on the client schema.
+
+    The fields roughly mirror ``SEARCH_PARAMS["query_by"]`` so the vector
+    representation aligns with the main full-text surface area.
+    """
+    text_parts: list[str] = []
+
+    def _add_value(value: Any) -> None:
+        if isinstance(value, str) and value.strip():
+            text_parts.append(value.strip())
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    text_parts.append(item.strip())
+
+    # Keep in sync with primary query fields from ``client_typesense_schema``.
+    for key in (
+        "name",
+        "primary_contact_full_name",
+        "email",
+        "phone_numbers",
+        "company_name",
+        "primary_contact_title",
+        "tags",
+        "industry",
+        "description",
+        "address_cities",
+        "work_history_companies",
+        "work_history_titles",
+        "skills",
+        "target_market_segments",
+        "current_tech_stack",
+        "key_people_names",
+        "product_names",
+        "custom_field_values",
+    ):
+        if key in document:
+            _add_value(document[key])
+
+    return " ".join(text_parts).strip()
+
+
+async def _embed_documents(documents: list[Mapping[str, Any]]) -> list[list[float] | None]:
+    """Return embeddings for *documents* or ``None`` when no text is available.
+
+    The returned list is positional: each entry corresponds to the respective
+    document in *documents*.
+    """
+    texts: list[str] = []
+    text_indices: list[int] = []
+
+    for idx, doc in enumerate(documents):
+        text = _build_embedding_text(doc)
+        if not text:
+            texts.append("")
+            text_indices.append(idx)
+            continue
+        texts.append(text)
+        text_indices.append(idx)
+
+    # Fast path: nothing to embed.
+    if not any(texts):
+        return [None] * len(documents)
+
+    # Only send non-empty texts to OpenAI to avoid wasting tokens.
+    non_empty_payload: list[str] = [t for t in texts if t]
+    if not non_empty_payload:
+        return [None] * len(documents)
+
+    client = await _get_embedding_client()
+    response = await client.embeddings.create(
+        model=_EMBEDDING_MODEL,
+        input=non_empty_payload,
+        dimensions=_EMBEDDING_DIMENSIONS,
+    )
+
+    embeddings: list[list[float]] = [item.embedding for item in response.data]
+
+    # Map back to original document order, filling gaps with None where needed.
+    result: list[list[float] | None] = [None] * len(documents)
+    emb_idx = 0
+    for original_idx, text in zip(text_indices, texts, strict=False):
+        if not text:
+            result[original_idx] = None
+            continue
+        result[original_idx] = embeddings[emb_idx]
+        emb_idx += 1
+
+    return result
+
+
 # TypesenseService
-# ---------------------------------------------------------------------------
-
-
 class TypesenseService:
     """Async Typesense helper backed by raw ``httpx`` calls.
 
@@ -172,9 +291,7 @@ class TypesenseService:
         """
         return cls(collection_name=collection_name, settings=settings)
 
-    # ------------------------------------------------------------------
     # Internal HTTP primitive
-    # ------------------------------------------------------------------
 
     async def _request(
         self,
@@ -189,7 +306,6 @@ class TypesenseService:
         """Execute a Typesense HTTP request, retrying on transient failures.
 
         Retry policy
-        ~~~~~~~~~~~~
         - ``num_retries`` (default 0) controls how many *extra* attempts are made.
         - Only ``httpx.TimeoutException``, ``httpx.NetworkError``, and HTTP responses
           in ``_RETRYABLE_STATUS_CODES`` trigger a retry.
@@ -242,9 +358,7 @@ class TypesenseService:
 
         raise last_exc or RuntimeError("typesense_request_failed_unexpectedly")
 
-    # ------------------------------------------------------------------
     # Collection bootstrap
-    # ------------------------------------------------------------------
 
     async def ensure_collection(self) -> None:
         """Create the Typesense collection if it does not yet exist.
@@ -274,9 +388,45 @@ class TypesenseService:
 
             self._ensured = True
 
-    # ------------------------------------------------------------------
     # Public helpers
-    # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_import_response(response_text: str) -> list[dict[str, Any]]:
+        """Parse Typesense /import NDJSON response and return failure entries.
+
+        Typesense returns one JSON object per line:
+          {"success": true}
+          {"success": false, "error": "...", "document": "..."}
+        HTTP 200 does not guarantee per-document success.
+        """
+        failures: list[dict[str, Any]] = []
+        for line in (response_text or "").splitlines():
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            if isinstance(item, dict) and item.get("success") is False:
+                failures.append(item)
+        return failures
+
+    async def embed_query_text(self, text: str) -> list[float] | None:
+        """Return an embedding vector for *text* suitable for ``vector_query``.
+
+        Uses the same model and dimensionality as document embeddings so that
+        query vectors live in the same space as indexed vectors.
+        """
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return None
+
+        client = await _get_embedding_client()
+        response = await client.embeddings.create(
+            model=_EMBEDDING_MODEL,
+            input=[cleaned],
+            dimensions=_EMBEDDING_DIMENSIONS,
+        )
+        if not response.data:
+            return None
+
+        return response.data[0].embedding
 
     async def upsert_documents_bulk(self, documents: list[Mapping[str, Any]]) -> None:
         """Bulk-upsert *documents* via the Typesense ``/import`` endpoint.
@@ -287,16 +437,54 @@ class TypesenseService:
         if not documents:
             return
 
+        # Enrich documents with OpenAI embeddings so they can be used for
+        # vector search in Typesense (via the ``embedding`` float[] field).
+        # This mutates shallow copies to avoid side effects on caller data.
+        embeddings = await _embed_documents(documents)
+        enriched_documents: list[dict[str, Any]] = []
+        for doc, embedding in zip(documents, embeddings, strict=False):
+            enriched = dict(doc)
+            if embedding is not None:
+                enriched[_EMBEDDING_FIELD_NAME] = embedding
+            enriched_documents.append(enriched)
+
         await self.ensure_collection()
 
-        ndjson = "\n".join(json.dumps(dict(doc), separators=(",", ":")) for doc in documents)
-        await self._request(
+        ndjson_payload = "\n".join(json.dumps(d) for d in enriched_documents) + "\n"
+
+        response = await self._request(
             "POST",
             f"/collections/{self._collection_name}/documents/import",
             params={"action": "upsert"},
-            content=ndjson,
+            content=ndjson_payload,
             extra_headers={"Content-Type": "text/plain"},
         )
+        try:
+            failures = self._parse_import_response(response.text or "")
+        except Exception as exc:
+            logger.exception(
+                "typesense_import_response_parse_failed",
+                extra={
+                    "collection": self._collection_name,
+                    "error": str(exc),
+                },
+            )
+            raise
+
+        if failures:
+            # Avoid logging full documents (may contain PII). Keep it high-signal.
+            logger.error(
+                "typesense_bulk_upsert_partial_failure",
+                extra={
+                    "collection": self._collection_name,
+                    "attempted": len(documents),
+                    "failed": len(failures),
+                    "sample_error": failures[0].get("error") if failures else None,
+                },
+            )
+            raise RuntimeError(
+                f"typesense_bulk_upsert_failed: {len(failures)}/{len(documents)} documents rejected"
+            )
         logger.info(
             "typesense_bulk_upsert",
             extra={"count": len(documents)},
@@ -317,12 +505,23 @@ class TypesenseService:
     async def search(self, params: Mapping[str, Any]) -> dict[str, Any]:
         """Execute a search against this collection and return the raw JSON result."""
         await self.ensure_collection()
+        # Use POST /multi_search so we don't hit URL length limits when `vector_query`
+        # contains an embedding. Some Typesense deployments don't support POST on
         response = await self._request(
-            "GET",
-            f"/collections/{self._collection_name}/documents/search",
-            params=dict(params),
+            "POST",
+            "/multi_search",
+            json_body={
+                "searches": [
+                    {
+                        "collection": self._collection_name,
+                        **dict(params),
+                    }
+                ]
+            },
         )
-        return response.json()  # type: ignore[no-any-return]
+        data: dict[str, Any] = response.json()
+        results: list[dict[str, Any]] = data.get("results") or []
+        return results[0] if results else {}
 
     async def generate_scoped_search_key(self, organization_id: str) -> str:
         """Return a short-lived, read-only key scoped to *organization_id*.

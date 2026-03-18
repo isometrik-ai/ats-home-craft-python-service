@@ -49,14 +49,19 @@ from apps.user_service.app.schemas.clients import (
     WorkHistoryItem,
 )
 from apps.user_service.app.schemas.enums import (
+    ClientStatus,
     ClientType,
     EntityType,
     IsometrikRole,
     UserEventStatus,
 )
+from apps.user_service.app.schemas.typesense import TypesenseClientDocument
 from apps.user_service.app.search.client_typesense_schema import (
     CLIENT_COLLECTION_SCHEMA,
     CLIENTS_COLLECTION_NAME,
+    EMAIL_SEARCH_PARAMS,
+    PHONE_SEARCH_PARAMS,
+    SEARCH_PARAMS,
     build_document_from_schema,
 )
 from apps.user_service.app.services.client_enrichment_service import (
@@ -158,6 +163,28 @@ class ClientService:
         async with AcquireConnection(pool) as conn:
             service = ClientService(db_connection=conn)
             await service._index_clients_in_typesense(refs)
+
+    @staticmethod
+    async def delete_clients_from_typesense_background(
+        client_ids: Iterable[str],
+    ) -> None:
+        """Best-effort deletion of client documents from Typesense.
+
+        Intended for FastAPI BackgroundTasks. Does not require a DB connection;
+        deletes are performed via the Typesense HTTP API.
+        """
+        ids = [str(cid) for cid in client_ids if cid]
+        if not ids:
+            return
+        typesense_service = TypesenseService.from_settings(collection_name=CLIENTS_COLLECTION_NAME)
+        for client_id in ids:
+            try:
+                await typesense_service.delete_document(client_id)
+            except Exception:
+                logger.exception(
+                    "typesense_delete_document_failed",
+                    extra={"client_id": client_id},
+                )
 
     @staticmethod
     async def trigger_enrichment_background(
@@ -308,9 +335,12 @@ class ClientService:
             "company_id": str(details["company_id"]) if details.get("company_id") else "",
         }
 
+        typesense_document = TypesenseClientDocument.model_validate(document).model_dump(
+            exclude_none=True
+        )
         return build_document_from_schema(
             schema=CLIENT_COLLECTION_SCHEMA,
-            raw_document=document,
+            raw_document=typesense_document,
         )
 
     async def _index_clients_in_typesense(
@@ -1066,6 +1096,102 @@ class ClientService:
 
         return {"clients": transformed_clients, "total": total}
 
+    async def search_clients(
+        self,
+        *,
+        organization_id: str,
+        query: str,
+        page: int,
+        page_size: int,
+        client_type: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """Search clients using Typesense with hybrid keyword + vector search.
+
+        All queries are implicitly scoped to the caller's organization via ``organization_id``.
+        """
+        filters: list[str] = [f"organization_id:={organization_id}"]
+        if client_type:
+            filters.append(f"client_type:={client_type}")
+        if status:
+            filters.append(f"status:={status}")
+        filter_by = " && ".join(filters)
+
+        # Start from the default full-text params and specialise for email / phone queries.
+        query = query.strip()
+        params: dict[str, Any] = {
+            "q": query,
+            "per_page": page_size,
+            "page": page,
+            "filter_by": filter_by,
+            "exclude_fields": "embedding",
+        }
+
+        if "@" in query:
+            # Strict email lookup (no typos / prefix) for email-shaped queries.
+            params.update(EMAIL_SEARCH_PARAMS)
+        elif sum(c.isdigit() for c in query) >= 5:
+            # Digit-heavy queries treated as phone lookups.
+            params.update(PHONE_SEARCH_PARAMS)
+        else:
+            params.update(SEARCH_PARAMS)
+
+        # Hybrid vector + keyword search when we can build an embedding.
+        embedding = await self.typesense_service.embed_query_text(query)
+        if embedding is not None:
+            vector = ",".join(map(str, embedding))
+            params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
+
+        raw = await self.typesense_service.search(params)
+
+        hits: list[dict[str, Any]] = raw.get("hits") or []
+        clients: list[dict[str, Any]] = []
+        for hit in hits:
+            doc = hit.get("document") or {}
+            is_person = doc.get("client_type") == ClientType.PERSON.value
+            company_id = str(doc["company_id"]) if is_person and doc.get("company_id") else None
+            company_name = (
+                str(doc["company_name"]) if is_person and doc.get("company_name") else None
+            )
+
+            primary_contact = PrimaryContactInfo(
+                salutation=None,
+                first_name=doc.get("primary_contact_first_name"),
+                middle_name=None,
+                last_name=doc.get("primary_contact_last_name"),
+                title=doc.get("primary_contact_title"),
+                email=doc.get("email"),
+                phones=[
+                    Phone(
+                        id=None,
+                        phone_number=value,
+                        phone_isd_code="",
+                        label=None,
+                        is_primary=index == 0,
+                    )
+                    for index, value in enumerate(doc.get("phone_numbers") or [])
+                ],
+            )
+
+            item = ClientListResponse(
+                id=str(doc.get("id")),
+                name=doc.get("name") or "",
+                company_id=company_id,
+                company_name=company_name,
+                primary_contact=primary_contact,
+                client_type=ClientType(doc.get("client_type")),
+                status=ClientStatus(doc.get("status")),
+                projects=[],
+                image_url=None,
+                created_at="",
+                updated_at="",
+                outstanding=None,
+                tags=doc.get("tags") or [],
+            )
+            clients.append(item.model_dump(exclude_none=True))
+
+        return {"clients": clients, "total": raw.get("found", 0)}
+
     async def get_client_details(
         self, client_id: str, organization_id: str
     ) -> ClientDetailsResponse:
@@ -1327,7 +1453,9 @@ class ClientService:
                 "industry": details.industry,
                 "email": primary.email,
                 "websites": [w.model_dump(mode="json") for w in details.websites],
-                "social_pages": [s.model_dump(mode="json") for s in details.social_pages],
+                "social_pages": [
+                    social_page.model_dump(mode="json") for social_page in details.social_pages
+                ],
                 "addresses": addresses_payload,
             }
 
