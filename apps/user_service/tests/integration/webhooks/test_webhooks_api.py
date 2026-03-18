@@ -9,20 +9,29 @@ from apps.user_service.tests.utils.assertions import assert_success
 
 @pytest.mark.asyncio
 async def test_enrichment_webhook_no_request_id_returns_200(client):
-    """POST /webhooks/enrichment without request_id returns 200 and does not process."""
+    """POST /webhooks/enrichment without request_id returns
+    422 with success envelope.
+    """
     res = await client.post("/v1/webhooks/enrichment", json={})
-    body = assert_success(res, 200)
+    body = assert_success(res, 422)
     assert body.get("status") == "success"
 
 
 @pytest.mark.asyncio
 async def test_enrichment_webhook_company_calls_process(client):
     """POST with request_id and enriched_company processes company enrichment."""
-    mock_process = AsyncMock(return_value=True)
+    mock_process = AsyncMock(return_value=("c1", "org-1"))
 
-    with patch(
-        "apps.user_service.app.api.webhooks.ClientEnrichmentService.from_settings",
-    ) as mock_from_settings:
+    with (
+        patch(
+            "apps.user_service.app.api.webhooks.ClientEnrichmentService.from_settings",
+        ) as mock_from_settings,
+        patch(
+            "apps.user_service.app.api.webhooks."
+            "ClientService.index_clients_in_typesense_background",
+            new=AsyncMock(),
+        ),
+    ):
         mock_svc = MagicMock()
         mock_svc.process_company_enrichment_webhook = mock_process
         mock_svc.process_person_enrichment_webhook = AsyncMock()
@@ -44,11 +53,18 @@ async def test_enrichment_webhook_company_calls_process(client):
 @pytest.mark.asyncio
 async def test_enrichment_webhook_profile_calls_process(client):
     """POST with request_id and enriched_profile processes person enrichment."""
-    mock_process = AsyncMock(return_value=True)
+    mock_process = AsyncMock(return_value=("c1", "org-1"))
 
-    with patch(
-        "apps.user_service.app.api.webhooks.ClientEnrichmentService.from_settings",
-    ) as mock_from_settings:
+    with (
+        patch(
+            "apps.user_service.app.api.webhooks.ClientEnrichmentService.from_settings",
+        ) as mock_from_settings,
+        patch(
+            "apps.user_service.app.api.webhooks."
+            "ClientService.index_clients_in_typesense_background",
+            new=AsyncMock(),
+        ),
+    ):
         mock_svc = MagicMock()
         mock_svc.process_company_enrichment_webhook = AsyncMock()
         mock_svc.process_person_enrichment_webhook = mock_process

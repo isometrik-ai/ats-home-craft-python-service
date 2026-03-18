@@ -19,10 +19,10 @@ from apps.user_service.app.schemas.clients import (
     UpdateClientRequest,
 )
 from apps.user_service.app.schemas.enums import ClientStatus, ClientType
-from apps.user_service.app.services.client_enrichment_service import (
+from apps.user_service.app.services.client_service import (
     ClientEnrichmentService,
+    ClientService,
 )
-from apps.user_service.app.services.client_service import ClientService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
@@ -196,6 +196,14 @@ async def create_client(
             payload_data,
         )
 
+    # Best-effort Typesense indexing, offloaded to background task (uses own DB connection).
+    if result.records:
+        client_refs = [(str(r["id"]), str(r["organization_id"])) for r in result.records]
+        background_tasks.add_task(
+            ClientService.index_clients_in_typesense_background,
+            client_refs,
+        )
+
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
         "user_email": user_context.email,
@@ -259,6 +267,79 @@ async def list_clients(
     result = await client_service.get_clients_list(
         organization_id=user_context.organization_id,
         filter_params=filter_params,
+    )
+
+    clients = result["clients"]
+    total = result["total"]
+
+    if not clients:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+        )
+
+    return list_response(
+        request=request,
+        items=clients,
+        total=total,
+        page=page,
+        page_size=page_size,
+        message_key="clients.success.clients_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("search clients")
+@router.get(
+    "/search",
+    status_code=http_status.HTTP_200_OK,
+    description="Search clients using Typesense (hybrid keyword + vector search)",
+    summary="Search clients",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Clients retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+async def search_clients(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    query: str = Query(..., min_length=2, description="Search query string"),
+    client_type: ClientType | None = Query(
+        None,
+        description="Filter by client type (person, company)",
+        enum=[ClientType.PERSON.value, ClientType.COMPANY.value],
+    ),
+    status: ClientStatus | None = Query(None, description="Filter by status"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size"),
+):
+    """Search clients via Typesense with organization-scoped filters."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+    )
+
+    client_service = ClientService(user_context=user_context, db_connection=db_connection)
+    result = await client_service.search_clients(
+        organization_id=user_context.organization_id,
+        query=query,
+        page=page,
+        page_size=page_size,
+        client_type=client_type.value if client_type else None,
+        status=status.value if status else None,
     )
 
     clients = result["clients"]
@@ -363,6 +444,7 @@ async def get_client_details(
 )
 async def delete_client(
     request: Request,
+    background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
@@ -394,6 +476,12 @@ async def delete_client(
         db_connection=db_connection,
     )
     await client_service.delete_client(client_id, user_context.organization_id)
+
+    # Best-effort Typesense cleanup, offloaded to background task.
+    background_tasks.add_task(
+        ClientService.delete_clients_from_typesense_background,
+        [client_id],
+    )
 
     return success_response(
         request=request,
@@ -427,8 +515,9 @@ async def delete_client(
 )
 async def update_client(
     request: Request,
+    background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
     body: UpdateClientRequest = Body(...),
 ):
@@ -437,25 +526,54 @@ async def update_client(
     request.state.audit_requested_id = client_id
     request.state.audit_description = f"Updated client: {client_id}"
     request.state.audit_risk_level = "medium"
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_EDIT,
-    )
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-    client_service = ClientService(
-        user_context=user_context,
-        db_connection=db_connection,
-    )
-    result = await client_service.update_client(client_id, user_context.organization_id, body)
 
-    if result:
-        request.state.raw_audit_old_data = result.get("old_data")
-        request.state.raw_audit_new_data = body.model_dump(exclude_unset=True, exclude_none=True)
+    async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CLIENTS_MANAGEMENT_EDIT,
+        )
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        client_service = ClientService(
+            user_context=user_context,
+            db_connection=db_connection,
+        )
+        result = await client_service.update_client(client_id, user_context.organization_id, body)
+
+        if result:
+            request.state.raw_audit_old_data = result.get("old_data")
+            request.state.raw_audit_new_data = body.model_dump(
+                exclude_unset=True, exclude_none=True
+            )
+
+        # Best-effort Typesense indexing after update, offloaded to background task.
+        background_tasks.add_task(
+            ClientService.index_clients_in_typesense_background,
+            [(client_id, user_context.organization_id)],
+        )
+
+        # Trigger enrichment only when enrichment-relevant inputs have changed.
+        enrichment_input_fields = (
+            "company_name",
+            "industry",
+            "websites",
+            "social_pages",
+            "addresses",
+            "primary_contact",
+        )
+        enrichment_inputs_changed = any(
+            getattr(body, field_name) is not None for field_name in enrichment_input_fields
+        )
+        if enrichment_inputs_changed:
+            background_tasks.add_task(
+                ClientService.trigger_enrichment_background,
+                client_id,
+                user_context.organization_id,
+            )
 
     return success_response(
         request=request,
@@ -489,6 +607,7 @@ async def update_client(
 )
 async def enrich_client(
     request: Request,
+    background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
@@ -510,14 +629,10 @@ async def enrich_client(
         "organization_id": user_context.organization_id,
     }
 
-    client_service = ClientService(
-        user_context=user_context,
-        db_connection=db_connection,
-    )
-    await client_service.trigger_enrichment(
-        client_id=client_id,
-        organization_id=user_context.organization_id,
-        conn=db_connection,
+    background_tasks.add_task(
+        ClientService.trigger_enrichment_background,
+        client_id,
+        user_context.organization_id,
     )
 
     return success_response(

@@ -4,6 +4,8 @@ This service handles all business logic related to clients, including
 validation, formatting, and orchestration of client operations.
 """
 
+# pylint: disable=too-many-lines
+
 import json
 import uuid
 from collections.abc import Iterable
@@ -39,6 +41,7 @@ from apps.user_service.app.schemas.clients import (
     Phone,
     PhonesUpdate,
     PrimaryContactInfo,
+    PrimaryContactUpdate,
     Product,
     SocialPage,
     UpdateClientRequest,
@@ -46,10 +49,20 @@ from apps.user_service.app.schemas.clients import (
     WorkHistoryItem,
 )
 from apps.user_service.app.schemas.enums import (
+    ClientStatus,
     ClientType,
     EntityType,
     IsometrikRole,
     UserEventStatus,
+)
+from apps.user_service.app.schemas.typesense import TypesenseClientDocument
+from apps.user_service.app.search.client_typesense_schema import (
+    CLIENT_COLLECTION_SCHEMA,
+    CLIENTS_COLLECTION_NAME,
+    EMAIL_SEARCH_PARAMS,
+    PHONE_SEARCH_PARAMS,
+    SEARCH_PARAMS,
+    build_document_from_schema,
 )
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
@@ -66,6 +79,7 @@ from apps.user_service.app.utils.common_utils import (
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 from apps.user_service.app.utils.user_utils import build_full_name
+from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.supabase_db.auth_repository import create_user
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -79,6 +93,7 @@ from libs.shared_utils.isometrik_service import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+from libs.shared_utils.typesense_service import TypesenseService
 
 logger = get_logger("client_service")
 
@@ -130,6 +145,240 @@ class ClientService:
         self.db_connection = db_connection
         self.client_repository = ClientRepository(db_connection=db_connection)
         self.supabase_client = supabase_client
+        self._typesense_service: TypesenseService | None = None
+
+    @staticmethod
+    async def index_clients_in_typesense_background(
+        client_refs: Iterable[tuple[str, str]],
+    ) -> None:
+        """Index the given client refs into Typesense using a pool connection.
+
+        For use from background tasks (e.g. webhooks, post-create) where no
+        request-scoped DB connection is available. Acquires its own connection.
+        """
+        refs = list(client_refs)
+        if not refs:
+            return
+        pool = await get_pool()
+        async with AcquireConnection(pool) as conn:
+            service = ClientService(db_connection=conn)
+            await service._index_clients_in_typesense(refs)
+
+    @staticmethod
+    async def delete_clients_from_typesense_background(
+        client_ids: Iterable[str],
+    ) -> None:
+        """Best-effort deletion of client documents from Typesense.
+
+        Intended for FastAPI BackgroundTasks. Does not require a DB connection;
+        deletes are performed via the Typesense HTTP API.
+        """
+        ids = [str(cid) for cid in client_ids if cid]
+        if not ids:
+            return
+        typesense_service = TypesenseService.from_settings(collection_name=CLIENTS_COLLECTION_NAME)
+        for client_id in ids:
+            try:
+                await typesense_service.delete_document(client_id)
+            except Exception:
+                logger.exception(
+                    "typesense_delete_document_failed",
+                    extra={"client_id": client_id},
+                )
+
+    @staticmethod
+    async def trigger_enrichment_background(
+        client_id: str,
+        organization_id: str,
+    ) -> None:
+        """Trigger enrichment using a pool connection.
+
+        Intended for FastAPI BackgroundTasks, where request-scoped connections are not safe
+        to reuse after the response is sent.
+        """
+        pool = await get_pool()
+        async with AcquireConnection(pool) as conn:
+            service = ClientService(db_connection=conn)
+            try:
+                await service.trigger_enrichment(
+                    client_id=client_id,
+                    organization_id=organization_id,
+                    conn=conn,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to trigger client enrichment in background",
+                    extra={
+                        "client_id": client_id,
+                        "organization_id": organization_id,
+                    },
+                )
+                raise
+
+    async def _build_typesense_document_for_index(
+        self,
+        client_id: str,
+        organization_id: str,
+    ) -> dict[str, Any] | None:
+        """Build a full Typesense document for a client using the ADR-compliant schema."""
+        details = await self.client_repository.get_client_details_with_primary_contact(
+            client_id=client_id,
+            organization_id=organization_id,
+        )
+        if not details:
+            return None
+
+        addresses = await self.client_repository.get_client_addresses(client_id)
+
+        work_history = parse_json_field(details.get("work_history")) or []
+        educational_history = parse_json_field(details.get("educational_history")) or []
+        key_people = parse_json_field(details.get("key_people")) or []
+        products = parse_json_field(details.get("products")) or []
+        custom_fields = parse_json_field(details.get("custom_fields")) or {}
+
+        phones_raw = details.get("phones") or []
+        phones = phones_raw or []
+
+        custom_field_keys: list[str] = []
+        custom_field_values: list[str] = []
+        for key, value in (custom_fields or {}).items():
+            custom_field_keys.append(str(key))
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    if item is not None:
+                        custom_field_values.append(str(item))
+            else:
+                custom_field_values.append(str(value))
+
+        created_at_dt = details.get("created_at")
+        updated_at_dt = details.get("updated_at")
+
+        primary_contact_full_name = " ".join(
+            part
+            for part in (
+                details.get("prefix"),
+                details.get("first_name"),
+                details.get("middle_name"),
+                details.get("last_name"),
+            )
+            if part
+        )
+
+        address_cities = [a.get("city", "") for a in addresses if a.get("city")]
+        address_states = [a.get("state", "") for a in addresses if a.get("state")]
+        address_countries = [a.get("country", "") for a in addresses if a.get("country")]
+        address_postal_codes = [a.get("postal_code", "") for a in addresses if a.get("postal_code")]
+
+        document: dict[str, Any] = {
+            "id": str(details["id"]),
+            "organization_id": str(details["organization_id"]),
+            "client_type": details.get("client_type"),
+            "status": details.get("status"),
+            "name": details.get("name") or "",
+            "company_name": details.get("company_name") or "",
+            "primary_contact_first_name": details.get("first_name") or "",
+            "primary_contact_last_name": details.get("last_name") or "",
+            "primary_contact_full_name": primary_contact_full_name,
+            "primary_contact_title": details.get("title") or "",
+            "email": (details.get("email") or "").lower(),
+            "phone_numbers": [
+                p.get("phone_number")
+                for p in (phones or [])
+                if isinstance(p, dict) and p.get("phone_number")
+            ],
+            "tags": details.get("tags") or [],
+            "industry": details.get("industry") or "",
+            "description": details.get("description") or "",
+            "target_market_segments": details.get("target_market_segments") or [],
+            "current_tech_stack": details.get("current_tech_stack") or [],
+            "industry_specific_terminologies": details.get("industry_specific_terminologies") or [],
+            "preferred_communication_channels": details.get("preferred_communication_channels")
+            or [],
+            "key_people_names": [
+                kp.get("name", "")
+                for kp in (key_people or [])
+                if isinstance(kp, dict) and kp.get("name")
+            ],
+            "product_names": [
+                p.get("name", "") for p in (products or []) if isinstance(p, dict) and p.get("name")
+            ],
+            "skills": details.get("skills") or [],
+            "work_history_companies": [
+                j.get("company", "")
+                for j in (work_history or [])
+                if isinstance(j, dict) and j.get("company")
+            ],
+            "work_history_titles": [
+                j.get("title", "")
+                for j in (work_history or [])
+                if isinstance(j, dict) and j.get("title")
+            ],
+            "educational_institutions": [
+                e.get("institution", "")
+                for e in (educational_history or [])
+                if isinstance(e, dict) and e.get("institution")
+            ],
+            "address_cities": address_cities,
+            "address_states": address_states,
+            "address_countries": address_countries,
+            "address_postal_codes": address_postal_codes,
+            "lead_status": details.get("lead_status") or "",
+            "lead_score": details.get("lead_score"),
+            "intake_stage": details.get("intake_stage") or "",
+            "custom_field_values": custom_field_values,
+            "custom_field_keys": custom_field_keys,
+            "enrichment_done": bool(details.get("enrichment_done")),
+            "created_at": int(created_at_dt.timestamp()) if created_at_dt else 0,
+            "updated_at": int(updated_at_dt.timestamp()) if updated_at_dt else 0,
+            "company_id": str(details["company_id"]) if details.get("company_id") else "",
+        }
+
+        typesense_document = TypesenseClientDocument.model_validate(document).model_dump(
+            exclude_none=True
+        )
+        return build_document_from_schema(
+            schema=CLIENT_COLLECTION_SCHEMA,
+            raw_document=typesense_document,
+        )
+
+    async def _index_clients_in_typesense(
+        self,
+        client_refs: Iterable[tuple[str, str]],
+    ) -> None:
+        """Best-effort indexing of clients into Typesense using the full schema.
+
+        This method is designed to be called from a background context. It builds
+        full denormalized documents for the provided client references and then
+        performs a single bulk upsert into Typesense for efficiency.
+        """
+        refs = list(client_refs)
+        if not refs:
+            return
+
+        documents: list[dict[str, Any]] = []
+        for client_id, organization_id in refs:
+            document = await self._build_typesense_document_for_index(
+                client_id=client_id,
+                organization_id=organization_id,
+            )
+            if document:
+                documents.append(document)
+
+        if not documents:
+            return
+
+        await self.typesense_service.upsert_documents_bulk(documents)
+
+    @property
+    def typesense_service(self) -> TypesenseService:
+        """Lazily initialized Typesense service for client indexing."""
+        if self._typesense_service is None:
+            self._typesense_service = TypesenseService.from_settings(
+                collection_name=CLIENTS_COLLECTION_NAME,
+            )
+        return self._typesense_service
 
     async def create_client_from_user(self, request_data: CreateClientFromUserRequest) -> None:
         """Create a client and client_user from user ID.
@@ -251,7 +500,8 @@ class ClientService:
 
         # Mark user_event as completed
         await user_event_repository.update_status_by_user_id(
-            user_id=user_id, status=UserEventStatus.COMPLETED
+            user_id=user_id,
+            status=UserEventStatus.COMPLETED,
         )
 
         # Send creation email
@@ -299,38 +549,6 @@ class ClientService:
                 message_key="clients.errors.email_already_exists",
                 custom_code=CustomStatusCode.CONFLICT,
             )
-
-        # Validate name uniqueness (use same name as stored in DB)
-        name_to_check = None
-        if request_data.client_type == ClientType.PERSON:
-            name_to_check = build_full_name(request_data.first_name, request_data.last_name).strip()
-        elif request_data.client_type == ClientType.COMPANY:
-            name_to_check = (request_data.name or "").strip()
-
-        name_exists = await self.client_repository.check_client_name_exists(
-            name=name_to_check,
-            organization_id=organization_id,
-        )
-        if name_exists:
-            raise ConflictException(
-                message_key="clients.errors.client_name_already_exists",
-                custom_code=CustomStatusCode.CONFLICT,
-            )
-
-        # When creating a person with a company name (and not linking to existing company),
-        # validate that the company name does not already exist (we will create a new company).
-        if request_data.client_type == ClientType.PERSON and not request_data.client_company_id:
-            company_name_for_person = (request_data.company or request_data.name or "").strip()
-            if company_name_for_person:
-                company_name_exists = await self.client_repository.check_client_name_exists(
-                    name=company_name_for_person,
-                    organization_id=organization_id,
-                )
-                if company_name_exists:
-                    raise ConflictException(
-                        message_key="clients.errors.client_name_already_exists",
-                        custom_code=CustomStatusCode.CONFLICT,
-                    )
 
         return organization
 
@@ -878,6 +1096,102 @@ class ClientService:
 
         return {"clients": transformed_clients, "total": total}
 
+    async def search_clients(
+        self,
+        *,
+        organization_id: str,
+        query: str,
+        page: int,
+        page_size: int,
+        client_type: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """Search clients using Typesense with hybrid keyword + vector search.
+
+        All queries are implicitly scoped to the caller's organization via ``organization_id``.
+        """
+        filters: list[str] = [f"organization_id:={organization_id}"]
+        if client_type:
+            filters.append(f"client_type:={client_type}")
+        if status:
+            filters.append(f"status:={status}")
+        filter_by = " && ".join(filters)
+
+        # Start from the default full-text params and specialise for email / phone queries.
+        query = query.strip()
+        params: dict[str, Any] = {
+            "q": query,
+            "per_page": page_size,
+            "page": page,
+            "filter_by": filter_by,
+            "exclude_fields": "embedding",
+        }
+
+        if "@" in query:
+            # Strict email lookup (no typos / prefix) for email-shaped queries.
+            params.update(EMAIL_SEARCH_PARAMS)
+        elif sum(c.isdigit() for c in query) >= 5:
+            # Digit-heavy queries treated as phone lookups.
+            params.update(PHONE_SEARCH_PARAMS)
+        else:
+            params.update(SEARCH_PARAMS)
+
+        # Hybrid vector + keyword search when we can build an embedding.
+        embedding = await self.typesense_service.embed_query_text(query)
+        if embedding is not None:
+            vector = ",".join(map(str, embedding))
+            params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
+
+        raw = await self.typesense_service.search(params)
+
+        hits: list[dict[str, Any]] = raw.get("hits") or []
+        clients: list[dict[str, Any]] = []
+        for hit in hits:
+            doc = hit.get("document") or {}
+            is_person = doc.get("client_type") == ClientType.PERSON.value
+            company_id = str(doc["company_id"]) if is_person and doc.get("company_id") else None
+            company_name = (
+                str(doc["company_name"]) if is_person and doc.get("company_name") else None
+            )
+
+            primary_contact = PrimaryContactInfo(
+                salutation=None,
+                first_name=doc.get("primary_contact_first_name"),
+                middle_name=None,
+                last_name=doc.get("primary_contact_last_name"),
+                title=doc.get("primary_contact_title"),
+                email=doc.get("email"),
+                phones=[
+                    Phone(
+                        id=None,
+                        phone_number=value,
+                        phone_isd_code="",
+                        label=None,
+                        is_primary=index == 0,
+                    )
+                    for index, value in enumerate(doc.get("phone_numbers") or [])
+                ],
+            )
+
+            item = ClientListResponse(
+                id=str(doc.get("id")),
+                name=doc.get("name") or "",
+                company_id=company_id,
+                company_name=company_name,
+                primary_contact=primary_contact,
+                client_type=ClientType(doc.get("client_type")),
+                status=ClientStatus(doc.get("status")),
+                projects=[],
+                image_url=None,
+                created_at="",
+                updated_at="",
+                outstanding=None,
+                tags=doc.get("tags") or [],
+            )
+            clients.append(item.model_dump(exclude_none=True))
+
+        return {"clients": clients, "total": raw.get("found", 0)}
+
     async def get_client_details(
         self, client_id: str, organization_id: str
     ) -> ClientDetailsResponse:
@@ -1124,6 +1438,7 @@ class ClientService:
         if details.client_type == ClientType.PERSON:
             payload_data: dict[str, Any] = {
                 "first_name": primary.first_name or "",
+                "middle_name": primary.middle_name or "",
                 "last_name": primary.last_name or "",
                 "email": primary.email,
                 "company": details.company_name,
@@ -1138,7 +1453,9 @@ class ClientService:
                 "industry": details.industry,
                 "email": primary.email,
                 "websites": [w.model_dump(mode="json") for w in details.websites],
-                "social_pages": [s.model_dump(mode="json") for s in details.social_pages],
+                "social_pages": [
+                    social_page.model_dump(mode="json") for social_page in details.social_pages
+                ],
                 "addresses": addresses_payload,
             }
 
@@ -1203,20 +1520,6 @@ class ClientService:
 
         old_data = self._format_client_for_audit(current)
 
-        # Validate client name when updating (same as create: non-empty and unique)
-        if body.client_name is not None:
-            name_to_check = body.client_name.lower().strip()
-            name_exists = await self.client_repository.check_client_name_exists(
-                name=name_to_check,
-                organization_id=organization_id,
-                exclude_client_id=client_id,
-            )
-            if name_exists:
-                raise ConflictException(
-                    message_key="clients.errors.client_name_already_exists",
-                    custom_code=CustomStatusCode.CONFLICT,
-                )
-
         update_data = await self._build_client_update_payload(body, current)
 
         await self._apply_batch_jsonb_list_changes(
@@ -1226,18 +1529,50 @@ class ClientService:
             current=current,
         )
 
-        if body.primary_contact is not None and body.primary_contact.phones is not None:
-            await self._apply_primary_contact_phones(
-                client_id, organization_id, body.primary_contact.phones
-            )
+        person_name_from_primary_contact = await self._apply_primary_contact_update_if_needed(
+            client_id=client_id,
+            organization_id=organization_id,
+            primary_contact=body.primary_contact,
+            is_person=current.get("client_type") == ClientType.PERSON.value,
+        )
 
         if body.lead_management is not None:
             await self._apply_lead_update(client_id, body.lead_management)
+
+        if (
+            current.get("client_type") == ClientType.PERSON.value
+            and person_name_from_primary_contact
+            and person_name_from_primary_contact != (current.get("name") or "")
+        ):
+            update_data["name"] = person_name_from_primary_contact
 
         if update_data:
             await self.client_repository.update_client(client_id, organization_id, update_data)
 
         return {"old_data": old_data}
+
+    async def _apply_primary_contact_update_if_needed(
+        self,
+        client_id: str,
+        organization_id: str,
+        primary_contact: PrimaryContactUpdate | None,
+        is_person: bool,
+    ) -> str | None:
+        """Apply primary_contact updates if present and return person full name if applicable."""
+        if primary_contact is None:
+            return None
+
+        primary_contact_row = await self.client_repository._get_primary_contact_for_update(
+            client_id, organization_id
+        )
+        if not primary_contact_row:
+            return None
+
+        return await self._apply_primary_contact_updates(
+            primary_contact_row=primary_contact_row,
+            primary_contact=primary_contact,
+            is_person=is_person,
+        )
 
     @staticmethod
     def _format_client_for_audit(client_data: dict[str, Any]) -> dict[str, Any]:
@@ -1287,7 +1622,7 @@ class ClientService:
         return any(
             getattr(body, name) is not None
             for name in (
-                "client_name",
+                "company_name",
                 "industry",
                 "profile_photo_url",
                 "portal_access",
@@ -1323,6 +1658,12 @@ class ClientService:
         Company type: target_market_segments, current_tech_stack, description,
         preferred_communication_channels, industry_specific_terminologies, linked_pages only.
         """
+        if client_type == ClientType.PERSON.value and body.company_name is not None:
+            raise ValidationException(
+                message_key="clients.errors.company_fields_not_allowed_for_person",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
         person_only = (
             body.work_history is not None
             or body.educational_history is not None
@@ -1352,7 +1693,7 @@ class ClientService:
     ) -> None:
         """Apply simple (no-merge) client fields from body onto payload."""
         simple_fields = [
-            ("client_name", "name"),
+            ("company_name", "name"),
             ("industry", "industry"),
             ("profile_photo_url", "profile_photo_url"),
             ("portal_access", "portal_access"),
@@ -1684,6 +2025,134 @@ class ClientService:
         await self.client_repository._update_client_user(
             primary["id"], {"phones": json.dumps(updated)}
         )
+
+    async def _apply_primary_contact_updates(
+        self,
+        primary_contact_row: dict[str, Any],
+        primary_contact: PrimaryContactUpdate,
+        is_person: bool,
+    ) -> str | None:
+        """Apply primary contact scalar fields and phones.
+
+        Returns computed full name (person only) when name parts provided; otherwise None.
+        """
+        primary_id = primary_contact_row["id"]
+
+        update_data = self._build_primary_contact_update_data(primary_contact)
+        if primary_contact.phones is not None:
+            update_data["phones"] = self._build_primary_contact_phones_json(
+                existing_phones_json=primary_contact_row.get("phones"),
+                phones_update=primary_contact.phones,
+            )
+
+        if update_data:
+            await self.client_repository._update_client_user(primary_id, update_data)
+
+        # Person only: return computed full name so caller can fold it into client update_data.
+        if self._should_compute_person_full_name(is_person=is_person, update=primary_contact):
+            return self._compute_person_full_name(
+                primary_contact_row=primary_contact_row,
+                update=primary_contact,
+            )
+
+        return None
+
+    @staticmethod
+    def _build_primary_contact_update_data(update: PrimaryContactUpdate) -> dict[str, Any]:
+        """Build DB update payload for primary contact scalar fields."""
+        update_data: dict[str, Any] = {}
+        if update.salutation is not None:
+            update_data["prefix"] = update.salutation
+        if update.first_name is not None:
+            update_data["first_name"] = update.first_name
+        if update.middle_name is not None:
+            update_data["middle_name"] = update.middle_name
+        if update.last_name is not None:
+            update_data["last_name"] = update.last_name
+        if update.title is not None:
+            update_data["title"] = update.title
+        return update_data
+
+    @staticmethod
+    def _build_primary_contact_phones_json(
+        *,
+        existing_phones_json: Any,
+        phones_update: PhonesUpdate,
+    ) -> str:
+        """Apply phones add/update/remove operations and return JSON string."""
+        # Semantics intentionally match _apply_primary_contact_phones / inlined prior logic.
+        current_list = parse_json_field(existing_phones_json) or []
+        if not isinstance(current_list, list):
+            current_list = []
+        updated = current_list.copy()
+
+        if phones_update.remove:
+            updated = [p for p in updated if str(p.get("id")) not in phones_update.remove]
+
+        if phones_update.update:
+            for item in phones_update.update:
+                data = item.model_dump(exclude_none=True, exclude={"id"})
+                found = False
+                for i, existing in enumerate(updated):
+                    if str(existing.get("id")) == item.id:
+                        updated[i] = {**existing, **data}
+                        found = True
+                        break
+                if not found:
+                    raise NotFoundException(
+                        message_key="clients.errors.phone_not_found",
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )
+
+        if phones_update.add:
+            for item in phones_update.add:
+                new_item = item.model_dump(exclude_none=True)
+                new_item["id"] = str(uuid.uuid4())
+                updated.append(new_item)
+
+        return json.dumps(updated)
+
+    @staticmethod
+    def _should_compute_person_full_name(
+        *,
+        is_person: bool,
+        update: PrimaryContactUpdate,
+    ) -> bool:
+        """Return True when person name parts were provided in update."""
+        return is_person and (
+            update.first_name is not None
+            or update.middle_name is not None
+            or update.last_name is not None
+        )
+
+    @staticmethod
+    def _compute_person_full_name(
+        *,
+        primary_contact_row: dict[str, Any],
+        update: PrimaryContactUpdate,
+    ) -> str | None:
+        """Compute full name from updated + existing name parts."""
+        first = (
+            update.first_name
+            if update.first_name is not None
+            else (primary_contact_row.get("first_name") or "")
+        )
+        middle = (
+            update.middle_name
+            if update.middle_name is not None
+            else (primary_contact_row.get("middle_name") or "")
+        )
+        last = (
+            update.last_name
+            if update.last_name is not None
+            else (primary_contact_row.get("last_name") or "")
+        )
+        new_name = build_full_name(
+            str(first).strip(),
+            str(middle).strip(),
+            str(last).strip(),
+        ).strip()
+        return new_name or None
 
     async def _apply_addresses_changes(
         self,

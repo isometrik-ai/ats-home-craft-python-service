@@ -476,12 +476,18 @@ async def test_create_client_does_not_check_phone_uniqueness(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_client_raises_when_name_exists(monkeypatch):
-    """Raises ConflictException when person name already exists."""
+async def test_create_client_allows_duplicate_names(monkeypatch):
+    """Client creation does not enforce name uniqueness."""
     fake_repo = _FakeClientRepo()
-    fake_repo.name_exists = True
+    fake_repo.name_exists = True  # should be ignored by service now
     fake_user_repo = _FakeUserRepo()
     fake_org_repo = _FakeOrgRepo()
+
+    async def _fake_create_isometrik_user(*_args, **_kwargs):
+        return {"userId": "iso-1"}
+
+    async def _fake_create_user(*_args, **_kwargs):
+        return {"id": "auth-user-1"}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
@@ -495,61 +501,55 @@ async def test_create_client_raises_when_name_exists(monkeypatch):
         "apps.user_service.app.services.client_service.OrganizationRepository",
         lambda db_connection=None: fake_org_repo,
     )
-
-    service = ClientService(user_context=_ctx(), db_connection=None)
-    request_data = CreateClientRequest(
-        client_type=ClientType.PERSON,
-        email="test@example.com",
-        first_name="John",
-        last_name="Doe",
-        phones=[
-            PhoneInput(
-                phone_number="1234567890",
-                phone_isd_code="+1",
-                label="mobile",
-                is_primary=True,
-            )
-        ],
-    )
-
-    with pytest.raises(ConflictException):
-        await service.create_client(request_data)
-
-
-@pytest.mark.asyncio
-async def test_create_client_company_name_exists(monkeypatch):
-    """Raises ConflictException when company name already exists."""
-    fake_repo = _FakeClientRepo()
-    fake_repo.name_exists = True
-    fake_user_repo = _FakeUserRepo()
-    fake_org_repo = _FakeOrgRepo()
-
     monkeypatch.setattr(
-        "apps.user_service.app.services.client_service.ClientRepository",
-        lambda db_connection=None: fake_repo,
+        "apps.user_service.app.services.client_service.create_isometrik_user",
+        _fake_create_isometrik_user,
     )
     monkeypatch.setattr(
-        "apps.user_service.app.services.client_service.UserRepository",
-        lambda db_connection=None: fake_user_repo,
+        "apps.user_service.app.services.client_service.create_user",
+        _fake_create_user,
     )
     monkeypatch.setattr(
-        "apps.user_service.app.services.client_service.OrganizationRepository",
-        lambda db_connection=None: fake_org_repo,
+        "apps.user_service.app.services.client_service.send_client_creation_email",
+        lambda *_args, **_kwargs: None,
     )
 
     service = ClientService(user_context=_ctx(), db_connection=None)
-    request_data = CreateClientRequest(
-        client_type=ClientType.COMPANY,
-        email="test@example.com",
-        phone_isd_code="+1",
-        phone_number="1234567890",
-        first_name="John",
-        last_name="Doe",
-        name="Test Company",
+
+    await service.create_client(
+        CreateClientRequest(
+            client_type=ClientType.PERSON,
+            email="test@example.com",
+            first_name="John",
+            last_name="Doe",
+            phones=[
+                PhoneInput(
+                    phone_number="1234567890",
+                    phone_isd_code="+1",
+                    label="mobile",
+                    is_primary=True,
+                )
+            ],
+        )
     )
 
-    with pytest.raises(ConflictException):
-        await service.create_client(request_data)
+    await service.create_client(
+        CreateClientRequest(
+            client_type=ClientType.COMPANY,
+            email="test-company@example.com",
+            first_name="John",
+            last_name="Doe",
+            phones=[
+                PhoneInput(
+                    phone_number="1234567891",
+                    phone_isd_code="+1",
+                    label="mobile",
+                    is_primary=True,
+                )
+            ],
+            name="Test Company",
+        )
+    )
 
 
 @pytest.mark.asyncio
@@ -1567,7 +1567,7 @@ async def test_update_client_not_found(monkeypatch):
         lambda db_connection=None: fake_repo,
     )
     service = ClientService(user_context=_ctx(), db_connection=None)
-    body = UpdateClientRequest(client_name="New Name")
+    body = UpdateClientRequest(company_name="New Name")
 
     with pytest.raises(NotFoundException) as exc_info:
         await service.update_client("client-1", "org-1", body)
@@ -1577,47 +1577,12 @@ async def test_update_client_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_client_name_exists(monkeypatch):
-    """update_client raises ConflictException when client_name already exists."""
-    fake_repo = _FakeClientRepo()
-    fake_repo.get_client_for_update_result = {
-        "id": "client-1",
-        "name": "Old Name",
-        "industry": None,
-        "profile_photo_url": None,
-        "portal_access": False,
-        "tags": [],
-        "websites": "[]",
-        "billing_preferences": "{}",
-        "custom_fields": "{}",
-        "additional_data": "{}",
-        "social_pages": "[]",
-        "enrichment_done": False,
-        "last_enriched_at": None,
-    }
-    fake_repo.name_exists = True
-    monkeypatch.setattr(
-        "apps.user_service.app.services.client_service.ClientRepository",
-        lambda db_connection=None: fake_repo,
-    )
-    service = ClientService(user_context=_ctx(), db_connection=None)
-    body = UpdateClientRequest(client_name="Existing Client")
-
-    with pytest.raises(ConflictException) as exc_info:
-        await service.update_client("client-1", "org-1", body)
-
-    assert exc_info.value.message_key == "clients.errors.client_name_already_exists"
-    assert fake_repo.calls["check_client_name_exists"]["name"] == "existing client"
-    assert fake_repo.calls["check_client_name_exists"]["exclude_client_id"] == "client-1"
-    assert "client_type" not in fake_repo.calls["check_client_name_exists"]
-
-
-@pytest.mark.asyncio
 async def test_update_client_success_scalar_only(monkeypatch):
     """update_client updates scalar fields and returns old_data for audit."""
     fake_repo = _FakeClientRepo()
     fake_repo.get_client_for_update_result = {
         "id": "client-1",
+        "client_type": ClientType.COMPANY.value,
         "name": "Old Name",
         "industry": "Old Industry",
         "profile_photo_url": None,
@@ -1637,7 +1602,7 @@ async def test_update_client_success_scalar_only(monkeypatch):
     )
     service = ClientService(user_context=_ctx(), db_connection=None)
     body = UpdateClientRequest(
-        client_name="New Name",
+        company_name="New Name",
         industry="Tech",
         portal_access=True,
     )
@@ -1663,6 +1628,7 @@ async def test_update_client_success_with_addresses(monkeypatch):
     fake_repo = _FakeClientRepo()
     fake_repo.get_client_for_update_result = {
         "id": "client-1",
+        "client_type": ClientType.COMPANY.value,
         "name": "Client",
         "industry": None,
         "profile_photo_url": None,
@@ -1682,7 +1648,7 @@ async def test_update_client_success_with_addresses(monkeypatch):
     )
     service = ClientService(user_context=_ctx(), db_connection=None)
     body = UpdateClientRequest(
-        client_name="Client",
+        company_name="Client",
         addresses=AddressesUpdate(
             update=[AddressUpdateItem(id="addr-1", address_line1="456 Updated St")],
             add=[AddressInput(address_line1="New Address")],
@@ -1752,7 +1718,7 @@ async def test_has_any_update_true_when_any_field_set():
     """_has_any_update returns True when any updatable field is set."""
     service = ClientService(db_connection=None)
 
-    assert service._has_any_update(UpdateClientRequest(client_name="X")) is True
+    assert service._has_any_update(UpdateClientRequest(company_name="X")) is True
     assert service._has_any_update(UpdateClientRequest(industry="Tech")) is True
     assert service._has_any_update(UpdateClientRequest(portal_access=True)) is True
     assert service._has_any_update(UpdateClientRequest(tags=["a"])) is True
@@ -1805,7 +1771,7 @@ async def test_build_client_update_payload_scalar_and_merge(monkeypatch):
         "custom_fields": '{"a": "1", "b": "2"}',
     }
     body = UpdateClientRequest(
-        client_name="New Name",
+        company_name="New Name",
         billing_preferences=BillingPreferencesUpdate(terms="Net 30"),
         custom_fields={"a": "updated", "b": None, "c": "new"},
     )
@@ -2034,7 +2000,7 @@ async def test_validate_client_creation_org_not_found(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_validate_client_creation_company_name(monkeypatch):
-    """_validate_client_creation validates company name correctly."""
+    """_validate_client_creation no longer enforces company name uniqueness."""
     fake_repo = _FakeClientRepo()
     fake_user_repo = _FakeUserRepo()
     fake_org_repo = _FakeOrgRepo()
@@ -2065,8 +2031,8 @@ async def test_validate_client_creation_company_name(monkeypatch):
 
     await service._validate_client_creation(request_data, "org-1")
 
-    # Name is stripped but not lowercased in validation
-    assert fake_repo.calls["check_client_name_exists"]["name"] == "Test Company"
+    # Email uniqueness is validated via repository helper
+    assert fake_repo.calls["check_client_email_exists"]["email"] == "test@example.com"
 
 
 @pytest.mark.asyncio
@@ -2640,6 +2606,7 @@ class _FakePrimaryContactForEnrichment:
 
     def __init__(self, first_name: str, last_name: str, email: str, phones):
         self.first_name = first_name
+        self.middle_name = None
         self.last_name = last_name
         self.email = email
         self.phones = phones

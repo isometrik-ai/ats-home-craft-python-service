@@ -1122,7 +1122,25 @@ class CustomFieldService:
             child_field = field_def.sub_fields[0]  # List has exactly one child
             validated_list = []
             for item in field_value:
-                validated_item = self._validate_field_value(f"{field_key}[item]", item, child_field)
+                # When the list child is an OBJECT and the item is a dict that contains
+                # the child_field.field_key, unwrap that inner object for validation.
+                if (
+                    child_field.field_type == FieldType.OBJECT.value
+                    and isinstance(item, dict)
+                    and child_field.field_key in item
+                    and isinstance(item[child_field.field_key], dict)
+                ):
+                    # Validate the inner object, but keep the wrapper key in the result
+                    validated_inner = self._validate_field_value(
+                        f"{field_key}[item]", item[child_field.field_key], child_field
+                    )
+                    validated_item = dict(item)
+                    validated_item[child_field.field_key] = validated_inner
+                else:
+                    # Existing behaviour for flat items or non-object children
+                    validated_item = self._validate_field_value(
+                        f"{field_key}[item]", item, child_field
+                    )
                 validated_list.append(validated_item)
             return validated_list
         return field_value

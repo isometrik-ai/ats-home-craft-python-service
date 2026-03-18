@@ -139,7 +139,11 @@ class ClientEnrichmentService:
     ) -> dict[str, Any]:
         """Build payload for POST /enrich (person).
         At least one of name, email, company, phone required."""
-        name = build_full_name(data.get("first_name") or "", data.get("last_name") or "").strip()
+        name = build_full_name(
+            data.get("first_name") or "",
+            data.get("middle_name") or "",
+            data.get("last_name") or "",
+        ).strip()
         phone_isd = data.get("phone_isd_code") or ""
         phone_num = data.get("phone_number") or ""
         phone = f"{phone_isd}{phone_num}".strip() or None
@@ -221,6 +225,33 @@ class ClientEnrichmentService:
             )
             return None
 
+    async def _store_sales_intelligence(
+        self,
+        repo: ClientRepository,
+        client_id: Any,
+        organization_id: Any,
+        person_info: dict[str, Any],
+        company_info: dict[str, Any],
+    ) -> None:
+        """Fetch sales intelligence using the shared API and persist it if available.
+
+        This is the single generic helper used by both company and person enrichment flows.
+        It does not change control flow: callers decide whether to await it inline or
+        invoke it from a background task.
+        """
+        sales_data = await self._fetch_sales_intelligence(
+            person_info=person_info or {},
+            company_info=company_info or {},
+        )
+        if not sales_data:
+            return
+
+        await repo.update_client(
+            client_id,
+            organization_id,
+            {"sales_intelligence": sales_data},
+        )
+
     async def run_client_enrichment(
         self,
         client_id: str,
@@ -230,44 +261,66 @@ class ClientEnrichmentService:
         conn: asyncpg.Connection | None = None,
     ) -> None:
         """Run enrichment after client creation: call API, then update client with
-        request_id and status.
+        request_id and status. Handles exceptions internally to prevent resource leaks.
 
         Runs only for client_type 'person' or 'company'. If conn is provided, uses
         the caller-managed connection (the caller is responsible for closing it);
         otherwise acquires a connection from the pool for the duration of this call.
         """
         webhook_url = self._webhook_url
-        if client_type == ClientType.PERSON.value:
-            body = self._build_person_payload(payload_data, webhook_url=webhook_url)
-            response = await self.enrich_person(body)
-        else:
-            body = self._build_company_payload(
-                client_id,
-                organization_id,
-                payload_data,
-                webhook_url=webhook_url,
-            )
-            response = await self.enrich_company(body)
 
-        request_id = response.get("request_id") if isinstance(response, dict) else None
-        if not request_id:
+        if client_type not in (ClientType.PERSON.value, ClientType.COMPANY.value):
             logger.error(
-                "Enrichment API did not return request_id",
-                extra={"client_id": client_id, "response": response},
+                "Unsupported client_type for enrichment; skipping",
+                extra={
+                    "client_id": client_id,
+                    "organization_id": organization_id,
+                    "client_type": client_type,
+                },
             )
             return
 
-        await self.update_client_enrichment_status(
-            client_id=client_id,
-            organization_id=organization_id,
-            request_id=request_id,
-            status=ClientEnrichmentStatus.REQUESTED.value,
-            conn=conn,
-        )
-        logger.info(
-            "Client enrichment requested and record updated",
-            extra={"client_id": client_id, "enrichment_request_id": request_id},
-        )
+        try:
+            if client_type == ClientType.PERSON.value:
+                body = self._build_person_payload(payload_data or {}, webhook_url=webhook_url)
+                response = await self.enrich_person(body)
+            else:
+                body = self._build_company_payload(
+                    client_id,
+                    organization_id,
+                    payload_data or {},
+                    webhook_url=webhook_url,
+                )
+                response = await self.enrich_company(body)
+
+            request_id = response.get("request_id") if isinstance(response, dict) else None
+            if not request_id:
+                logger.error(
+                    "Enrichment API did not return request_id",
+                    extra={"client_id": client_id, "response": response},
+                )
+                return
+
+            await self.update_client_enrichment_status(
+                client_id=client_id,
+                organization_id=organization_id,
+                request_id=request_id,
+                status=ClientEnrichmentStatus.REQUESTED.value,
+                conn=conn,
+            )
+            logger.info(
+                "Client enrichment requested and record updated",
+                extra={"client_id": client_id, "enrichment_request_id": request_id},
+            )
+        except Exception:
+            logger.exception(
+                "Error during run_client_enrichment",
+                extra={
+                    "client_id": client_id,
+                    "organization_id": organization_id,
+                    "client_type": client_type,
+                },
+            )
 
     async def update_client_enrichment_status(
         self,
@@ -304,34 +357,49 @@ class ClientEnrichmentService:
     ) -> None:
         """Run enrichment for multiple clients in parallel.
 
-        Uses asyncio.gather so person/company enrichment HTTP calls execute concurrently.
-        Any exception from an individual task is logged and does not prevent others from running.
+        Uses bounded asyncio.gather so person/company enrichment HTTP calls execute
+        concurrently without unbounded task creation. Any exception from an individual
+        task is logged and does not prevent others from running.
         """
         if not items:
             return
 
-        tasks = [
-            self.run_client_enrichment(
-                client_id=item["client_id"],
-                organization_id=item["organization_id"],
-                client_type=item["client_type"],
-                payload_data=payload_data,
-            )
+        # Basic input validation to avoid key errors on untrusted data
+        valid_items = [
+            item
             for item in items
+            if isinstance(item, dict)
+            and all(k in item for k in ("client_id", "organization_id", "client_type"))
         ]
+        if not valid_items:
+            return
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for item, result in zip(items, results, strict=False):
-            if isinstance(result, Exception):
-                logger.error(
-                    "Client enrichment task failed",
-                    extra={
-                        "client_id": item.get("client_id"),
-                        "organization_id": item.get("organization_id"),
-                        "client_type": item.get("client_type"),
-                        "error": str(result),
-                    },
+        max_concurrency = 5
+
+        for i in range(0, len(valid_items), max_concurrency):
+            batch = valid_items[i : i + max_concurrency]
+            tasks = [
+                self.run_client_enrichment(
+                    client_id=item["client_id"],
+                    organization_id=item["organization_id"],
+                    client_type=item["client_type"],
+                    payload_data=payload_data,
                 )
+                for item in batch
+            ]
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for item, result in zip(batch, results, strict=False):
+                if isinstance(result, Exception):
+                    logger.error(
+                        "Client enrichment task failed",
+                        extra={
+                            "client_id": item.get("client_id"),
+                            "organization_id": item.get("organization_id"),
+                            "client_type": item.get("client_type"),
+                            "error": str(result),
+                        },
+                    )
 
     # Company enrichment webhook (mapping + processing)
     @staticmethod
@@ -606,15 +674,19 @@ class ClientEnrichmentService:
 
     async def process_company_enrichment_webhook(
         self, conn: asyncpg.Connection, body: dict[str, Any]
-    ) -> bool:
+    ) -> tuple[str, str] | None:
         """Process company enrichment webhook:
-        find client by request_id, apply enriched data. Idempotent."""
+        find client by request_id, apply enriched data. Idempotent.
+
+        Returns:
+            (client_id, organization_id) on success, None when not processed.
+        """
         request_id = body.get("request_id") if body else None
         if not request_id or not isinstance(request_id, str):
-            return False
+            return None
         enriched_company = body.get("enriched_company") if body else None
         if not enriched_company or not isinstance(enriched_company, dict):
-            return False
+            return None
 
         repo = ClientRepository(conn)
         existing = await repo.get_client_for_update(enrichment_request_id=request_id)
@@ -623,7 +695,7 @@ class ClientEnrichmentService:
                 "Enrichment webhook: no client found for request_id",
                 extra={"request_id": request_id},
             )
-            return False
+            return None
         client_id = existing["id"]
         organization_id = existing["organization_id"]
         existing_additional_raw = existing.get("additional_data")
@@ -641,18 +713,11 @@ class ClientEnrichmentService:
             addresses_data = [{"client_id": client_id, **row} for row in new_address_rows]
             await repo.bulk_create_addresses(addresses_data)
 
-        # Fetch and store sales intelligence (same base URL as enrichment)
-        sales_data = await self._fetch_sales_intelligence(
-            person_info={}, company_info=enriched_company
-        )
-        if sales_data:
-            await repo.update_client(client_id, organization_id, {"sales_intelligence": sales_data})
-
         logger.info(
             "Client updated from enrichment webhook",
             extra={"client_id": client_id, "request_id": request_id},
         )
-        return True
+        return (str(client_id), str(organization_id))
 
     # Person enrichment webhook (mapping + processing)
     @staticmethod
@@ -817,15 +882,19 @@ class ClientEnrichmentService:
 
     async def process_person_enrichment_webhook(
         self, conn: asyncpg.Connection, body: dict[str, Any]
-    ) -> bool:
+    ) -> tuple[str, str] | None:
         """Process person enrichment webhook:
-        find client by request_id, apply enriched_profile. Idempotent."""
+        find client by request_id, apply enriched_profile. Idempotent.
+
+        Returns:
+            (client_id, organization_id) on success, None when not processed.
+        """
         request_id = body.get("request_id") if body else None
         if not request_id or not isinstance(request_id, str):
-            return False
+            return None
         enriched_profile = body.get("enriched_profile") if body else None
         if not enriched_profile or not isinstance(enriched_profile, dict):
-            return False
+            return None
 
         repo = ClientRepository(conn)
         existing = await repo.get_client_for_update(enrichment_request_id=request_id)
@@ -834,7 +903,7 @@ class ClientEnrichmentService:
                 "Enrichment webhook: no client found for request_id",
                 extra={"request_id": request_id},
             )
-            return False
+            return None
         client_id = existing["id"]
         organization_id = existing["organization_id"]
         existing_additional_raw = existing.get("additional_data")
@@ -849,18 +918,24 @@ class ClientEnrichmentService:
             "Client updated from person enrichment webhook",
             extra={"client_id": client_id, "request_id": request_id},
         )
-        return True
+        return (str(client_id), str(organization_id))
 
     async def fetch_and_store_sales_intelligence_for_request(
-        self, request_id: str, enriched_profile: dict[str, Any] | None = None
+        self,
+        request_id: str,
+        enriched_profile: dict[str, Any] | None = None,
+        enriched_company: dict[str, Any] | None = None,
     ) -> None:
-        """Fetch sales intelligence for a given enrichment request and persist it.
+        """Fetch sales intelligence for an enrichment request and persist it.
 
-        This is designed to be called from a background task so that the main
-        webhook processing path is not blocked by the external sales-intelligence
-        service. It is safe to call multiple times for the same request_id; the
-        latest successful response will simply overwrite the existing
-        sales_intelligence field for the client.
+        Single generic entry point used from a background task for both company and
+        person webhooks, so the webhook response is not blocked by the external
+        sales-intelligence service.
+
+        Pass enriched_company for company webhooks (person_info={}, company_info from
+        payload). Pass enriched_profile for person webhooks (person_info and
+        company_info from profile). It is safe to call multiple times for the same
+        request_id; the latest successful response overwrites sales_intelligence.
         """
         if not request_id or not isinstance(request_id, str):
             return
@@ -879,39 +954,21 @@ class ClientEnrichmentService:
             client_id = existing["id"]
             organization_id = existing["organization_id"]
 
-            # Prefer the enriched_profile passed from the webhook body if available;
-            # otherwise, fall back to the stored additional_data.enriched_profile.
-            profile: dict[str, Any] | None = None
-            if isinstance(enriched_profile, dict) and enriched_profile:
-                profile = enriched_profile
-            else:
-                existing_additional_raw = existing.get("additional_data")
-                existing_additional = safe_json_loads(existing_additional_raw)
-                if isinstance(existing_additional, dict):
-                    stored_profile = existing_additional.get("enriched_profile")
-                    if isinstance(stored_profile, dict):
-                        profile = stored_profile
+            person_info = {}
+            company_info = {}
+            if isinstance(enriched_company, dict) and enriched_company:
+                company_info = enriched_company
+            elif isinstance(enriched_profile, dict) and enriched_profile:
+                person_info = enriched_profile
+                raw_company = enriched_profile.get("companyInfo")
+                company_info = raw_company if isinstance(raw_company, dict) else {}
 
-            if not isinstance(profile, dict) or not profile:
-                logger.warning(
-                    "Sales intelligence: no enriched_profile available for request_id",
-                    extra={"request_id": request_id, "client_id": client_id},
-                )
-                return
-
-            raw_company = profile.get("companyInfo")
-            company_info = raw_company if isinstance(raw_company, dict) else {}
-
-            sales_data = await self._fetch_sales_intelligence(
-                person_info=profile, company_info=company_info
-            )
-            if not sales_data:
-                return
-
-            await repo.update_client(
-                client_id,
-                organization_id,
-                {"sales_intelligence": sales_data},
+            await self._store_sales_intelligence(
+                repo=repo,
+                client_id=client_id,
+                organization_id=organization_id,
+                person_info=person_info,
+                company_info=company_info,
             )
 
             logger.info(

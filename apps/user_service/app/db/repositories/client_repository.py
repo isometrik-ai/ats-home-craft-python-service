@@ -553,6 +553,7 @@ class ClientRepository:
                    linked_pages, products, key_people
             FROM clients
             WHERE {where}
+            FOR UPDATE
         """
         row = await self.db_connection.fetchrow(query, *params)
         return dict(row) if row else None
@@ -624,37 +625,6 @@ class ClientRepository:
         return row is not None
 
     # VALIDATION OPERATIONS
-    async def check_client_name_exists(
-        self,
-        name: str,
-        organization_id: str,
-        exclude_client_id: str | None = None,
-    ) -> bool:
-        """Check if client name exists for this organization (any client type).
-
-        Args:
-            name: Client name (normalized, e.g. full name for person or company name).
-            organization_id: Organization ID.
-            exclude_client_id: Client ID to exclude from check (e.g. current client on update).
-
-        Returns:
-            True if a non-deleted client with this name exists; False otherwise.
-        """
-        conditions = [
-            "LOWER(name) = $1",
-            "organization_id = $2",
-            "status != $3",
-        ]
-        params: list[str] = [name.lower(), organization_id, ClientStatus.DELETED.value]
-        next_index = 4
-
-        if exclude_client_id is not None:
-            conditions.append(f"id != ${next_index}")
-            params.append(exclude_client_id)
-
-        query = "SELECT EXISTS(SELECT 1 FROM clients WHERE " + " AND ".join(conditions) + ")"
-        exists = await self.db_connection.fetchval(query, *params)
-        return bool(exists)
 
     async def _check_client_email_exists(
         self,
@@ -896,7 +866,7 @@ class ClientRepository:
                 l.intake_stage,
                 l.lead_source,
                 l.referral_source,
-                l.lead_score,
+                NULLIF(l.lead_score, '')::int AS lead_score,
                 l.converted_at,
                 l.notes as lead_notes,
                 l.created_at as lead_created_at,
@@ -954,10 +924,10 @@ class ClientRepository:
         for company client, the one with client_company_id = client_id and is_primary_contact.
 
         Returns:
-            dict with id, phones (raw JSONB), or None if no primary contact.
+            dict with id, phones (raw JSONB), and name parts; or None if no primary contact.
         """
         query = """
-            SELECT cu.id, cu.phones
+            SELECT cu.id, cu.phones, cu.first_name, cu.middle_name, cu.last_name
             FROM client_users cu
             JOIN clients c ON (c.id = cu.client_id OR c.id = cu.client_company_id)
             WHERE c.id = $1 AND c.organization_id = $2

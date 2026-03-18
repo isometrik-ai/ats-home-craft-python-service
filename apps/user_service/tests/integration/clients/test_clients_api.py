@@ -342,9 +342,9 @@ async def test_update_client(monkeypatch, client):
     async def fake_update_client(self, client_id, organization_id, body):
         """Fake update client."""
         del self
-        assert client_id == "client-123"
+        assert client_id == "00000000-0000-0000-0000-000000000123"
         assert organization_id == "org-1"
-        assert body.client_name == "Updated Name"
+        assert body.company_name == "Updated Name"
         return {"old_data": {"client_id": "client-123", "name": "Old Name"}}
 
     monkeypatch.setattr(
@@ -355,10 +355,18 @@ async def test_update_client(monkeypatch, client):
         "apps.user_service.app.services.client_service.ClientService.update_client",
         fake_update_client,
     )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.ClientService.index_clients_in_typesense_background",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.ClientService.trigger_enrichment_background",
+        AsyncMock(),
+    )
 
     res = await client.patch(
-        "/v1/clients/client-123",
-        json={"client_name": "Updated Name"},
+        "/v1/clients/00000000-0000-0000-0000-000000000123",
+        json={"company_name": "Updated Name"},
     )
     assert_success(res, 200)
 
@@ -531,7 +539,7 @@ async def test_update_client_with_custom_fields(monkeypatch, client):
     async def fake_update_client(self, client_id, organization_id, body):
         """Fake update client with custom fields."""
         del self
-        assert client_id == "client-123"
+        assert client_id == "00000000-0000-0000-0000-000000000123"
         assert organization_id == "org-1"
         assert body.custom_fields == {"age": 30}
         return {"old_data": {"client_id": "client-123", "custom_fields": {"age": 25}}}
@@ -544,9 +552,13 @@ async def test_update_client_with_custom_fields(monkeypatch, client):
         "apps.user_service.app.services.client_service.ClientService.update_client",
         fake_update_client,
     )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.clients.ClientService.index_clients_in_typesense_background",
+        AsyncMock(),
+    )
 
     res = await client.patch(
-        "/v1/clients/client-123",
+        "/v1/clients/00000000-0000-0000-0000-000000000123",
         json={"custom_fields": {"age": 30}},
     )
     assert_success(res, 200)

@@ -165,14 +165,15 @@
       "client_user_not_found": "Client user not found",
       "email_already_exists": "A user with this email already exists in our system",
       "phone_number_already_exists": "A user with this phone number already exists in our system",
-      "client_name_already_exists": "A client with this name already exists in your organization",
       "auth_user_creation_failed": "Failed to create authentication user",
       "company_contact_required": "Company contact is required for company type",
       "company_name_required": "Company name is required for company type",
+      "only_one_primary_phone": "Only one phone number can be marked as primary",
       "only_one_primary_website": "Only one website can be marked as primary",
       "only_one_primary_address": "Only one address can be marked as primary",
       "website_not_found": "Website not found",
       "social_page_not_found": "Social page not found",
+      "phone_not_found": "Phone number not found",
       "company_fields_not_allowed_for_person": "Company-specific fields cannot be updated for individual clients",
       "person_fields_not_allowed_for_company": "Individual-specific fields cannot be updated for company clients",
       "work_history_item_not_found": "Work history item not found",
@@ -194,7 +195,8 @@
       "clients_retrieved": "Clients retrieved successfully",
       "client_retrieved": "Client details retrieved successfully",
       "client_updated": "Client updated successfully",
-      "client_deleted": "Client deleted successfully"
+      "client_deleted": "Client deleted successfully",
+      "client_enrichment_requested": "Client enrichment requested successfully"
     }
   },
   "audit_logs": {
