@@ -141,7 +141,7 @@ async def _get_embedding_client() -> AsyncOpenAI:
         if _embedding_state.client is not None:
             return _embedding_state.client
 
-        api_key = shared_settings.typesense.openai_api_key
+        api_key = shared_settings.openai_api_key
         _embedding_state.client = AsyncOpenAI(api_key=api_key)
         logger.info("openai_embedding_client_created")
 
