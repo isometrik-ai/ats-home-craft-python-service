@@ -26,6 +26,8 @@ from apps.user_service.app.db.repositories import (
 )
 from apps.user_service.app.schemas.clients import (
     AddressesUpdate,
+    AddressInput,
+    AddressUpdateItem,
     BillingPreferences,
     ClientAddressResponse,
     ClientDetailsResponse,
@@ -2235,27 +2237,71 @@ class ClientService:
         addresses_update: AddressesUpdate,
     ) -> None:
         """Apply batch address operations: add, update, and/or remove."""
-        # Remove operations
-        if addresses_update.remove:
-            await self.client_repository._delete_addresses_by_ids(
-                client_id, addresses_update.remove
-            )
+        try:
+            await self._delete_removed_addresses(client_id, addresses_update.remove)
+            await self._update_existing_addresses(client_id, addresses_update.update)
+            await self._add_new_addresses(client_id, addresses_update.add)
+        except UniqueViolationError as exc:
+            if getattr(exc, "constraint_name", None) == "uq_client_primary_address":
+                raise ValidationException(
+                    message_key="clients.errors.only_one_primary_address",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                ) from exc
+            raise
 
-        # Update operations
-        if addresses_update.update:
-            for update_item in addresses_update.update:
-                payload = update_item.model_dump(exclude_none=True, exclude={"id"})
-                if payload:
-                    await self.client_repository.update_address(update_item.id, client_id, payload)
+    async def _delete_removed_addresses(
+        self, client_id: str, address_ids_to_remove: list[str] | None
+    ) -> None:
+        """Delete address rows listed in remove operation."""
+        if not address_ids_to_remove:
+            return
+        await self.client_repository._delete_addresses_by_ids(client_id, address_ids_to_remove)
 
-        # Add operations
-        if addresses_update.add:
-            rows = []
-            for add_item in addresses_update.add:
-                row: dict[str, Any] = {"client_id": client_id}
-                row.update(add_item.model_dump(exclude_none=True))
-                rows.append(row)
-            await self.client_repository.bulk_create_addresses(rows)
+    async def _update_existing_addresses(
+        self,
+        client_id: str,
+        address_updates: list[AddressUpdateItem] | None,
+    ) -> None:
+        """Apply partial updates to existing addresses."""
+        if not address_updates:
+            return
+
+        for update_item in address_updates:
+            payload = update_item.model_dump(exclude_none=True, exclude={"id"})
+            if not payload:
+                continue
+            if payload.get("is_primary") is True:
+                await self.client_repository.clear_primary_addresses(
+                    client_id, exclude_address_id=update_item.id
+                )
+            await self.client_repository.update_address(update_item.id, client_id, payload)
+
+    async def _add_new_addresses(
+        self,
+        client_id: str,
+        addresses_to_add: list[AddressInput] | None,
+    ) -> None:
+        """Create new address rows from add operation."""
+        if not addresses_to_add:
+            return
+
+        if any(item.is_primary is True for item in addresses_to_add):
+            await self.client_repository.clear_primary_addresses(client_id)
+
+        rows = self._build_address_rows_for_create(client_id, addresses_to_add)
+        await self.client_repository.bulk_create_addresses(rows)
+
+    @staticmethod
+    def _build_address_rows_for_create(
+        client_id: str, addresses_to_add: list[AddressInput]
+    ) -> list[dict[str, Any]]:
+        """Build DB rows for bulk address creation."""
+        rows: list[dict[str, Any]] = []
+        for add_item in addresses_to_add:
+            row: dict[str, Any] = {"client_id": client_id}
+            row.update(add_item.model_dump(exclude_none=True))
+            rows.append(row)
+        return rows
 
     async def _sync_user_with_social_service(
         self,

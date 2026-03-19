@@ -624,6 +624,27 @@ class ClientRepository:
         )
         return row is not None
 
+    async def clear_primary_addresses(
+        self, client_id: str, exclude_address_id: str | None = None
+    ) -> None:
+        """Clear primary flag for a client's addresses.
+
+        Args:
+            client_id: Client ID.
+            exclude_address_id: Optional address ID to keep untouched.
+        """
+        await self.db_connection.execute(
+            """
+            UPDATE client_addresses
+            SET is_primary = FALSE, updated_at = NOW()
+            WHERE client_id = $1
+              AND is_primary = TRUE
+              AND ($2::uuid IS NULL OR id != $2::uuid)
+            """,
+            client_id,
+            exclude_address_id,
+        )
+
     # VALIDATION OPERATIONS
 
     async def _check_client_email_exists(

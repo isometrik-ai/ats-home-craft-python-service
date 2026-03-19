@@ -6,7 +6,7 @@ This module contains Pydantic models for client management operations.
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.enums import (
     AddressType,
@@ -398,37 +398,17 @@ class AddressesUpdate(BaseModel):
         None, description="Address record IDs to remove", max_length=50
     )
 
-    @field_validator("add")
-    @classmethod
-    def validate_primary_address_add(
-        cls, add_list: list[AddressInput] | None
-    ) -> list[AddressInput] | None:
-        """Validate only one primary address in add operations."""
-        if not add_list:
-            return add_list
-        primary_count = sum(1 for a in add_list if a.is_primary is True)
-        if primary_count > 1:
+    @model_validator(mode="after")
+    def validate_primary_address_across_add_and_update(self) -> "AddressesUpdate":
+        """Validate only one primary address across add/update payload."""
+        primary_add_count = sum(1 for a in (self.add or []) if a.is_primary is True)
+        primary_update_count = sum(1 for a in (self.update or []) if a.is_primary is True)
+        if primary_add_count + primary_update_count > 1:
             raise ValidationException(
                 message_key="clients.errors.only_one_primary_address",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        return add_list
-
-    @field_validator("update")
-    @classmethod
-    def validate_primary_address_update(
-        cls, update_list: list[AddressUpdateItem] | None
-    ) -> list[AddressUpdateItem] | None:
-        """Validate only one primary address in update operations."""
-        if not update_list:
-            return update_list
-        primary_count = sum(1 for a in update_list if a.is_primary is True)
-        if primary_count > 1:
-            raise ValidationException(
-                message_key="clients.errors.only_one_primary_address",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return update_list
+        return self
 
 
 class WebsitesUpdate(BaseModel):
