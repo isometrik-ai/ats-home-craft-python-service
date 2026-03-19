@@ -607,7 +607,7 @@ async def enrich_client(
     request: Request,
     background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Trigger client enrichment by client ID."""
@@ -615,17 +615,17 @@ async def enrich_client(
     request.state.audit_requested_id = client_id
     request.state.audit_description = f"Enriched client: {client_id}"
     request.state.audit_risk_level = "medium"
-
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_EDIT,
-    )
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
+    async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CLIENTS_MANAGEMENT_EDIT,
+        )
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
 
     background_tasks.add_task(
         ClientService.trigger_enrichment_background,
