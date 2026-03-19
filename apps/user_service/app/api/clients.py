@@ -23,6 +23,7 @@ from apps.user_service.app.services.client_service import (
     ClientEnrichmentService,
     ClientService,
 )
+from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
@@ -76,7 +77,8 @@ logger = get_logger("clients-api")
 )
 async def create_client_from_user(
     request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    background_tasks: BackgroundTasks,
+    db_connection: asyncpg.Connection = Depends(db_conn),
     body: CreateClientFromUserRequest = Body(...),
 ):
     """Create a client and client_user from user ID.
@@ -88,6 +90,7 @@ async def create_client_from_user(
 
     Args:
         request: FastAPI request object
+        background_tasks: FastAPI background task manager
         db_connection: Database connection
         body: Request body containing user_id and organization_id
 
@@ -103,11 +106,28 @@ async def create_client_from_user(
         "organization_id": body.organization_id,
     }
 
-    # Create service and delegate all business logic to service
-    client_service = ClientService(
-        db_connection=db_connection,
-    )
-    await client_service.create_client_from_user(body)
+    event: dict | None = None
+    async with db_connection.transaction():
+        # Create service and delegate all business logic to service
+        client_service = ClientService(
+            db_connection=db_connection,
+        )
+        event_service = EventService(db_connection=db_connection)
+        await client_service.create_client_from_user(body)
+        event = await event_service.create_lifecycle_event(
+            event_type="client.created",
+            aggregate_id=body.user_id,
+            organization_id=body.organization_id,
+            actor_user_id=body.user_id,
+            payload={"module": "clients", "action": "create_from_user"},
+        )
+
+    if event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=event,
+            key=str(body.user_id),
+        )
 
     return success_response(
         request=request,
@@ -184,7 +204,12 @@ async def create_client(
             db_connection=db_connection,
             supabase_client=sb_client,
         )
+        event_service = EventService(db_connection=db_connection)
         result = await client_service.create_client(request_data=body)
+        create_events = await event_service.create_client_created_events(
+            records=result.records,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+        )
 
     # Committed; run enrichment for each created client (person and/or company).
     if result.enrichment_items:
@@ -203,6 +228,13 @@ async def create_client(
             ClientService.index_clients_in_typesense_background,
             client_refs,
         )
+        for event in create_events:
+            client_id = str(event["aggregate_id"])
+            background_tasks.add_task(
+                EventService.publish_event_background,
+                event=event,
+                key=client_id,
+            )
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
@@ -475,10 +507,23 @@ async def delete_client(
         user_context=user_context,
         db_connection=db_connection,
     )
+    event_service = EventService(db_connection=db_connection)
     await client_service.delete_client(client_id, user_context.organization_id)
+    event = await event_service.create_lifecycle_event(
+        event_type="client.deleted",
+        aggregate_id=client_id,
+        organization_id=user_context.organization_id,
+        actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+        payload={"module": "clients", "action": "delete"},
+    )
 
     # Best-effort Typesense cleanup, offloaded to background task.
     background_tasks.add_task(ClientService.delete_clients_from_typesense_background, [client_id])
+    background_tasks.add_task(
+        EventService.publish_event_background,
+        event=event,
+        key=client_id,
+    )
 
     return success_response(
         request=request,
@@ -535,17 +580,31 @@ async def update_client(
         "organization_id": user_context.organization_id,
     }
 
+    update_event: dict | None = None
     async with db_connection.transaction():
         client_service = ClientService(
             user_context=user_context,
             db_connection=db_connection,
         )
+        event_service = EventService(db_connection=db_connection)
         result = await client_service.update_client(client_id, user_context.organization_id, body)
 
         if result:
             request.state.raw_audit_old_data = result.get("old_data")
             request.state.raw_audit_new_data = body.model_dump(
                 exclude_unset=True, exclude_none=True
+            )
+            changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
+            update_event = await event_service.create_lifecycle_event(
+                event_type="client.updated",
+                aggregate_id=client_id,
+                organization_id=user_context.organization_id,
+                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+                payload={
+                    "module": "clients",
+                    "action": "update",
+                    "changed_fields": changed_fields,
+                },
             )
 
     # Best-effort Typesense indexing after update, offloaded to background task.
@@ -571,6 +630,12 @@ async def update_client(
             ClientService.trigger_enrichment_background,
             client_id,
             user_context.organization_id,
+        )
+    if update_event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=update_event,
+            key=client_id,
         )
 
     return success_response(
@@ -629,11 +694,24 @@ async def enrich_client(
             "organization_id": user_context.organization_id,
         }
         organization_id = user_context.organization_id
+        event_service = EventService(db_connection=db_connection)
+        enrich_event = await event_service.create_lifecycle_event(
+            event_type="client.enrichment_requested",
+            aggregate_id=client_id,
+            organization_id=organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={"module": "clients", "action": "enrich"},
+        )
 
     background_tasks.add_task(
         ClientService.trigger_enrichment_background,
         client_id,
         organization_id,
+    )
+    background_tasks.add_task(
+        EventService.publish_event_background,
+        event=enrich_event,
+        key=client_id,
     )
 
     return success_response(

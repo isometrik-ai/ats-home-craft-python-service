@@ -5,7 +5,12 @@ Services provide business logic and orchestration of operations.
 
 from apps.user_service.app.services.auth_service import AuthService
 from apps.user_service.app.services.client_service import ClientService
+from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.invite_service import InviteService
+from apps.user_service.app.services.kafka_event_service import (
+    KafkaEventService,
+    get_kafka_event_service,
+)
 from apps.user_service.app.services.organization_service import (
     OrganizationService,
 )
@@ -21,7 +26,9 @@ from apps.user_service.app.services.verification_code_service import (
 __all__ = [
     "AuthService",
     "ClientService",
+    "EventService",
     "InviteService",
+    "KafkaEventService",
     "OrganizationService",
     "PermissionsService",
     "RoleService",
@@ -29,4 +36,5 @@ __all__ = [
     "TeamService",
     "UserService",
     "VerificationCodeService",
+    "get_kafka_event_service",
 ]

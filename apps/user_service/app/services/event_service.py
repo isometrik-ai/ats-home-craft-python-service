@@ -1,0 +1,172 @@
+"""Generic event service for event persistence and Kafka publishing."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
+
+import asyncpg
+
+from apps.user_service.app.config.app_settings import app_settings
+from apps.user_service.app.db.repositories.events_repository import EventsRepository
+from apps.user_service.app.services.kafka_event_service import get_kafka_event_service
+from libs.shared_utils.logger import get_logger
+
+logger = get_logger("event_service")
+
+
+class EventService:
+    """Application-level service for generic event lifecycle."""
+
+    def __init__(self, db_connection: asyncpg.Connection | None = None) -> None:
+        self.db_connection = db_connection
+
+    def build_event(
+        self,
+        *,
+        event_type: str,
+        aggregate_id: str,
+        organization_id: str,
+        actor_user_id: str | None,
+        payload: Mapping[str, Any] | None = None,
+        source: str = "user-service",
+    ) -> dict[str, Any]:
+        """Build a generic event envelope."""
+        return {
+            "event_id": str(uuid.uuid4()),
+            "event_type": event_type,
+            "aggregate_id": str(aggregate_id),
+            "organization_id": str(organization_id),
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "source": source,
+            "actor_user_id": str(actor_user_id) if actor_user_id else None,
+            "payload": dict(payload or {}),
+        }
+
+    async def store_event(
+        self,
+        *,
+        event: Mapping[str, Any],
+        topic: str | None = None,
+        status: str = "pending",
+    ) -> None:
+        """Persist event to events table using current transaction connection."""
+        if self.db_connection is None:
+            raise ValueError("db_connection is required to store events")
+
+        event_repo = EventsRepository(db_connection=self.db_connection)
+        resolved_topic = topic or app_settings.kafka.default_topic
+        await event_repo.create_event(
+            event_id=str(event["event_id"]),
+            event_type=str(event["event_type"]),
+            aggregate_id=str(event["aggregate_id"]),
+            organization_id=str(event["organization_id"]),
+            topic=resolved_topic,
+            payload=event,
+            status=status,
+        )
+
+    async def create_lifecycle_event(
+        self,
+        *,
+        event_type: str,
+        aggregate_id: str,
+        organization_id: str,
+        actor_user_id: str | None,
+        payload: Mapping[str, Any] | None = None,
+        topic: str | None = None,
+    ) -> dict[str, Any]:
+        """Build and persist lifecycle event in events table."""
+        event = self.build_event(
+            event_type=event_type,
+            aggregate_id=aggregate_id,
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+            payload=payload,
+        )
+        await self.store_event(event=event, topic=topic, status="pending")
+        return event
+
+    async def create_lifecycle_events(
+        self,
+        *,
+        items: list[dict[str, Any]],
+        topic: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build and persist multiple lifecycle events in one DB batch."""
+        if self.db_connection is None:
+            raise ValueError("db_connection is required to store events")
+        if not items:
+            return []
+
+        resolved_topic = topic or app_settings.kafka.default_topic
+        events: list[dict[str, Any]] = []
+        db_rows: list[dict[str, Any]] = []
+
+        for item in items:
+            event = self.build_event(
+                event_type=str(item["event_type"]),
+                aggregate_id=str(item["aggregate_id"]),
+                organization_id=str(item["organization_id"]),
+                actor_user_id=item.get("actor_user_id"),
+                payload=item.get("payload"),
+            )
+            events.append(event)
+            db_rows.append(
+                {
+                    "event_id": event["event_id"],
+                    "event_type": event["event_type"],
+                    "aggregate_id": event["aggregate_id"],
+                    "organization_id": event["organization_id"],
+                    "topic": resolved_topic,
+                    "payload": event,
+                    "status": "pending",
+                }
+            )
+
+        event_repo = EventsRepository(db_connection=self.db_connection)
+        await event_repo.bulk_create_events(events=db_rows)
+        return events
+
+    async def create_client_created_events(
+        self,
+        *,
+        records: list[Mapping[str, Any]],
+        actor_user_id: str | None,
+        topic: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build and persist `client.created` lifecycle events for client records."""
+        items = [
+            {
+                "event_type": "client.created",
+                "aggregate_id": str(record["id"]),
+                "organization_id": str(record["organization_id"]),
+                "actor_user_id": actor_user_id,
+                "payload": {"module": "clients", "action": "create"},
+            }
+            for record in records
+        ]
+        return await self.create_lifecycle_events(items=items, topic=topic)
+
+    @staticmethod
+    async def publish_event_background(
+        *,
+        event: Mapping[str, Any],
+        key: str | None = None,
+        topic: str | None = None,
+    ) -> None:
+        """Best-effort Kafka publish intended for background execution."""
+        try:
+            kafka_service = get_kafka_event_service()
+            await kafka_service.produce_event(event=event, key=key, topic=topic)
+        except Exception:
+            logger.exception(
+                "kafka_event_publish_failed",
+                extra={
+                    "event_type": event.get("event_type"),
+                    "aggregate_id": event.get("aggregate_id"),
+                    "organization_id": event.get("organization_id"),
+                },
+            )

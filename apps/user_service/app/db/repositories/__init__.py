@@ -13,6 +13,7 @@ Usage:
 """
 
 from apps.user_service.app.db.repositories.client_repository import ClientRepository
+from apps.user_service.app.db.repositories.events_repository import EventsRepository
 from apps.user_service.app.db.repositories.invite_repository import InviteRepository
 from apps.user_service.app.db.repositories.organization_delete_request_repository import (
     OrganizationDeleteRequestRepository,
@@ -56,4 +57,5 @@ __all__ = [
     "UserRepository",
     "VerificationCodeRepository",
     "InviteRepository",
+    "EventsRepository",
 ]

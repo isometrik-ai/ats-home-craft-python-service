@@ -50,6 +50,23 @@ class ExternalServiceSettings(BaseSettings):
     social_service_url: str | None = config("SOCIAL_SERVICE_URL", default=None)
 
 
+class KafkaSettings(BaseSettings):
+    """Kafka producer settings for event publishing."""
+
+    enabled: bool = config("KAFKA_ENABLED", default=False)
+    bootstrap_servers: str = config("KAFKA_BOOTSTRAP_SERVERS")
+    default_topic: str = config("KAFKA_DEFAULT_TOPIC", default="crm.events")
+    producer_name: str = config("KAFKA_PRODUCER_NAME", default="user_service")
+    security_protocol: str = config("KAFKA_SECURITY_PROTOCOL", default="PLAINTEXT")
+    sasl_mechanism: str | None = config("KAFKA_SASL_MECHANISM")
+    sasl_username: str | None = config("KAFKA_SASL_USERNAME")
+    sasl_password: str | None = config("KAFKA_SASL_PASSWORD")
+    request_timeout_ms: int = config("KAFKA_REQUEST_TIMEOUT_MS", default=30000)
+    max_batch_size: int = config("KAFKA_MAX_BATCH_SIZE", default=16384)
+    linger_ms: int = config("KAFKA_LINGER_MS", default=5)
+    compression_type: str | None = config("KAFKA_COMPRESSION_TYPE", default="gzip")
+
+
 class ApplicationSettings(BaseSettings):
     """Application settings."""
 
@@ -59,6 +76,7 @@ class ApplicationSettings(BaseSettings):
     invite_expiry_days: int = config("INVITE_EXPIRY_DAYS", default=7)
     datadog_tracing_enabled: bool = config("DATADOG_TRACING_ENABLED", default=False)
     external_service: ExternalServiceSettings = ExternalServiceSettings()
+    kafka: KafkaSettings = KafkaSettings()
 
 
 app_settings = ApplicationSettings()
