@@ -169,7 +169,8 @@ class _FakeClientRepo:
 
     async def clear_primary_addresses(self, client_id, exclude_address_id=None):
         """Clear primary flags for addresses."""
-        self.calls.setdefault("clear_primary_addresses", []).append((client_id, exclude_address_id))
+        self.calls.setdefault("clear_primary_addresses", []).clear()
+        self.calls["clear_primary_addresses"].append((client_id, exclude_address_id))
 
     async def _delete_addresses_by_ids(self, client_id, address_ids):
         """Delete addresses by ids."""

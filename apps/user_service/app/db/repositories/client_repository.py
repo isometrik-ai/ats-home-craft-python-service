@@ -633,6 +633,8 @@ class ClientRepository:
             client_id: Client ID.
             exclude_address_id: Optional address ID to keep untouched.
         """
+        # Note: this statement can transiently produce 0 primaries; correctness under concurrent
+        # updates is guaranteed by the DB unique constraint for primary address per client.
         await self.db_connection.execute(
             """
             UPDATE client_addresses
