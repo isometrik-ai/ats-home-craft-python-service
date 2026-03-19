@@ -1303,6 +1303,10 @@ class ClientService:
         custom_fields = parse_json_field(client.get("custom_fields")) or {}
 
         additional_data = parse_json_field(client.get("additional_data")) or {}
+        sales_intelligence_raw = parse_json_field(client.get("sales_intelligence")) or {}
+        sales_intelligence = (
+            sales_intelligence_raw if isinstance(sales_intelligence_raw, dict) else {}
+        )
         social_pages_data = parse_json_field(client.get("social_pages")) or []
         social_pages = [SocialPage(**p) for p in social_pages_data] if social_pages_data else []
 
@@ -1370,7 +1374,7 @@ class ClientService:
                 intake_stage=client.get("intake_stage"),
                 lead_source=client.get("lead_source"),
                 referral_source=client.get("referral_source"),
-                lead_score=client.get("lead_score"),
+                lead_score=str(client.get("lead_score")),
                 converted_at=format_iso_datetime(client.get("converted_at")),
                 notes=client.get("lead_notes"),
                 created_at=format_iso_datetime(client.get("lead_created_at")) or "",
@@ -1429,6 +1433,7 @@ class ClientService:
             addresses=formatted_addresses,
             lead=lead_info,
             additional_data=additional_data,
+            sales_intelligence=sales_intelligence,
             social_pages=social_pages,
             work_history=work_history,
             educational_history=educational_history,

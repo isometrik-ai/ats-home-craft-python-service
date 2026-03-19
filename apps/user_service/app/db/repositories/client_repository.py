@@ -837,6 +837,7 @@ class ClientRepository:
                 c.billing_preferences,
                 c.custom_fields,
                 c.additional_data,
+                c.sales_intelligence,
                 c.social_pages,
                 c.enrichment_done,
                 c.last_enriched_at,
