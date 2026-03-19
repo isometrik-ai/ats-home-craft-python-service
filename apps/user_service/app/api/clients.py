@@ -615,6 +615,8 @@ async def enrich_client(
     request.state.audit_requested_id = client_id
     request.state.audit_description = f"Enriched client: {client_id}"
     request.state.audit_risk_level = "medium"
+
+    organization_id = None
     async with db_connection.transaction():
         user_context = await check_permissions(
             current_user=current_user,
@@ -626,11 +628,12 @@ async def enrich_client(
             "user_email": user_context.email,
             "organization_id": user_context.organization_id,
         }
+        organization_id = user_context.organization_id
 
     background_tasks.add_task(
         ClientService.trigger_enrichment_background,
         client_id,
-        user_context.organization_id,
+        organization_id,
     )
 
     return success_response(
