@@ -550,30 +550,30 @@ async def update_client(
                 exclude_unset=True, exclude_none=True
             )
 
-        # Best-effort Typesense indexing after update, offloaded to background task.
-        background_tasks.add_task(
-            ClientService.index_clients_in_typesense_background,
-            [(client_id, user_context.organization_id)],
-        )
+    # Best-effort Typesense indexing after update, offloaded to background task.
+    background_tasks.add_task(
+        ClientService.index_clients_in_typesense_background,
+        [(client_id, user_context.organization_id)],
+    )
 
-        # Trigger enrichment only when enrichment-relevant inputs have changed.
-        enrichment_input_fields = (
-            "company_name",
-            "industry",
-            "websites",
-            "social_pages",
-            "addresses",
-            "primary_contact",
+    # Trigger enrichment only when enrichment-relevant inputs have changed.
+    enrichment_input_fields = (
+        "company_name",
+        "industry",
+        "websites",
+        "social_pages",
+        "addresses",
+        "primary_contact",
+    )
+    enrichment_inputs_changed = any(
+        getattr(body, field_name) is not None for field_name in enrichment_input_fields
+    )
+    if enrichment_inputs_changed:
+        background_tasks.add_task(
+            ClientService.trigger_enrichment_background,
+            client_id,
+            user_context.organization_id,
         )
-        enrichment_inputs_changed = any(
-            getattr(body, field_name) is not None for field_name in enrichment_input_fields
-        )
-        if enrichment_inputs_changed:
-            background_tasks.add_task(
-                ClientService.trigger_enrichment_background,
-                client_id,
-                user_context.organization_id,
-            )
 
     return success_response(
         request=request,

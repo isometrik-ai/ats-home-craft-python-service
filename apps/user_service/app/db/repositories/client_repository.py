@@ -917,21 +917,28 @@ class ClientRepository:
     async def _get_primary_contact_for_update(
         self, client_id: str, organization_id: str
     ) -> dict | None:
-        """Get primary contact client_user id and phones for update (e.g. phones batch).
+        """Get contact client_user id and phones for update (e.g. phones batch).
 
-        Returns the client_user row that is the primary contact for this client:
-        for person client, the one with client_id = client_id and is_primary_contact;
-        for company client, the one with client_company_id = client_id and is_primary_contact.
+        Returns one contact row for this client:
+        for person client, the contact linked by client_id;
+        for company client, only the primary contact linked by client_company_id.
 
         Returns:
-            dict with id, phones (raw JSONB), and name parts; or None if no primary contact.
+            dict with id, phones (raw JSONB), and name parts; or None if no contact.
         """
         query = """
             SELECT cu.id, cu.phones, cu.first_name, cu.middle_name, cu.last_name
             FROM client_users cu
-            JOIN clients c ON (c.id = cu.client_id OR c.id = cu.client_company_id)
+            JOIN clients c ON c.id = $1
             WHERE c.id = $1 AND c.organization_id = $2
-                AND cu.is_primary_contact = true
+                AND (
+                    (c.client_type = 'person' AND cu.client_id = c.id)
+                    OR (
+                        c.client_type = 'company'
+                        AND cu.client_company_id = c.id
+                        AND cu.is_primary_contact = true
+                    )
+                )
                 AND cu.status != $3
                 AND c.status != $4
             LIMIT 1

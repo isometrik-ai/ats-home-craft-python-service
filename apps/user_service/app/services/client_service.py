@@ -737,6 +737,9 @@ class ClientService:
     ) -> list[dict[str, Any]]:
         """Build the ordered list of client payloads for create_client
         based on client type and linking rules."""
+        # Note: in the 2-row create flows, the second (linked) payload does NOT go
+        # through `_prepare_client_data(...)`, so custom-field required validation
+        # is only applied for the payload built by `_prepare_client_data(...)`.
         if request_data.client_type == ClientType.COMPANY:
             return [
                 await self._prepare_client_data(request_data, organization_id),
