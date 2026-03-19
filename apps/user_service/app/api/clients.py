@@ -478,10 +478,7 @@ async def delete_client(
     await client_service.delete_client(client_id, user_context.organization_id)
 
     # Best-effort Typesense cleanup, offloaded to background task.
-    background_tasks.add_task(
-        ClientService.delete_clients_from_typesense_background,
-        [client_id],
-    )
+    background_tasks.add_task(ClientService.delete_clients_from_typesense_background, [client_id])
 
     return success_response(
         request=request,
@@ -527,17 +524,18 @@ async def update_client(
     request.state.audit_description = f"Updated client: {client_id}"
     request.state.audit_risk_level = "medium"
 
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CLIENTS_MANAGEMENT_EDIT,
+    )
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
     async with db_connection.transaction():
-        user_context = await check_permissions(
-            current_user=current_user,
-            db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_EDIT,
-        )
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id,
-        }
         client_service = ClientService(
             user_context=user_context,
             db_connection=db_connection,

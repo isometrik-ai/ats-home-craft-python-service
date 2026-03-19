@@ -926,19 +926,12 @@ class ClientRepository:
         Returns:
             dict with id, phones (raw JSONB), and name parts; or None if no contact.
         """
-        query = """
+        query = f"""
             SELECT cu.id, cu.phones, cu.first_name, cu.middle_name, cu.last_name
             FROM client_users cu
             JOIN clients c ON c.id = $1
             WHERE c.id = $1 AND c.organization_id = $2
-                AND (
-                    (c.client_type = 'person' AND cu.client_id = c.id)
-                    OR (
-                        c.client_type = 'company'
-                        AND cu.client_company_id = c.id
-                        AND cu.is_primary_contact = true
-                    )
-                )
+                AND {PRIMARY_CONTACT_JOIN_PREDICATE}
                 AND cu.status != $3
                 AND c.status != $4
             LIMIT 1
