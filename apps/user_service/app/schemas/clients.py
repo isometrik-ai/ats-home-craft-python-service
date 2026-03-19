@@ -826,6 +826,10 @@ class ClientDetailsResponse(BaseModel):
     additional_data: dict[str, Any] = Field(
         default_factory=dict, description="Dynamic data stored as passed"
     )
+    sales_intelligence: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Sales intelligence insights (populated by enrichment when available)",
+    )
     social_pages: list[SocialPage] = Field(
         default_factory=list, description="Social platform and URL entries"
     )
