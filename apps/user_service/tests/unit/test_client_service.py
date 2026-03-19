@@ -167,6 +167,11 @@ class _FakeClientRepo:
         self.calls["update_address"] = (address_id, client_id, update_data)
         return True
 
+    async def clear_primary_addresses(self, client_id, exclude_address_id=None):
+        """Clear primary flags for addresses."""
+        self.calls.setdefault("clear_primary_addresses", []).clear()
+        self.calls["clear_primary_addresses"].append((client_id, exclude_address_id))
+
     async def _delete_addresses_by_ids(self, client_id, address_ids):
         """Delete addresses by ids."""
         self.calls["delete_addresses_by_ids"] = (client_id, address_ids)
@@ -1960,6 +1965,103 @@ async def test_apply_addresses_changes_ops(monkeypatch):
     assert "bulk_create_addresses" in fake_repo.calls
     assert len(fake_repo.calls["bulk_create_addresses"]) == 1
     assert fake_repo.calls["bulk_create_addresses"][0]["address_line1"] == "New Addr"
+
+
+@pytest.mark.asyncio
+async def test_apply_addresses_promote_primary_on_update(monkeypatch):
+    """Promoting an updated address to primary clears other primaries first."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    addresses_update = AddressesUpdate(
+        update=[AddressUpdateItem(id="addr-1", is_primary=True, address_line1="Updated")],
+    )
+
+    await service._apply_addresses_changes("client-1", addresses_update)
+
+    assert fake_repo.calls["clear_primary_addresses"] == [("client-1", "addr-1")]
+    assert fake_repo.calls["update_address"] == (
+        "addr-1",
+        "client-1",
+        {"address_line1": "Updated", "is_primary": True},
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_addresses_changes_promote_primary_on_add(monkeypatch):
+    """Adding a primary address clears any existing primary first."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    addresses_update = AddressesUpdate(
+        add=[AddressInput(address_line1="New Addr", is_primary=True)],
+    )
+
+    await service._apply_addresses_changes("client-1", addresses_update)
+
+    assert fake_repo.calls["clear_primary_addresses"] == [("client-1", None)]
+    assert fake_repo.calls["bulk_create_addresses"][0]["is_primary"] is True
+
+
+@pytest.mark.asyncio
+async def test_apply_addresses_conflicting_primary_add_update(monkeypatch):
+    """Reject payload that promotes more than one primary in a single request."""
+    fake_repo = _FakeClientRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(db_connection=None)
+    with pytest.raises(ValidationException) as exc_info:
+        addresses_update = AddressesUpdate(
+            update=[AddressUpdateItem(id="addr-1", is_primary=True)],
+            add=[AddressInput(address_line1="New Addr", is_primary=True)],
+        )
+        await service._apply_addresses_changes("client-1", addresses_update)
+
+    assert exc_info.value.message_key == "clients.errors.only_one_primary_address"
+    assert "clear_primary_addresses" not in fake_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_apply_addresses_maps_primary_unique_violation(monkeypatch):
+    """Map DB unique violation for primary address to validation error."""
+    fake_repo = _FakeClientRepo()
+
+    class _FakeUniqueViolationError(Exception):
+        """Test exception carrying DB constraint metadata."""
+
+        def __init__(self, constraint_name):
+            super().__init__("unique violation")
+            self.constraint_name = constraint_name
+
+    async def _raise_primary_violation(*_args, **_kwargs):
+        raise _FakeUniqueViolationError("uq_client_primary_address")
+
+    fake_repo.update_address = _raise_primary_violation
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.UniqueViolationError",
+        _FakeUniqueViolationError,
+    )
+    service = ClientService(db_connection=None)
+    addresses_update = AddressesUpdate(
+        update=[AddressUpdateItem(id="addr-1", is_primary=True)],
+    )
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service._apply_addresses_changes("client-1", addresses_update)
+
+    assert exc_info.value.message_key == "clients.errors.only_one_primary_address"
 
 
 @pytest.mark.asyncio
