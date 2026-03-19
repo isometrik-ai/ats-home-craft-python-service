@@ -236,6 +236,27 @@ class _FakeCustomFieldRepo:
         return self.get_fields_result
 
 
+@pytest.fixture(autouse=True)
+def _patch_custom_field_repository(monkeypatch):
+    """Prevent DB access in client service tests.
+
+    ClientService performs a lightweight required-custom-fields check when no
+    `custom_fields` are provided. Many tests in this module use db_connection=None,
+    so we patch the repository used by CustomFieldService to a fake by default.
+    Individual tests can override this patch with their own monkeypatch.
+    """
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    return fake_custom_field_repo
+
+
+# Reference the autouse fixture so static analyzers
+_AUTO_PATCH_CUSTOM_FIELD_REPOSITORY = _patch_custom_field_repository
+
+
 def _ctx(org_id="org-1"):
     """Build reusable UserContext for tests."""
     return UserContext(
@@ -697,6 +718,85 @@ async def test_build_client_name_for_company():
     client_data = await service._prepare_client_data(request_data, "org-1")
 
     assert client_data["name"] == "Test Company"
+
+
+@pytest.mark.asyncio
+async def test_client_raises_required_custom_fields_missing(monkeypatch):
+    """_prepare_client_data should raise when org has required custom fields but none provided."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Required Field",
+            "field_key": "required_field",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": True,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.PERSON,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+        # custom_fields omitted → defaults to {}
+    )
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service._prepare_client_data(request_data, "org-1")
+    assert "custom_field_required" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
+async def test_client_allows_custom_fields_no_required_fields(monkeypatch):
+    """_prepare_client_data should allow empty custom_fields when no required fields exist."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Optional Field",
+            "field_key": "optional_field",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.PERSON,
+        email="test@example.com",
+        phone_isd_code="+1",
+        phone_number="1234567890",
+        first_name="John",
+        last_name="Doe",
+        # custom_fields omitted → defaults to {}
+    )
+
+    client_data = await service._prepare_client_data(request_data, "org-1")
+    assert client_data["name"] == "John Doe"
 
 
 @pytest.mark.asyncio

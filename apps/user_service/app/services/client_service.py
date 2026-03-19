@@ -637,6 +637,81 @@ class ClientService:
 
         return user_id, isometrik_response["userId"], password
 
+    def _get_client_name_for_create(self, request_data: CreateClientRequest) -> str:
+        """Return the persisted client name for create payloads."""
+        if request_data.client_type == ClientType.PERSON:
+            return build_full_name(request_data.first_name, request_data.last_name)
+        return request_data.name or ""
+
+    def _build_base_client_data(
+        self, request_data: CreateClientRequest, organization_id: str
+    ) -> dict[str, Any]:
+        """Build the non-serialized parts of the client payload."""
+        client_name = self._get_client_name_for_create(request_data)
+        client_data: dict[str, Any] = {
+            "organization_id": organization_id,
+            "client_type": request_data.client_type.value,
+            "name": client_name,
+            "portal_access": request_data.portal_access,
+        }
+
+        if request_data.industry:
+            client_data["industry"] = request_data.industry
+        if request_data.profile_photo_url:
+            client_data["profile_photo_url"] = request_data.profile_photo_url
+        if request_data.tags:
+            client_data["tags"] = request_data.tags
+
+        return client_data
+
+    def _apply_serialized_jsonb_fields(
+        self, client_data: dict[str, Any], request_data: CreateClientRequest
+    ) -> None:
+        """Serialize JSONB fields to JSON strings for asyncpg."""
+        if request_data.websites:
+            serialized_websites = serialize_pydantic_models(request_data.websites)
+            client_data["websites"] = json.dumps(self._ensure_list_item_ids(serialized_websites))
+        if request_data.billing_preferences:
+            serialized_billing = serialize_pydantic_models(request_data.billing_preferences)
+            client_data["billing_preferences"] = json.dumps(serialized_billing)
+
+    async def _apply_custom_fields_if_needed(
+        self, client_data: dict[str, Any], request_data: CreateClientRequest
+    ) -> None:
+        """Validate and apply custom fields when user context is available."""
+        if not (self.user_context and self.user_context.organization_id):
+            return
+
+        if request_data.client_type == ClientType.COMPANY:
+            entity_type = EntityType.COMPANY
+        else:
+            entity_type = EntityType.CONTACT
+
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+
+        if request_data.custom_fields:
+            validated_custom_fields = await custom_field_service.validate_and_format_custom_fields(
+                request_data.custom_fields, entity_type
+            )
+            client_data["custom_fields"] = json.dumps(validated_custom_fields)
+        else:
+            await custom_field_service.ensure_required_fields_present(
+                request_data.custom_fields, entity_type
+            )
+
+    def _apply_additional_and_social_pages(
+        self, client_data: dict[str, Any], request_data: CreateClientRequest
+    ) -> None:
+        """Apply remaining optional fields requiring JSON serialization."""
+        if request_data.additional_data:
+            client_data["additional_data"] = json.dumps(request_data.additional_data)
+        if request_data.social_pages:
+            serialized = [p.model_dump() for p in request_data.social_pages]
+            client_data["social_pages"] = json.dumps(self._ensure_list_item_ids(serialized))
+
     async def _prepare_client_data(
         self,
         request_data: CreateClientRequest,
@@ -651,55 +726,10 @@ class ClientService:
         Returns:
             dict: Client data with JSONB fields serialized to JSON strings
         """
-        if request_data.client_type == ClientType.PERSON:
-            client_name = build_full_name(request_data.first_name, request_data.last_name)
-        else:
-            client_name = request_data.name or ""
-        client_data = {
-            "organization_id": organization_id,
-            "client_type": request_data.client_type.value,
-            "name": client_name,
-        }
-
-        if request_data.industry:
-            client_data["industry"] = request_data.industry
-        if request_data.profile_photo_url:
-            client_data["profile_photo_url"] = request_data.profile_photo_url
-        if request_data.tags:
-            client_data["tags"] = request_data.tags
-
-        # Add portal_access field (defaults to False if not provided)
-        client_data["portal_access"] = request_data.portal_access
-
-        # Serialize JSONB fields for asyncpg (business logic in service layer)
-        if request_data.websites:
-            serialized_websites = serialize_pydantic_models(request_data.websites)
-            client_data["websites"] = json.dumps(self._ensure_list_item_ids(serialized_websites))
-        if request_data.billing_preferences:
-            serialized_billing = serialize_pydantic_models(request_data.billing_preferences)
-            client_data["billing_preferences"] = json.dumps(serialized_billing)
-        if request_data.custom_fields:
-            # Validate and format custom fields against definitions
-            entity_type = (
-                EntityType.COMPANY
-                if request_data.client_type == ClientType.COMPANY
-                else EntityType.CONTACT
-            )
-            custom_field_service = CustomFieldService(
-                db_connection=self.db_connection,
-                user_context=self.user_context,
-            )
-            validated_custom_fields = await custom_field_service.validate_and_format_custom_fields(
-                request_data.custom_fields, entity_type
-            )
-            client_data["custom_fields"] = json.dumps(validated_custom_fields)
-
-        if request_data.additional_data:
-            client_data["additional_data"] = json.dumps(request_data.additional_data)
-        if request_data.social_pages:
-            serialized = [p.model_dump() for p in request_data.social_pages]
-            client_data["social_pages"] = json.dumps(self._ensure_list_item_ids(serialized))
-
+        client_data = self._build_base_client_data(request_data, organization_id)
+        self._apply_serialized_jsonb_fields(client_data, request_data)
+        await self._apply_custom_fields_if_needed(client_data, request_data)
+        self._apply_additional_and_social_pages(client_data, request_data)
         return client_data
 
     async def _build_create_client_payloads(
@@ -707,6 +737,9 @@ class ClientService:
     ) -> list[dict[str, Any]]:
         """Build the ordered list of client payloads for create_client
         based on client type and linking rules."""
+        # Note: in the 2-row create flows, the second (linked) payload does NOT go
+        # through `_prepare_client_data(...)`, so custom-field required validation
+        # is only applied for the payload built by `_prepare_client_data(...)`.
         if request_data.client_type == ClientType.COMPANY:
             return [
                 await self._prepare_client_data(request_data, organization_id),
