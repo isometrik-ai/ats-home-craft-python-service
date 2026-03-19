@@ -311,14 +311,14 @@ class ClientService:
                 if isinstance(j, dict) and j.get("company")
             ],
             "work_history_titles": [
-                j.get("title", "")
+                j.get("job_title", "")
                 for j in (work_history or [])
-                if isinstance(j, dict) and j.get("title")
+                if isinstance(j, dict) and j.get("job_title")
             ],
             "educational_institutions": [
-                e.get("institution", "")
+                e.get("university", "")
                 for e in (educational_history or [])
-                if isinstance(e, dict) and e.get("institution")
+                if isinstance(e, dict) and e.get("university")
             ],
             "address_cities": address_cities,
             "address_states": address_states,
@@ -334,6 +334,10 @@ class ClientService:
             "updated_at": int(updated_at_dt.timestamp()) if updated_at_dt else 0,
             "company_id": str(details["company_id"]) if details.get("company_id") else "",
         }
+
+        # Typesense search facets are defined as `string[]` — keep the indexed
+        # values clean by removing accidental duplicates.
+        self._dedupe_string_list_fields(document)
 
         typesense_document = TypesenseClientDocument.model_validate(document).model_dump(
             exclude_none=True
@@ -1173,7 +1177,17 @@ class ClientService:
         embedding = await self.typesense_service.embed_query_text(query)
         if embedding is not None:
             vector = ",".join(map(str, embedding))
-            params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
+            distance_threshold = getattr(
+                shared_settings.typesense,
+                "vector_distance_threshold",
+                None,
+            )
+            if distance_threshold is not None and float(distance_threshold) > 0:
+                params["vector_query"] = (
+                    f"embedding:([{vector}], alpha:0.7, distance_threshold:{distance_threshold})"
+                )
+            else:
+                params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
 
         raw = await self.typesense_service.search(params)
 
@@ -1812,6 +1826,29 @@ class ClientService:
         self._merge_billing_preferences_into_payload(body, current, payload)
         await self._merge_custom_fields_into_payload(body, current, payload)
         return payload
+
+    @staticmethod
+    def _dedupe_string_list_fields(document: dict[str, Any]) -> None:
+        """Deduplicate `string[]`-like fields while preserving the first occurrence order.
+
+        Typesense facets/search operate on sets of terms, so duplicates only increase
+        index size and noise without improving recall.
+        """
+        for key, value in document.items():
+            if not isinstance(value, list):
+                continue
+            seen: set[str] = set()
+            deduped: list[str] = []
+            for item in value:
+                if item is None:
+                    continue
+                # Keep strict `list[str]` shape by stringifying non-str items.
+                string_item = item if isinstance(item, str) else str(item)
+                if string_item in seen:
+                    continue
+                seen.add(string_item)
+                deduped.append(string_item)
+            document[key] = deduped
 
     @staticmethod
     def _ensure_list_item_ids(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -6,7 +6,7 @@ import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request
 from fastapi import status as http_status
 
-from apps.user_service.app.dependencies.db import db_uow
+from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 async def enrichment_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     body: dict[str, Any] = Body(...),
 ):
     """Handle POST from enrichment service; process company or person enrichment
@@ -65,12 +65,15 @@ async def enrichment_webhook(
         )
 
     # Apply enrichment updates to the client; get (client_id, organization_id) from result.
-    if has_company_payload:
-        client_ref = await enrichment_service.process_company_enrichment_webhook(
-            db_connection, body
-        )
-    else:
-        client_ref = await enrichment_service.process_person_enrichment_webhook(db_connection, body)
+    async with db_connection.transaction():
+        if has_company_payload:
+            client_ref = await enrichment_service.process_company_enrichment_webhook(
+                db_connection, body
+            )
+        else:
+            client_ref = await enrichment_service.process_person_enrichment_webhook(
+                db_connection, body
+            )
 
     # Single generic background task: pass both payloads when present; service uses the right one.
     background_tasks.add_task(

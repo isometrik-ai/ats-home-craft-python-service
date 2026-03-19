@@ -93,6 +93,10 @@ class TypesenseSettings(BaseSettings):
     protocol: str = config("TYPESENSE_PROTOCOL", default="https")
     admin_api_key: str = config("TYPESENSE_ADMIN_API_KEY")
     search_only_api_key: str = config("TYPESENSE_SEARCH_ONLY_KEY")
+    vector_distance_threshold: float = config(
+        "TYPESENSE_VECTOR_DISTANCE_THRESHOLD",
+        default=0.30,
+    )
     connection_timeout_seconds: float = config(
         "TYPESENSE_CONNECTION_TIMEOUT_SECONDS",
         default=5.0,
