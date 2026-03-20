@@ -12,9 +12,11 @@ class _FakeConn:
 
     def __init__(self):
         self.fetchval_calls = []
+        self.fetch_calls = []
         self.fetchrow_calls = []
         self.execute_calls = []
         self.fetchval_result = None
+        self.fetch_result = []
         self.fetchrow_result = None
 
     async def fetchval(self, query, *args):
@@ -26,6 +28,11 @@ class _FakeConn:
         """Record fetchrow calls."""
         self.fetchrow_calls.append((query.strip(), args))
         return self.fetchrow_result
+
+    async def fetch(self, query, *args):
+        """Record fetch calls."""
+        self.fetch_calls.append((query.strip(), args))
+        return self.fetch_result
 
     async def execute(self, query, *args):
         """Record execute calls."""
@@ -141,3 +148,64 @@ async def test_create_stage_inserts_and_returns_dict():
         False,
         False,
     )
+
+
+@pytest.mark.asyncio
+async def test_get_stages_by_organization_returns_rows():
+    """get_stages_by_organization returns ordered stage list."""
+    conn = _FakeConn()
+    conn.fetch_result = [
+        {
+            "id": "stage-1",
+            "stage_name": "New",
+            "stage_key": "new",
+            "description": None,
+            "color": "blue",
+            "sort_order": 1,
+            "is_initial": True,
+            "is_final": False,
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+    ]
+    repo = LeadStageRepository(db_connection=conn)
+
+    result = await repo.get_stages_by_organization("org-1")
+
+    assert len(result) == 1
+    assert result[0]["stage_key"] == "new"
+    query, args = conn.fetch_calls[0]
+    assert "FROM lead_stages" in query
+    assert "ORDER BY sort_order ASC" in query
+    assert args == ("org-1",)
+
+
+@pytest.mark.asyncio
+async def test_get_stage_by_id_returns_row_or_none():
+    """get_stage_by_id returns stage dict when found and None otherwise."""
+    conn = _FakeConn()
+    repo = LeadStageRepository(db_connection=conn)
+
+    conn.fetchrow_result = {
+        "id": "stage-1",
+        "stage_name": "Qualified",
+        "stage_key": "qualified",
+        "description": "Warm lead",
+        "color": "green",
+        "sort_order": 2,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+    }
+    found = await repo.get_stage_by_id("org-1", "stage-id")
+    assert found is not None
+    assert found["stage_name"] == "Qualified"
+    query, args = conn.fetchrow_calls[0]
+    assert "AND id = $2::uuid" in query
+    assert "LIMIT 1" in query
+    assert args == ("org-1", "stage-id")
+
+    conn.fetchrow_result = None
+    missing = await repo.get_stage_by_id("org-1", "missing-id")
+    assert missing is None
