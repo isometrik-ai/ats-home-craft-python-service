@@ -348,6 +348,7 @@ class ClientRepository:
                 company_c.id AS company_id,
                 company_c.name AS company_name,
                 c.status,
+                c.industry AS industry,
                 c.tags,
                 c.profile_photo_url,
                 c.created_at,

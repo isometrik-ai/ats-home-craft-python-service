@@ -715,6 +715,7 @@ class ClientListResponse(BaseModel):
     primary_contact: PrimaryContactInfo = Field(..., description="Primary contact information")
     client_type: ClientType = Field(..., description="Client type")
     status: ClientStatus = Field(..., description="Client status")
+    industry: str | None = Field(None, description="Industry")
     projects: list[Any] = Field(default_factory=list, description="Projects list")
     image_url: str | None = Field(None, description="Primary profile image URL")
     created_at: str = Field(..., description="Creation timestamp")

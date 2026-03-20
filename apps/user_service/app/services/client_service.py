@@ -1123,6 +1123,7 @@ class ClientService:
                 primary_contact=primary_contact,
                 client_type=client.get("client_type"),
                 status=client.get("status"),
+                industry=client.get("industry"),
                 projects=[],
                 image_url=client.get("contact_profile_photo_url")
                 or client.get("profile_photo_url"),
@@ -1230,6 +1231,7 @@ class ClientService:
                 primary_contact=primary_contact,
                 client_type=ClientType(doc.get("client_type")),
                 status=ClientStatus(doc.get("status")),
+                industry=doc.get("industry"),
                 projects=[],
                 image_url=None,
                 created_at="",
