@@ -1,4 +1,3 @@
-
 """Service for lead stage business logic."""
 
 import re
@@ -6,7 +5,9 @@ import re
 import asyncpg
 from asyncpg import UniqueViolationError
 
-from apps.user_service.app.db.repositories.lead_stage_repository import LeadStageRepository
+from apps.user_service.app.db.repositories.lead_stage_repository import (
+    LeadStageRepository,
+)
 from apps.user_service.app.schemas.lead_stages import CreateLeadStageRequest
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import ConflictException, ValidationException

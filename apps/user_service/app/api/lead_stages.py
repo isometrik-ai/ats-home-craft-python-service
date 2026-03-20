@@ -12,7 +12,10 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_uow
 from apps.user_service.app.schemas.lead_stages import CreateLeadStageRequest
 from apps.user_service.app.services.lead_stage_service import LeadStageService
-from apps.user_service.app.utils.common_utils import check_permissions, handle_api_exceptions
+from apps.user_service.app.utils.common_utils import (
+    check_permissions,
+    handle_api_exceptions,
+)
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import LEADS_MANAGEMENT_CREATE
 from libs.shared_utils.response_factory import success_response

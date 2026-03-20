@@ -45,7 +45,9 @@ class LeadStageRepository:
         """
         return bool(await self.db_connection.fetchval(query, organization_id, stage_key))
 
-    async def shift_sort_orders_for_insert(self, organization_id: str, target_position: int) -> None:
+    async def shift_sort_orders_for_insert(
+        self, organization_id: str, target_position: int
+    ) -> None:
         """Shift stages at and after target_position up by one."""
         query = """
             UPDATE lead_stages

@@ -109,13 +109,16 @@ class UpdateLeadStageRequest(LeadStageBasePayload):
     @model_validator(mode="after")
     def validate_at_least_one_field(self) -> "UpdateLeadStageRequest":
         """Require at least one mutable field in PATCH payload."""
-        if (
-            self.stage_name is None
-            and self.description is None
-            and self.color is None
-            and self.sort_order is None
-            and self.is_initial is None
-            and self.is_final is None
+        if all(
+            value is None
+            for value in (
+                self.stage_name,
+                self.description,
+                self.color,
+                self.sort_order,
+                self.is_initial,
+                self.is_final,
+            )
         ):
             raise ValidationException(
                 message_key="lead_stages.errors.empty_update_payload",
