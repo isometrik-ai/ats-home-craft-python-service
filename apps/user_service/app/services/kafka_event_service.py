@@ -171,7 +171,6 @@ class KafkaEventService:
             "kafka_producer_started",
             extra={
                 "bootstrap_servers": self._settings.bootstrap_servers,
-                "default_topic": self._settings.default_topic,
             },
         )
 
@@ -210,11 +209,11 @@ class KafkaEventService:
         *,
         event: Mapping[str, Any],
         key: str | None = None,
-        topic: str | None = None,
+        topics: list[str],
         headers: list[tuple[str, bytes]] | None = None,
         timeout: float | None = None,
         serializer: Callable[[Any], str] | None = None,
-    ) -> Any | None:
+    ) -> list[Any] | None:
         """Publish *event* as a JSON message to Kafka.
 
         Serialisation is strict by default: if *event* contains types that
@@ -228,8 +227,8 @@ class KafkaEventService:
                         mapping unless *serializer* is supplied.
             key:        Optional partition key.  Messages with the same key
                         are routed to the same partition, preserving order.
-            topic:      Target topic.  Falls back to the default topic from
-                        settings when omitted.
+            topics:    Target topics. Caller must provide an explicit list
+                        of topics (no env/settings fallback).
             headers:    Optional list of ``(header_name, value_bytes)``
                         tuples attached to the Kafka message.
             timeout:    Seconds to wait for the broker acknowledgement.
@@ -248,18 +247,22 @@ class KafkaEventService:
                             )
 
         Returns:
-            ``RecordMetadata`` on success (contains topic, partition, and
-            offset), or ``None`` when Kafka is disabled in settings.
+            A list of ``RecordMetadata`` (one per topic) on success, or
+            ``None`` when Kafka is disabled in settings.
 
         Raises:
             RuntimeError:  If the producer is unavailable after startup, or
                            if ``stop()`` has already been called.
             TypeError:     If *event* contains non-JSON-serialisable values
                            and no *serializer* is provided.
+            ValueError:    If *topics* is an empty list.
         """
         if not self._settings.enabled:
             logger.info("kafka_producer_skipped_disabled")
             return None
+
+        if not topics:
+            raise ValueError("topics must be a non-empty list")
 
         if _state.closing:
             raise RuntimeError("Cannot produce event: Kafka producer is shutting down.")
@@ -270,8 +273,6 @@ class KafkaEventService:
         if producer is None:
             raise RuntimeError("Kafka producer is unavailable after startup.")
 
-        resolved_topic = topic or self._settings.default_topic
-
         # Serialise strictly — no silent coercion via default=str.
         # Callers own their types; use the serializer hook for custom ones.
         if serializer is not None:
@@ -281,33 +282,37 @@ class KafkaEventService:
 
         encoded_key = key.encode() if key else None
 
-        # ``producer.send()`` schedules the message and returns an
-        # asyncio.Future that resolves when the broker sends an ack.
-        # ``asyncio.shield()`` prevents a timeout cancellation from
-        # also cancelling the Future — the message may already be in
-        # the broker's buffer even if we stop waiting for the ack.
-        fut = await producer.send(
-            resolved_topic,
-            value=value,
-            key=encoded_key,
-            headers=headers,
-        )
+        metadata_by_topic: list[Any] = []
+        for topic in topics:
+            # ``producer.send()`` schedules the message and returns an
+            # asyncio.Future that resolves when the broker sends an ack.
+            # ``asyncio.shield()`` prevents a timeout cancellation from
+            # also cancelling the Future — the message may already be in
+            # the broker's buffer even if we stop waiting for the ack.
+            fut = await producer.send(
+                topic,
+                value=value,
+                key=encoded_key,
+                headers=headers,
+            )
 
-        if timeout is None:
-            metadata = await fut
-        else:
-            metadata = await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
+            if timeout is None:
+                metadata = await fut
+            else:
+                metadata = await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
 
-        logger.info(
-            "kafka_event_produced",
-            extra={
-                "topic": metadata.topic,
-                "partition": metadata.partition,
-                "offset": metadata.offset,
-                "key_present": key is not None,
-            },
-        )
-        return metadata
+            logger.info(
+                "kafka_event_produced",
+                extra={
+                    "topic": metadata.topic,
+                    "partition": metadata.partition,
+                    "offset": metadata.offset,
+                    "key_present": key is not None,
+                },
+            )
+            metadata_by_topic.append(metadata)
+
+        return metadata_by_topic
 
 
 # Dependency helper

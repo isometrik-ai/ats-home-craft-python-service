@@ -337,6 +337,25 @@ class ClientEnrichmentStatus(str, Enum):
     COMPLETED = "completed"
 
 
+class ClientEventType(str, Enum):
+    """Kafka event type names emitted for client lifecycle changes."""
+
+    CREATED = "clients.created"
+    UPDATED = "clients.updated"
+    DELETED = "clients.deleted"
+    ENRICHMENT_REQUESTED = "clients.enrichment_requested"
+
+
+class KafkaTopics(str, Enum):
+    """Kafka topics used by this service.
+
+    Caller code should provide topic lists explicitly (no env/settings
+    defaults) to avoid accidental publishing to the wrong topic.
+    """
+
+    CRM_EVENTS = "crm.events"
+
+
 class LeadStatus(str, Enum):
     """Lead status enumeration."""
 

@@ -9,8 +9,8 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.config.app_settings import app_settings
 from apps.user_service.app.db.repositories.events_repository import EventsRepository
+from apps.user_service.app.schemas.enums import ClientEventType
 from apps.user_service.app.services.kafka_event_service import get_kafka_event_service
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_utils.logger import get_logger
@@ -50,15 +50,19 @@ class EventService:
         self,
         *,
         event: Mapping[str, Any],
-        topic: str | None = None,
+        topics: list[str],
         status: str = "pending",
     ) -> None:
         """Persist event to events table using current transaction connection."""
         if self.db_connection is None:
             raise ValueError("db_connection is required to store events")
+        if not topics:
+            raise ValueError("topics must be a non-empty list")
 
         event_repo = EventsRepository(db_connection=self.db_connection)
-        resolved_topic = topic or app_settings.kafka.default_topic
+        # Persist the event against the first provided topic.
+        # Publishing can target multiple topics, but the DB row stores one.
+        resolved_topic = topics[0]
         await event_repo.create_event(
             event_id=str(event["event_id"]),
             event_type=str(event["event_type"]),
@@ -77,7 +81,7 @@ class EventService:
         organization_id: str,
         actor_user_id: str | None,
         payload: Mapping[str, Any] | None = None,
-        topic: str | None = None,
+        topics: list[str],
     ) -> dict[str, Any]:
         """Build and persist lifecycle event in events table."""
         event = self.build_event(
@@ -87,22 +91,24 @@ class EventService:
             actor_user_id=actor_user_id,
             payload=payload,
         )
-        await self.store_event(event=event, topic=topic, status="pending")
+        await self.store_event(event=event, topics=topics, status="pending")
         return event
 
     async def create_lifecycle_events(
         self,
         *,
         items: list[dict[str, Any]],
-        topic: str | None = None,
+        topics: list[str],
     ) -> list[dict[str, Any]]:
         """Build and persist multiple lifecycle events in one DB batch."""
         if self.db_connection is None:
             raise ValueError("db_connection is required to store events")
         if not items:
             return []
+        if not topics:
+            raise ValueError("topics must be a non-empty list")
 
-        resolved_topic = topic or app_settings.kafka.default_topic
+        resolved_topic = topics[0]
         events: list[dict[str, Any]] = []
         db_rows: list[dict[str, Any]] = []
 
@@ -136,12 +142,12 @@ class EventService:
         *,
         records: list[Mapping[str, Any]],
         actor_user_id: str | None,
-        topic: str | None = None,
+        topics: list[str],
     ) -> list[dict[str, Any]]:
-        """Build and persist `client.created` lifecycle events for client records."""
+        """Build and persist `clients.created` lifecycle events for client records."""
         items = [
             {
-                "event_type": "client.created",
+                "event_type": ClientEventType.CREATED.value,
                 "aggregate_id": str(record["id"]),
                 "organization_id": str(record["organization_id"]),
                 "actor_user_id": actor_user_id,
@@ -149,19 +155,19 @@ class EventService:
             }
             for record in records
         ]
-        return await self.create_lifecycle_events(items=items, topic=topic)
+        return await self.create_lifecycle_events(items=items, topics=topics)
 
     @staticmethod
     async def publish_event_background(
         *,
         event: Mapping[str, Any],
         key: str | None = None,
-        topic: str | None = None,
+        topics: list[str],
     ) -> None:
         """Best-effort Kafka publish intended for background execution."""
         try:
             kafka_service = get_kafka_event_service()
-            metadata = await kafka_service.produce_event(event=event, key=key, topic=topic)
+            metadata = await kafka_service.produce_event(event=event, key=key, topics=topics)
         except Exception:
             logger.exception(
                 "kafka_event_publish_failed",

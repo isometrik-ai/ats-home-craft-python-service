@@ -55,7 +55,6 @@ class KafkaSettings(BaseSettings):
 
     enabled: bool = config("KAFKA_ENABLED", default=False)
     bootstrap_servers: str = config("KAFKA_BOOTSTRAP_SERVERS")
-    default_topic: str = config("KAFKA_DEFAULT_TOPIC", default="crm.events")
     producer_name: str = config("KAFKA_PRODUCER_NAME", default="user_service")
     security_protocol: str = config("KAFKA_SECURITY_PROTOCOL", default="PLAINTEXT")
     sasl_mechanism: str | None = config("KAFKA_SASL_MECHANISM")

@@ -18,7 +18,12 @@ from apps.user_service.app.schemas.clients import (
     CreateClientRequest,
     UpdateClientRequest,
 )
-from apps.user_service.app.schemas.enums import ClientStatus, ClientType
+from apps.user_service.app.schemas.enums import (
+    ClientEventType,
+    ClientStatus,
+    ClientType,
+    KafkaTopics,
+)
 from apps.user_service.app.services.client_service import (
     ClientEnrichmentService,
     ClientService,
@@ -42,6 +47,8 @@ from libs.shared_utils.status_codes import CustomStatusCode
 router = APIRouter(prefix="/clients", tags=["Clients Management"])
 
 logger = get_logger("clients-api")
+
+CLIENT_KAFKA_TOPICS: list[str] = [KafkaTopics.CRM_EVENTS.value]
 
 
 @handle_api_exceptions("create client from user")
@@ -115,11 +122,12 @@ async def create_client_from_user(
         event_service = EventService(db_connection=db_connection)
         await client_service.create_client_from_user(body)
         event = await event_service.create_lifecycle_event(
-            event_type="client.created",
+            event_type=ClientEventType.CREATED.value,
             aggregate_id=body.user_id,
             organization_id=body.organization_id,
             actor_user_id=body.user_id,
             payload={"module": "clients", "action": "create_from_user"},
+            topics=CLIENT_KAFKA_TOPICS,
         )
 
     if event is not None:
@@ -127,6 +135,7 @@ async def create_client_from_user(
             EventService.publish_event_background,
             event=event,
             key=str(body.user_id),
+            topics=CLIENT_KAFKA_TOPICS,
         )
 
     return success_response(
@@ -209,6 +218,7 @@ async def create_client(
         create_events = await event_service.create_client_created_events(
             records=result.records,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            topics=CLIENT_KAFKA_TOPICS,
         )
 
     # Committed; run enrichment for each created client (person and/or company).
@@ -234,6 +244,7 @@ async def create_client(
                 EventService.publish_event_background,
                 event=event,
                 key=client_id,
+                topics=CLIENT_KAFKA_TOPICS,
             )
 
     request.state.audit_user_context = {
@@ -512,11 +523,12 @@ async def delete_client(
         event_service = EventService(db_connection=db_connection)
         await client_service.delete_client(client_id, user_context.organization_id)
         event = await event_service.create_lifecycle_event(
-            event_type="client.deleted",
+            event_type=ClientEventType.DELETED.value,
             aggregate_id=client_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
             payload={"module": "clients", "action": "delete"},
+            topics=CLIENT_KAFKA_TOPICS,
         )
 
     # Transaction committed; it is now safe to publish the lifecycle event.
@@ -526,6 +538,7 @@ async def delete_client(
             EventService.publish_event_background,
             event=event,
             key=client_id,
+            topics=CLIENT_KAFKA_TOPICS,
         )
 
     return success_response(
@@ -599,7 +612,7 @@ async def update_client(
             )
             changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
             update_event = await event_service.create_lifecycle_event(
-                event_type="client.updated",
+                event_type=ClientEventType.UPDATED.value,
                 aggregate_id=client_id,
                 organization_id=user_context.organization_id,
                 actor_user_id=str(user_context.user_id) if user_context.user_id else None,
@@ -608,6 +621,7 @@ async def update_client(
                     "action": "update",
                     "changed_fields": changed_fields,
                 },
+                topics=CLIENT_KAFKA_TOPICS,
             )
 
     # Best-effort Typesense indexing after update, offloaded to background task.
@@ -639,6 +653,7 @@ async def update_client(
             EventService.publish_event_background,
             event=update_event,
             key=client_id,
+            topics=CLIENT_KAFKA_TOPICS,
         )
 
     return success_response(
@@ -699,11 +714,12 @@ async def enrich_client(
         organization_id = user_context.organization_id
         event_service = EventService(db_connection=db_connection)
         enrich_event = await event_service.create_lifecycle_event(
-            event_type="client.enrichment_requested",
+            event_type=ClientEventType.ENRICHMENT_REQUESTED.value,
             aggregate_id=client_id,
             organization_id=organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
             payload={"module": "clients", "action": "enrich"},
+            topics=CLIENT_KAFKA_TOPICS,
         )
 
     background_tasks.add_task(
@@ -715,6 +731,7 @@ async def enrich_client(
         EventService.publish_event_background,
         event=enrich_event,
         key=client_id,
+        topics=CLIENT_KAFKA_TOPICS,
     )
 
     return success_response(
