@@ -98,10 +98,7 @@ class KafkaEventService:
         """
         self._settings: KafkaSettings = settings or app_settings.kafka
 
-    # ------------------------------------------------------------------
     # Lifecycle
-    # ------------------------------------------------------------------
-
     def _build_producer_kwargs(self) -> dict[str, Any]:
         """Assemble the constructor kwargs for ``AIOKafkaProducer``.
 
@@ -207,10 +204,7 @@ class KafkaEventService:
         await asyncio.shield(producer.stop())
         logger.info("kafka_producer_stopped")
 
-    # ------------------------------------------------------------------
     # Producing
-    # ------------------------------------------------------------------
-
     async def produce_event(
         self,
         *,

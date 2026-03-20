@@ -12,6 +12,7 @@ import asyncpg
 from apps.user_service.app.config.app_settings import app_settings
 from apps.user_service.app.db.repositories.events_repository import EventsRepository
 from apps.user_service.app.services.kafka_event_service import get_kafka_event_service
+from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("event_service")
@@ -160,11 +161,58 @@ class EventService:
         """Best-effort Kafka publish intended for background execution."""
         try:
             kafka_service = get_kafka_event_service()
-            await kafka_service.produce_event(event=event, key=key, topic=topic)
+            metadata = await kafka_service.produce_event(event=event, key=key, topic=topic)
         except Exception:
             logger.exception(
                 "kafka_event_publish_failed",
                 extra={
+                    "event_type": event.get("event_type"),
+                    "aggregate_id": event.get("aggregate_id"),
+                    "organization_id": event.get("organization_id"),
+                },
+            )
+            return
+
+        # Confirmation comes from Kafka ack metadata. If Kafka is disabled,
+        # produce_event returns None and we must not mark DB row as published.
+        if metadata is None:
+            logger.warning(
+                "event_publish_status_update_skipped_no_kafka_ack",
+                extra={
+                    "event_id": event.get("event_id"),
+                    "event_type": event.get("event_type"),
+                    "aggregate_id": event.get("aggregate_id"),
+                    "organization_id": event.get("organization_id"),
+                },
+            )
+            return
+
+        event_id = event.get("event_id")
+        if not event_id:
+            logger.error(
+                "event_publish_status_update_skipped_missing_event_id",
+                extra={
+                    "event_type": event.get("event_type"),
+                    "aggregate_id": event.get("aggregate_id"),
+                    "organization_id": event.get("organization_id"),
+                },
+            )
+            return
+
+        try:
+            pool = await get_pool()
+            async with AcquireConnection(pool) as conn:
+                event_repo = EventsRepository(db_connection=conn)
+                await event_repo.update_event_status(
+                    event_id=str(event_id),
+                    status="published",
+                    mark_published_at=True,
+                )
+        except Exception:
+            logger.exception(
+                "event_publish_status_update_failed",
+                extra={
+                    "event_id": event_id,
                     "event_type": event.get("event_type"),
                     "aggregate_id": event.get("aggregate_id"),
                     "organization_id": event.get("organization_id"),

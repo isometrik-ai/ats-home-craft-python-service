@@ -84,3 +84,23 @@ class EventsRepository:
             for event in events
         ]
         await self.db_connection.executemany(query, values)
+
+    async def update_event_status(
+        self,
+        *,
+        event_id: str,
+        status: str,
+        mark_published_at: bool = False,
+    ) -> None:
+        """Update event status, optionally setting published_at."""
+        query = """
+            UPDATE events
+            SET
+                status = $2,
+                published_at = CASE
+                    WHEN $3::boolean THEN COALESCE(published_at, NOW())
+                    ELSE published_at
+                END
+            WHERE event_id = $1
+        """
+        await self.db_connection.execute(query, event_id, status, mark_published_at)
