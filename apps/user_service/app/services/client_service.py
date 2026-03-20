@@ -1426,6 +1426,7 @@ class ClientService:
             company_id=str(company_id),
             company_name=company_name,
             status=client.get("status"),
+            portal_access=bool(client.get("portal_access", False)),
             industry=client.get("industry"),
             image_url=client.get("contact_profile_photo_url") or client.get("profile_photo_url"),
             tags=client.get("tags") or [],

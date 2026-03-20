@@ -788,6 +788,7 @@ class ClientDetailsResponse(BaseModel):
         description="Linked company name when client is a person and client_company_id is set",
     )
     status: ClientStatus = Field(..., description="Client status")
+    portal_access: bool = Field(default=False, description="Portal access enabled flag")
     industry: str | None = Field(None, description="Industry")
     image_url: str | None = Field(None, description="Primary profile image URL")
     tags: list[str] = Field(default_factory=list, description="Tags")
