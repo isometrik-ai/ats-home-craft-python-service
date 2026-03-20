@@ -606,6 +606,7 @@ async def test_get_clients_list_returns_results(monkeypatch):
             "company_name": "Acme Corp",
             "client_type": "person",
             "status": "active",
+            "industry": "SaaS",
             "created_at": datetime.datetime.now(),
             "updated_at": datetime.datetime.now(),
             "first_name": "John",
@@ -631,6 +632,7 @@ async def test_get_clients_list_returns_results(monkeypatch):
     assert result["clients"][0]["id"] == "client-1"
     assert result["clients"][0]["name"] == "Client 1"
     assert result["clients"][0]["company_name"] == "Acme Corp"
+    assert result["clients"][0]["industry"] == "SaaS"
 
 
 @pytest.mark.asyncio

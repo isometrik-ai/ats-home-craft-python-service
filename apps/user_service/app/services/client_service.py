@@ -291,7 +291,7 @@ class ClientService:
                 if isinstance(p, dict) and p.get("phone_number")
             ],
             "tags": details.get("tags") or [],
-            "industry": details.get("industry") or "",
+            "industry": details.get("industry") or None,
             "description": details.get("description") or "",
             "target_market_segments": details.get("target_market_segments") or [],
             "current_tech_stack": details.get("current_tech_stack") or [],
@@ -1123,6 +1123,7 @@ class ClientService:
                 primary_contact=primary_contact,
                 client_type=client.get("client_type"),
                 status=client.get("status"),
+                industry=client.get("industry"),
                 projects=[],
                 image_url=client.get("contact_profile_photo_url")
                 or client.get("profile_photo_url"),
@@ -1230,6 +1231,7 @@ class ClientService:
                 primary_contact=primary_contact,
                 client_type=ClientType(doc.get("client_type")),
                 status=ClientStatus(doc.get("status")),
+                industry=doc.get("industry"),
                 projects=[],
                 image_url=None,
                 created_at="",
