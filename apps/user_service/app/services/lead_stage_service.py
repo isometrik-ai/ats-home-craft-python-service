@@ -8,9 +8,13 @@ from asyncpg import UniqueViolationError
 from apps.user_service.app.db.repositories.lead_stage_repository import (
     LeadStageRepository,
 )
-from apps.user_service.app.schemas.lead_stages import CreateLeadStageRequest
-from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import ConflictException, ValidationException
+from apps.user_service.app.schemas.lead_stages import CreateLeadStageRequest, LeadStageResponse
+from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -126,3 +130,40 @@ class LeadStageService:
                     custom_code=CustomStatusCode.CONFLICT,
                 ) from exc
             raise
+
+    @staticmethod
+    def _build_stage_response(stage_row: dict) -> LeadStageResponse:
+        """Map repository row to API response schema."""
+        return LeadStageResponse(
+            id=str(stage_row["id"]),
+            stage_name=stage_row["stage_name"],
+            stage_key=stage_row["stage_key"],
+            description=stage_row.get("description"),
+            color=stage_row.get("color"),
+            sort_order=stage_row["sort_order"],
+            is_initial=stage_row["is_initial"],
+            is_final=stage_row["is_final"],
+            created_at=format_iso_datetime(stage_row.get("created_at")),
+            updated_at=format_iso_datetime(stage_row.get("updated_at")),
+        )
+
+    async def list_lead_stages(self) -> tuple[list[dict], int]:
+        """List all lead stages for the current organization."""
+        organization_id = self.user_context.organization_id
+        stage_rows = await self.lead_stage_repository.get_stages_by_organization(organization_id)
+        items = [self._build_stage_response(row).model_dump(mode="json") for row in stage_rows]
+        return items, len(items)
+
+    async def get_lead_stage(self, stage_id: str) -> dict:
+        """Get a single lead stage by id for the current organization."""
+        organization_id = self.user_context.organization_id
+        stage_row = await self.lead_stage_repository.get_stage_by_id(
+            organization_id=organization_id,
+            stage_id=stage_id,
+        )
+        if not stage_row:
+            raise NotFoundException(
+                message_key="lead_stages.errors.stage_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return self._build_stage_response(stage_row).model_dump(mode="json")

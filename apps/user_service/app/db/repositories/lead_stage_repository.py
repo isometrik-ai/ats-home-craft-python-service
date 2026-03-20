@@ -95,3 +95,46 @@ class LeadStageRepository:
             stage_data["is_final"],
         )
         return dict(row)
+
+    async def get_stages_by_organization(self, organization_id: str) -> list[dict[str, Any]]:
+        """Return all lead stages for an organization ordered by sort_order."""
+        query = """
+            SELECT
+                id,
+                stage_name,
+                stage_key,
+                description,
+                color,
+                sort_order,
+                is_initial,
+                is_final,
+                created_at,
+                updated_at
+            FROM lead_stages
+            WHERE organization_id = $1
+            ORDER BY sort_order ASC
+        """
+        rows = await self.db_connection.fetch(query, organization_id)
+        return [dict(row) for row in rows]
+
+    async def get_stage_by_id(self, organization_id: str, stage_id: str) -> dict[str, Any] | None:
+        """Return one lead stage by id scoped to organization."""
+        query = """
+            SELECT
+                id,
+                stage_name,
+                stage_key,
+                description,
+                color,
+                sort_order,
+                is_initial,
+                is_final,
+                created_at,
+                updated_at
+            FROM lead_stages
+            WHERE organization_id = $1
+              AND id = $2::uuid
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(query, organization_id, stage_id)
+        return dict(row) if row else None

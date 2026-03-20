@@ -1,15 +1,12 @@
-"""Lead Stages API Module.
-
-This module currently provides create operation for lead stages.
-"""
+"""Lead Stages API Module."""
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
-from apps.user_service.app.dependencies.db import db_uow
+from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.lead_stages import CreateLeadStageRequest
 from apps.user_service.app.services.lead_stage_service import LeadStageService
 from apps.user_service.app.utils.common_utils import (
@@ -17,8 +14,8 @@ from apps.user_service.app.utils.common_utils import (
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_utils.common_query import LEADS_MANAGEMENT_CREATE
-from libs.shared_utils.response_factory import success_response
+from libs.shared_utils.common_query import LEADS_MANAGEMENT_CREATE, LEADS_MANAGEMENT_VIEW
+from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/lead-stages", tags=["Lead Stages"])
@@ -90,4 +87,99 @@ async def create_lead_stage(
         message_key="lead_stages.success.stage_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("list lead stages")
+@router.get(
+    "",
+    status_code=http_status.HTTP_200_OK,
+    description="List all lead stages for the authenticated organization",
+    summary="List lead stages",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Lead stages retrieved successfully"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+async def list_lead_stages(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """List lead stages ordered by sort_order."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=LEADS_MANAGEMENT_VIEW,
+    )
+
+    lead_stage_service = LeadStageService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    items, total = await lead_stage_service.list_lead_stages()
+
+    if not items:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+        )
+
+    return list_response(
+        request=request,
+        items=items,
+        total=total,
+        message_key="lead_stages.success.stages_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("get lead stage")
+@router.get(
+    "/{stage_id}",
+    status_code=http_status.HTTP_200_OK,
+    description="Get a single lead stage by id",
+    summary="Get lead stage",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Lead stage retrieved successfully"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Lead stage not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+async def get_lead_stage(
+    request: Request,
+    stage_id: str = Path(..., description="Lead stage ID"),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Get lead stage details for the authenticated organization."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=LEADS_MANAGEMENT_VIEW,
+    )
+
+    lead_stage_service = LeadStageService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    stage_data = await lead_stage_service.get_lead_stage(stage_id)
+
+    return success_response(
+        request=request,
+        message_key="lead_stages.success.stage_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=stage_data,
     )
