@@ -25,6 +25,7 @@ from apps.user_service.app.db.repositories import (
     UserRepository,
 )
 from apps.user_service.app.schemas.clients import (
+    PORTAL_ACCESS_DEFAULT,
     AddressesUpdate,
     AddressInput,
     AddressUpdateItem,
@@ -1426,6 +1427,9 @@ class ClientService:
             company_id=str(company_id),
             company_name=company_name,
             status=client.get("status"),
+            portal_access=client.get("portal_access", PORTAL_ACCESS_DEFAULT)
+            if client.get("portal_access", PORTAL_ACCESS_DEFAULT) is not None
+            else PORTAL_ACCESS_DEFAULT,
             industry=client.get("industry"),
             image_url=client.get("contact_profile_photo_url") or client.get("profile_photo_url"),
             tags=client.get("tags") or [],

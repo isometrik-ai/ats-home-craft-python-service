@@ -851,6 +851,7 @@ class ClientRepository:
                 c.organization_id,
                 c.client_type,
                 c.name,
+                c.portal_access,
                 company_c.id AS company_id,
                 company_c.name AS company_name,
                 c.status,
