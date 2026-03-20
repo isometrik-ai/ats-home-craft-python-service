@@ -478,7 +478,7 @@ async def delete_client(
     request: Request,
     background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Soft delete a client by setting status='deleted'."""
@@ -487,43 +487,48 @@ async def delete_client(
     request.state.audit_description = f"Deleted client: {client_id}"
     request.state.audit_risk_level = "high"
 
-    # Check permissions and get user context
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_DELETE,
-    )
-    if not user_context.organization_id:
-        raise ValueError("Organization ID is required")
+    event: dict | None = None
+    async with db_connection.transaction():
+        # Check permissions and get user context
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CLIENTS_MANAGEMENT_DELETE,
+        )
+        if not user_context.organization_id:
+            raise ValueError("Organization ID is required")
 
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
 
-    # Create service with user context and delegate to service
-    client_service = ClientService(
-        user_context=user_context,
-        db_connection=db_connection,
-    )
-    event_service = EventService(db_connection=db_connection)
-    await client_service.delete_client(client_id, user_context.organization_id)
-    event = await event_service.create_lifecycle_event(
-        event_type="client.deleted",
-        aggregate_id=client_id,
-        organization_id=user_context.organization_id,
-        actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-        payload={"module": "clients", "action": "delete"},
-    )
+        # Create service with user context and delegate to service
+        client_service = ClientService(
+            user_context=user_context,
+            db_connection=db_connection,
+        )
+        event_service = EventService(db_connection=db_connection)
+        await client_service.delete_client(client_id, user_context.organization_id)
+        event = await event_service.create_lifecycle_event(
+            event_type="client.deleted",
+            aggregate_id=client_id,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={"module": "clients", "action": "delete"},
+        )
 
-    # Best-effort Typesense cleanup, offloaded to background task.
-    background_tasks.add_task(ClientService.delete_clients_from_typesense_background, [client_id])
+    # Transaction committed; it is now safe to publish the lifecycle event.
     background_tasks.add_task(
-        EventService.publish_event_background,
-        event=event,
-        key=client_id,
+        ClientService.delete_clients_from_typesense_background, [client_id]
     )
+    if event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=event,
+            key=client_id,
+        )
 
     return success_response(
         request=request,
