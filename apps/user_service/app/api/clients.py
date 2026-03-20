@@ -520,9 +520,7 @@ async def delete_client(
         )
 
     # Transaction committed; it is now safe to publish the lifecycle event.
-    background_tasks.add_task(
-        ClientService.delete_clients_from_typesense_background, [client_id]
-    )
+    background_tasks.add_task(ClientService.delete_clients_from_typesense_background, [client_id])
     if event is not None:
         background_tasks.add_task(
             EventService.publish_event_background,
