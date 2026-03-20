@@ -8,7 +8,10 @@ from asyncpg import UniqueViolationError
 from apps.user_service.app.db.repositories.lead_stage_repository import (
     LeadStageRepository,
 )
-from apps.user_service.app.schemas.lead_stages import CreateLeadStageRequest, LeadStageResponse
+from apps.user_service.app.schemas.lead_stages import (
+    CreateLeadStageRequest,
+    LeadStageResponse,
+)
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     ConflictException,

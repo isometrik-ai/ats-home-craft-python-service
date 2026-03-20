@@ -14,7 +14,10 @@ from apps.user_service.app.utils.common_utils import (
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_utils.common_query import LEADS_MANAGEMENT_CREATE, LEADS_MANAGEMENT_VIEW
+from libs.shared_utils.common_query import (
+    LEADS_MANAGEMENT_CREATE,
+    LEADS_MANAGEMENT_VIEW,
+)
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
