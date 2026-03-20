@@ -272,5 +272,19 @@
       "field_updated": "Custom field updated successfully.",
       "field_deleted": "Custom field deleted successfully."
     }
+  },
+  "lead_stages": {
+    "errors": {
+      "invalid_stage_name": "The stage name is invalid. Please provide a valid name.",
+      "invalid_sort_order_range": "Sort order must be between {min} and {max}.",
+      "stage_key_exists": "A lead stage with this key already exists in the organization.",
+      "stage_name_exists": "A lead stage with this name already exists in the organization.",
+      "sort_order_conflict": "Another lead stage already uses this sort order.",
+      "stage_name_required": "Stage name is required.",
+      "empty_update_payload": "At least one field must be provided to update a lead stage."
+    },
+    "success": {
+      "stage_created": "Lead stage created successfully."
+    }
   }
 }
