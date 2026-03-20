@@ -48,7 +48,7 @@ router = APIRouter(prefix="/clients", tags=["Clients Management"])
 
 logger = get_logger("clients-api")
 
-CLIENT_KAFKA_TOPICS: list[str] = [KafkaTopics.CRM_EVENTS.value]
+CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
 
 @handle_api_exceptions("create client from user")
