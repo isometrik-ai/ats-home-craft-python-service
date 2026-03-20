@@ -291,7 +291,7 @@ class ClientService:
                 if isinstance(p, dict) and p.get("phone_number")
             ],
             "tags": details.get("tags") or [],
-            "industry": details.get("industry") or "",
+            "industry": details.get("industry") or None,
             "description": details.get("description") or "",
             "target_market_segments": details.get("target_market_segments") or [],
             "current_tech_stack": details.get("current_tech_stack") or [],
