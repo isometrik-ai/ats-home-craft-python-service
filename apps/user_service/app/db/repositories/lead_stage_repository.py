@@ -234,3 +234,15 @@ class LeadStageRepository:
         """
         row = await self.db_connection.fetchrow(query, *values)
         return dict(row) if row else None
+
+    async def delete_stage(self, organization_id: str, stage_id: str) -> dict[str, Any] | None:
+        """Hard-delete one stage scoped to the organization; return the removed row if any."""
+        cols = self._stage_columns_expr()
+        query = f"""
+            DELETE FROM {self.TABLE_NAME}
+            WHERE organization_id = $1
+              AND id = $2::uuid
+            RETURNING {cols}
+        """
+        row = await self.db_connection.fetchrow(query, organization_id, stage_id)
+        return dict(row) if row else None

@@ -214,3 +214,34 @@ async def test_update_lead_stage(monkeypatch, client):
         json={"stage_name": "Discovery", "sort_order": 2},
     )
     assert_success(response, 200)
+
+
+@pytest.mark.asyncio
+async def test_delete_lead_stage(monkeypatch, client):
+    """Delete lead stage by ID."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, organization_id
+        assert permission_codes == "leads_management.delete"
+        return _ctx()
+
+    async def fake_delete_lead_stage(self, stage_id):
+        """Fake service delete call."""
+        del self
+        assert stage_id == "550e8400-e29b-41d4-a716-446655440000"
+        return {"id": stage_id, "stage_name": "Old"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.lead_stages.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_stage_service.LeadStageService.delete_lead_stage",
+        fake_delete_lead_stage,
+    )
+
+    response = await client.delete("/v1/lead-stages/550e8400-e29b-41d4-a716-446655440000")
+    assert_success(response, 200)

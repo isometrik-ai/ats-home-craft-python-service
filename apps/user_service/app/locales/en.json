@@ -292,7 +292,8 @@
       "stage_created": "Lead stage created successfully.",
       "stages_retrieved": "Lead stages retrieved successfully.",
       "stage_retrieved": "Lead stage retrieved successfully.",
-      "stage_updated": "Lead stage updated successfully."
+      "stage_updated": "Lead stage updated successfully.",
+      "stage_deleted": "Lead stage deleted successfully."
     }
   }
 }

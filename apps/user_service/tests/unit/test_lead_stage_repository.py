@@ -230,3 +230,35 @@ async def test_update_stage_builds_dynamic_update():
     assert "stage_name = $3" in query
     assert "color = $4" in query
     assert args == ("org-1", "stage-id", "Qualified", "green")
+
+
+@pytest.mark.asyncio
+async def test_delete_stage_removes_row_and_returns_dict():
+    """delete_stage issues DELETE with RETURNING stage columns."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "stage-1",
+        "stage_name": "Mid",
+        "stage_key": "mid",
+        "description": None,
+        "color": "blue",
+        "sort_order": 2,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+    }
+    repo = LeadStageRepository(db_connection=conn)
+
+    result = await repo.delete_stage("org-1", "550e8400-e29b-41d4-a716-446655440000")
+
+    assert result is not None
+    assert result["stage_key"] == "mid"
+    query, args = conn.fetchrow_calls[0]
+    assert "DELETE FROM lead_stages" in query
+    assert "RETURNING" in query
+    assert args == ("org-1", "550e8400-e29b-41d4-a716-446655440000")
+
+    conn.fetchrow_result = None
+    missing = await repo.delete_stage("org-1", "550e8400-e29b-41d4-a716-446655440001")
+    assert missing is None

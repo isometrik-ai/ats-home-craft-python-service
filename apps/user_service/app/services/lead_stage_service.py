@@ -347,3 +347,27 @@ class LeadStageService:
             )
 
         return self._build_stage_response(updated_stage).model_dump(mode="json")
+
+    async def delete_lead_stage(self, stage_id: str) -> dict:
+        """Delete a lead stage and shift down sort_order for stages above the gap (same txn)."""
+        organization_id = self.user_context.organization_id
+
+        deleted_row = await self.lead_stage_repository.delete_stage(
+            organization_id=organization_id,
+            stage_id=stage_id,
+        )
+        if not deleted_row:
+            raise NotFoundException(
+                message_key="lead_stages.errors.stage_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        deleted_sort = deleted_row["sort_order"]
+        await self.lead_stage_repository.adjust_sort_orders(
+            organization_id,
+            min_sort_order=deleted_sort + 1,
+            max_sort_order=None,
+            delta=-1,
+        )
+
+        return self._build_stage_response(deleted_row).model_dump(mode="json")

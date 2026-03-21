@@ -19,6 +19,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     LEADS_MANAGEMENT_CREATE,
+    LEADS_MANAGEMENT_DELETE,
     LEADS_MANAGEMENT_EDIT,
     LEADS_MANAGEMENT_VIEW,
 )
@@ -253,6 +254,69 @@ async def update_lead_stage(
     return success_response(
         request=request,
         message_key="lead_stages.success.stage_updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("delete lead stage")
+@router.delete(
+    "/{stage_id}",
+    status_code=http_status.HTTP_200_OK,
+    description="Delete a lead stage and compact sort_order for remaining stages",
+    summary="Delete lead stage",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Lead stage deleted successfully"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Lead stage not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="confidential",
+    compliance_tags=[
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="lead_stages",
+    category="LEAD_STAGE",
+)
+async def delete_lead_stage(
+    request: Request,
+    stage_id: str = Path(..., description="Lead stage ID"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Hard-delete a lead stage for the authenticated organization."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=LEADS_MANAGEMENT_DELETE,
+    )
+
+    request.state.audit_table = "lead_stages"
+    request.state.audit_requested_id = stage_id
+    request.state.audit_description = f"Deleted lead stage: {stage_id}"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    lead_stage_service = LeadStageService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    deleted_stage = await lead_stage_service.delete_lead_stage(stage_id)
+    request.state.raw_audit_old_data = deleted_stage
+
+    return success_response(
+        request=request,
+        message_key="lead_stages.success.stage_deleted",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )

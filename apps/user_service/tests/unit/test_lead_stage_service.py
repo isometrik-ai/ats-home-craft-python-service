@@ -34,6 +34,7 @@ class _FakeLeadStageRepo:
         self.initial_count = 1
         self.final_count = 1
         self.update_fields_result = None
+        self.delete_stage_result = None
 
     async def summarize_organization_for_new_stage(self, organization_id, stage_key):
         """Return org-level summary used before insert."""
@@ -92,6 +93,11 @@ class _FakeLeadStageRepo:
         """Update stage fields."""
         self.calls["update_stage"] = (organization_id, stage_id, update_data)
         return self.update_fields_result
+
+    async def delete_stage(self, organization_id, stage_id):
+        """Delete stage row."""
+        self.calls["delete_stage"] = (organization_id, stage_id)
+        return self.delete_stage_result
 
 
 def _ctx():
@@ -416,3 +422,67 @@ async def test_update_lead_stage_rejects_unset_last_initial():
         await service.update_lead_stage("stage-1", UpdateLeadStageRequest(is_initial=False))
 
     assert exc_info.value.message_key == "lead_stages.errors.cannot_unset_last_initial"
+
+
+@pytest.mark.asyncio
+async def test_delete_lead_stage_deletes_shifts_sort_order():
+    """delete_lead_stage removes row then decrements sort_order for stages after the gap."""
+    service, fake_repo = _service_with_fake_repo()
+    now = datetime.now(timezone.utc)
+    row = {
+        "id": "stage-2",
+        "stage_name": "Screening",
+        "stage_key": "screening",
+        "description": None,
+        "color": "blue",
+        "sort_order": 2,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+    fake_repo.delete_stage_result = row
+
+    deleted = await service.delete_lead_stage("stage-2")
+
+    assert deleted["id"] == "stage-2"
+    assert fake_repo.calls["delete_stage"] == ("org-1", "stage-2")
+    assert fake_repo.calls["adjust_sort_orders"][-1] == ("org-1", 3, None, -1)
+
+
+@pytest.mark.asyncio
+async def test_delete_lead_stage_allows_last_remaining():
+    """delete_lead_stage removes the final org stage (zero stages left)."""
+    service, fake_repo = _service_with_fake_repo()
+    now = datetime.now(timezone.utc)
+    row = {
+        "id": "stage-1",
+        "stage_name": "New",
+        "stage_key": "new",
+        "description": None,
+        "color": "blue",
+        "sort_order": 1,
+        "is_initial": True,
+        "is_final": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+    fake_repo.delete_stage_result = row
+
+    deleted = await service.delete_lead_stage("stage-1")
+
+    assert deleted["id"] == "stage-1"
+    assert fake_repo.calls["delete_stage"] == ("org-1", "stage-1")
+    assert fake_repo.calls["adjust_sort_orders"][-1] == ("org-1", 2, None, -1)
+
+
+@pytest.mark.asyncio
+async def test_delete_lead_stage_raises_not_found():
+    """delete_lead_stage raises when DELETE matches no row."""
+    service, fake_repo = _service_with_fake_repo()
+    fake_repo.delete_stage_result = None
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.delete_lead_stage("missing-id")
+
+    assert exc_info.value.message_key == "lead_stages.errors.stage_not_found"
