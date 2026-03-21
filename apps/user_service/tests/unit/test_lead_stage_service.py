@@ -104,14 +104,14 @@ def _ctx():
     )
 
 
-def _service_with_fake_repo(monkeypatch):
-    """Create service with monkeypatched repository."""
+def _service_with_fake_repo():
+    """Create service with injected fake repository."""
     fake_repo = _FakeLeadStageRepo()
-    monkeypatch.setattr(
-        "apps.user_service.app.services.lead_stage_service.LeadStageRepository",
-        lambda db_connection=None: fake_repo,
+    service = LeadStageService(
+        user_context=_ctx(),
+        db_connection=None,
+        lead_stage_repository=fake_repo,
     )
-    service = LeadStageService(user_context=_ctx(), db_connection=None)
     return service, fake_repo
 
 
@@ -143,9 +143,9 @@ def test_reorder_intermediate_window_none_when_no_move():
 
 
 @pytest.mark.asyncio
-async def test_resolve_sort_order_appends_when_missing(monkeypatch):
+async def test_resolve_sort_order_appends_when_missing():
     """_resolve_sort_order_on_create appends when sort_order not provided."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     fake_repo.max_sort_order = 4
 
     result = await service._resolve_sort_order_on_create("org-1", None, max_sort_order=4)
@@ -155,9 +155,9 @@ async def test_resolve_sort_order_appends_when_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_resolve_sort_order_raises_for_out_of_range(monkeypatch):
+async def test_resolve_sort_order_raises_for_out_of_range():
     """_resolve_sort_order_on_create validates requested range."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     fake_repo.max_sort_order = 2
 
     with pytest.raises(ValidationException) as exc_info:
@@ -167,9 +167,9 @@ async def test_resolve_sort_order_raises_for_out_of_range(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_resolve_sort_order_shifts_when_inserting(monkeypatch):
+async def test_resolve_sort_order_shifts_when_inserting():
     """_resolve_sort_order_on_create shifts rows for in-between insert."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     fake_repo.max_sort_order = 3
 
     result = await service._resolve_sort_order_on_create("org-1", 2, max_sort_order=3)
@@ -179,9 +179,9 @@ async def test_resolve_sort_order_shifts_when_inserting(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_lead_stage_first_stage_forces_flags(monkeypatch):
+async def test_create_lead_stage_first_stage_forces_flags():
     """create_lead_stage enforces first-stage bootstrap behavior."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     fake_repo.count = 0
     request = CreateLeadStageRequest(
         stage_name=" New ",
@@ -203,9 +203,9 @@ async def test_create_lead_stage_first_stage_forces_flags(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_lead_stage_non_first_uses_body_flags(monkeypatch):
+async def test_create_lead_stage_non_first_uses_body_flags():
     """create_lead_stage keeps requested flags for non-first stage."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     fake_repo.count = 2
     fake_repo.max_sort_order = 3
     request = CreateLeadStageRequest(
@@ -227,9 +227,9 @@ async def test_create_lead_stage_non_first_uses_body_flags(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_lead_stage_raises_when_stage_key_exists(monkeypatch):
+async def test_create_lead_stage_raises_when_stage_key_exists():
     """create_lead_stage raises conflict on duplicate generated stage_key."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     fake_repo.stage_key_exists = True
     request = CreateLeadStageRequest(stage_name="Qualified")
 
@@ -252,7 +252,7 @@ async def test_create_stage_maps_unique_constraint_conflicts(
     monkeypatch, constraint_name, expected_message_key
 ):
     """create_lead_stage translates DB unique violations into ConflictException."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     fake_repo.count = 1
     fake_repo.max_sort_order = 1
 
@@ -278,9 +278,9 @@ async def test_create_stage_maps_unique_constraint_conflicts(
 
 
 @pytest.mark.asyncio
-async def test_list_lead_stages_returns_serialized_items(monkeypatch):
+async def test_list_lead_stages_returns_serialized_items():
     """list_lead_stages returns serialized rows with total count."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     now = datetime.now(timezone.utc)
     fake_repo.stages_result = [
         {
@@ -307,9 +307,9 @@ async def test_list_lead_stages_returns_serialized_items(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_lead_stage_returns_serialized_item(monkeypatch):
+async def test_get_lead_stage_returns_serialized_item():
     """get_lead_stage returns stage details when stage exists."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     now = datetime.now(timezone.utc)
     fake_repo.stage_by_id_result = {
         "id": "stage-1",
@@ -333,9 +333,9 @@ async def test_get_lead_stage_returns_serialized_item(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_lead_stage_raises_not_found(monkeypatch):
+async def test_get_lead_stage_raises_not_found():
     """get_lead_stage raises NotFoundException when stage missing."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     fake_repo.stage_by_id_result = None
 
     with pytest.raises(NotFoundException) as exc_info:
@@ -345,9 +345,9 @@ async def test_get_lead_stage_raises_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_lead_stage_reorders_and_updates_fields(monkeypatch):
+async def test_update_lead_stage_reorders_and_updates_fields():
     """update_lead_stage reorders and updates mutable fields."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     now = datetime.now(timezone.utc)
     fake_repo.count = 5
     fake_repo.stage_by_id_result = {
@@ -394,9 +394,9 @@ async def test_update_lead_stage_reorders_and_updates_fields(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_lead_stage_rejects_unset_last_initial(monkeypatch):
+async def test_update_lead_stage_rejects_unset_last_initial():
     """update_lead_stage rejects unsetting last initial stage."""
-    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    service, fake_repo = _service_with_fake_repo()
     now = datetime.now(timezone.utc)
     fake_repo.stage_by_id_result = {
         "id": "stage-1",

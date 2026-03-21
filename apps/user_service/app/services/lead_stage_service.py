@@ -5,9 +5,7 @@ import re
 import asyncpg
 from asyncpg import UniqueViolationError
 
-from apps.user_service.app.db.repositories.lead_stage_repository import (
-    LeadStageRepository,
-)
+from apps.user_service.app.db.repositories import LeadStageRepository
 from apps.user_service.app.schemas.lead_stages import (
     CreateLeadStageRequest,
     LeadStageResponse,
@@ -30,11 +28,14 @@ class LeadStageService:
         self,
         db_connection: asyncpg.Connection,
         user_context: UserContext | None = None,
+        lead_stage_repository: LeadStageRepository | None = None,
     ) -> None:
         """Initialize LeadStageService with user context and database connection."""
         self.user_context = user_context
         self.db_connection = db_connection
-        self.lead_stage_repository = LeadStageRepository(db_connection=db_connection)
+        self.lead_stage_repository = lead_stage_repository or LeadStageRepository(
+            db_connection=db_connection
+        )
 
     @staticmethod
     def generate_stage_key(stage_name: str) -> str:
