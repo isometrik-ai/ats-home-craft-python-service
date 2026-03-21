@@ -179,3 +179,38 @@ async def test_get_lead_stage(monkeypatch, client):
     body = assert_success(response, 200)
     assert body["data"]["id"] == "550e8400-e29b-41d4-a716-446655440000"
     assert body["data"]["stage_key"] == "qualified"
+
+
+@pytest.mark.asyncio
+async def test_update_lead_stage(monkeypatch, client):
+    """Update lead stage by ID."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        """Fake permissions check."""
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_update_lead_stage(self, stage_id, body):
+        """Fake service update call."""
+        del self
+        assert stage_id == "550e8400-e29b-41d4-a716-446655440000"
+        assert body.stage_name == "Discovery"
+        assert body.sort_order == 2
+        return {"id": stage_id, "stage_name": "Discovery"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.lead_stages.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_stage_service.LeadStageService.update_lead_stage",
+        fake_update_lead_stage,
+    )
+
+    response = await client.patch(
+        "/v1/lead-stages/550e8400-e29b-41d4-a716-446655440000",
+        json={"stage_name": "Discovery", "sort_order": 2},
+    )
+    assert_success(response, 200)

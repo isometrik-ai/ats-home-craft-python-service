@@ -7,6 +7,7 @@ import pytest
 from apps.user_service.app.schemas.lead_stages import (
     CreateLeadStageRequest,
     LeadStageColor,
+    UpdateLeadStageRequest,
 )
 from apps.user_service.app.services.lead_stage_service import LeadStageService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -26,47 +27,71 @@ class _FakeLeadStageRepo:
         self.max_sort_order = 0
         self.stage_key_exists = False
         self.count = 0
-        self.create_result = {"id": "stage-1"}
-        self.create_error = None
+        self.create_stage_result = {"id": "stage-1"}
+        self.create_stage_error = None
         self.stages_result = []
         self.stage_by_id_result = None
+        self.initial_count = 1
+        self.final_count = 1
+        self.update_fields_result = None
 
-    async def get_max_sort_order(self, organization_id):
-        """Get the maximum sort order for a given organization."""
-        self.calls["get_max_sort_order"] = organization_id
-        return self.max_sort_order
+    async def summarize_organization_for_new_stage(self, organization_id, stage_key):
+        """Return org-level summary used before insert."""
+        self.calls["summarize_organization_for_new_stage"] = (organization_id, stage_key)
+        return {
+            "total_stages": self.count,
+            "max_sort_order": self.max_sort_order,
+            "stage_key_exists": self.stage_key_exists,
+        }
 
-    async def shift_sort_orders_for_insert(self, organization_id, target_position):
-        """Shift the sort orders for insert."""
-        self.calls["shift_sort_orders_for_insert"] = (organization_id, target_position)
+    async def adjust_sort_orders(self, organization_id, *, min_sort_order, max_sort_order, delta):
+        """Generic sort_order bulk update."""
+        self.calls.setdefault("adjust_sort_orders", []).append(
+            (organization_id, min_sort_order, max_sort_order, delta)
+        )
         return None
 
-    async def check_stage_key_exists(self, organization_id, stage_key):
-        """Check if the stage key exists for a given organization."""
-        self.calls["check_stage_key_exists"] = (organization_id, stage_key)
-        return self.stage_key_exists
-
-    async def count_stages(self, organization_id):
-        """Count the number of stages for a given organization."""
-        self.calls["count_stages"] = organization_id
-        return self.count
-
     async def create_stage(self, stage_data):
-        """Create a stage."""
+        """Insert a stage row."""
         self.calls["create_stage"] = stage_data
-        if self.create_error:
-            raise self.create_error
-        return self.create_result
+        if self.create_stage_error:
+            raise self.create_stage_error
+        return self.create_stage_result
 
-    async def get_stages_by_organization(self, organization_id):
-        """Get all stages by organization."""
-        self.calls["get_stages_by_organization"] = organization_id
+    async def list_stages_by_organization(self, organization_id):
+        """List stages for org."""
+        self.calls["list_stages_by_organization"] = organization_id
         return self.stages_result
 
     async def get_stage_by_id(self, organization_id, stage_id):
-        """Get stage by id."""
+        """Fetch one stage by id."""
         self.calls["get_stage_by_id"] = (organization_id, stage_id)
         return self.stage_by_id_result
+
+    async def get_stage_by_id_with_organization_metrics(
+        self, organization_id, stage_id, proposed_stage_key=None
+    ):
+        """Fetch stage row plus org metrics for PATCH validation."""
+        self.calls["get_stage_by_id_with_organization_metrics"] = (
+            organization_id,
+            stage_id,
+            proposed_stage_key,
+        )
+        base = self.stage_by_id_result
+        if base is None:
+            return None
+        return {
+            **base,
+            "total_stages": self.count,
+            "key_conflict_count": 1 if self.stage_key_exists else 0,
+            "other_initial_count": self.initial_count,
+            "other_final_count": self.final_count,
+        }
+
+    async def update_stage(self, organization_id, stage_id, update_data):
+        """Update stage fields."""
+        self.calls["update_stage"] = (organization_id, stage_id, update_data)
+        return self.update_fields_result
 
 
 def _ctx():
@@ -102,16 +127,31 @@ def test_generate_stage_key_raises_for_invalid_name():
     assert exc_info.value.message_key == "lead_stages.errors.invalid_stage_name"
 
 
+def test_reorder_intermediate_window_when_moving_later():
+    """Rows between old and new positions shift down by one sort index."""
+    assert LeadStageService._reorder_intermediate_window(1, 4) == (2, 4, -1)
+
+
+def test_reorder_window_when_moving_earlier():
+    """Rows between new and old positions shift up by one sort index."""
+    assert LeadStageService._reorder_intermediate_window(5, 2) == (2, 4, 1)
+
+
+def test_reorder_intermediate_window_none_when_no_move():
+    """Same position implies no intermediate rows to adjust."""
+    assert LeadStageService._reorder_intermediate_window(3, 3) is None
+
+
 @pytest.mark.asyncio
 async def test_resolve_sort_order_appends_when_missing(monkeypatch):
     """_resolve_sort_order_on_create appends when sort_order not provided."""
     service, fake_repo = _service_with_fake_repo(monkeypatch)
     fake_repo.max_sort_order = 4
 
-    result = await service._resolve_sort_order_on_create("org-1", None)
+    result = await service._resolve_sort_order_on_create("org-1", None, max_sort_order=4)
 
     assert result == 5
-    assert "shift_sort_orders_for_insert" not in fake_repo.calls
+    assert "adjust_sort_orders" not in fake_repo.calls
 
 
 @pytest.mark.asyncio
@@ -121,7 +161,7 @@ async def test_resolve_sort_order_raises_for_out_of_range(monkeypatch):
     fake_repo.max_sort_order = 2
 
     with pytest.raises(ValidationException) as exc_info:
-        await service._resolve_sort_order_on_create("org-1", 5)
+        await service._resolve_sort_order_on_create("org-1", 5, max_sort_order=2)
 
     assert exc_info.value.message_key == "lead_stages.errors.invalid_sort_order_range"
 
@@ -132,10 +172,10 @@ async def test_resolve_sort_order_shifts_when_inserting(monkeypatch):
     service, fake_repo = _service_with_fake_repo(monkeypatch)
     fake_repo.max_sort_order = 3
 
-    result = await service._resolve_sort_order_on_create("org-1", 2)
+    result = await service._resolve_sort_order_on_create("org-1", 2, max_sort_order=3)
 
     assert result == 2
-    assert fake_repo.calls["shift_sort_orders_for_insert"] == ("org-1", 2)
+    assert fake_repo.calls["adjust_sort_orders"] == [("org-1", 2, None, 1)]
 
 
 @pytest.mark.asyncio
@@ -183,7 +223,7 @@ async def test_create_lead_stage_non_first_uses_body_flags(monkeypatch):
     assert payload["is_initial"] is True
     assert payload["is_final"] is False
     assert payload["description"] == "Warm lead"
-    assert fake_repo.calls["shift_sort_orders_for_insert"] == ("org-1", 2)
+    assert fake_repo.calls["adjust_sort_orders"] == [("org-1", 2, None, 1)]
 
 
 @pytest.mark.asyncio
@@ -228,7 +268,7 @@ async def test_create_stage_maps_unique_constraint_conflicts(
         "apps.user_service.app.services.lead_stage_service.UniqueViolationError",
         _FakeUniqueViolationError,
     )
-    fake_repo.create_error = _FakeUniqueViolationError(constraint_name)
+    fake_repo.create_stage_error = _FakeUniqueViolationError(constraint_name)
     request = CreateLeadStageRequest(stage_name="Qualified")
 
     with pytest.raises(ConflictException) as exc_info:
@@ -263,7 +303,7 @@ async def test_list_lead_stages_returns_serialized_items(monkeypatch):
     assert items[0]["id"] == "stage-1"
     assert items[0]["stage_key"] == "new"
     assert items[0]["created_at"] == now.isoformat()
-    assert fake_repo.calls["get_stages_by_organization"] == "org-1"
+    assert fake_repo.calls["list_stages_by_organization"] == "org-1"
 
 
 @pytest.mark.asyncio
@@ -302,3 +342,77 @@ async def test_get_lead_stage_raises_not_found(monkeypatch):
         await service.get_lead_stage("missing-id")
 
     assert exc_info.value.message_key == "lead_stages.errors.stage_not_found"
+
+
+@pytest.mark.asyncio
+async def test_update_lead_stage_reorders_and_updates_fields(monkeypatch):
+    """update_lead_stage reorders and updates mutable fields."""
+    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    now = datetime.now(timezone.utc)
+    fake_repo.count = 5
+    fake_repo.stage_by_id_result = {
+        "id": "stage-1",
+        "stage_name": "New",
+        "stage_key": "new",
+        "description": None,
+        "color": "blue",
+        "sort_order": 1,
+        "is_initial": True,
+        "is_final": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+    fake_repo.initial_count = 2
+    fake_repo.final_count = 2
+    fake_repo.update_fields_result = {
+        **fake_repo.stage_by_id_result,
+        "stage_name": "Qualified",
+        "description": "Warm lead",
+        "color": "green",
+        "sort_order": 3,
+        "is_initial": False,
+        "is_final": False,
+    }
+
+    body = UpdateLeadStageRequest(
+        stage_name="Qualified",
+        description="Warm lead",
+        color=LeadStageColor.GREEN,
+        sort_order=3,
+        is_initial=False,
+        is_final=False,
+    )
+    result = await service.update_lead_stage("stage-1", body)
+
+    assert result["stage_name"] == "Qualified"
+    assert fake_repo.calls["adjust_sort_orders"][0] == ("org-1", 2, 3, -1)
+    _, _, updated_fields = fake_repo.calls["update_stage"]
+    assert updated_fields["stage_key"] == "qualified"
+    assert updated_fields["is_initial"] is False
+    assert updated_fields["is_final"] is False
+    assert updated_fields["sort_order"] == 3
+
+
+@pytest.mark.asyncio
+async def test_update_lead_stage_rejects_unset_last_initial(monkeypatch):
+    """update_lead_stage rejects unsetting last initial stage."""
+    service, fake_repo = _service_with_fake_repo(monkeypatch)
+    now = datetime.now(timezone.utc)
+    fake_repo.stage_by_id_result = {
+        "id": "stage-1",
+        "stage_name": "New",
+        "stage_key": "new",
+        "description": None,
+        "color": "blue",
+        "sort_order": 1,
+        "is_initial": True,
+        "is_final": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+    fake_repo.initial_count = 0
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.update_lead_stage("stage-1", UpdateLeadStageRequest(is_initial=False))
+
+    assert exc_info.value.message_key == "lead_stages.errors.cannot_unset_last_initial"

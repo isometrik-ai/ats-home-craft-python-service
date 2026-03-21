@@ -7,7 +7,10 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.schemas.lead_stages import CreateLeadStageRequest
+from apps.user_service.app.schemas.lead_stages import (
+    CreateLeadStageRequest,
+    UpdateLeadStageRequest,
+)
 from apps.user_service.app.services.lead_stage_service import LeadStageService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -16,6 +19,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     LEADS_MANAGEMENT_CREATE,
+    LEADS_MANAGEMENT_EDIT,
     LEADS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
@@ -185,4 +189,70 @@ async def get_lead_stage(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=stage_data,
+    )
+
+
+@handle_api_exceptions("update lead stage")
+@router.patch(
+    "/{stage_id}",
+    status_code=http_status.HTTP_200_OK,
+    description="Update a lead stage (partial update, including reorder)",
+    summary="Update lead stage",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Lead stage updated successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Validation error"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Lead stage not found"},
+        http_status.HTTP_409_CONFLICT: {"description": "Stage conflict"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="lead_stages",
+    category="LEAD_STAGE",
+)
+async def update_lead_stage(
+    request: Request,
+    stage_id: str = Path(..., description="Lead stage ID"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: UpdateLeadStageRequest = Body(...),
+):
+    """Update a lead stage for the authenticated organization."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=LEADS_MANAGEMENT_EDIT,
+    )
+
+    request.state.audit_table = "lead_stages"
+    request.state.audit_requested_id = stage_id
+    request.state.audit_description = f"Updated lead stage: {stage_id}"
+    request.state.audit_risk_level = "medium"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    lead_stage_service = LeadStageService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    updated_stage = await lead_stage_service.update_lead_stage(stage_id=stage_id, body=body)
+    request.state.raw_audit_new_data = updated_stage
+
+    return success_response(
+        request=request,
+        message_key="lead_stages.success.stage_updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
     )

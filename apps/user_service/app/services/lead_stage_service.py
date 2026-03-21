@@ -11,6 +11,8 @@ from apps.user_service.app.db.repositories.lead_stage_repository import (
 from apps.user_service.app.schemas.lead_stages import (
     CreateLeadStageRequest,
     LeadStageResponse,
+    Unset,
+    UpdateLeadStageRequest,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
@@ -48,27 +50,46 @@ class LeadStageService:
             )
         return key
 
+    @staticmethod
+    def _reorder_intermediate_window(
+        current_sort_order: int,
+        target_sort_order: int,
+    ) -> tuple[int, int, int] | None:
+        """Inclusive bounds of rows strictly between two positions, and delta per row.
+
+        Returns None when no rows need shifting (e.g. adjacent positions).
+        """
+        if current_sort_order < target_sort_order:
+            low, high, delta = current_sort_order + 1, target_sort_order, -1
+        else:
+            low, high, delta = target_sort_order, current_sort_order - 1, 1
+        if low > high:
+            return None
+        return low, high, delta
+
     async def _resolve_sort_order_on_create(
         self,
         organization_id: str,
         requested_sort_order: int | None,
+        *,
+        max_sort_order: int,
     ) -> int:
         """Resolve sort_order for create: append or insert with shift."""
-        max_order = await self.lead_stage_repository.get_max_sort_order(organization_id)
-
         if requested_sort_order is None:
-            return max_order + 1
+            return max_sort_order + 1
 
-        if not 1 <= requested_sort_order <= max_order + 1:
+        if not 1 <= requested_sort_order <= max_sort_order + 1:
             raise ValidationException(
                 message_key="lead_stages.errors.invalid_sort_order_range",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
-                params={"min": 1, "max": max_order + 1},
+                params={"min": 1, "max": max_sort_order + 1},
             )
 
-        await self.lead_stage_repository.shift_sort_orders_for_insert(
-            organization_id=organization_id,
-            target_position=requested_sort_order,
+        await self.lead_stage_repository.adjust_sort_orders(
+            organization_id,
+            min_sort_order=requested_sort_order,
+            max_sort_order=None,
+            delta=1,
         )
         return requested_sort_order
 
@@ -78,14 +99,16 @@ class LeadStageService:
         stage_name = body.stage_name.strip()
         stage_key = self.generate_stage_key(stage_name)
 
-        # Defensive pre-check for cleaner conflict messaging.
-        if await self.lead_stage_repository.check_stage_key_exists(organization_id, stage_key):
+        metrics = await self.lead_stage_repository.summarize_organization_for_new_stage(
+            organization_id, stage_key
+        )
+        if metrics["stage_key_exists"]:
             raise ConflictException(
                 message_key="lead_stages.errors.stage_key_exists",
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
-        existing_count = await self.lead_stage_repository.count_stages(organization_id)
+        existing_count = metrics["total_stages"]
         is_first_stage = existing_count == 0
 
         if is_first_stage:
@@ -97,6 +120,7 @@ class LeadStageService:
             resolved_sort_order = await self._resolve_sort_order_on_create(
                 organization_id=organization_id,
                 requested_sort_order=body.sort_order,
+                max_sort_order=metrics["max_sort_order"],
             )
             is_initial = body.is_initial
             is_final = body.is_final
@@ -127,6 +151,7 @@ class LeadStageService:
                     message_key="lead_stages.errors.stage_name_exists",
                     custom_code=CustomStatusCode.CONFLICT,
                 ) from exc
+            # Deferred uq_lsd_sort_order: violation may surface at commit, not on INSERT alone.
             if constraint in {"uq_lsd_sort_order"}:
                 raise ConflictException(
                     message_key="lead_stages.errors.sort_order_conflict",
@@ -153,7 +178,7 @@ class LeadStageService:
     async def list_lead_stages(self) -> tuple[list[dict], int]:
         """List all lead stages for the current organization."""
         organization_id = self.user_context.organization_id
-        stage_rows = await self.lead_stage_repository.get_stages_by_organization(organization_id)
+        stage_rows = await self.lead_stage_repository.list_stages_by_organization(organization_id)
         items = [self._build_stage_response(row).model_dump(mode="json") for row in stage_rows]
         return items, len(items)
 
@@ -170,3 +195,154 @@ class LeadStageService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return self._build_stage_response(stage_row).model_dump(mode="json")
+
+    def _run_update_validations(self, ctx: dict, *, body: UpdateLeadStageRequest) -> None:
+        """Validate update against pre-fetched context (no DB calls)."""
+        if body.stage_name is not None and ctx["key_conflict_count"] > 0:
+            raise ConflictException(
+                message_key="lead_stages.errors.stage_key_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        if body.sort_order is not None and not 1 <= body.sort_order <= ctx["total_stages"]:
+            raise ValidationException(
+                message_key="lead_stages.errors.invalid_sort_order_range",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"min": 1, "max": ctx["total_stages"]},
+            )
+
+        if body.is_initial is False and ctx["other_initial_count"] == 0:
+            raise ValidationException(
+                message_key="lead_stages.errors.cannot_unset_last_initial",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        if body.is_final is False and ctx["other_final_count"] == 0:
+            raise ValidationException(
+                message_key="lead_stages.errors.cannot_unset_last_final",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    def _build_update_data(
+        self,
+        body: UpdateLeadStageRequest,
+        *,
+        generated_stage_key: str | None = None,
+        sort_order_to_apply: int | None = None,
+    ) -> dict[str, object]:
+        """Build DB update payload based on PATCH semantics."""
+        update_data: dict[str, object] = {}
+
+        if body.stage_name is not None:
+            normalized_stage_name = body.stage_name.strip()
+            update_data["stage_name"] = normalized_stage_name
+            update_data["stage_key"] = (
+                generated_stage_key
+                if generated_stage_key is not None
+                else self.generate_stage_key(normalized_stage_name)
+            )
+
+        if not isinstance(body.description, Unset):
+            update_data["description"] = body.description
+
+        if not isinstance(body.color, Unset):
+            update_data["color"] = body.color.value if body.color else None
+
+        if body.is_initial is not None:
+            update_data["is_initial"] = body.is_initial
+
+        if body.is_final is not None:
+            update_data["is_final"] = body.is_final
+
+        if sort_order_to_apply is not None:
+            update_data["sort_order"] = sort_order_to_apply
+
+        return update_data
+
+    async def _persist_stage_update(
+        self,
+        organization_id: str,
+        stage_id: str,
+        update_data: dict[str, object],
+    ) -> dict | None:
+        """Persist stage updates and return the updated row."""
+        try:
+            return await self.lead_stage_repository.update_stage(
+                organization_id=organization_id,
+                stage_id=stage_id,
+                update_data=update_data,
+            )
+        except UniqueViolationError as exc:
+            constraint = getattr(exc, "constraint_name", "") or ""
+            if constraint == "uq_lsd_stage_key":
+                raise ConflictException(
+                    message_key="lead_stages.errors.stage_key_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                ) from exc
+            if constraint == "uq_lsd_stage_name":
+                raise ConflictException(
+                    message_key="lead_stages.errors.stage_name_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                ) from exc
+            raise
+
+    async def update_lead_stage(self, stage_id: str, body: UpdateLeadStageRequest) -> dict:
+        """Update lead stage fields and/or reorder stage."""
+        organization_id = self.user_context.organization_id
+
+        generated_stage_key: str | None = None
+        if body.stage_name is not None:
+            generated_stage_key = self.generate_stage_key(body.stage_name.strip())
+
+        stage_with_ctx = await self.lead_stage_repository.get_stage_by_id_with_organization_metrics(
+            organization_id=organization_id,
+            stage_id=stage_id,
+            proposed_stage_key=generated_stage_key,
+        )
+        if not stage_with_ctx:
+            raise NotFoundException(
+                message_key="lead_stages.errors.stage_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        self._run_update_validations(stage_with_ctx, body=body)
+
+        sort_order_to_apply: int | None = None
+        if body.sort_order is not None and body.sort_order != stage_with_ctx["sort_order"]:
+            sort_order_to_apply = body.sort_order
+            # Intermediate sort_order values may duplicate until txn commit
+            # (deferred uq_lsd_sort_order).
+            window = self._reorder_intermediate_window(
+                stage_with_ctx["sort_order"],
+                body.sort_order,
+            )
+            if window is not None:
+                low, high, delta = window
+                await self.lead_stage_repository.adjust_sort_orders(
+                    organization_id,
+                    min_sort_order=low,
+                    max_sort_order=high,
+                    delta=delta,
+                )
+
+        update_data = self._build_update_data(
+            body,
+            generated_stage_key=generated_stage_key,
+            sort_order_to_apply=sort_order_to_apply,
+        )
+        if not update_data:
+            return self._build_stage_response(stage_with_ctx).model_dump(mode="json")
+
+        updated_stage = await self._persist_stage_update(
+            organization_id=organization_id,
+            stage_id=stage_id,
+            update_data=update_data,
+        )
+
+        if not updated_stage:
+            raise NotFoundException(
+                message_key="lead_stages.errors.stage_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        return self._build_stage_response(updated_stage).model_dump(mode="json")

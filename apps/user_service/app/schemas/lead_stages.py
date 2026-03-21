@@ -24,6 +24,13 @@ class LeadStageColor(str, Enum):
     GRAY = "gray"
 
 
+class Unset:
+    """Sentinel type: field not present in request payload."""
+
+
+UNSET = Unset()
+
+
 class LeadStageBasePayload(BaseModel):
     """Common writable fields for lead stages."""
 
@@ -104,22 +111,35 @@ class CreateLeadStageRequest(LeadStageBasePayload):
 class UpdateLeadStageRequest(LeadStageBasePayload):
     """Request schema for partially updating a lead stage (PATCH semantics)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    description: str | None | Unset = Field(
+        default=UNSET,
+        description="Description update; null clears, omitted keeps unchanged",
+    )
+    color: LeadStageColor | None | Unset = Field(
+        default=UNSET,
+        description="Color update; null clears, omitted keeps unchanged",
+    )
+
+    @field_validator("description")
+    @classmethod
+    def validate_update_description(cls, value: str | None | Unset) -> str | None | Unset:
+        """Normalize/validate update description while preserving sentinel semantics."""
+        if isinstance(value, Unset) or value is None:
+            return value
+        normalized = value.strip()
+        if len(normalized) > 1000:
+            raise ValidationException(
+                message_key="lead_stages.errors.invalid_description",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return normalized or None
 
     @model_validator(mode="after")
     def validate_at_least_one_field(self) -> "UpdateLeadStageRequest":
         """Require at least one mutable field in PATCH payload."""
-        if all(
-            value is None
-            for value in (
-                self.stage_name,
-                self.description,
-                self.color,
-                self.sort_order,
-                self.is_initial,
-                self.is_final,
-            )
-        ):
+        if not self.model_fields_set:
             raise ValidationException(
                 message_key="lead_stages.errors.empty_update_payload",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -144,6 +164,8 @@ class LeadStageResponse(BaseModel):
 
 __all__ = [
     "LeadStageColor",
+    "Unset",
+    "UNSET",
     "CreateLeadStageRequest",
     "UpdateLeadStageRequest",
     "LeadStageResponse",

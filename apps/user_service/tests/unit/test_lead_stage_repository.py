@@ -41,67 +41,56 @@ class _FakeConn:
 
 
 @pytest.mark.asyncio
-async def test_count_stages_returns_count():
-    """count_stages returns total active stages for org."""
+async def test_organization_for_new_stage_returns_row_dict():
+    """summarize_organization_for_new_stage returns counts and key collision flag."""
     conn = _FakeConn()
-    conn.fetchval_result = 3
+    conn.fetchrow_result = {
+        "total_stages": 3,
+        "max_sort_order": 5,
+        "stage_key_exists": False,
+    }
     repo = LeadStageRepository(db_connection=conn)
 
-    result = await repo.count_stages("org-1")
+    result = await repo.summarize_organization_for_new_stage("org-1", "qualified")
 
-    assert result == 3
-    query, args = conn.fetchval_calls[0]
-    assert "SELECT COUNT(*)::int" in query
-    assert "FROM lead_stages" in query
-    assert "organization_id = $1" in query
-    assert args == ("org-1",)
-
-
-@pytest.mark.asyncio
-async def test_get_max_sort_order_returns_zero_when_empty():
-    """get_max_sort_order returns COALESCE(max, 0)."""
-    conn = _FakeConn()
-    conn.fetchval_result = 0
-    repo = LeadStageRepository(db_connection=conn)
-
-    result = await repo.get_max_sort_order("org-1")
-
-    assert result == 0
-    query, args = conn.fetchval_calls[0]
-    assert "COALESCE(MAX(sort_order), 0)::int" in query
-    assert "organization_id = $1" in query
-    assert args == ("org-1",)
-
-
-@pytest.mark.asyncio
-async def test_check_stage_key_exists_casts_to_bool():
-    """check_stage_key_exists returns bool from EXISTS query."""
-    conn = _FakeConn()
-    conn.fetchval_result = 1
-    repo = LeadStageRepository(db_connection=conn)
-
-    result = await repo.check_stage_key_exists("org-1", "qualified")
-
-    assert result is True
-    query, args = conn.fetchval_calls[0]
-    assert "SELECT EXISTS" in query
-    assert "stage_key = $2" in query
+    assert result["total_stages"] == 3
+    assert result["max_sort_order"] == 5
+    assert result["stage_key_exists"] is False
+    query, args = conn.fetchrow_calls[0]
+    assert "FROM lead_stages" in query or "lead_stages" in query
+    assert "total_stages" in query
+    assert "max_sort_order" in query
+    assert "stage_key_exists" in query
     assert args == ("org-1", "qualified")
 
 
 @pytest.mark.asyncio
-async def test_shift_sort_orders_for_insert_executes_update():
-    """shift_sort_orders_for_insert bumps orders at target position."""
+async def test_adjust_sort_orders_unbounded_upper():
+    """adjust_sort_orders with max_sort_order=None shifts every row from min upward."""
     conn = _FakeConn()
     repo = LeadStageRepository(db_connection=conn)
 
-    await repo.shift_sort_orders_for_insert("org-1", 2)
+    await repo.adjust_sort_orders("org-1", min_sort_order=2, max_sort_order=None, delta=1)
 
     query, args = conn.execute_calls[0]
     assert "UPDATE lead_stages" in query
-    assert "SET sort_order = sort_order + 1" in query
-    assert "sort_order >= $2" in query
-    assert args == ("org-1", 2)
+    assert "SET sort_order = sort_order + $4::int" in query
+    assert "sort_order >= $2::int" in query
+    assert "$3::int IS NULL OR sort_order <= $3::int" in query
+    assert args == ("org-1", 2, None, 1)
+
+
+@pytest.mark.asyncio
+async def test_adjust_sort_orders_bounded_range():
+    """adjust_sort_orders with max_sort_order set only touches the closed range."""
+    conn = _FakeConn()
+    repo = LeadStageRepository(db_connection=conn)
+
+    await repo.adjust_sort_orders("org-1", min_sort_order=2, max_sort_order=5, delta=-1)
+
+    query, args = conn.execute_calls[0]
+    assert "UPDATE lead_stages" in query
+    assert args == ("org-1", 2, 5, -1)
 
 
 @pytest.mark.asyncio
@@ -121,7 +110,7 @@ async def test_create_stage_inserts_and_returns_dict():
         "updated_at": "2026-01-01T00:00:00Z",
     }
     repo = LeadStageRepository(db_connection=conn)
-    stage_data = {
+    row = {
         "organization_id": "org-1",
         "stage_name": "Qualified",
         "stage_key": "qualified",
@@ -132,7 +121,7 @@ async def test_create_stage_inserts_and_returns_dict():
         "is_final": False,
     }
 
-    result = await repo.create_stage(stage_data)
+    result = await repo.create_stage(row)
 
     assert result["id"] == "stage-1"
     query, args = conn.fetchrow_calls[0]
@@ -151,8 +140,8 @@ async def test_create_stage_inserts_and_returns_dict():
 
 
 @pytest.mark.asyncio
-async def test_get_stages_by_organization_returns_rows():
-    """get_stages_by_organization returns ordered stage list."""
+async def test_list_stages_by_organization_returns_rows():
+    """list_stages_by_organization returns ordered stage list."""
     conn = _FakeConn()
     conn.fetch_result = [
         {
@@ -170,7 +159,7 @@ async def test_get_stages_by_organization_returns_rows():
     ]
     repo = LeadStageRepository(db_connection=conn)
 
-    result = await repo.get_stages_by_organization("org-1")
+    result = await repo.list_stages_by_organization("org-1")
 
     assert len(result) == 1
     assert result[0]["stage_key"] == "new"
@@ -209,3 +198,35 @@ async def test_get_stage_by_id_returns_row_or_none():
     conn.fetchrow_result = None
     missing = await repo.get_stage_by_id("org-1", "missing-id")
     assert missing is None
+
+
+@pytest.mark.asyncio
+async def test_update_stage_builds_dynamic_update():
+    """update_stage updates only provided columns."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "stage-1",
+        "stage_name": "Qualified",
+        "stage_key": "new",
+        "description": "Warm lead",
+        "color": "green",
+        "sort_order": 2,
+        "is_initial": True,
+        "is_final": False,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+    }
+    repo = LeadStageRepository(db_connection=conn)
+
+    result = await repo.update_stage(
+        "org-1",
+        "stage-id",
+        {"stage_name": "Qualified", "color": "green"},
+    )
+
+    assert result is not None
+    query, args = conn.fetchrow_calls[0]
+    assert "UPDATE lead_stages" in query
+    assert "stage_name = $3" in query
+    assert "color = $4" in query
+    assert args == ("org-1", "stage-id", "Qualified", "green")
