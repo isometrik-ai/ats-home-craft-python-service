@@ -34,6 +34,7 @@ class _FakeLeadStageRepo:
         self.initial_count = 1
         self.final_count = 1
         self.update_fields_result = None
+        self.update_stage_error = None
         self.delete_stage_result = None
 
     async def summarize_organization_for_new_stage(self, organization_id, stage_key):
@@ -92,6 +93,8 @@ class _FakeLeadStageRepo:
     async def update_stage(self, organization_id, stage_id, update_data):
         """Update stage fields."""
         self.calls["update_stage"] = (organization_id, stage_id, update_data)
+        if self.update_stage_error:
+            raise self.update_stage_error
         return self.update_fields_result
 
     async def delete_stage(self, organization_id, stage_id):
@@ -284,6 +287,32 @@ async def test_create_stage_maps_unique_constraint_conflicts(
 
 
 @pytest.mark.asyncio
+async def test_create_stage_reraises_unknown_unique_violation(monkeypatch):
+    """create_lead_stage propagates UniqueViolationError for unrecognized constraints."""
+    service, fake_repo = _service_with_fake_repo()
+    fake_repo.count = 1
+    fake_repo.max_sort_order = 1
+
+    class _FakeUniqueViolationError(Exception):
+        """Fake unique violation error."""
+
+        def __init__(self, name):
+            """Initialize with constraint name."""
+            super().__init__("duplicate")
+            self.constraint_name = name
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_stage_service.UniqueViolationError",
+        _FakeUniqueViolationError,
+    )
+    fake_repo.create_stage_error = _FakeUniqueViolationError("other_constraint")
+    request = CreateLeadStageRequest(stage_name="Qualified")
+
+    with pytest.raises(_FakeUniqueViolationError):
+        await service.create_lead_stage(request)
+
+
+@pytest.mark.asyncio
 async def test_list_lead_stages_returns_serialized_items():
     """list_lead_stages returns serialized rows with total count."""
     service, fake_repo = _service_with_fake_repo()
@@ -346,6 +375,18 @@ async def test_get_lead_stage_raises_not_found():
 
     with pytest.raises(NotFoundException) as exc_info:
         await service.get_lead_stage("missing-id")
+
+    assert exc_info.value.message_key == "lead_stages.errors.stage_not_found"
+
+
+@pytest.mark.asyncio
+async def test_update_lead_stage_raises_not_found():
+    """update_lead_stage raises when the stage id does not exist for the org."""
+    service, fake_repo = _service_with_fake_repo()
+    fake_repo.stage_by_id_result = None
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.update_lead_stage("missing-id", UpdateLeadStageRequest(stage_name="X"))
 
     assert exc_info.value.message_key == "lead_stages.errors.stage_not_found"
 
@@ -425,6 +466,219 @@ async def test_update_lead_stage_rejects_unset_last_initial():
 
 
 @pytest.mark.asyncio
+async def test_update_lead_stage_rejects_unset_last_final():
+    """update_lead_stage rejects unsetting last final stage."""
+    service, fake_repo = _service_with_fake_repo()
+    now = datetime.now(timezone.utc)
+    fake_repo.stage_by_id_result = {
+        "id": "stage-1",
+        "stage_name": "Won",
+        "stage_key": "won",
+        "description": None,
+        "color": "green",
+        "sort_order": 3,
+        "is_initial": False,
+        "is_final": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+    fake_repo.final_count = 0
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.update_lead_stage("stage-1", UpdateLeadStageRequest(is_final=False))
+
+    assert exc_info.value.message_key == "lead_stages.errors.cannot_unset_last_final"
+
+
+@pytest.mark.asyncio
+async def test_update_lead_stage_rejects_key_conflict():
+    """update_lead_stage raises when renamed stage_key would collide with another row."""
+    service, fake_repo = _service_with_fake_repo()
+    now = datetime.now(timezone.utc)
+    fake_repo.stage_by_id_result = {
+        "id": "stage-1",
+        "stage_name": "Alpha",
+        "stage_key": "alpha",
+        "description": None,
+        "color": "blue",
+        "sort_order": 1,
+        "is_initial": True,
+        "is_final": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+    fake_repo.count = 3
+    fake_repo.stage_key_exists = True
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.update_lead_stage("stage-1", UpdateLeadStageRequest(stage_name="Beta"))
+
+    assert exc_info.value.message_key == "lead_stages.errors.stage_key_exists"
+
+
+@pytest.mark.asyncio
+async def test_update_stage_rejects_sort_order_out_of_range():
+    """update_lead_stage validates sort_order against current org stage count."""
+    service, fake_repo = _service_with_fake_repo()
+    now = datetime.now(timezone.utc)
+    fake_repo.count = 3
+    fake_repo.stage_by_id_result = {
+        "id": "stage-1",
+        "stage_name": "Mid",
+        "stage_key": "mid",
+        "description": None,
+        "color": "blue",
+        "sort_order": 2,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.update_lead_stage("stage-1", UpdateLeadStageRequest(sort_order=10))
+
+    assert exc_info.value.message_key == "lead_stages.errors.invalid_sort_order_range"
+
+
+@pytest.mark.asyncio
+async def test_update_no_op_when_sort_order_unchanged():
+    """update_lead_stage skips persist when sort_order matches and no other mutations."""
+    service, fake_repo = _service_with_fake_repo()
+    now = datetime.now(timezone.utc)
+    fake_repo.count = 3
+    fake_repo.stage_by_id_result = {
+        "id": "stage-1",
+        "stage_name": "Mid",
+        "stage_key": "mid",
+        "description": None,
+        "color": "blue",
+        "sort_order": 2,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    result = await service.update_lead_stage("stage-1", UpdateLeadStageRequest(sort_order=2))
+
+    assert result["stage_key"] == "mid"
+    assert result["sort_order"] == 2
+    assert fake_repo.calls.get("update_stage") is None
+
+
+@pytest.mark.asyncio
+async def test_update_raises_not_found_returns_none():
+    """update_lead_stage raises if UPDATE matches no row after validation."""
+    service, fake_repo = _service_with_fake_repo()
+    now = datetime.now(timezone.utc)
+    fake_repo.count = 2
+    fake_repo.stage_by_id_result = {
+        "id": "stage-1",
+        "stage_name": "Mid",
+        "stage_key": "mid",
+        "description": None,
+        "color": "blue",
+        "sort_order": 1,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+    fake_repo.update_fields_result = None
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.update_lead_stage("stage-1", UpdateLeadStageRequest(stage_name="Renamed"))
+
+    assert exc_info.value.message_key == "lead_stages.errors.stage_not_found"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("constraint_name", "expected_message_key"),
+    [
+        ("uq_lsd_stage_key", "lead_stages.errors.stage_key_exists"),
+        ("uq_lsd_stage_name", "lead_stages.errors.stage_name_exists"),
+    ],
+)
+async def test_update_maps_unique_constraint_conflicts(
+    monkeypatch, constraint_name, expected_message_key
+):
+    """update_lead_stage maps unique violations from persist into ConflictException."""
+    service, fake_repo = _service_with_fake_repo()
+    now = datetime.now(timezone.utc)
+    fake_repo.count = 2
+    fake_repo.stage_by_id_result = {
+        "id": "stage-1",
+        "stage_name": "Mid",
+        "stage_key": "mid",
+        "description": None,
+        "color": "blue",
+        "sort_order": 1,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    class _FakeUniqueViolationError(Exception):
+        """Fake unique violation error."""
+
+        def __init__(self, name):
+            """Initialize with constraint name."""
+            super().__init__("duplicate")
+            self.constraint_name = name
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_stage_service.UniqueViolationError",
+        _FakeUniqueViolationError,
+    )
+    fake_repo.update_stage_error = _FakeUniqueViolationError(constraint_name)
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.update_lead_stage("stage-1", UpdateLeadStageRequest(stage_name="Other"))
+
+    assert exc_info.value.message_key == expected_message_key
+
+
+@pytest.mark.asyncio
+async def test_update_reraises_unknown_unique_violation(monkeypatch):
+    """update_lead_stage propagates UniqueViolationError for unrecognized constraints."""
+    service, fake_repo = _service_with_fake_repo()
+    now = datetime.now(timezone.utc)
+    fake_repo.count = 2
+    fake_repo.stage_by_id_result = {
+        "id": "stage-1",
+        "stage_name": "Mid",
+        "stage_key": "mid",
+        "description": None,
+        "color": "blue",
+        "sort_order": 1,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    class _FakeUniqueViolationError(Exception):
+        """Fake unique violation error."""
+
+        def __init__(self, name):
+            """Initialize with constraint name."""
+            super().__init__("duplicate")
+            self.constraint_name = name
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_stage_service.UniqueViolationError",
+        _FakeUniqueViolationError,
+    )
+    fake_repo.update_stage_error = _FakeUniqueViolationError("uq_lsd_sort_order")
+
+    with pytest.raises(_FakeUniqueViolationError):
+        await service.update_lead_stage("stage-1", UpdateLeadStageRequest(stage_name="Other"))
+
+
+@pytest.mark.asyncio
 async def test_delete_lead_stage_deletes_shifts_sort_order():
     """delete_lead_stage removes row then decrements sort_order for stages after the gap."""
     service, fake_repo = _service_with_fake_repo()
@@ -486,3 +740,19 @@ async def test_delete_lead_stage_raises_not_found():
         await service.delete_lead_stage("missing-id")
 
     assert exc_info.value.message_key == "lead_stages.errors.stage_not_found"
+
+
+def test_update_request_rejects_empty_payload():
+    """UpdateLeadStageRequest requires at least one explicit field."""
+    with pytest.raises(ValidationException) as exc_info:
+        UpdateLeadStageRequest()
+
+    assert exc_info.value.message_key == "lead_stages.errors.empty_update_payload"
+
+
+def test_create_request_rejects_blank_stage_name():
+    """CreateLeadStageRequest rejects whitespace-only stage_name."""
+    with pytest.raises(ValidationException) as exc_info:
+        CreateLeadStageRequest(stage_name="   ")
+
+    assert exc_info.value.message_key == "lead_stages.errors.stage_name_required"

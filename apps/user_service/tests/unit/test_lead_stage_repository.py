@@ -201,6 +201,59 @@ async def test_get_stage_by_id_returns_row_or_none():
 
 
 @pytest.mark.asyncio
+async def test_get_stage_with_metrics_returns_row():
+    """get_stage_by_id_with_organization_metrics returns merged stage and org stats."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "stage_name": "Mid",
+        "stage_key": "mid",
+        "description": None,
+        "color": "blue",
+        "sort_order": 2,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "total_stages": 4,
+        "key_conflict_count": 0,
+        "other_initial_count": 1,
+        "other_final_count": 1,
+    }
+    repo = LeadStageRepository(db_connection=conn)
+
+    row = await repo.get_stage_by_id_with_organization_metrics(
+        "org-1",
+        "550e8400-e29b-41d4-a716-446655440000",
+        "proposed_key",
+    )
+
+    assert row is not None
+    assert row["total_stages"] == 4
+    assert row["key_conflict_count"] == 0
+    assert row["stage_key"] == "mid"
+    query, args = conn.fetchrow_calls[0]
+    assert "WITH org_stats AS" in query
+    assert "key_conflict_count" in query
+    assert "FROM lead_stages s" in query
+    assert args == ("org-1", "550e8400-e29b-41d4-a716-446655440000", "proposed_key")
+
+
+@pytest.mark.asyncio
+async def test_get_stage_with_metrics_none_when_missing():
+    """get_stage_by_id_with_organization_metrics returns None when stage is absent."""
+    conn = _FakeConn()
+    conn.fetchrow_result = None
+    repo = LeadStageRepository(db_connection=conn)
+
+    row = await repo.get_stage_by_id_with_organization_metrics("org-1", "missing-id", None)
+
+    assert row is None
+    _, args = conn.fetchrow_calls[0]
+    assert args[2] == ""
+
+
+@pytest.mark.asyncio
 async def test_update_stage_builds_dynamic_update():
     """update_stage updates only provided columns."""
     conn = _FakeConn()
@@ -230,6 +283,35 @@ async def test_update_stage_builds_dynamic_update():
     assert "stage_name = $3" in query
     assert "color = $4" in query
     assert args == ("org-1", "stage-id", "Qualified", "green")
+
+
+@pytest.mark.asyncio
+async def test_update_empty_payload_selects_existing_row():
+    """update_stage with no allowed columns issues SELECT via get_stage_by_id."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {
+        "id": "stage-1",
+        "stage_name": "Mid",
+        "stage_key": "mid",
+        "description": None,
+        "color": "blue",
+        "sort_order": 2,
+        "is_initial": False,
+        "is_final": False,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+    }
+    repo = LeadStageRepository(db_connection=conn)
+
+    result = await repo.update_stage("org-1", "stage-id", {})
+
+    assert result is not None
+    assert result["stage_key"] == "mid"
+    assert len(conn.fetchrow_calls) == 1
+    query, args = conn.fetchrow_calls[0]
+    assert "UPDATE lead_stages" not in query
+    assert "FROM lead_stages" in query
+    assert args == ("org-1", "stage-id")
 
 
 @pytest.mark.asyncio
