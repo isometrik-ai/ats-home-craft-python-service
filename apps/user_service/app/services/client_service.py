@@ -20,6 +20,7 @@ from supabase import AsyncClient
 from apps.user_service.app.config.app_settings import app_settings, shared_settings
 from apps.user_service.app.db.repositories import (
     ClientRepository,
+    LeadRepository,
     OrganizationRepository,
     UserEventRepository,
     UserRepository,
@@ -147,6 +148,7 @@ class ClientService:
         self.user_context = user_context
         self.db_connection = db_connection
         self.client_repository = ClientRepository(db_connection=db_connection)
+        self.lead_repository = LeadRepository(db_connection=db_connection)
         self.supabase_client = supabase_client
         self._typesense_service: TypesenseService | None = None
 
@@ -924,10 +926,12 @@ class ClientService:
             request_data: Request data
             client_id: Client ID
         """
-        # Create lead record if enabled
+        # Create lead record if enabled (same insert path as API create_lead)
         if request_data.lead_management and request_data.lead_management.enabled:
-            lead_data = {
+            organization_id = self.user_context.organization_id
+            lead_row = {
                 "client_id": client_id,
+                "organization_id": organization_id,
                 "lead_status": request_data.lead_management.lead_status.value
                 if request_data.lead_management.lead_status
                 else None,
@@ -938,7 +942,7 @@ class ClientService:
                 "referral_source": request_data.lead_management.referral_source,
                 "lead_score": request_data.lead_management.lead_score,
             }
-            await self.client_repository.create_lead(lead_data)
+            await self.lead_repository.create_lead(lead_row)
 
         # Create address records if provided
         if request_data.addresses:
@@ -1531,7 +1535,7 @@ class ClientService:
         # Soft delete client (existence check is handled in repository)
         await self.client_repository.delete_client(client_id, organization_id)
         await self.client_repository.delete_client_users(client_id)
-        await self.client_repository.delete_leads(client_id)
+        await self.lead_repository.delete_leads_by_client_id(client_id)
         await self.client_repository.delete_addresses(client_id)
 
     async def update_client(
@@ -1915,7 +1919,7 @@ class ClientService:
         lead_data = lead.model_dump(exclude={"lead_id"}, exclude_none=True)
         if not lead_data:
             return
-        await self.client_repository.update_lead(lead.lead_id, client_id, lead_data)
+        await self.lead_repository.update_lead(lead.lead_id, client_id, lead_data)
 
     async def _apply_jsonb_list_changes(
         self,

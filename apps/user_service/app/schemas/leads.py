@@ -45,10 +45,10 @@ class CreateLeadRequest(BaseModel):
         ...,
         description="Existing client UUID (one lead per client)",
     )
-    name: str | None = Field(default=None, description="Lead display title")
-    stage_id: str | None = Field(
-        default=None,
-        description=("Pipeline stage; if omitted, backend assigns initial stage when available"),
+    name: str = Field(..., description="Lead display title")
+    stage_id: str = Field(
+        ...,
+        description="Pipeline stage UUID (must belong to the organization)",
     )
     lead_status: LeadStatus | None = Field(
         default=None,
@@ -106,7 +106,6 @@ class CreateLeadRequest(BaseModel):
         return value
 
     @field_validator(
-        "name",
         "intake_stage",
         "lead_source",
         "referral_source",
@@ -242,7 +241,7 @@ class LeadsListQueryParams(BaseModel):
         description="list (flat paginated) or kanban (grouped by stage)",
     )
     stage_id: str | None = Field(default=None, description="Filter by pipeline stage")
-    search: str | None = Field(default=None, description="Search by lead name")
+    search: str | None = Field(default=None, description="Search by lead name or client name")
     page: int = Field(default=1, ge=1, description="Page number (list mode)")
     limit: int = Field(
         default=20,
@@ -251,14 +250,14 @@ class LeadsListQueryParams(BaseModel):
         description="Page size (list mode)",
     )
 
-    @field_validator("stage_id")
+    @field_validator("search")
     @classmethod
-    def validate_stage_filter(cls, value: str | None) -> str | None:
-        """Validate ``stage_id`` when provided as a filter."""
+    def normalize_search(cls, value: str | None) -> str | None:
+        """Strip search; treat blank as omitted."""
         if value is None:
             return None
-        validate_uuid_format(value, "stage ID")
-        return value
+        stripped = value.strip()
+        return stripped or None
 
 
 class LeadListItem(BaseModel):
@@ -275,7 +274,19 @@ class LeadListItem(BaseModel):
     lead_score: str | None = Field(None, description="Score label")
     close_date: date | None = Field(None, description="Expected close date")
     amount: Decimal | None = Field(None, description="Estimated value")
-    point_of_contact: str | None = Field(None, description="Primary contact UUID")
+    owner_id: str | None = Field(None, description="Owning organization member user UUID")
+    owner_name: str | None = Field(
+        None,
+        description="Owner display name from auth.users (raw_user_meta_data first/last name)",
+    )
+    point_of_contact_id: str | None = Field(
+        None,
+        description="Point-of-contact client UUID (FK to clients.id)",
+    )
+    point_of_contact: str | None = Field(
+        None,
+        description="Display name of the point-of-contact client",
+    )
     created_at: str = Field(..., description="Created at (ISO 8601)")
     updated_at: str = Field(..., description="Updated at (ISO 8601)")
 
@@ -283,7 +294,10 @@ class LeadListItem(BaseModel):
 class LeadKanbanStageGroup(BaseModel):
     """One pipeline column in the kanban ``GET /leads`` response."""
 
-    stage_id: str = Field(..., description="Stage UUID")
+    stage_id: str | None = Field(
+        default=None,
+        description="Stage UUID; null for leads with no stage assigned",
+    )
     stage_name: str = Field(..., description="Stage display name")
     sort_order: int = Field(..., ge=1, description="Stage order in pipeline")
     total: int = Field(..., ge=0, description="Lead count in this column")
@@ -314,8 +328,19 @@ class LeadDetail(BaseModel):
     amount: Decimal | None = Field(None, description="Estimated value")
     created_by: str | None = Field(None, description="User who created the lead")
     description: str | None = Field(None, description="Opportunity description")
-    owner_id: str | None = Field(None, description="Owning user UUID")
-    point_of_contact: str | None = Field(None, description="Primary contact UUID")
+    owner_id: str | None = Field(None, description="Owning organization member user UUID")
+    owner_name: str | None = Field(
+        None,
+        description="Owner display name from auth.users (raw_user_meta_data first/last name)",
+    )
+    point_of_contact_id: str | None = Field(
+        None,
+        description="Point-of-contact client UUID (FK to clients.id)",
+    )
+    point_of_contact: str | None = Field(
+        None,
+        description="Display name of the point-of-contact client",
+    )
     custom_fields: dict[str, Any] = Field(
         default_factory=dict,
         description="Custom metadata",
