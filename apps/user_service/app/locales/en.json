@@ -299,12 +299,14 @@
   "leads": {
     "errors": {
       "lead_already_exists": "A lead already exists for this client.",
-      "not_found": "Lead does not exist or has been deleted"
+      "not_found": "Lead does not exist or has been deleted",
+      "empty_update_payload": "At least one field must be provided to update a lead."
     },
     "success": {
       "lead_created": "Lead created successfully.",
       "leads_retrieved": "Leads retrieved successfully",
-      "lead_retrieved": "Lead retrieved successfully"
+      "lead_retrieved": "Lead retrieved successfully",
+      "lead_updated": "Lead updated successfully."
     }
   }
 }

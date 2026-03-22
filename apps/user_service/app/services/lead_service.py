@@ -14,15 +14,21 @@ from apps.user_service.app.db.repositories.lead_stage_repository import (
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.schemas.enums import EntityType, LeadsListMode
+from apps.user_service.app.schemas.lead_stages import Unset
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
     LeadDetail,
     LeadKanbanStageGroup,
     LeadListItem,
     LeadsListQueryParams,
+    UpdateLeadRequest,
 )
 from apps.user_service.app.services.custom_field_service import CustomFieldService
-from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    format_iso_datetime,
+    parse_json_field,
+)
 from libs.shared_utils.http_exceptions import (
     DuplicateValueException,
     NotFoundException,
@@ -162,6 +168,121 @@ class LeadService:
                 message_key="leads.errors.lead_already_exists",
                 custom_code=CustomStatusCode.DUPLICATE_ENTRY,
             ) from exc
+
+    @staticmethod
+    def _apply_lead_scalar_updates(body: UpdateLeadRequest, update_data: dict[str, Any]) -> None:
+        """Map PATCH body to DB columns (``Unset`` omitted)."""
+        for attr in (
+            "name",
+            "stage_id",
+            "intake_stage",
+            "lead_source",
+            "referral_source",
+            "lead_score",
+            "close_date",
+            "converted_at",
+            "amount",
+            "description",
+            "owner_id",
+            "point_of_contact",
+            "notes",
+        ):
+            val = getattr(body, attr)
+            if not isinstance(val, Unset):
+                update_data[attr] = val
+        status = body.lead_status
+        if not isinstance(status, Unset):
+            update_data["lead_status"] = status.value if status is not None else None
+
+    async def _merge_custom_fields_into_lead_update(
+        self,
+        body: UpdateLeadRequest,
+        current: dict[str, Any],
+        update_data: dict[str, Any],
+    ) -> None:
+        """Merge ``custom_fields`` like clients: validate new keys, remove on ``null``."""
+        if isinstance(body.custom_fields, Unset):
+            return
+        raw = current.get("custom_fields")
+        existing = parse_json_field(raw) if raw is not None else {}
+        if not isinstance(existing, dict):
+            existing = {}
+        merged = dict(existing)
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        fields_to_validate: dict[str, Any] = {}
+        for key, value in body.custom_fields.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                fields_to_validate[key] = value
+        if fields_to_validate:
+            validated = await custom_field_service.validate_and_format_custom_fields(
+                fields_to_validate,
+                EntityType.LEAD,
+            )
+            merged.update(validated)
+        if merged != existing:
+            update_data["custom_fields"] = merged
+
+    async def update_lead(self, lead_id: str, body: UpdateLeadRequest) -> dict[str, Any]:
+        """Partially update a lead (org-scoped) with custom-field merge and stage rules."""
+        organization_id = self.user_context.organization_id
+        current = await self.lead_repository.get_lead_detail_by_id(organization_id, lead_id)
+        if not current:
+            raise NotFoundException(
+                message_key="leads.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        update_data: dict[str, Any] = {}
+        self._apply_lead_scalar_updates(body, update_data)
+        await self._merge_custom_fields_into_lead_update(body, current, update_data)
+
+        new_stage_row: dict[str, Any] | None = None
+        if not isinstance(body.stage_id, Unset) and body.stage_id is not None:
+            new_stage_row = await self.lead_stage_repository.get_stage_by_id(
+                organization_id,
+                body.stage_id,
+            )
+            if not new_stage_row:
+                raise NotFoundException(
+                    message_key="lead_stages.errors.stage_not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+
+        if not isinstance(body.owner_id, Unset) and body.owner_id is not None:
+            user_row = await self.user_repository.get_user_details_by_id(body.owner_id, ["id"])
+            if not user_row:
+                raise NotFoundException(
+                    message_key="users.errors.user_not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                    params={"user_id": body.owner_id},
+                )
+
+        if not isinstance(body.point_of_contact, Unset) and body.point_of_contact is not None:
+            poc_ok = await self.client_repository.client_exists_in_organization(
+                organization_id,
+                body.point_of_contact,
+            )
+            if not poc_ok:
+                raise NotFoundException(
+                    message_key="clients.errors.not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+
+        if not update_data:
+            return current
+
+        updated = await self.lead_repository.update_lead(organization_id, lead_id, update_data)
+        if not updated:
+            raise NotFoundException(
+                message_key="leads.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return updated
 
     @staticmethod
     def _uuid_str(value: Any) -> str | None:

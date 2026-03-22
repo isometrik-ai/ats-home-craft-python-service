@@ -6,7 +6,8 @@ validation, formatting, and orchestration of audit log operations.
 
 import json
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 import asyncpg
@@ -31,10 +32,10 @@ logger = get_logger("audit_log_service")
 
 
 def _make_json_serializable(obj: Any) -> Any:
-    """Recursively convert UUID and datetime objects to JSON-serializable types.
+    """Recursively convert UUID, date/datetime, and Decimal to JSON-serializable types.
 
     Args:
-        obj: Object to convert (dict, list, UUID, datetime, or primitive)
+        obj: Object to convert (dict, list, UUID, date, datetime, Decimal, or primitive)
 
     Returns:
         JSON-serializable version of the object
@@ -45,6 +46,10 @@ def _make_json_serializable(obj: Any) -> Any:
         return str(obj)
     if isinstance(obj, datetime):
         return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
     if isinstance(obj, dict):
         return {k: _make_json_serializable(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -55,11 +60,11 @@ def _make_json_serializable(obj: Any) -> Any:
 def _prepare_jsonb_value(obj: Any) -> str | None:
     """Prepare a value for JSONB column storage.
 
-    Converts UUID/datetime to JSON-serializable types, then serializes to JSON string.
+    Converts UUID/date/datetime/Decimal to JSON-serializable types, then serializes to JSON string.
     asyncpg's JSONB codec expects a JSON string, not a dict.
 
     Args:
-        obj: Object to prepare (dict, list, UUID, datetime, or primitive)
+        obj: Object to prepare (dict, list, UUID, date, datetime, Decimal, or primitive)
 
     Returns:
         JSON string or None

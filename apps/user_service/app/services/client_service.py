@@ -1591,7 +1591,7 @@ class ClientService:
         )
 
         if body.lead_management is not None:
-            await self._apply_lead_update(client_id, body.lead_management)
+            await self._apply_lead_update(body.lead_management)
 
         if (
             current.get("client_type") == ClientType.PERSON.value
@@ -1914,12 +1914,17 @@ class ClientService:
             for r in raw_contacts
         ]
 
-    async def _apply_lead_update(self, client_id: str, lead: LeadManagementUpdate) -> None:
+    async def _apply_lead_update(self, lead: LeadManagementUpdate) -> None:
         """Apply lead update by lead_id; only provided fields are sent to repository."""
-        lead_data = lead.model_dump(exclude={"lead_id"}, exclude_none=True)
+        lead_data = lead.model_dump(
+            exclude={"lead_id"},
+            exclude_none=True,
+            mode="json",
+        )
         if not lead_data:
             return
-        await self.lead_repository.update_lead(lead.lead_id, client_id, lead_data)
+        organization_id = self.user_context.organization_id
+        await self.lead_repository.update_lead(organization_id, lead.lead_id, lead_data)
 
     async def _apply_jsonb_list_changes(
         self,

@@ -128,6 +128,27 @@ CREATE_LEAD_COLUMNS: tuple[str, ...] = (
     "custom_fields",
 )
 
+# PATCH /leads — must stay aligned with service-layer payloads.
+LEAD_UPDATABLE_FIELDS: frozenset[str] = frozenset(
+    {
+        "name",
+        "stage_id",
+        "lead_status",
+        "intake_stage",
+        "lead_source",
+        "referral_source",
+        "lead_score",
+        "close_date",
+        "converted_at",
+        "notes",
+        "amount",
+        "description",
+        "owner_id",
+        "point_of_contact",
+        "custom_fields",
+    }
+)
+
 
 def _ilike_pattern(search: str | None) -> str | None:
     """Wrap search for optional ILIKE; None means no filter ($3 IS NULL)."""
@@ -139,6 +160,7 @@ class LeadRepository:
 
     TABLE_NAME = "leads"
     JSONB_COLUMNS = frozenset({"custom_fields"})
+    UPDATABLE_FIELDS = LEAD_UPDATABLE_FIELDS
 
     def __init__(self, db_connection: asyncpg.Connection) -> None:
         self.db_connection = db_connection
@@ -260,21 +282,34 @@ class LeadRepository:
         await self.db_connection.execute(query, client_id)
         return True
 
-    async def update_lead(self, lead_id: str, client_id: str, update_data: dict) -> bool:
-        """Update a lead row scoped by ``lead_id`` and ``client_id``; only provided keys are set."""
-        set_parts = [f"{k} = ${i}" for i, k in enumerate(update_data, start=1)]
-        set_expr = (
-            ", ".join(set_parts) + ", updated_at = NOW()" if set_parts else "updated_at = NOW()"
-        )
-        index = len(update_data)
-        params = list(update_data.values()) + [lead_id, client_id]
-        row = await self.db_connection.fetchrow(
-            f"""
-            UPDATE leads
-            SET {set_expr}
-            WHERE id = ${index + 1} AND client_id = ${index + 2}
-            RETURNING id
-            """,
-            *params,
-        )
-        return row is not None
+    async def update_lead(
+        self,
+        organization_id: str,
+        lead_id: str,
+        update_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Patch allowed columns; return the updated row or ``None`` if no matching lead."""
+        filtered: dict[str, Any] = {
+            k: v for k, v in update_data.items() if k in self.UPDATABLE_FIELDS
+        }
+        if not filtered:
+            return await self.get_lead_detail_by_id(organization_id, lead_id)
+
+        set_clauses: list[str] = []
+        values: list[Any] = [organization_id, lead_id]
+        param_index = 3
+        for field, value in filtered.items():
+            serialized = serialize_jsonb_param(field, value, self.JSONB_COLUMNS)
+            set_clauses.append(f"{field} = ${param_index}")
+            values.append(serialized)
+            param_index += 1
+
+        query = f"""
+            UPDATE {self.TABLE_NAME}
+            SET {", ".join(set_clauses)}, updated_at = NOW()
+            WHERE organization_id = $1
+              AND id = $2::uuid
+            RETURNING *
+        """
+        row = await self.db_connection.fetchrow(query, *values)
+        return dict(row) if row else None
