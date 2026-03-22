@@ -21,18 +21,22 @@ class _FakeConn:
         self.fetchval_result = None
 
     async def fetchrow(self, query, *args):
+        """Record fetchrow calls."""
         self.fetchrow_calls.append((query.strip(), args))
         return self.fetchrow_result
 
     async def fetch(self, query, *args):
+        """Record fetch calls."""
         self.fetch_calls.append((query.strip(), args))
         return self.fetch_result
 
     async def fetchval(self, query, *args):
+        """Record fetchval calls."""
         self.fetchval_calls.append((query.strip(), args))
         return self.fetchval_result
 
     async def execute(self, query, *args):
+        """Record execute calls."""
         self.execute_calls.append((query.strip(), args))
         return None
 
