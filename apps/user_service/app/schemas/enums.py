@@ -367,6 +367,13 @@ class LeadStatus(str, Enum):
     LOST = "lost"
 
 
+class LeadsListMode(str, Enum):
+    """Query mode for GET /leads: paginated list vs kanban grouped by stage."""
+
+    LIST = "list"
+    KANBAN = "kanban"
+
+
 class IntakeStage(str, Enum):
     """Intake stage enumeration."""
 
