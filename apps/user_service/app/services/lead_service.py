@@ -428,3 +428,14 @@ class LeadService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return self._build_lead_detail(row)
+
+    async def delete_lead(self, lead_id: str) -> dict[str, Any]:
+        """Hard-delete a lead for the current organization (client row is not deleted)."""
+        organization_id = self.user_context.organization_id
+        deleted = await self.lead_repository.delete_lead(organization_id, lead_id)
+        if not deleted:
+            raise NotFoundException(
+                message_key="leads.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return deleted

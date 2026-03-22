@@ -85,11 +85,6 @@ class _FakeClientRepo:
         self.calls["create_client_user"] = client_user_data
         return {"id": "client-user-1", **client_user_data}
 
-    async def create_lead(self, lead_data):
-        """Create lead."""
-        self.calls["create_lead"] = lead_data
-        return {"id": "lead-1", **lead_data}
-
     async def bulk_create_addresses(self, addresses_data):
         """Create addresses."""
         self.calls["bulk_create_addresses"] = addresses_data
@@ -120,11 +115,6 @@ class _FakeClientRepo:
         self.calls["delete_client_users"] = client_id
         return True
 
-    async def delete_leads(self, client_id):
-        """Delete leads."""
-        self.calls["delete_leads"] = client_id
-        return True
-
     async def delete_addresses(self, client_id):
         """Delete addresses."""
         self.calls["delete_addresses"] = client_id
@@ -152,11 +142,6 @@ class _FakeClientRepo:
         self.calls["update_client"] = (client_id, organization_id, update_data)
         return {"id": client_id, **update_data}
 
-    async def update_lead(self, lead_id, client_id, update_data):
-        """Update lead."""
-        self.calls["update_lead"] = (lead_id, client_id, update_data)
-        return True
-
     async def update_address(self, address_id, client_id, update_data):
         """Update address."""
         self.calls["update_address"] = (address_id, client_id, update_data)
@@ -170,6 +155,28 @@ class _FakeClientRepo:
     async def _delete_addresses_by_ids(self, client_id, address_ids):
         """Delete addresses by ids."""
         self.calls["delete_addresses_by_ids"] = (client_id, address_ids)
+
+
+class _FakeLeadRepo:
+    """Lightweight fake lead repository."""
+
+    def __init__(self):
+        self.calls = {}
+
+    async def create_lead(self, lead_data):
+        """Record create (same repository method as API lead create)."""
+        self.calls["create_lead"] = lead_data
+        return {"id": "lead-1", **lead_data}
+
+    async def delete_leads_by_client_id(self, client_id):
+        """Record delete by client id."""
+        self.calls["delete_leads_by_client_id"] = client_id
+        return True
+
+    async def update_lead(self, organization_id, lead_id, update_data):
+        """Record patch by lead id."""
+        self.calls["update_lead"] = (organization_id, lead_id, update_data)
+        return {"id": lead_id}
 
 
 class _FakeUserRepo:
@@ -651,9 +658,14 @@ async def test_get_clients_list_company_omits_company_name(monkeypatch):
 async def test_delete_client_calls_delete_methods(monkeypatch):
     """delete_client calls all related delete methods."""
     fake_repo = _FakeClientRepo()
+    fake_lead = _FakeLeadRepo()
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.LeadRepository",
+        lambda db_connection=None: fake_lead,
     )
 
     service = ClientService(user_context=_ctx(), db_connection=None)
@@ -661,7 +673,7 @@ async def test_delete_client_calls_delete_methods(monkeypatch):
 
     assert "delete_client" in fake_repo.calls
     assert "delete_client_users" in fake_repo.calls
-    assert "delete_leads" in fake_repo.calls
+    assert fake_lead.calls["delete_leads_by_client_id"] == "client-1"
     assert "delete_addresses" in fake_repo.calls
 
 
@@ -965,11 +977,16 @@ async def test_prepare_user_non_primary_company_linked():
 async def test_create_optional_records_creates_lead(monkeypatch):
     """_create_optional_records creates lead when lead_management enabled."""
     fake_repo = _FakeClientRepo()
+    fake_lead = _FakeLeadRepo()
     monkeypatch.setattr(
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
     )
-    service = ClientService(db_connection=None)
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.LeadRepository",
+        lambda db_connection=None: fake_lead,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
     request_data = CreateClientRequest(
         client_type=ClientType.PERSON,
         email="test@example.com",
@@ -981,8 +998,8 @@ async def test_create_optional_records_creates_lead(monkeypatch):
     )
 
     await service._create_optional_records(request_data, "client-1")
-    assert "create_lead" in fake_repo.calls
-    assert fake_repo.calls["create_lead"]["client_id"] == "client-1"
+    assert fake_lead.calls["create_lead"]["client_id"] == "client-1"
+    assert fake_lead.calls["create_lead"]["organization_id"] == "org-1"
 
 
 @pytest.mark.asyncio
@@ -1701,7 +1718,6 @@ async def test_update_client_success_scalar_only(monkeypatch):
     assert args[2]["industry"] == "Tech"
     assert args[2]["portal_access"] is True
     assert "get_client_addresses" not in fake_repo.calls
-    assert "update_lead" not in fake_repo.calls
 
 
 @pytest.mark.asyncio
@@ -1747,6 +1763,7 @@ async def test_update_client_success_with_addresses(monkeypatch):
 async def test_update_client_with_lead_management(monkeypatch):
     """update_client calls update_lead when lead_management provided."""
     fake_repo = _FakeClientRepo()
+    fake_lead = _FakeLeadRepo()
     fake_repo.get_client_for_update_result = {
         "id": "client-1",
         "name": "Client",
@@ -1766,6 +1783,10 @@ async def test_update_client_with_lead_management(monkeypatch):
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
     )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.LeadRepository",
+        lambda db_connection=None: fake_lead,
+    )
     service = ClientService(user_context=_ctx(), db_connection=None)
     body = UpdateClientRequest(
         industry="Legal",
@@ -1778,10 +1799,9 @@ async def test_update_client_with_lead_management(monkeypatch):
 
     await service.update_client("client-1", "org-1", body)
 
-    assert "update_lead" in fake_repo.calls
-    assert fake_repo.calls["update_lead"] == (
+    assert fake_lead.calls["update_lead"] == (
+        "org-1",
         "lead-1",
-        "client-1",
         {"lead_status": LeadStatus.QUALIFIED.value, "notes": "Updated notes"},
     )
 
@@ -1887,18 +1907,23 @@ async def test_build_client_update_payload_websites():
 @pytest.mark.asyncio
 async def test_apply_lead_update_calls_repository(monkeypatch):
     """_apply_lead_update calls update_lead with lead_id and payload."""
-    fake_repo = _FakeClientRepo()
+    fake_lead = _FakeLeadRepo()
     monkeypatch.setattr(
-        "apps.user_service.app.services.client_service.ClientRepository",
-        lambda db_connection=None: fake_repo,
+        "apps.user_service.app.services.client_service.LeadRepository",
+        lambda db_connection=None: fake_lead,
     )
     service = ClientService(db_connection=None)
+    service.user_context = UserContext(
+        user_id="u1",
+        email="u@example.com",
+        organization_id="org-1",
+    )
     lead = LeadManagementUpdate(lead_id="lead-1", lead_status=LeadStatus.CONVERTED)
 
-    await service._apply_lead_update("client-1", lead)
-    assert fake_repo.calls["update_lead"] == (
+    await service._apply_lead_update(lead)
+    assert fake_lead.calls["update_lead"] == (
+        "org-1",
         "lead-1",
-        "client-1",
         {"lead_status": LeadStatus.CONVERTED.value},
     )
 
@@ -1906,16 +1931,21 @@ async def test_apply_lead_update_calls_repository(monkeypatch):
 @pytest.mark.asyncio
 async def test_apply_lead_update_empty_payload(monkeypatch):
     """_apply_lead_update does not call repository when only lead_id provided."""
-    fake_repo = _FakeClientRepo()
+    fake_lead = _FakeLeadRepo()
     monkeypatch.setattr(
-        "apps.user_service.app.services.client_service.ClientRepository",
-        lambda db_connection=None: fake_repo,
+        "apps.user_service.app.services.client_service.LeadRepository",
+        lambda db_connection=None: fake_lead,
     )
     service = ClientService(db_connection=None)
+    service.user_context = UserContext(
+        user_id="u1",
+        email="u@example.com",
+        organization_id="org-1",
+    )
     lead = LeadManagementUpdate(lead_id="lead-1")
 
-    await service._apply_lead_update("client-1", lead)
-    assert "update_lead" not in fake_repo.calls
+    await service._apply_lead_update(lead)
+    assert "update_lead" not in fake_lead.calls
 
 
 @pytest.mark.asyncio

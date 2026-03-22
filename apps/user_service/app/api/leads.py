@@ -21,6 +21,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     LEADS_MANAGEMENT_CREATE,
+    LEADS_MANAGEMENT_DELETE,
     LEADS_MANAGEMENT_EDIT,
     LEADS_MANAGEMENT_VIEW,
 )
@@ -275,6 +276,69 @@ async def update_lead(
     return success_response(
         request=request,
         message_key="leads.success.lead_updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("delete lead")
+@router.delete(
+    "/{lead_id}",
+    status_code=http_status.HTTP_200_OK,
+    description="Hard-delete a lead (client record is not deleted)",
+    summary="Delete lead",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Lead deleted successfully"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Lead not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="confidential",
+    compliance_tags=[
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="leads",
+    category="LEAD",
+)
+async def delete_lead(
+    request: Request,
+    lead_id: str = Path(..., description="Lead ID"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Hard-delete a lead for the authenticated organization."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=LEADS_MANAGEMENT_DELETE,
+    )
+
+    request.state.audit_table = "leads"
+    request.state.audit_requested_id = lead_id
+    request.state.audit_description = f"Deleted lead: {lead_id}"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    lead_service = LeadService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    deleted = await lead_service.delete_lead(lead_id)
+    request.state.raw_audit_old_data = deleted
+
+    return success_response(
+        request=request,
+        message_key="leads.success.lead_deleted",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )

@@ -273,6 +273,24 @@ class LeadRepository:
         )
         return dict(row) if row else None
 
+    async def delete_lead(
+        self,
+        organization_id: str,
+        lead_id: str,
+    ) -> dict[str, Any] | None:
+        """Hard-delete one lead scoped to the organization; return removed row if any."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            DELETE FROM {self.TABLE_NAME}
+            WHERE organization_id = $1
+              AND id = $2::uuid
+            RETURNING *
+            """,
+            organization_id,
+            lead_id,
+        )
+        return dict(row) if row else None
+
     async def delete_leads_by_client_id(self, client_id: str) -> bool:
         """Delete all lead rows linked to ``client_id``."""
         query = """

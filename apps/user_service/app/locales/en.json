@@ -306,7 +306,8 @@
       "lead_created": "Lead created successfully.",
       "leads_retrieved": "Leads retrieved successfully",
       "lead_retrieved": "Lead retrieved successfully",
-      "lead_updated": "Lead updated successfully."
+      "lead_updated": "Lead updated successfully.",
+      "lead_deleted": "Lead deleted successfully."
     }
   }
 }
