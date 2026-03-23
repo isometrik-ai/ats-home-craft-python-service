@@ -428,16 +428,6 @@ class ClientService:
 
         user_repository = UserRepository(db_connection=self.db_connection)
 
-        # Check if client_user already exists
-        client_user_exists = await self.client_repository.check_client_user_exists(
-            user_id=user_id, organization_id=organization_id
-        )
-        if client_user_exists:
-            raise ConflictException(
-                message_key="clients.errors.user_already_a_client",
-                custom_code=CustomStatusCode.CONFLICT,
-            )
-
         # Get user details including email and raw_user_meta_data for first_name/last_name
         user_details = await user_repository.get_user_details_by_id(user_id, ["email"])
         if not user_details:

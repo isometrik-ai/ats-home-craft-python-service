@@ -238,24 +238,6 @@ class ClientRepository:
         row = await self.db_connection.fetchrow(query, *values)
         return dict(row)
 
-    async def check_client_user_exists(self, user_id: str, organization_id: str) -> bool:
-        """Check if a client user exists for a given user and organization.
-
-        Args:
-            user_id: User ID
-            organization_id: Organization ID
-
-        Returns:
-            bool: True if client user exists, False otherwise
-        """
-        query = """
-            SELECT EXISTS(
-                SELECT 1 FROM client_users WHERE user_id = $1 AND organization_id = $2
-            )
-        """
-        exists = await self.db_connection.fetchval(query, user_id, organization_id)
-        return bool(exists)
-
     async def is_active_client_user_for_organization(
         self, user_id: str, organization_id: str
     ) -> bool:
