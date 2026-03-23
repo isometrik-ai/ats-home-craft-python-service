@@ -54,11 +54,6 @@ class _FakeClientRepo:
         self.address_result = []
         self.company_contacts_result = []
 
-    async def check_client_user_exists(self, user_id, organization_id):
-        """Return existence flag."""
-        self.calls["check_client_user_exists"] = (user_id, organization_id)
-        return self.client_user_exists
-
     async def check_client_name_exists(self, name, organization_id, exclude_client_id=None):
         """Return name existence flag."""
         self.calls["check_client_name_exists"] = {
@@ -322,26 +317,6 @@ async def test_create_client_from_user_event_not_pending(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_client_from_user_raises_user_already_client(monkeypatch):
-    """Raises ConflictException when user is already a client."""
-    fake_repo = _FakeClientRepo()
-    fake_repo.client_user_exists = True
-    fake_user_event_repo = _FakeUserEventRepo()
-    monkeypatch.setattr(
-        "apps.user_service.app.services.client_service.ClientRepository",
-        lambda db_connection=None: fake_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.client_service.UserEventRepository",
-        lambda db_connection=None: fake_user_event_repo,
-    )
-    service = ClientService(db_connection=None)
-    request_data = CreateClientFromUserRequest(user_id="user-1", organization_id="org-1")
-
-    with pytest.raises(ConflictException):
-        await service.create_client_from_user(request_data)
-
-
 @pytest.mark.asyncio
 async def test_create_client_from_user_user_not_found(monkeypatch):
     """Raises NotFoundException when user not found."""

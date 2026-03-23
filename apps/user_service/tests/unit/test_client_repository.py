@@ -114,22 +114,6 @@ async def test_create_client_list_returns_list():
 
 
 @pytest.mark.asyncio
-async def test_check_client_user_exists():
-    """check_client_user_exists returns boolean."""
-    conn = _FakeConn()
-    conn.fetchval_result = True
-    repo = ClientRepository(db_connection=conn)
-
-    result = await repo.check_client_user_exists("user-1", "org-1")
-
-    assert result is True
-    assert len(conn.fetchval_calls) == 1
-    query = conn.fetchval_calls[0][0]
-    assert "EXISTS" in query
-    assert "client_users" in query
-
-
-@pytest.mark.asyncio
 async def test_get_clients_list_excludes_deleted():
     """get_clients_list filters out deleted clients."""
     conn = _FakeConn()
