@@ -10,6 +10,7 @@ in the Update API; never overwrites non-empty existing data with empty enrichmen
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -70,6 +71,129 @@ def _merge_update_without_overwriting_empty(
         elif isinstance(existing_val, (list, dict)) and len(existing_val) > 0:
             result.pop(key, None)
     return result
+
+
+def _normalize_str_key(value: Any) -> str:
+    """Normalize a string for key comparisons (trim + lower).
+
+    Returns empty string for non-string inputs.
+    """
+    if not isinstance(value, str):
+        return ""
+    return value.strip().lower()
+
+
+def _trim_nonempty_str(value: Any) -> str | None:
+    """Trim string and return None if empty (or non-string)."""
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed if trimmed else None
+
+
+def _merge_dict_list_by_key(
+    enriched_items: list[dict[str, Any]],
+    existing_items: list[dict[str, Any]],
+    *,
+    get_key: Callable[[dict[str, Any]], str],
+    merge_on_match: Callable[[dict[str, Any], dict[str, Any]], tuple[dict[str, Any], bool]],
+    build_enriched_only: Callable[[dict[str, Any]], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Generic merge helper for list-of-dicts by normalized key.
+
+    Keeps existing item order and only overrides when `merge_on_match` says so.
+    Enrichment-only entries are appended; any keys overridden at least once are
+    not appended.
+    """
+
+    # key -> first enriched item for that key
+    enriched_map: dict[str, dict[str, Any]] = {}
+    for item in enriched_items:
+        if not isinstance(item, dict):
+            continue
+        key = get_key(item)
+        if not key or key in enriched_map:
+            continue
+        enriched_map[key] = item
+
+    result: list[dict[str, Any]] = []
+    overridden_keys: set[str] = set()
+
+    for existing_item in existing_items:
+        key = get_key(existing_item)
+        enriched_item = enriched_map.get(key) if key else None
+        if not key or not enriched_item or key in overridden_keys:
+            result.append(existing_item)
+            continue
+
+        merged_item, did_override = merge_on_match(existing_item, enriched_item)
+        result.append(merged_item)
+        if did_override:
+            overridden_keys.add(key)
+
+    # Append enrichment-only keys (or keys whose override did not happen).
+    for key, enriched_item in enriched_map.items():
+        if key in overridden_keys:
+            continue
+        result.append(build_enriched_only(enriched_item))
+
+    return result
+
+
+def _merge_social_pages_by_platform(
+    enriched_social_pages: list[dict[str, Any]],
+    existing_social_pages: Any,
+) -> list[dict[str, Any]]:
+    """Merge `social_pages` by case-insensitive `platform`, without wiping entries.
+
+    Rules:
+    - If enrichment provides the same `platform` with a non-empty `url`, override ONLY
+      `url` on the first matching existing item, preserving that item's `id` and other fields.
+    - If enrichment has the platform but `url` is empty, keep the existing item unchanged.
+    - Existing platforms not returned by enrichment are preserved.
+    - Enrichment-only platforms are appended; assign a UUID if enrichment item has no `id`.
+    """
+
+    parsed_existing = parse_json_field(existing_social_pages)
+    if isinstance(parsed_existing, list):
+        existing_list: list[dict[str, Any]] = [
+            item for item in parsed_existing if isinstance(item, dict)
+        ]
+    else:
+        existing_list = []
+
+    def get_platform(item: dict[str, Any]) -> str:
+        return _normalize_str_key(item.get("platform"))
+
+    def merge_on_match(
+        existing_item: dict[str, Any],
+        enriched_item: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        """Return (merged_item, did_override_url)."""
+        raw_url = enriched_item.get("url")
+        if _is_empty_value(raw_url):
+            return existing_item, False
+        override_url = _trim_nonempty_str(raw_url)
+        if override_url is None:
+            return existing_item, False
+
+        new_item = dict(existing_item)
+        new_item["url"] = override_url
+        return new_item, True
+
+    def build_enriched_only(enriched_item: dict[str, Any]) -> dict[str, Any]:
+        new_item = dict(enriched_item)
+        if not new_item.get("id"):
+            new_item["id"] = str(uuid.uuid4())
+        return new_item
+
+    return _merge_dict_list_by_key(
+        enriched_items=enriched_social_pages,
+        existing_items=existing_list,
+        get_key=get_platform,
+        merge_on_match=merge_on_match,
+        build_enriched_only=build_enriched_only,
+    )
 
 
 def _first_country_from_addresses(data: dict[str, Any]) -> str | None:
@@ -664,7 +788,13 @@ class ClientEnrichmentService:
             update["last_enriched_at"] = datetime.now(timezone.utc)
 
             # Never overwrite non-empty existing with empty enrichment
-            return _merge_update_without_overwriting_empty(update, existing_client)
+            merged = _merge_update_without_overwriting_empty(update, existing_client)
+            if "social_pages" in merged and existing_client is not None:
+                merged["social_pages"] = _merge_social_pages_by_platform(
+                    enriched_social_pages=merged.get("social_pages") or [],
+                    existing_social_pages=existing_client.get("social_pages"),
+                )
+            return merged
         except Exception as e:
             logger.error(
                 "Error building company enrichment update",
@@ -878,7 +1008,13 @@ class ClientEnrichmentService:
         update["enrichment_done"] = True
         update["last_enriched_at"] = datetime.now(timezone.utc)
 
-        return _merge_update_without_overwriting_empty(update, existing_client)
+        merged = _merge_update_without_overwriting_empty(update, existing_client)
+        if "social_pages" in merged and existing_client is not None:
+            merged["social_pages"] = _merge_social_pages_by_platform(
+                enriched_social_pages=merged.get("social_pages") or [],
+                existing_social_pages=existing_client.get("social_pages"),
+            )
+        return merged
 
     async def process_person_enrichment_webhook(
         self, conn: asyncpg.Connection, body: dict[str, Any]

@@ -571,6 +571,35 @@ def test_build_company_enrichment_social_market_tech():
     assert update["linked_pages"][0]["page_name"] == "Blog"
 
 
+def test_build_enrichment_merges_preserves_social_pages():
+    """Enrichment returning only one platform must not wipe other existing platforms."""
+    existing_client = {
+        "social_pages": [
+            {
+                "id": "social-linkedin",
+                "platform": "linkedin",
+                "url": "https://linkedin.com/in/old",
+            },
+            {"id": "social-github", "platform": "github", "url": "https://github.com/old"},
+        ]
+    }
+    enriched_company = {"socialProfiles": {"github": "https://github.com/new"}}
+
+    update = ClientEnrichmentService.build_company_enrichment_update(
+        enriched_company, existing_client=existing_client
+    )
+
+    social_pages = update["social_pages"]
+    assert len(social_pages) == 2
+
+    by_platform = {sp["platform"]: sp for sp in social_pages}
+    assert by_platform["linkedin"]["url"] == "https://linkedin.com/in/old"
+    assert by_platform["github"]["url"] == "https://github.com/new"
+    # Preserve existing IDs where we override.
+    assert by_platform["linkedin"]["id"] == "social-linkedin"
+    assert by_platform["github"]["id"] == "social-github"
+
+
 def test_build_company_enrichment_key_people_products():
     """build_company_enrichment_update maps keyPeople and products."""
     enriched = {
@@ -643,6 +672,30 @@ def test_build_person_enrichment_social_and_skills():
     update = ClientEnrichmentService.build_person_enrichment_update(enriched)
     assert len(update["social_pages"]) == 1
     assert update["skills"] == ["Python", "Go"]
+
+
+def test_person_enrichment_merges_preserves_existing():
+    """Same merge behavior for person enrichment webhooks."""
+    existing_client = {
+        "social_pages": [
+            {"id": "social-linkedin", "platform": "linkedin", "url": "https://li.com/old"},
+            {"id": "social-github", "platform": "github", "url": "https://gh.com/old"},
+        ]
+    }
+    enriched_profile = {"socialProfiles": {"github": "https://gh.com/new"}}
+
+    update = ClientEnrichmentService.build_person_enrichment_update(
+        enriched_profile, existing_client=existing_client
+    )
+
+    social_pages = update["social_pages"]
+    assert len(social_pages) == 2
+
+    by_platform = {sp["platform"]: sp for sp in social_pages}
+    assert by_platform["linkedin"]["url"] == "https://li.com/old"
+    assert by_platform["github"]["url"] == "https://gh.com/new"
+    assert by_platform["linkedin"]["id"] == "social-linkedin"
+    assert by_platform["github"]["id"] == "social-github"
 
 
 class _FakePool:

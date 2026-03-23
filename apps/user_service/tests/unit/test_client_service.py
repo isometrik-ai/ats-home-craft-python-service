@@ -2508,6 +2508,113 @@ async def test_merge_custom_fields_into_payload_remove_field(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_merge_fields_payload_preserves_required_fields(monkeypatch):
+    """Updating only an optional custom field should not fail required fields."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-req",
+            "field_name": "Name",
+            "field_key": "name",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": True,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-opt",
+            "field_name": "Description",
+            "field_key": "description",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    current = {
+        "client_type": "person",
+        "custom_fields": '{"name": "Acme", "description": "Old"}',
+    }
+    body = UpdateClientRequest(custom_fields={"description": "New"})
+    payload = {}
+
+    await service._merge_custom_fields_into_payload(body, current, payload)
+
+    parsed = parse_json_field(payload["custom_fields"])
+    assert parsed["name"] == "Acme"
+    assert parsed["description"] == "New"
+
+
+@pytest.mark.asyncio
+async def test_merge_fields_payload_missing_required_raises(monkeypatch):
+    """If required custom field is absent, updating optional fields should fail."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-req",
+            "field_name": "Name",
+            "field_key": "name",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": True,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-opt",
+            "field_name": "Description",
+            "field_key": "description",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    current = {
+        "client_type": "person",
+        "custom_fields": '{"description": "Old"}',
+    }
+    body = UpdateClientRequest(custom_fields={"description": "New"})
+    payload = {}
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service._merge_custom_fields_into_payload(body, current, payload)
+
+    assert "custom_field_required" in str(exc_info.value.message_key)
+
+
+@pytest.mark.asyncio
 async def test_merge_custom_fields_into_payload_list_field(monkeypatch):
     """_merge_custom_fields_into_payload validates list field."""
     fake_custom_field_repo = _FakeCustomFieldRepo()
