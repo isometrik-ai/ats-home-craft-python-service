@@ -34,6 +34,11 @@ CUSTOM_FIELDS_MANAGEMENT_VIEW = "custom_fields_management.view"
 CUSTOM_FIELDS_MANAGEMENT_EDIT = "custom_fields_management.edit"
 CUSTOM_FIELDS_MANAGEMENT_DELETE = "custom_fields_management.delete"
 
+LEADS_MANAGEMENT_CREATE = "leads_management.create"
+LEADS_MANAGEMENT_VIEW = "leads_management.view"
+LEADS_MANAGEMENT_EDIT = "leads_management.edit"
+LEADS_MANAGEMENT_DELETE = "leads_management.delete"
+
 USERS_MANAGEMENT_DELETE = "users_management.delete"
 
 DEFAULT_PERMISSIONS = [
@@ -305,6 +310,31 @@ DEFAULT_PERMISSIONS = [
         "Delete Custom Fields",
         "Remove custom fields from the system",
         "custom_fields",
+    ),
+    # lead stages management
+    (
+        "leads_management.view",
+        "View Leads",
+        "View leads list and details",
+        "leads",
+    ),
+    (
+        "leads_management.create",
+        "Create Leads",
+        "Create new leads",
+        "leads",
+    ),
+    (
+        "leads_management.edit",
+        "Edit Leads",
+        "Modify lead information",
+        "leads",
+    ),
+    (
+        "leads_management.delete",
+        "Delete Leads",
+        "Remove leads from the system",
+        "leads",
     ),
 ]
 

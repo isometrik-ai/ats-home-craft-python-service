@@ -7,6 +7,7 @@ from apps.user_service.app.api.auth import router as auth_router
 from apps.user_service.app.api.clients import router as clients_router
 from apps.user_service.app.api.custom_fields import router as custom_fields_router
 from apps.user_service.app.api.invites import router as invites_router
+from apps.user_service.app.api.lead_stages import router as lead_stages_router
 from apps.user_service.app.api.organization import router as organization_router
 from apps.user_service.app.api.permissions import router as permissions_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
@@ -36,6 +37,7 @@ router.include_router(teams_router)
 router.include_router(clients_router)
 router.include_router(projects_router)
 router.include_router(custom_fields_router)
+router.include_router(lead_stages_router)
 router.include_router(webhooks_router)
 
 

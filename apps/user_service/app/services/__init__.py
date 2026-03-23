@@ -11,6 +11,7 @@ from apps.user_service.app.services.kafka_event_service import (
     KafkaEventService,
     get_kafka_event_service,
 )
+from apps.user_service.app.services.lead_stage_service import LeadStageService
 from apps.user_service.app.services.organization_service import (
     OrganizationService,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "EventService",
     "InviteService",
     "KafkaEventService",
+    "LeadStageService",
     "OrganizationService",
     "PermissionsService",
     "RoleService",

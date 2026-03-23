@@ -272,5 +272,28 @@
       "field_updated": "Custom field updated successfully.",
       "field_deleted": "Custom field deleted successfully."
     }
+  },
+  "lead_stages": {
+    "errors": {
+      "invalid_stage_name": "The stage name is invalid. Please provide a valid name.",
+      "invalid_sort_order_range": "Sort order must be between {min} and {max}.",
+      "stage_key_exists": "A lead stage with this key already exists in the organization.",
+      "stage_name_exists": "A lead stage with this name already exists in the organization.",
+      "sort_order_conflict": "Another lead stage already uses this sort order.",
+      "stage_name_required": "Stage name is required.",
+      "invalid_description": "Description cannot exceed 1000 characters.",
+      "invalid_color": "Color must be one of: red, orange, yellow, green, blue, purple, pink, gray.",
+      "empty_update_payload": "At least one field must be provided to update a lead stage.",
+      "stage_not_found": "Lead stage does not exist or has been deleted.",
+      "cannot_unset_last_initial": "Cannot unset is_initial - at least one initial stage must exist in your organization.",
+      "cannot_unset_last_final": "Cannot unset is_final - at least one final stage must exist in your organization."
+    },
+    "success": {
+      "stage_created": "Lead stage created successfully.",
+      "stages_retrieved": "Lead stages retrieved successfully.",
+      "stage_retrieved": "Lead stage retrieved successfully.",
+      "stage_updated": "Lead stage updated successfully.",
+      "stage_deleted": "Lead stage deleted successfully."
+    }
   }
 }
