@@ -831,12 +831,17 @@ class CustomFieldService:
         self,
         custom_fields: dict[str, Any],
         entity_type: EntityType,
+        required_custom_fields_for_presence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Validate and format custom fields against field definitions.
 
         Args:
             custom_fields: Raw custom fields dictionary from request
             entity_type: Entity type (company or contact)
+            required_custom_fields_for_presence:
+                Optional dict used only for "required custom field present" checks.
+                When provided, required validation checks membership against this dict,
+                while only `custom_fields` entries are validated/format-coerced.
 
         Returns:
             Formatted custom fields dictionary ready for storage
@@ -875,7 +880,8 @@ class CustomFieldService:
             formatted_fields[field_key] = validated_value
 
         # Check required fields (only top-level)
-        self._validate_required_fields(top_level_fields, formatted_fields)
+        presence_source = required_custom_fields_for_presence or formatted_fields
+        self._validate_required_fields(top_level_fields, presence_source)
 
         return formatted_fields
 

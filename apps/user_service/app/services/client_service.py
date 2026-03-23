@@ -1811,8 +1811,14 @@ class ClientService:
 
         # Validate only the fields being updated/added
         if fields_to_validate:
+            # Required-field validation must consider the full merged set
+            # (existing + newly provided values), even though we only validate
+            # /format the keys being updated.
+            required_presence = {**merged, **fields_to_validate}
             validated_fields = await custom_field_service.validate_and_format_custom_fields(
-                fields_to_validate, entity_type
+                fields_to_validate,
+                entity_type,
+                required_custom_fields_for_presence=required_presence,
             )
             merged.update(validated_fields)
 
