@@ -1870,6 +1870,100 @@ async def test_validate_and_format_custom_fields_object(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_validate_object_same_parent_and_child_key(monkeypatch):
+    """Object field validates correctly when child key equals parent key."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Profile",
+            "field_key": "profile",
+            "field_type": "object",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-2",
+            "field_name": "Profile Name",
+            "field_key": "profile",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    result = await service.validate_and_format_custom_fields(
+        {"profile": {"profile": "Alice"}}, EntityType.CONTACT
+    )
+
+    assert result == {"profile": {"profile": "Alice"}}
+
+
+@pytest.mark.asyncio
+async def test_validate_format_list_same_parent_and_child_key(monkeypatch):
+    """List field validates correctly when child key equals parent key."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Tags",
+            "field_key": "tags",
+            "field_type": "list",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+        {
+            "id": "field-2",
+            "field_name": "Tag",
+            "field_key": "tags",
+            "field_type": "text",
+            "parent_id": "field-1",
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        },
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+
+    result = await service.validate_and_format_custom_fields(
+        {"tags": ["alpha", "beta"]}, EntityType.CONTACT
+    )
+
+    assert result == {"tags": ["alpha", "beta"]}
+
+
+@pytest.mark.asyncio
 async def test_validate_format_cf_object_required_subfield(monkeypatch):
     """Test validate_and_format_custom_fields raises when required sub-field missing."""
     fake_repo = _FakeCustomFieldRepo()

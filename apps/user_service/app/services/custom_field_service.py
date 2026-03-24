@@ -862,20 +862,22 @@ class CustomFieldService:
                 params={"entity_type": entity_type.value},
             )
 
-        # Build maps: top-level fields for required check, all fields for validation
-        top_level_fields, all_fields = self._build_field_map(field_definitions)
+        # Build maps: top-level fields for request-level validation,
+        top_level_fields, _ = self._build_field_map(field_definitions)
 
         # Validate and format each custom field
         formatted_fields: dict[str, Any] = {}
         for field_key, field_value in custom_fields.items():
-            if field_key not in all_fields:
+            # Payload keys are top-level custom fields; nested keys are validated
+            # inside object/list validators against each parent's sub_fields.
+            if field_key not in top_level_fields:
                 raise ValidationException(
                     message_key="clients.errors.custom_field_not_defined",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": field_key},
                 )
 
-            field_def = all_fields[field_key]
+            field_def = top_level_fields[field_key]
             validated_value = self._validate_field_value(field_key, field_value, field_def)
             formatted_fields[field_key] = validated_value
 
