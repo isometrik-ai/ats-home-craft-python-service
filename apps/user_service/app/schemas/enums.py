@@ -355,6 +355,14 @@ class ClientEventType(str, Enum):
     ENRICHMENT_REQUESTED = "clients.enrichment_requested"
 
 
+class LeadEventType(str, Enum):
+    """Kafka event type names emitted for lead lifecycle changes."""
+
+    CREATED = "leads.created"
+    UPDATED = "leads.updated"
+    DELETED = "leads.deleted"
+
+
 class KafkaTopics(str, Enum):
     """Kafka topics used by this service.
 
