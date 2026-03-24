@@ -806,6 +806,7 @@ class ClientRepository:
                 au.email,
                 cu.phones,
                 l.id as lead_id,
+                l.stage_id,
                 l.lead_status,
                 l.intake_stage,
                 l.lead_source,

@@ -933,18 +933,17 @@ class ClientService:
         # Create lead record if enabled (same insert path as API create_lead)
         if request_data.lead_management and request_data.lead_management.enabled:
             organization_id = self.user_context.organization_id
+            lead = request_data.lead_management
             lead_row = {
                 "client_id": client_id,
                 "organization_id": organization_id,
-                "lead_status": request_data.lead_management.lead_status.value
-                if request_data.lead_management.lead_status
-                else None,
-                "intake_stage": request_data.lead_management.intake_stage.value
-                if request_data.lead_management.intake_stage
-                else None,
-                "lead_source": request_data.lead_management.lead_source,
-                "referral_source": request_data.lead_management.referral_source,
-                "lead_score": request_data.lead_management.lead_score,
+                "name": self._get_client_name_for_create(request_data),
+                "stage_id": lead.stage_id or None,
+                "lead_status": lead.lead_status.value if lead.lead_status else None,
+                "intake_stage": lead.intake_stage.value if lead.intake_stage else None,
+                "lead_source": lead.lead_source,
+                "referral_source": lead.referral_source,
+                "lead_score": lead.lead_score,
             }
             await self.lead_repository.create_lead(lead_row)
 
@@ -1371,8 +1370,10 @@ class ClientService:
         # Format lead information if exists
         lead_info = None
         if client.get("lead_id"):
+            raw_stage_id = client.get("stage_id")
             lead_info = LeadInfo(
                 id=str(client.get("lead_id")),
+                stage_id=str(raw_stage_id) if raw_stage_id is not None else None,
                 lead_status=client.get("lead_status"),
                 intake_stage=client.get("intake_stage"),
                 lead_source=client.get("lead_source"),

@@ -55,7 +55,11 @@ class LeadManagement(BaseModel):
     """Lead management schema."""
 
     enabled: bool = Field(default=False, description="Enable lead management")
-    lead_status: LeadStatus | None = Field(None, description="Lead status")
+    stage_id: str | None = Field(None, description="Pipeline stage ID for the new lead")
+    lead_status: LeadStatus | None = Field(
+        None,
+        description="Optional legacy status field; prefer stage_id for pipeline placement",
+    )
     intake_stage: IntakeStage | None = Field(None, description="Intake stage")
     lead_source: str | None = Field(None, description="Lead source", max_length=100)
     referral_source: str | None = Field(None, description="Referral source", max_length=200)
@@ -472,6 +476,7 @@ class LeadManagementUpdate(BaseModel):
 
     lead_id: str = Field(..., description="Lead ID to update")
     enabled: bool | None = None
+    stage_id: str | None = Field(None, description="Pipeline stage ID to assign")
     lead_status: LeadStatus | None = None
     intake_stage: IntakeStage | None = None
     lead_source: str | None = Field(None, max_length=100)
@@ -754,6 +759,7 @@ class LeadInfo(BaseModel):
     """Lead information schema."""
 
     id: str = Field(..., description="Lead ID")
+    stage_id: str | None = Field(None, description="Pipeline stage ID")
     lead_status: LeadStatus | None = Field(None, description="Lead status")
     intake_stage: IntakeStage | None = Field(None, description="Intake stage")
     lead_source: str | None = Field(None, description="Lead source")
