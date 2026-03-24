@@ -117,8 +117,6 @@ async def test_create_stage_inserts_and_returns_dict():
         "description": "Warm lead",
         "color": "blue",
         "sort_order": 2,
-        "is_initial": False,
-        "is_final": False,
     }
 
     result = await repo.create_stage(row)
@@ -134,8 +132,6 @@ async def test_create_stage_inserts_and_returns_dict():
         "Warm lead",
         "blue",
         2,
-        False,
-        False,
     )
 
 

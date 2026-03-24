@@ -378,8 +378,10 @@ class LeadStageService:
         remaining_stage_rows = await self.lead_stage_repository.list_stages_by_organization(
             organization_id
         )
-        max_sort_order = deleted_sort if not remaining_stage_rows else max(
-            row["sort_order"] for row in remaining_stage_rows
+        max_sort_order = (
+            deleted_sort
+            if not remaining_stage_rows
+            else max(row["sort_order"] for row in remaining_stage_rows)
         )
         return self._build_stage_response(deleted_row, max_sort_order=max_sort_order).model_dump(
             mode="json"

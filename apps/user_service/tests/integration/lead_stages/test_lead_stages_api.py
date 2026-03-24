@@ -32,8 +32,6 @@ async def test_create_lead_stage(monkeypatch, client):
         del self
         assert body.stage_name == "Qualified"
         assert body.sort_order == 2
-        assert body.is_initial is False
-        assert body.is_final is False
         assert body.color.value == "green"
         return {"id": "stage-1", "stage_name": "Qualified"}
 
@@ -53,8 +51,6 @@ async def test_create_lead_stage(monkeypatch, client):
             "description": "Warm leads that passed intro",
             "color": "green",
             "sort_order": 2,
-            "is_initial": False,
-            "is_final": False,
         },
     )
     assert_success(response, 201)
