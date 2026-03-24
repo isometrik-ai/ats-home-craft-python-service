@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-from apps.user_service.app.schemas.enums import LeadsListMode, LeadStatus
+from apps.user_service.app.schemas.enums import IntakeStage, LeadsListMode, LeadStatus
 from apps.user_service.app.schemas.lead_stages import UNSET, Unset
 from apps.user_service.app.utils.common_utils import validate_uuid_format
 from libs.shared_utils.http_exceptions import ValidationException
@@ -54,9 +54,9 @@ class CreateLeadRequest(BaseModel):
         default=None,
         description="Internal status (not exposed in API responses)",
     )
-    intake_stage: str | None = Field(
+    intake_stage: IntakeStage | None = Field(
         default=None,
-        description="How the lead entered the pipeline (free text)",
+        description="How the lead entered the pipeline",
     )
     lead_source: str | None = Field(default=None, description="Origin channel")
     referral_source: str | None = Field(
@@ -106,7 +106,6 @@ class CreateLeadRequest(BaseModel):
         return value
 
     @field_validator(
-        "intake_stage",
         "lead_source",
         "referral_source",
         "lead_score",
@@ -139,7 +138,7 @@ class UpdateLeadRequest(BaseModel):
         default=UNSET,
         description="Internal status; null clears",
     )
-    intake_stage: str | None | Unset = Field(
+    intake_stage: IntakeStage | None | Unset = Field(
         default=UNSET,
         description="Intake label; null clears",
     )
@@ -187,7 +186,6 @@ class UpdateLeadRequest(BaseModel):
 
     @field_validator(
         "name",
-        "intake_stage",
         "lead_source",
         "referral_source",
         "lead_score",

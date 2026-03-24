@@ -152,6 +152,23 @@ class ClientService:
         self._typesense_service: TypesenseService | None = None
 
     @staticmethod
+    def _lead_score_for_typesense(value: Any) -> int | None:
+        """Convert string lead score to int for Typesense only.
+
+        Lead score is string in app flow; Typesense expects int32.
+        Invalid values are ignored (None) so indexing stays best-effort.
+        """
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            return int(cleaned)
+        except ValueError:
+            return None
+
+    @staticmethod
     async def index_clients_in_typesense_background(
         client_refs: Iterable[tuple[str, str]],
     ) -> None:
@@ -333,7 +350,7 @@ class ClientService:
             "address_countries": address_countries,
             "address_postal_codes": address_postal_codes,
             "lead_status": details.get("lead_status") or "",
-            "lead_score": details.get("lead_score"),
+            "lead_score": self._lead_score_for_typesense(details.get("lead_score")),
             "intake_stage": details.get("intake_stage") or "",
             "custom_field_values": custom_field_values,
             "custom_field_keys": custom_field_keys,
