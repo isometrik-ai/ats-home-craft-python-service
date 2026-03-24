@@ -338,6 +338,7 @@ class ClientService:
             "created_at": int(created_at_dt.timestamp()) if created_at_dt else 0,
             "updated_at": int(updated_at_dt.timestamp()) if updated_at_dt else 0,
             "company_id": str(details["company_id"]) if details.get("company_id") else "",
+            "profile_photo_url": details.get("profile_photo_url") or "",
         }
 
         # Typesense search facets are defined as `string[]` — keep the indexed
@@ -1228,7 +1229,7 @@ class ClientService:
                 status=ClientStatus(doc.get("status")),
                 industry=doc.get("industry"),
                 projects=[],
-                image_url=None,
+                image_url=doc.get("profile_photo_url") or None,
                 created_at="",
                 updated_at="",
                 outstanding=None,

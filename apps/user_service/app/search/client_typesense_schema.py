@@ -130,6 +130,8 @@ CLIENT_COLLECTION_SCHEMA: dict[str, Any] = {
         # ── Display-Only (index:False) ─────────────────────────────────────
         # company_id: UUID of the linked company for person clients; frontend link only.
         {"name": "company_id", "type": "string", "index": False, "optional": True},
+        # profile_photo_url is stored for API response rendering only.
+        {"name": "profile_photo_url", "type": "string", "index": False, "optional": True},
     ],
 }
 

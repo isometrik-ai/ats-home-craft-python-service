@@ -181,3 +181,7 @@ class TypesenseClientDocument(BaseModel):
         default=None,
         description="Linked company UUID for person clients (display-only, optional).",
     )
+    profile_photo_url: str | None = Field(
+        default=None,
+        description="Client profile image URL (stored for display-only responses).",
+    )
