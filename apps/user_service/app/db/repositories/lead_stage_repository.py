@@ -26,8 +26,6 @@ class LeadStageRepository:
         "description",
         "color",
         "sort_order",
-        "is_initial",
-        "is_final",
     }
 
     STAGE_COLUMNS = """
@@ -37,8 +35,6 @@ class LeadStageRepository:
         description,
         color,
         sort_order,
-        is_initial,
-        is_final,
         created_at,
         updated_at
     """
@@ -119,11 +115,9 @@ class LeadStageRepository:
                 stage_key,
                 description,
                 color,
-                sort_order,
-                is_initial,
-                is_final
+                sort_order
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING {cols}
         """
         row = await self.db_connection.fetchrow(
@@ -134,8 +128,6 @@ class LeadStageRepository:
             row.get("description"),
             row.get("color"),
             row["sort_order"],
-            row["is_initial"],
-            row["is_final"],
         )
         return dict(row)
 
@@ -156,6 +148,32 @@ class LeadStageRepository:
         row = await self.db_connection.fetchrow(query, organization_id, stage_id)
         return dict(row) if row else None
 
+    async def get_stage_by_id_with_max_sort_order(
+        self, organization_id: str, stage_id: str
+    ) -> dict[str, Any] | None:
+        """Return one stage row plus organization-level max sort_order in a single query."""
+        cols = self._stage_columns_expr()
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT
+                {cols},
+                COALESCE(max_stage.sort_order, 0)::int AS max_sort_order
+            FROM {self.TABLE_NAME} s
+            LEFT JOIN LATERAL (
+                SELECT sort_order
+                FROM {self.TABLE_NAME}
+                WHERE organization_id = $1
+                ORDER BY sort_order DESC
+                LIMIT 1
+            ) max_stage ON TRUE
+            WHERE s.organization_id = $1
+            AND s.id = $2::uuid
+            """,
+            organization_id,
+            stage_id,
+        )
+        return dict(row) if row else None
+
     async def get_stage_by_id_with_organization_metrics(
         self,
         organization_id: str,
@@ -169,9 +187,8 @@ class LeadStageRepository:
 
         Returned keys:
             Stage columns — id, stage_name, stage_key, description, color,
-                sort_order, is_initial, is_final, created_at, updated_at
-            Extra columns — total_stages, key_conflict_count,
-                other_initial_count, other_final_count
+                sort_order, created_at, updated_at
+            Extra columns — total_stages, key_conflict_count
         """
         table = self.TABLE_NAME
         row = await self.db_connection.fetchrow(
@@ -181,13 +198,7 @@ class LeadStageRepository:
                     COUNT(*)::int AS total_stages,
                     COUNT(*) FILTER (
                         WHERE stage_key = $3 AND id != $2::uuid
-                    ) AS key_conflict_count,
-                    COUNT(*) FILTER (
-                        WHERE is_initial = TRUE AND id != $2::uuid
-                    ) AS other_initial_count,
-                    COUNT(*) FILTER (
-                        WHERE is_final = TRUE AND id != $2::uuid
-                    ) AS other_final_count
+                    ) AS key_conflict_count
                 FROM {table}
                 WHERE organization_id = $1
             )

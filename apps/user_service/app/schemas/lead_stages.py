@@ -54,15 +54,6 @@ class LeadStageBasePayload(BaseModel):
         ge=1,
         description="Pipeline position (1..N or 1..N+1 based on operation)",
     )
-    is_initial: bool | None = Field(
-        default=None,
-        description="Whether this stage is an entry stage",
-    )
-    is_final: bool | None = Field(
-        default=None,
-        description="Whether this stage is a terminal won/closed stage",
-    )
-
     @field_validator("stage_name")
     @classmethod
     def validate_stage_name_not_blank(cls, value: str | None) -> str | None:
@@ -97,14 +88,6 @@ class CreateLeadStageRequest(LeadStageBasePayload):
         min_length=1,
         max_length=100,
         description="Stage display name (unique per organization)",
-    )
-    is_initial: bool = Field(
-        default=False,
-        description="Entry-stage flag. First stage is forced to true by service layer.",
-    )
-    is_final: bool = Field(
-        default=False,
-        description="Final-stage flag. First stage is forced to true by service layer.",
     )
 
 

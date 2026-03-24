@@ -24,6 +24,16 @@ from libs.shared_utils.status_codes import CustomStatusCode
 class LeadStageService:
     """Service for lead stage business logic and orchestration."""
 
+    @staticmethod
+    def _is_initial_stage(stage_row: dict) -> bool:
+        """Derive initial-stage state from sort order."""
+        return stage_row["sort_order"] == 1
+
+    @staticmethod
+    def _is_final_stage(stage_row: dict, max_sort_order: int) -> bool:
+        """Derive final-stage state from sort order."""
+        return stage_row["sort_order"] == max_sort_order
+
     def __init__(
         self,
         db_connection: asyncpg.Connection,
@@ -113,18 +123,14 @@ class LeadStageService:
         is_first_stage = existing_count == 0
 
         if is_first_stage:
-            # First-stage bootstrap rule from ADR: force both flags true and order=1.
+            # First stage always starts at sort_order=1.
             resolved_sort_order = 1
-            is_initial = True
-            is_final = True
         else:
             resolved_sort_order = await self._resolve_sort_order_on_create(
                 organization_id=organization_id,
                 requested_sort_order=body.sort_order,
                 max_sort_order=metrics["max_sort_order"],
             )
-            is_initial = body.is_initial
-            is_final = body.is_final
 
         stage_data = {
             "organization_id": organization_id,
@@ -133,8 +139,6 @@ class LeadStageService:
             "description": body.description,
             "color": body.color.value if body.color is not None else None,
             "sort_order": resolved_sort_order,
-            "is_initial": is_initial,
-            "is_final": is_final,
         }
 
         try:
@@ -161,7 +165,7 @@ class LeadStageService:
             raise
 
     @staticmethod
-    def _build_stage_response(stage_row: dict) -> LeadStageResponse:
+    def _build_stage_response(stage_row: dict, *, max_sort_order: int) -> LeadStageResponse:
         """Map repository row to API response schema."""
         return LeadStageResponse(
             id=str(stage_row["id"]),
@@ -170,8 +174,8 @@ class LeadStageService:
             description=stage_row.get("description"),
             color=stage_row.get("color"),
             sort_order=stage_row["sort_order"],
-            is_initial=stage_row["is_initial"],
-            is_final=stage_row["is_final"],
+            is_initial=LeadStageService._is_initial_stage(stage_row),
+            is_final=LeadStageService._is_final_stage(stage_row, max_sort_order),
             created_at=format_iso_datetime(stage_row.get("created_at")),
             updated_at=format_iso_datetime(stage_row.get("updated_at")),
         )
@@ -180,13 +184,19 @@ class LeadStageService:
         """List all lead stages for the current organization."""
         organization_id = self.user_context.organization_id
         stage_rows = await self.lead_stage_repository.list_stages_by_organization(organization_id)
-        items = [self._build_stage_response(row).model_dump(mode="json") for row in stage_rows]
+        if not stage_rows:
+            return [], 0
+        max_sort_order = max(row["sort_order"] for row in stage_rows)
+        items = [
+            self._build_stage_response(row, max_sort_order=max_sort_order).model_dump(mode="json")
+            for row in stage_rows
+        ]
         return items, len(items)
 
     async def get_lead_stage(self, stage_id: str) -> dict:
         """Get a single lead stage by id for the current organization."""
         organization_id = self.user_context.organization_id
-        stage_row = await self.lead_stage_repository.get_stage_by_id(
+        stage_row = await self.lead_stage_repository.get_stage_by_id_with_max_sort_order(
             organization_id=organization_id,
             stage_id=stage_id,
         )
@@ -195,7 +205,10 @@ class LeadStageService:
                 message_key="lead_stages.errors.stage_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return self._build_stage_response(stage_row).model_dump(mode="json")
+        max_sort_order = stage_row["max_sort_order"]
+        return self._build_stage_response(stage_row, max_sort_order=max_sort_order).model_dump(
+            mode="json"
+        )
 
     def _run_update_validations(self, ctx: dict, *, body: UpdateLeadStageRequest) -> None:
         """Validate update against pre-fetched context (no DB calls)."""
@@ -210,18 +223,6 @@ class LeadStageService:
                 message_key="lead_stages.errors.invalid_sort_order_range",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"min": 1, "max": ctx["total_stages"]},
-            )
-
-        if body.is_initial is False and ctx["other_initial_count"] == 0:
-            raise ValidationException(
-                message_key="lead_stages.errors.cannot_unset_last_initial",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
-        if body.is_final is False and ctx["other_final_count"] == 0:
-            raise ValidationException(
-                message_key="lead_stages.errors.cannot_unset_last_final",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
     def _build_update_data(
@@ -248,12 +249,6 @@ class LeadStageService:
 
         if not isinstance(body.color, Unset):
             update_data["color"] = body.color.value if body.color else None
-
-        if body.is_initial is not None:
-            update_data["is_initial"] = body.is_initial
-
-        if body.is_final is not None:
-            update_data["is_final"] = body.is_final
 
         if sort_order_to_apply is not None:
             update_data["sort_order"] = sort_order_to_apply
@@ -332,7 +327,13 @@ class LeadStageService:
             sort_order_to_apply=sort_order_to_apply,
         )
         if not update_data:
-            return self._build_stage_response(stage_with_ctx).model_dump(mode="json")
+            stage_rows = await self.lead_stage_repository.list_stages_by_organization(
+                organization_id
+            )
+            max_sort_order = max(row["sort_order"] for row in stage_rows)
+            return self._build_stage_response(
+                stage_with_ctx, max_sort_order=max_sort_order
+            ).model_dump(mode="json")
 
         updated_stage = await self._persist_stage_update(
             organization_id=organization_id,
@@ -346,7 +347,11 @@ class LeadStageService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        return self._build_stage_response(updated_stage).model_dump(mode="json")
+        stage_rows = await self.lead_stage_repository.list_stages_by_organization(organization_id)
+        max_sort_order = max(row["sort_order"] for row in stage_rows)
+        return self._build_stage_response(updated_stage, max_sort_order=max_sort_order).model_dump(
+            mode="json"
+        )
 
     async def delete_lead_stage(self, stage_id: str) -> dict:
         """Delete a lead stage and shift down sort_order for stages above the gap (same txn)."""
@@ -370,4 +375,12 @@ class LeadStageService:
             delta=-1,
         )
 
-        return self._build_stage_response(deleted_row).model_dump(mode="json")
+        remaining_stage_rows = await self.lead_stage_repository.list_stages_by_organization(
+            organization_id
+        )
+        max_sort_order = deleted_sort if not remaining_stage_rows else max(
+            row["sort_order"] for row in remaining_stage_rows
+        )
+        return self._build_stage_response(deleted_row, max_sort_order=max_sort_order).model_dump(
+            mode="json"
+        )
