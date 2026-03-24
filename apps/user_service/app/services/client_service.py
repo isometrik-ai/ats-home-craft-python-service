@@ -1589,6 +1589,7 @@ class ClientService:
             organization_id=organization_id,
             primary_contact=body.primary_contact,
             is_person=current.get("client_type") == ClientType.PERSON.value,
+            profile_photo_url=body.profile_photo_url,
         )
 
         if body.lead_management is not None:
@@ -1612,9 +1613,10 @@ class ClientService:
         organization_id: str,
         primary_contact: PrimaryContactUpdate | None,
         is_person: bool,
+        profile_photo_url: str | None,
     ) -> str | None:
         """Apply primary_contact updates if present and return person full name if applicable."""
-        if primary_contact is None:
+        if primary_contact is None and profile_photo_url is None:
             return None
 
         primary_contact_row = await self.client_repository._get_primary_contact_for_update(
@@ -1623,10 +1625,18 @@ class ClientService:
         if not primary_contact_row:
             return None
 
+        if primary_contact is None:
+            await self.client_repository._update_client_user(
+                primary_contact_row["id"],
+                {"profile_photo_url": profile_photo_url},
+            )
+            return None
+
         return await self._apply_primary_contact_updates(
             primary_contact_row=primary_contact_row,
             primary_contact=primary_contact,
             is_person=is_person,
+            profile_photo_url=profile_photo_url,
         )
 
     @staticmethod
@@ -2120,6 +2130,7 @@ class ClientService:
         primary_contact_row: dict[str, Any],
         primary_contact: PrimaryContactUpdate,
         is_person: bool,
+        profile_photo_url: str | None = None,
     ) -> str | None:
         """Apply primary contact scalar fields and phones.
 
@@ -2128,6 +2139,8 @@ class ClientService:
         primary_id = primary_contact_row["id"]
 
         update_data = self._build_primary_contact_update_data(primary_contact)
+        if profile_photo_url is not None:
+            update_data["profile_photo_url"] = profile_photo_url
         if primary_contact.phones is not None:
             update_data["phones"] = self._build_primary_contact_phones_json(
                 existing_phones_json=primary_contact_row.get("phones"),
