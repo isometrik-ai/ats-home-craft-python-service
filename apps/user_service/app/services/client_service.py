@@ -62,7 +62,6 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.schemas.typesense import TypesenseClientDocument
 from apps.user_service.app.search.client_typesense_schema import (
     CLIENT_COLLECTION_SCHEMA,
-    CLIENTS_COLLECTION_NAME,
     EMAIL_SEARCH_PARAMS,
     PHONE_SEARCH_PARAMS,
     SEARCH_PARAMS,
@@ -181,7 +180,9 @@ class ClientService:
         ids = [str(cid) for cid in client_ids if cid]
         if not ids:
             return
-        typesense_service = TypesenseService.from_settings(collection_name=CLIENTS_COLLECTION_NAME)
+        typesense_service = TypesenseService.from_settings(
+            collection_name=app_settings.shared_settings.typesense.clients_collection_name
+        )
         for client_id in ids:
             try:
                 await typesense_service.delete_document(client_id)
@@ -388,7 +389,7 @@ class ClientService:
         """Lazily initialized Typesense service for client indexing."""
         if self._typesense_service is None:
             self._typesense_service = TypesenseService.from_settings(
-                collection_name=CLIENTS_COLLECTION_NAME,
+                collection_name=app_settings.shared_settings.typesense.clients_collection_name,
             )
         return self._typesense_service
 

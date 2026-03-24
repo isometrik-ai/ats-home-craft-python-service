@@ -106,6 +106,7 @@ class TypesenseSettings(BaseSettings):
         "TYPESENSE_RETRY_INTERVAL_SECONDS",
         default=0.1,
     )
+    clients_collection_name: str = config("TYPESENSE_CLIENTS_COLLECTION_NAME")
 
 
 class SharedAppSettings(BaseSettings):
