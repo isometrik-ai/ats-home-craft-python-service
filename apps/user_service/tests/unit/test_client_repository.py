@@ -211,19 +211,6 @@ async def test_delete_client_users():
 
 
 @pytest.mark.asyncio
-async def test_create_lead_requires_client_id_and_lead_status():
-    """create_lead raises ValueError when required fields missing."""
-    conn = _FakeConn()
-    repo = ClientRepository(db_connection=conn)
-
-    with pytest.raises(ValueError, match="client_id is required"):
-        await repo.create_lead({})
-
-    with pytest.raises(ValueError, match="lead_status is required"):
-        await repo.create_lead({"client_id": "client-1"})
-
-
-@pytest.mark.asyncio
 async def test_bulk_create_addresses_empty_list():
     """bulk_create_addresses returns empty list for empty input."""
     conn = _FakeConn()
@@ -509,22 +496,6 @@ async def test_get_clients_count_with_status_filter():
 
 
 @pytest.mark.asyncio
-async def test_delete_leads():
-    """delete_leads deletes all leads for a client."""
-    conn = _FakeConn()
-    repo = ClientRepository(db_connection=conn)
-
-    result = await repo.delete_leads("client-1")
-
-    assert result is True
-    assert len(conn.execute_calls) == 1
-    query = conn.execute_calls[0][0]
-    assert "DELETE FROM leads" in query
-    assert "client_id = $1" in query
-    assert "client-1" in conn.execute_calls[0][1]
-
-
-@pytest.mark.asyncio
 async def test_delete_addresses():
     """delete_addresses deletes all addresses for a client."""
     conn = _FakeConn()
@@ -538,67 +509,6 @@ async def test_delete_addresses():
     assert "DELETE FROM client_addresses" in query
     assert "client_id = $1" in query
     assert "client-1" in conn.execute_calls[0][1]
-
-
-@pytest.mark.asyncio
-async def test_create_lead_with_optional_fields():
-    """create_lead includes optional fields when provided."""
-    conn = _FakeConn()
-    conn.fetchrow_result = {
-        "id": "lead-1",
-        "client_id": "client-1",
-        "lead_status": "prospect",
-        "intake_stage": "initial",
-        "lead_source": "website",
-        "referral_source": "google",
-        "lead_score": 85,
-        "notes": "Interested in services",
-    }
-    repo = ClientRepository(db_connection=conn)
-
-    result = await repo.create_lead(
-        {
-            "client_id": "client-1",
-            "lead_status": "prospect",
-            "intake_stage": "initial",
-            "lead_source": "website",
-            "referral_source": "google",
-            "lead_score": 85,
-            "notes": "Interested in services",
-        }
-    )
-
-    assert result["id"] == "lead-1"
-    query = conn.fetchrow_calls[0][0]
-    assert "intake_stage" in query
-    assert "lead_source" in query
-    assert "referral_source" in query
-    assert "lead_score" in query
-    assert "notes" in query
-
-
-@pytest.mark.asyncio
-async def test_create_lead_with_required_fields_only():
-    """create_lead creates record with only required fields."""
-    conn = _FakeConn()
-    conn.fetchrow_result = {
-        "id": "lead-1",
-        "client_id": "client-1",
-        "lead_status": "prospect",
-    }
-    repo = ClientRepository(db_connection=conn)
-
-    result = await repo.create_lead(
-        {
-            "client_id": "client-1",
-            "lead_status": "prospect",
-        }
-    )
-
-    assert result["id"] == "lead-1"
-    query = conn.fetchrow_calls[0][0]
-    assert "client_id" in query
-    assert "lead_status" in query
 
 
 # --- Update operations ---
@@ -693,25 +603,6 @@ async def test_update_client_builds_set_clause():
     assert "updated_at = NOW()" in query
     assert "RETURNING *" in query
     assert ClientStatus.DELETED.value in conn.fetchrow_calls[0][1]
-
-
-@pytest.mark.asyncio
-async def test_update_lead_calls_fetchrow():
-    """update_lead builds UPDATE and returns True when row updated."""
-    conn = _FakeConn()
-    conn.fetchrow_result = {"id": "lead-1"}
-    repo = ClientRepository(db_connection=conn)
-
-    result = await repo.update_lead(
-        "lead-1", "client-1", {"lead_status": "qualified", "notes": "Updated"}
-    )
-
-    assert result is True
-    assert len(conn.fetchrow_calls) == 1
-    query = conn.fetchrow_calls[0][0]
-    assert "UPDATE leads" in query
-    assert "WHERE id = $" in query
-    assert "client_id = $" in query
 
 
 @pytest.mark.asyncio

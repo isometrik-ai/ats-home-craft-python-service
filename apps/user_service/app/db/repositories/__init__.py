@@ -15,6 +15,7 @@ Usage:
 from apps.user_service.app.db.repositories.client_repository import ClientRepository
 from apps.user_service.app.db.repositories.events_repository import EventsRepository
 from apps.user_service.app.db.repositories.invite_repository import InviteRepository
+from apps.user_service.app.db.repositories.lead_repository import LeadRepository
 from apps.user_service.app.db.repositories.lead_stage_repository import (
     LeadStageRepository,
 )
@@ -61,5 +62,6 @@ __all__ = [
     "VerificationCodeRepository",
     "InviteRepository",
     "EventsRepository",
+    "LeadRepository",
     "LeadStageRepository",
 ]

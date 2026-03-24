@@ -551,6 +551,13 @@ def parse_json_field(field_value: str | dict[str, Any] | None) -> dict[str, Any]
     return {}
 
 
+def serialize_jsonb_param(column_name: str, value: Any, jsonb_columns: frozenset[str]) -> Any:
+    """Serialize JSONB column values to a JSON string for asyncpg; pass others through."""
+    if column_name in jsonb_columns and isinstance(value, (dict, list)):
+        return json.dumps(value)
+    return value
+
+
 def serialize_pydantic_models(value: Any) -> Any:
     """Recursively convert Pydantic models and other
     non-serializable objects to JSON-serializable primitives.

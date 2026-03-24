@@ -264,6 +264,20 @@ class ClientRepository:
         )
         return bool(exists)
 
+    async def client_exists_in_organization(self, organization_id: str, client_id: str) -> bool:
+        """Return True if ``clients.id`` exists for the organization."""
+        val = await self.db_connection.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM clients
+                WHERE organization_id = $1 AND id = $2::uuid
+            )
+            """,
+            organization_id,
+            client_id,
+        )
+        return bool(val)
+
     # READ OPERATIONS
     async def get_clients_list(
         self,
@@ -454,22 +468,6 @@ class ClientRepository:
         await self.db_connection.execute(query, client_id, ClientUserStatus.DELETED.value)
         return True
 
-    async def delete_leads(self, client_id: str) -> bool:
-        """Hard delete lead for a client.
-
-        Args:
-            client_id: Client ID
-
-        Returns:
-            bool: True if deleted successfully
-        """
-        query = """
-            DELETE FROM leads
-            WHERE client_id = $1
-        """
-        await self.db_connection.execute(query, client_id)
-        return True
-
     async def delete_addresses(self, client_id: str) -> bool:
         """Delete addresses for a client.
 
@@ -569,25 +567,6 @@ class ClientRepository:
         )
         return dict(row) if row else None
 
-    async def update_lead(self, lead_id: str, client_id: str, update_data: dict) -> bool:
-        """Update lead by id and client_id. Only provided keys are updated."""
-        set_parts = [f"{k} = ${i}" for i, k in enumerate(update_data, start=1)]
-        set_expr = (
-            ", ".join(set_parts) + ", updated_at = NOW()" if set_parts else "updated_at = NOW()"
-        )
-        index = len(update_data)
-        params = list(update_data.values()) + [lead_id, client_id]
-        row = await self.db_connection.fetchrow(
-            f"""
-            UPDATE leads
-            SET {set_expr}
-            WHERE id = ${index + 1} AND client_id = ${index + 2}
-            RETURNING id
-            """,
-            *params,
-        )
-        return row is not None
-
     async def update_address(self, address_id: str, client_id: str, update_data: dict) -> bool:
         """Update address by id and client_id. Only provided keys are updated."""
         set_parts = [f"{k} = ${i}" for i, k in enumerate(update_data, start=1)]
@@ -682,49 +661,6 @@ class ClientRepository:
         """
         exists = await self.db_connection.fetchval(query, *params)
         return bool(exists)
-
-    # LEAD OPERATIONS
-    async def create_lead(self, lead_data: dict) -> dict:
-        """Create a new lead record.
-
-        Args:
-            lead_data: Dictionary containing lead fields
-
-        Returns:
-            dict: Created lead record
-        """
-        fields = []
-        placeholders = []
-        values = []
-        param_index = 1
-
-        required_fields = ["client_id", "lead_status"]
-        for field in required_fields:
-            if field not in lead_data:
-                raise ValueError(f"{field} is required")
-
-        for field in required_fields:
-            fields.append(field)
-            placeholders.append(f"${param_index}")
-            values.append(lead_data[field])
-            param_index += 1
-
-        optional_fields = ["intake_stage", "lead_source", "referral_source", "lead_score", "notes"]
-        for field in optional_fields:
-            if field in lead_data and lead_data[field] is not None:
-                fields.append(field)
-                placeholders.append(f"${param_index}")
-                values.append(lead_data[field])
-                param_index += 1
-
-        query = f"""
-            INSERT INTO leads ({", ".join(fields)})
-            VALUES ({", ".join(placeholders)})
-            RETURNING *
-        """
-
-        row = await self.db_connection.fetchrow(query, *values)
-        return dict(row)
 
     # ADDRESS OPERATIONS
     async def bulk_create_addresses(self, addresses_data: list[dict]) -> list[dict]:
