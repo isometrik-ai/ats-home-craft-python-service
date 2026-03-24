@@ -1577,6 +1577,13 @@ class ClientService:
 
         old_data = self._format_client_for_audit(current)
 
+        created_company_id: str | None = None
+        if current.get("client_type") == ClientType.PERSON.value:
+            created_company_id = await self._create_and_link_company_for_person_update(
+                organization_id=organization_id,
+                body=body,
+            )
+
         update_data = await self._build_client_update_payload(body, current)
 
         await self._apply_batch_jsonb_list_changes(
@@ -1592,6 +1599,7 @@ class ClientService:
             primary_contact=body.primary_contact,
             is_person=current.get("client_type") == ClientType.PERSON.value,
             profile_photo_url=body.profile_photo_url,
+            client_company_id=created_company_id,
         )
 
         if body.lead_management is not None:
@@ -1607,7 +1615,35 @@ class ClientService:
         if update_data:
             await self.client_repository.update_client(client_id, organization_id, update_data)
 
-        return {"old_data": old_data}
+        return {"old_data": old_data, "created_company_id": created_company_id}
+
+    async def _create_and_link_company_for_person_update(
+        self,
+        organization_id: str,
+        body: UpdateClientRequest,
+    ) -> str | None:
+        """For person updates, create linked company from primary_contact.company_name.
+
+        This keeps PATCH behavior intact for all other fields while adding the
+        requested contact->company linking flow.
+        """
+        company_name = (body.company_name or "").strip()
+        if not company_name:
+            return None
+
+        company_rows = await self.client_repository.create_client(
+            [
+                {
+                    "organization_id": organization_id,
+                    "client_type": ClientType.COMPANY.value,
+                    "name": company_name,
+                }
+            ]
+        )
+        if not company_rows:
+            return None
+        company_id = company_rows[0]["id"]
+        return str(company_id)
 
     async def _apply_primary_contact_update_if_needed(
         self,
@@ -1616,9 +1652,10 @@ class ClientService:
         primary_contact: PrimaryContactUpdate | None,
         is_person: bool,
         profile_photo_url: str | None,
+        client_company_id: str | None = None,
     ) -> str | None:
         """Apply primary_contact updates if present and return person full name if applicable."""
-        if primary_contact is None and profile_photo_url is None:
+        if primary_contact is None and profile_photo_url is None and client_company_id is None:
             return None
 
         primary_contact_row = await self.client_repository._get_primary_contact_for_update(
@@ -1628,9 +1665,14 @@ class ClientService:
             return None
 
         if primary_contact is None:
+            update_data: dict[str, Any] = {}
+            if profile_photo_url is not None:
+                update_data["profile_photo_url"] = profile_photo_url
+            if client_company_id is not None:
+                update_data["client_company_id"] = client_company_id
             await self.client_repository._update_client_user(
                 primary_contact_row["id"],
-                {"profile_photo_url": profile_photo_url},
+                update_data,
             )
             return None
 
@@ -1639,6 +1681,7 @@ class ClientService:
             primary_contact=primary_contact,
             is_person=is_person,
             profile_photo_url=profile_photo_url,
+            client_company_id=client_company_id,
         )
 
     @staticmethod
@@ -1725,12 +1768,6 @@ class ClientService:
         Company type: target_market_segments, current_tech_stack, description,
         preferred_communication_channels, industry_specific_terminologies, linked_pages only.
         """
-        if client_type == ClientType.PERSON.value and body.company_name is not None:
-            raise ValidationException(
-                message_key="clients.errors.company_fields_not_allowed_for_person",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
         person_only = (
             body.work_history is not None
             or body.educational_history is not None
@@ -2133,6 +2170,7 @@ class ClientService:
         primary_contact: PrimaryContactUpdate,
         is_person: bool,
         profile_photo_url: str | None = None,
+        client_company_id: str | None = None,
     ) -> str | None:
         """Apply primary contact scalar fields and phones.
 
@@ -2141,6 +2179,8 @@ class ClientService:
         primary_id = primary_contact_row["id"]
 
         update_data = self._build_primary_contact_update_data(primary_contact)
+        if client_company_id is not None:
+            update_data["client_company_id"] = client_company_id
         if profile_photo_url is not None:
             update_data["profile_photo_url"] = profile_photo_url
         if primary_contact.phones is not None:
