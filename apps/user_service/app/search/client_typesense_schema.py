@@ -1,8 +1,6 @@
-"""Client Typesense collection schema, search parameters, and collection name."""
+"""Client Typesense collection schema and search parameters."""
 
 from typing import Any
-
-CLIENTS_COLLECTION_NAME = "isometrik-clients"
 
 
 def _schema_field_names(schema: dict[str, Any]) -> list[str]:
@@ -41,7 +39,6 @@ def build_document_from_schema(
 # ---------------------------------------------------------------------------
 
 CLIENT_COLLECTION_SCHEMA: dict[str, Any] = {
-    "name": "clients",
     "enable_nested_fields": True,
     "token_separators": ["+", "-", "@", ".", "(", ")"],
     "default_sorting_field": "updated_at",
