@@ -241,8 +241,10 @@ class ClientService:
         products = parse_json_field(details.get("products")) or []
         custom_fields = parse_json_field(details.get("custom_fields")) or {}
 
-        phones_raw = details.get("phones") or []
-        phones = phones_raw or []
+        phones_raw = details.get("phones")
+        phones = parse_json_field(phones_raw)
+        if not isinstance(phones, list):
+            phones = []
 
         custom_field_keys: list[str] = []
         custom_field_values: list[str] = []
