@@ -11,6 +11,7 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.db.repositories import (
+    LeadStageRepository,
     OrganizationDeleteRequestRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -91,6 +92,7 @@ class OrganizationService:
             db_connection=db_connection
         )
         self.team_repository = TeamRepository(db_connection=db_connection)
+        self.lead_stage_repository = LeadStageRepository(db_connection=db_connection)
 
     async def list_organizations(
         self,
@@ -194,6 +196,10 @@ class OrganizationService:
         )
 
         created = await self.organization_repository.create_organization(org_payload)
+
+        await self.lead_stage_repository.bulk_insert_default_stages_for_organization(
+            organization_id
+        )
 
         permission_ids = await self.permissions_repository.create_default_permissions(
             organization_id=organization_id

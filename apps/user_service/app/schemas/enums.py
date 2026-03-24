@@ -5,6 +5,7 @@ This prevents circular import issues and provides a centralized location for all
 """
 
 from enum import Enum
+from typing import Final
 
 # ============================================================================
 # USER & AUTHENTICATION ENUMS
@@ -373,6 +374,34 @@ class KafkaTopics(str, Enum):
     CRM_EVENTS = "crm.events"
 
 
+class UiColor(str, Enum):
+    """Everyday color names for UI (stages, badges, charts). Values are lowercase for API/DB."""
+
+    BLACK = "black"
+    WHITE = "white"
+    GRAY = "gray"
+    SILVER = "silver"
+    RED = "red"
+    MAROON = "maroon"
+    ORANGE = "orange"
+    YELLOW = "yellow"
+    GOLD = "gold"
+    GREEN = "green"
+    OLIVE = "olive"
+    LIME = "lime"
+    TEAL = "teal"
+    CYAN = "cyan"
+    BLUE = "blue"
+    NAVY = "navy"
+    PURPLE = "purple"
+    VIOLET = "violet"
+    MAGENTA = "magenta"
+    PINK = "pink"
+    BROWN = "brown"
+    BEIGE = "beige"
+    CORAL = "coral"
+
+
 class LeadStatus(str, Enum):
     """Lead status enumeration."""
 
@@ -382,6 +411,41 @@ class LeadStatus(str, Enum):
     PROPOSAL = "proposal"
     CONVERTED = "converted"
     LOST = "lost"
+
+
+# Per-stage default copy for new orgs (AI-facing; stored on ``lead_stages.description``).
+DEFAULT_ORGANIZATION_LEAD_STAGES: Final[tuple[tuple[LeadStatus, UiColor, str], ...]] = (
+    (
+        LeadStatus.PROSPECT,
+        UiColor.GRAY,
+        "Initial interest identified; not yet qualified or engaged.",
+    ),
+    (
+        LeadStatus.QUALIFIED,
+        UiColor.BLUE,
+        "Meets key qualification criteria; ready for active sales engagement.",
+    ),
+    (
+        LeadStatus.CONSULTATION,
+        UiColor.YELLOW,
+        "Consultation or discovery session scheduled or completed to assess needs and fit.",
+    ),
+    (
+        LeadStatus.PROPOSAL,
+        UiColor.ORANGE,
+        "Proposal or quotation shared; pending client review and decision.",
+    ),
+    (
+        LeadStatus.CONVERTED,
+        UiColor.GREEN,
+        "Successfully closed; lead has converted into a client or signed engagement.",
+    ),
+    (
+        LeadStatus.LOST,
+        UiColor.RED,
+        "Opportunity closed without conversion; no further action expected.",
+    ),
+)
 
 
 class LeadsListMode(str, Enum):

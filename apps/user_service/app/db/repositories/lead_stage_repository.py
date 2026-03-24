@@ -7,6 +7,9 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.schemas.enums import DEFAULT_ORGANIZATION_LEAD_STAGES
+from apps.user_service.app.utils.common_utils import enum_member_title_label
+
 
 class LeadStageRepository:
     """Persistence for the `lead_stages` table (CRUD and sort-order maintenance).
@@ -130,6 +133,57 @@ class LeadStageRepository:
             row["sort_order"],
         )
         return dict(row)
+
+    async def bulk_insert_default_stages_for_organization(self, organization_id: str) -> None:
+        """Insert the standard lead-stage pipeline for a new org in one statement.
+
+        Uses a single ``INSERT … SELECT unnest(...)`` so sort_order uniqueness is
+        satisfied without deferred-constraint tricks.
+        """
+        if not DEFAULT_ORGANIZATION_LEAD_STAGES:
+            return
+
+        stage_names = [
+            enum_member_title_label(status) for status, _, _ in DEFAULT_ORGANIZATION_LEAD_STAGES
+        ]
+        stage_keys = [status.value for status, _, _ in DEFAULT_ORGANIZATION_LEAD_STAGES]
+        descriptions = [text for _, _, text in DEFAULT_ORGANIZATION_LEAD_STAGES]
+        colors = [color.value for _, color, _ in DEFAULT_ORGANIZATION_LEAD_STAGES]
+        sort_orders = list(range(1, len(DEFAULT_ORGANIZATION_LEAD_STAGES) + 1))
+        table = self.TABLE_NAME
+        query = f"""
+            INSERT INTO {table} (
+                organization_id,
+                stage_name,
+                stage_key,
+                description,
+                color,
+                sort_order
+            )
+            SELECT
+                $1::uuid,
+                stage_name,
+                stage_key,
+                description,
+                color,
+                sort_order
+            FROM unnest(
+                $2::text[],
+                $3::text[],
+                $4::text[],
+                $5::text[],
+                $6::int[]
+            ) AS t(stage_name, stage_key, description, color, sort_order)
+        """
+        await self.db_connection.execute(
+            query,
+            organization_id,
+            stage_names,
+            stage_keys,
+            descriptions,
+            colors,
+            sort_orders,
+        )
 
     async def list_stages_by_organization(self, organization_id: str) -> list[dict[str, Any]]:
         """Return every lead stage for the organization, ordered by sort_order."""

@@ -208,6 +208,7 @@ async def test_create_lead_stage_first_stage_forces_flags():
     fake_repo.count = 0
     request = CreateLeadStageRequest(
         stage_name=" New ",
+        description="Entry stage for inbound leads.",
         sort_order=9,
         color=LeadStageColor.GREEN,
     )
@@ -219,6 +220,7 @@ async def test_create_lead_stage_first_stage_forces_flags():
     assert payload["stage_key"] == "new"
     assert payload["sort_order"] == 1
     assert payload["color"] == "green"
+    assert payload["description"] == "Entry stage for inbound leads."
 
 
 @pytest.mark.asyncio

@@ -3,25 +3,14 @@
 Pydantic models for lead stage create, update, and read operations.
 """
 
-from enum import Enum
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from apps.user_service.app.schemas.enums import UiColor
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
-
-class LeadStageColor(str, Enum):
-    """Allowed stage color keys (mapped to UI tokens on frontend)."""
-
-    RED = "red"
-    ORANGE = "orange"
-    YELLOW = "yellow"
-    GREEN = "green"
-    BLUE = "blue"
-    PURPLE = "purple"
-    PINK = "pink"
-    GRAY = "gray"
+# Same palette as ``UiColor``; kept for lead-stage API field naming.
+LeadStageColor = UiColor
 
 
 class Unset:
@@ -68,15 +57,6 @@ class LeadStageBasePayload(BaseModel):
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         return normalized
-
-    @field_validator("description")
-    @classmethod
-    def normalize_description(cls, value: str | None) -> str | None:
-        """Normalize blank description strings to None."""
-        if value is None:
-            return value
-        normalized = value.strip()
-        return normalized or None
 
 
 class CreateLeadStageRequest(LeadStageBasePayload):
