@@ -299,6 +299,15 @@ class PracticeArea(str, Enum):
     ENVIRONMENTAL_LAW = "Environmental Law"
     HEALTHCARE_LAW = "Healthcare Law"
     SECURITIES_LAW = "Securities Law"
+    TECHNOLOGY = "Technology"
+    HEALTHCARE = "Healthcare"
+    LEGAL = "Legal"
+    FINANCE = "Finance"
+    MANUFACTURING = "Manufacturing"
+    RETAIL = "Retail"
+    CONSULTING = "Consulting"
+    AGRICULTURE = "Agriculture"
+    FARMING = "Farming"
 
 
 # ============================================================================
