@@ -597,6 +597,7 @@ async def update_client(
     }
 
     update_event: dict | None = None
+    created_company_id: str | None = None
     async with db_connection.transaction():
         client_service = ClientService(
             user_context=user_context,
@@ -606,6 +607,7 @@ async def update_client(
         result = await client_service.update_client(client_id, user_context.organization_id, body)
 
         if result:
+            created_company_id = result.get("created_company_id")
             request.state.raw_audit_old_data = result.get("old_data")
             request.state.raw_audit_new_data = body.model_dump(
                 exclude_unset=True, exclude_none=True
@@ -625,9 +627,12 @@ async def update_client(
             )
 
     # Best-effort Typesense indexing after update, offloaded to background task.
+    client_refs = [(client_id, user_context.organization_id)]
+    if created_company_id:
+        client_refs.append((created_company_id, user_context.organization_id))
     background_tasks.add_task(
         ClientService.index_clients_in_typesense_background,
-        [(client_id, user_context.organization_id)],
+        client_refs,
     )
 
     # Trigger enrichment only when enrichment-relevant inputs have changed.
@@ -642,10 +647,18 @@ async def update_client(
     enrichment_inputs_changed = any(
         getattr(body, field_name) is not None for field_name in enrichment_input_fields
     )
-    if enrichment_inputs_changed:
+    enrichment_client_ids = [
+        cid
+        for cid in (
+            client_id if enrichment_inputs_changed else None,
+            created_company_id,
+        )
+        if cid
+    ]
+    for enrichment_client_id in enrichment_client_ids:
         background_tasks.add_task(
             ClientService.trigger_enrichment_background,
-            client_id,
+            enrichment_client_id,
             user_context.organization_id,
         )
     if update_event is not None:
