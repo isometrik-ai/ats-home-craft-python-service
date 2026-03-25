@@ -278,8 +278,9 @@ class ClientEnrichmentService:
             payload["name"] = name
         if data.get("email"):
             payload["email"] = data["email"]
-        if data.get("company"):
-            payload["company"] = data["company"]
+        company_name = (data.get("company_name") or data.get("company") or "").strip()
+        if company_name:
+            payload["company"] = company_name
         if country:
             payload["country"] = country
         if phone:

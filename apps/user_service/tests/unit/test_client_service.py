@@ -994,12 +994,17 @@ async def test_create_optional_records_creates_lead(monkeypatch):
         phone_number="1234567890",
         first_name="John",
         last_name="Doe",
-        lead_management=LeadManagement(enabled=True, lead_status=LeadStatus.PROSPECT),
+        lead_management=LeadManagement(
+            enabled=True,
+            stage_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        ),
     )
 
     await service._create_optional_records(request_data, "client-1")
     assert fake_lead.calls["create_lead"]["client_id"] == "client-1"
     assert fake_lead.calls["create_lead"]["organization_id"] == "org-1"
+    assert fake_lead.calls["create_lead"]["name"] == "John Doe"
+    assert fake_lead.calls["create_lead"]["stage_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
 @pytest.mark.asyncio
@@ -1435,6 +1440,7 @@ async def test_get_client_details_with_full_data(monkeypatch):
         "enrichment_done": False,
         "last_enriched_at": None,
         "lead_id": "lead-1",
+        "stage_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         "lead_status": "prospect",
         "intake_stage": "Initial Contact",
         "lead_source": "website",
@@ -1481,6 +1487,7 @@ async def test_get_client_details_with_full_data(monkeypatch):
     assert result.billing_preferences is not None
     assert result.custom_fields == {"key": "value"}
     assert result.lead is not None
+    assert result.lead.stage_id == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     assert result.lead.lead_status == "prospect"
     assert len(result.addresses) == 1
     assert result.addresses[0].address_line1 == "123 Main St"
@@ -1925,6 +1932,33 @@ async def test_apply_lead_update_calls_repository(monkeypatch):
         "org-1",
         "lead-1",
         {"lead_status": LeadStatus.CONVERTED.value},
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_lead_update_includes_stage_id(monkeypatch):
+    """_apply_lead_update passes stage_id to the repository."""
+    fake_lead = _FakeLeadRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.LeadRepository",
+        lambda db_connection=None: fake_lead,
+    )
+    service = ClientService(db_connection=None)
+    service.user_context = UserContext(
+        user_id="u1",
+        email="u@example.com",
+        organization_id="org-1",
+    )
+    lead = LeadManagementUpdate(
+        lead_id="lead-1",
+        stage_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    )
+
+    await service._apply_lead_update(lead)
+    assert fake_lead.calls["update_lead"] == (
+        "org-1",
+        "lead-1",
+        {"stage_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
     )
 
 
