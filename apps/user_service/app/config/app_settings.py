@@ -54,12 +54,12 @@ class KafkaSettings(BaseSettings):
     """Kafka producer settings for event publishing."""
 
     enabled: bool = config("KAFKA_ENABLED", default=False)
-    bootstrap_servers: str = config("KAFKA_BOOTSTRAP_SERVERS")
+    bootstrap_servers: str = config("KAFKA_BOOTSTRAP_SERVERS", default="")
     producer_name: str = config("KAFKA_PRODUCER_NAME", default="user_service")
     security_protocol: str = config("KAFKA_SECURITY_PROTOCOL", default="PLAINTEXT")
-    sasl_mechanism: str | None = config("KAFKA_SASL_MECHANISM")
-    sasl_username: str | None = config("KAFKA_SASL_USERNAME")
-    sasl_password: str | None = config("KAFKA_SASL_PASSWORD")
+    sasl_mechanism: str | None = config("KAFKA_SASL_MECHANISM", default=None)
+    sasl_username: str | None = config("KAFKA_SASL_USERNAME", default=None)
+    sasl_password: str | None = config("KAFKA_SASL_PASSWORD", default=None)
     request_timeout_ms: int = config("KAFKA_REQUEST_TIMEOUT_MS", default=30000)
     max_batch_size: int = config("KAFKA_MAX_BATCH_SIZE", default=16384)
     linger_ms: int = config("KAFKA_LINGER_MS", default=5)
