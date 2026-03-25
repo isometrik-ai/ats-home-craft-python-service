@@ -1641,7 +1641,7 @@ async def test_apply_project_row_sets_primary_from_add(monkeypatch):
         )
     )
 
-    await service._apply_project_row_update("project-1", "org-1", request, None)
+    await service._apply_project_row_update("project-1", "org-1", {}, request, None)
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
@@ -1662,7 +1662,7 @@ async def test_apply_project_row_sets_primary_from_update(monkeypatch):
         )
     )
 
-    await service._apply_project_row_update("project-1", "org-1", request, None)
+    await service._apply_project_row_update("project-1", "org-1", {}, request, None)
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
@@ -1678,7 +1678,7 @@ async def test_apply_project_row_fetches_primary_not_in_req(monkeypatch):
     ]
     request = UpdateProjectRequest(repositories=RepositoriesUpdate(remove="repo-2"))
 
-    await service._apply_project_row_update("project-1", "org-1", request, None)
+    await service._apply_project_row_update("project-1", "org-1", {}, request, None)
 
     assert "get_project_repositories" in fake_project_repo.calls
     assert fake_project_repo.calls["get_project_repositories"][2] is True
@@ -1694,7 +1694,7 @@ async def test_apply_project_row_handles_no_primary_repo(monkeypatch):
     fake_project_repo.repositories_result = []
     request = UpdateProjectRequest(repositories=RepositoriesUpdate(remove="repo-1"))
 
-    await service._apply_project_row_update("project-1", "org-1", request, None)
+    await service._apply_project_row_update("project-1", "org-1", {}, request, None)
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
@@ -1707,7 +1707,7 @@ async def test_apply_project_row_skips_no_repos_request(monkeypatch):
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
     request = UpdateProjectRequest(project_title="Updated Title")
 
-    await service._apply_project_row_update("project-1", "org-1", request, None)
+    await service._apply_project_row_update("project-1", "org-1", {}, request, None)
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
@@ -1720,7 +1720,7 @@ async def test_apply_project_row_update_sets_team_id(monkeypatch):
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
     request = UpdateProjectRequest(project_title="Updated Title")
 
-    await service._apply_project_row_update("project-1", "org-1", request, "new-team-1")
+    await service._apply_project_row_update("project-1", "org-1", {}, request, "new-team-1")
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
@@ -1893,7 +1893,7 @@ async def test_apply_project_row_update_with_only_updated_by(monkeypatch):
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
     request = UpdateProjectRequest()
 
-    await service._apply_project_row_update("project-1", "org-1", request, None)
+    await service._apply_project_row_update("project-1", "org-1", {}, request, None)
 
     # updated_by is always included, so update_project is called
     assert "update_project" in fake_project_repo.calls

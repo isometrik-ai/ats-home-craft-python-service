@@ -19,7 +19,7 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.schemas.projects import ProjectListQueryParams
 
 # JSONB columns in projects table
-PROJECT_JSONB_COLUMNS = frozenset({"billing_info", "tech_stack", "custom_fields"})
+PROJECT_JSONB_COLUMNS = frozenset({"billing_info", "tech_stack", "custom_fields", "documents"})
 
 
 class ProjectRepository:
@@ -98,6 +98,7 @@ class ProjectRepository:
             "primary_repo_url",
             "tags",
             "custom_fields",
+            "documents",
             "is_billable",
             "is_internal",
             "created_by",
@@ -570,7 +571,7 @@ class ProjectRepository:
                 p.team_id, p.start_date, p.target_end_date, p.actual_end_date, p.billing_info,
                 p.total_billed, p.total_hours, p.tech_stack, p.project_goals, p.success_criteria,
                 p.additional_ai_context, p.primary_pm_tool, p.primary_repo_url, p.tags,
-                p.custom_fields, p.is_billable, p.is_internal, p.created_at, p.updated_at,
+                p.custom_fields, p.documents, p.is_billable, p.is_internal, p.created_at, p.updated_at,
                 p.created_by, p.updated_by,
                 c.id AS client_uuid,
                 c.name AS client_name,
