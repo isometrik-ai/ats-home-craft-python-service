@@ -5,6 +5,8 @@ import pytest
 from apps.user_service.app.db.repositories.lead_stage_repository import (
     LeadStageRepository,
 )
+from apps.user_service.app.schemas.enums import DEFAULT_ORGANIZATION_LEAD_STAGES
+from apps.user_service.app.utils.common_utils import enum_member_title_label
 
 
 class _FakeConn:
@@ -117,8 +119,6 @@ async def test_create_stage_inserts_and_returns_dict():
         "description": "Warm lead",
         "color": "blue",
         "sort_order": 2,
-        "is_initial": False,
-        "is_final": False,
     }
 
     result = await repo.create_stage(row)
@@ -134,9 +134,29 @@ async def test_create_stage_inserts_and_returns_dict():
         "Warm lead",
         "blue",
         2,
-        False,
-        False,
     )
+
+
+@pytest.mark.asyncio
+async def test_bulk_insert_default_stages():
+    """bulk_insert_default_stages_for_organization runs one INSERT with parallel unnest."""
+    conn = _FakeConn()
+    repo = LeadStageRepository(db_connection=conn)
+
+    await repo.bulk_insert_default_stages_for_organization("550e8400-e29b-41d4-a716-446655440000")
+
+    assert len(conn.execute_calls) == 1
+    query, args = conn.execute_calls[0]
+    assert "INSERT INTO lead_stages" in query
+    assert "unnest" in query
+    org_id, names, keys, descriptions, colors, orders = args
+    assert org_id == "550e8400-e29b-41d4-a716-446655440000"
+    assert len(names) == len(DEFAULT_ORGANIZATION_LEAD_STAGES)
+    assert names == [enum_member_title_label(s) for s, _, _ in DEFAULT_ORGANIZATION_LEAD_STAGES]
+    assert keys == [s.value for s, _, _ in DEFAULT_ORGANIZATION_LEAD_STAGES]
+    assert descriptions == [d for _, _, d in DEFAULT_ORGANIZATION_LEAD_STAGES]
+    assert colors == [c.value for _, c, _ in DEFAULT_ORGANIZATION_LEAD_STAGES]
+    assert orders == list(range(1, len(DEFAULT_ORGANIZATION_LEAD_STAGES) + 1))
 
 
 @pytest.mark.asyncio

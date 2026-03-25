@@ -70,6 +70,20 @@ class _FakeLeadStageRepo:
         self.calls["get_stage_by_id"] = (organization_id, stage_id)
         return self.stage_by_id_result
 
+    async def get_stage_by_id_with_max_sort_order(self, organization_id, stage_id):
+        """Fetch one stage by id plus org max sort_order."""
+        self.calls["get_stage_by_id_with_max_sort_order"] = (organization_id, stage_id)
+        if self.stage_by_id_result is None:
+            return None
+        max_sort_order = max(
+            [self.stage_by_id_result["sort_order"]]
+            + [row["sort_order"] for row in self.stages_result]
+        )
+        return {
+            **self.stage_by_id_result,
+            "max_sort_order": max_sort_order,
+        }
+
     async def get_stage_by_id_with_organization_metrics(
         self, organization_id, stage_id, proposed_stage_key=None
     ):
@@ -194,8 +208,7 @@ async def test_create_lead_stage_first_stage_forces_flags():
     fake_repo.count = 0
     request = CreateLeadStageRequest(
         stage_name=" New ",
-        is_initial=False,
-        is_final=False,
+        description="Entry stage for inbound leads.",
         sort_order=9,
         color=LeadStageColor.GREEN,
     )
@@ -206,9 +219,8 @@ async def test_create_lead_stage_first_stage_forces_flags():
     assert payload["stage_name"] == "New"
     assert payload["stage_key"] == "new"
     assert payload["sort_order"] == 1
-    assert payload["is_initial"] is True
-    assert payload["is_final"] is True
     assert payload["color"] == "green"
+    assert payload["description"] == "Entry stage for inbound leads."
 
 
 @pytest.mark.asyncio
@@ -219,8 +231,6 @@ async def test_create_lead_stage_non_first_uses_body_flags():
     fake_repo.max_sort_order = 3
     request = CreateLeadStageRequest(
         stage_name="Qualified",
-        is_initial=True,
-        is_final=False,
         sort_order=2,
         description="Warm lead",
     )
@@ -229,8 +239,6 @@ async def test_create_lead_stage_non_first_uses_body_flags():
 
     payload = fake_repo.calls["create_stage"]
     assert payload["sort_order"] == 2
-    assert payload["is_initial"] is True
-    assert payload["is_final"] is False
     assert payload["description"] == "Warm lead"
     assert fake_repo.calls["adjust_sort_orders"] == [("org-1", 2, None, 1)]
 
@@ -364,7 +372,7 @@ async def test_get_lead_stage_returns_serialized_item():
     assert item["id"] == "stage-1"
     assert item["stage_name"] == "Qualified"
     assert item["updated_at"] == now.isoformat()
-    assert fake_repo.calls["get_stage_by_id"] == ("org-1", "stage-1")
+    assert fake_repo.calls["get_stage_by_id_with_max_sort_order"] == ("org-1", "stage-1")
 
 
 @pytest.mark.asyncio
@@ -420,14 +428,19 @@ async def test_update_lead_stage_reorders_and_updates_fields():
         "is_initial": False,
         "is_final": False,
     }
+    fake_repo.stages_result = [
+        {"sort_order": 1},
+        {"sort_order": 2},
+        {"sort_order": 3},
+        {"sort_order": 4},
+        {"sort_order": 5},
+    ]
 
     body = UpdateLeadStageRequest(
         stage_name="Qualified",
         description="Warm lead",
         color=LeadStageColor.GREEN,
         sort_order=3,
-        is_initial=False,
-        is_final=False,
     )
     result = await service.update_lead_stage("stage-1", body)
 
@@ -435,59 +448,7 @@ async def test_update_lead_stage_reorders_and_updates_fields():
     assert fake_repo.calls["adjust_sort_orders"][0] == ("org-1", 2, 3, -1)
     _, _, updated_fields = fake_repo.calls["update_stage"]
     assert updated_fields["stage_key"] == "qualified"
-    assert updated_fields["is_initial"] is False
-    assert updated_fields["is_final"] is False
     assert updated_fields["sort_order"] == 3
-
-
-@pytest.mark.asyncio
-async def test_update_lead_stage_rejects_unset_last_initial():
-    """update_lead_stage rejects unsetting last initial stage."""
-    service, fake_repo = _service_with_fake_repo()
-    now = datetime.now(timezone.utc)
-    fake_repo.stage_by_id_result = {
-        "id": "stage-1",
-        "stage_name": "New",
-        "stage_key": "new",
-        "description": None,
-        "color": "blue",
-        "sort_order": 1,
-        "is_initial": True,
-        "is_final": False,
-        "created_at": now,
-        "updated_at": now,
-    }
-    fake_repo.initial_count = 0
-
-    with pytest.raises(ValidationException) as exc_info:
-        await service.update_lead_stage("stage-1", UpdateLeadStageRequest(is_initial=False))
-
-    assert exc_info.value.message_key == "lead_stages.errors.cannot_unset_last_initial"
-
-
-@pytest.mark.asyncio
-async def test_update_lead_stage_rejects_unset_last_final():
-    """update_lead_stage rejects unsetting last final stage."""
-    service, fake_repo = _service_with_fake_repo()
-    now = datetime.now(timezone.utc)
-    fake_repo.stage_by_id_result = {
-        "id": "stage-1",
-        "stage_name": "Won",
-        "stage_key": "won",
-        "description": None,
-        "color": "green",
-        "sort_order": 3,
-        "is_initial": False,
-        "is_final": True,
-        "created_at": now,
-        "updated_at": now,
-    }
-    fake_repo.final_count = 0
-
-    with pytest.raises(ValidationException) as exc_info:
-        await service.update_lead_stage("stage-1", UpdateLeadStageRequest(is_final=False))
-
-    assert exc_info.value.message_key == "lead_stages.errors.cannot_unset_last_final"
 
 
 @pytest.mark.asyncio
@@ -559,6 +520,7 @@ async def test_update_no_op_when_sort_order_unchanged():
         "created_at": now,
         "updated_at": now,
     }
+    fake_repo.stages_result = [fake_repo.stage_by_id_result]
 
     result = await service.update_lead_stage("stage-1", UpdateLeadStageRequest(sort_order=2))
 

@@ -3,25 +3,14 @@
 Pydantic models for lead stage create, update, and read operations.
 """
 
-from enum import Enum
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from apps.user_service.app.schemas.enums import UiColor
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
-
-class LeadStageColor(str, Enum):
-    """Allowed stage color keys (mapped to UI tokens on frontend)."""
-
-    RED = "red"
-    ORANGE = "orange"
-    YELLOW = "yellow"
-    GREEN = "green"
-    BLUE = "blue"
-    PURPLE = "purple"
-    PINK = "pink"
-    GRAY = "gray"
+# Same palette as ``UiColor``; kept for lead-stage API field naming.
+LeadStageColor = UiColor
 
 
 class Unset:
@@ -54,14 +43,6 @@ class LeadStageBasePayload(BaseModel):
         ge=1,
         description="Pipeline position (1..N or 1..N+1 based on operation)",
     )
-    is_initial: bool | None = Field(
-        default=None,
-        description="Whether this stage is an entry stage",
-    )
-    is_final: bool | None = Field(
-        default=None,
-        description="Whether this stage is a terminal won/closed stage",
-    )
 
     @field_validator("stage_name")
     @classmethod
@@ -77,15 +58,6 @@ class LeadStageBasePayload(BaseModel):
             )
         return normalized
 
-    @field_validator("description")
-    @classmethod
-    def normalize_description(cls, value: str | None) -> str | None:
-        """Normalize blank description strings to None."""
-        if value is None:
-            return value
-        normalized = value.strip()
-        return normalized or None
-
 
 class CreateLeadStageRequest(LeadStageBasePayload):
     """Request schema for creating a lead stage."""
@@ -97,14 +69,6 @@ class CreateLeadStageRequest(LeadStageBasePayload):
         min_length=1,
         max_length=100,
         description="Stage display name (unique per organization)",
-    )
-    is_initial: bool = Field(
-        default=False,
-        description="Entry-stage flag. First stage is forced to true by service layer.",
-    )
-    is_final: bool = Field(
-        default=False,
-        description="Final-stage flag. First stage is forced to true by service layer.",
     )
 
 
