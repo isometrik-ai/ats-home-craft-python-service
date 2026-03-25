@@ -749,7 +749,7 @@ class ClientService:
                 self._prepare_primary_contact_person_client_data(request_data, organization_id),
             ]
         if request_data.client_type == ClientType.PERSON:
-            company_name = (request_data.company or "").strip()
+            company_name = (request_data.company_name or "").strip()
             if company_name and not request_data.client_company_id:
                 return [
                     self._prepare_company_client_data_for_linked_company(
@@ -796,7 +796,7 @@ class ClientService:
         is_company = request_data.client_type == ClientType.COMPANY
         person_with_new_company = (
             request_data.client_type == ClientType.PERSON
-            and (request_data.company or "").strip()
+            and (request_data.company_name or "").strip()
             and request_data.client_company_id is None
         )
         person_with_existing_company = (

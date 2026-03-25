@@ -604,7 +604,7 @@ class CreateClientRequest(BaseModel):
     # Person type fields
     prefix: str | None = Field(None, description="Name prefix", max_length=10)
     middle_name: str | None = Field(None, description="Middle name", max_length=100)
-    company: str | None = Field(None, description="Company name", max_length=200)
+    company_name: str | None = Field(None, description="Company name", max_length=200)
     title: str | None = Field(None, description="Job title", max_length=100)
     date_of_birth: date | None = Field(None, description="Date of birth")
     client_company_id: str | None = Field(

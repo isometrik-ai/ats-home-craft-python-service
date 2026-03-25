@@ -158,7 +158,7 @@ def test_build_person_payload_phone_country_company():
         "last_name": "D",
         "phone_isd_code": "+1",
         "phone_number": "5551234",
-        "company": "Acme",
+        "company_name": "Acme",
         "addresses": [{"country": "USA"}],
     }
     payload = svc._build_person_payload(data, webhook_url=None)
