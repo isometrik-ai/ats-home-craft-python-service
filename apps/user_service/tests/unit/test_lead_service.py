@@ -8,7 +8,12 @@ from typing import Any
 
 import pytest
 
-from apps.user_service.app.schemas.enums import EntityType, LeadsListMode, LeadStatus
+from apps.user_service.app.schemas.enums import (
+    EntityType,
+    IntakeStage,
+    LeadsListMode,
+    LeadStatus,
+)
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
     LeadsListQueryParams,
@@ -259,7 +264,7 @@ async def test_create_lead_client_missing_raises(monkeypatch):
         client_id=CLIENT_ID,
         name="New Lead",
         stage_id=STAGE_ID_1,
-        intake_stage="Initial",
+        intake_stage=IntakeStage.INITIAL_CONTACT,
         lead_status=LeadStatus.PROSPECT,
     )
 
@@ -337,7 +342,7 @@ async def test_create_lead_payload_and_poc_validation(monkeypatch):
         client_id=CLIENT_ID,
         name="New Lead",
         stage_id=STAGE_ID_1,
-        intake_stage="  Initial Intake  ",
+        intake_stage=IntakeStage.INITIAL_CONTACT,
         lead_source="Referral",
         referral_source="Partner",
         lead_score="high",
@@ -363,7 +368,7 @@ async def test_create_lead_payload_and_poc_validation(monkeypatch):
     assert payload["name"] == "New Lead"
     assert payload["stage_id"] == STAGE_ID_1
     assert payload["lead_status"] == LeadStatus.QUALIFIED.value
-    assert payload["intake_stage"] == "Initial Intake"
+    assert payload["intake_stage"] == IntakeStage.INITIAL_CONTACT.value
     assert payload["created_by"] == CTX_USER_ID
     assert payload["owner_id"] == CTX_USER_ID  # owner_id defaults to creator
     assert payload["point_of_contact"] == POINT_OF_CONTACT_ID

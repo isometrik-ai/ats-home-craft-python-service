@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from apps.user_service.app.schemas.enums import LeadStatus
+from apps.user_service.app.schemas.enums import IntakeStage, LeadStatus
 from apps.user_service.app.schemas.lead_stages import UNSET
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
@@ -26,7 +26,7 @@ def test_create_lead_blank_optional_to_none():
         client_id=CLIENT_ID,
         name="Lead",
         stage_id=STAGE_ID,
-        intake_stage="   ",
+        intake_stage=IntakeStage.INITIAL_CONTACT,
         lead_source="   ",
         referral_source=" Partner  ",
         lead_score="   ",
@@ -38,7 +38,7 @@ def test_create_lead_blank_optional_to_none():
         close_date=date(2026, 1, 1),
     )
 
-    assert req.intake_stage is None
+    assert req.intake_stage == IntakeStage.INITIAL_CONTACT
     assert req.lead_source is None
     assert req.referral_source == "Partner"
     assert req.lead_score is None
