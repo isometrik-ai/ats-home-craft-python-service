@@ -16,7 +16,7 @@ from apps.user_service.app.db.repositories import (
     TeamRepository,
 )
 from apps.user_service.app.schemas.clients import PrimaryContactInfo
-from apps.user_service.app.schemas.enums import TeamRoles
+from apps.user_service.app.schemas.enums import EntityType, TeamRoles
 from apps.user_service.app.schemas.projects import (
     BillingInfo,
     ClientInfo,
@@ -29,6 +29,7 @@ from apps.user_service.app.schemas.projects import (
     UpdateProjectRequest,
 )
 from apps.user_service.app.schemas.teams import MemberData, TeamDbDelete, TeamDbIn
+from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -349,6 +350,31 @@ class ProjectService:
         if team_id:
             project_data["team_id"] = team_id
 
+    async def _apply_custom_fields_for_create(
+        self, project_data: dict[str, Any], request_data: CreateProjectRequest
+    ) -> None:
+        """Validate/format custom fields for projects create payloads."""
+        if not (self.user_context and self.user_context.organization_id):
+            return
+
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        entity_type = EntityType.PROJECT
+
+        if request_data.custom_fields:
+            validated = await custom_field_service.validate_and_format_custom_fields(
+                request_data.custom_fields,
+                entity_type,
+            )
+            project_data["custom_fields"] = validated
+        else:
+            await custom_field_service.ensure_required_fields_present(
+                request_data.custom_fields,
+                entity_type,
+            )
+
     def _apply_primary_relationships(
         self,
         project_data: dict[str, Any],
@@ -483,6 +509,7 @@ class ProjectService:
 
         # Prepare project data
         project_data = self._prepare_project_data(request_data, project_id, team_id)
+        await self._apply_custom_fields_for_create(project_data, request_data)
 
         # Create project
         project_record = await self.project_repository.create_project(project_data)
@@ -512,7 +539,6 @@ class ProjectService:
             "success_criteria",
             "additional_ai_context",
             "tags",
-            "custom_fields",
             "is_billable",
             "is_internal",
         )
@@ -528,6 +554,51 @@ class ProjectService:
         if request_data.tech_stack is not None:
             data["tech_stack"] = self._prepare_tech_stack_dict(request_data.tech_stack)
         return data
+
+    async def _merge_custom_fields_into_payload(
+        self,
+        body: UpdateProjectRequest,
+        current: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
+        """Merge body.custom_fields with current, validate, and set on payload."""
+        if body.custom_fields is None:
+            return
+
+        existing = parse_json_field(current.get("custom_fields")) or {}
+        if not isinstance(existing, dict):
+            existing = {}
+        merged = dict(existing)
+
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        entity_type = EntityType.PROJECT
+
+        fields_to_validate: dict[str, Any] = {}
+        for key, value in body.custom_fields.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                fields_to_validate[key] = value
+
+        if fields_to_validate:
+            required_presence = {**merged, **fields_to_validate}
+            validated_fields = await custom_field_service.validate_and_format_custom_fields(
+                fields_to_validate,
+                entity_type,
+                required_custom_fields_for_presence=required_presence,
+            )
+            merged.update(validated_fields)
+        else:
+            # If the request only removed fields, required fields still must be present.
+            await custom_field_service.ensure_required_fields_present(
+                merged,
+                entity_type,
+            )
+
+        payload["custom_fields"] = merged
 
     @staticmethod
     def _format_project_for_audit(project_data: dict[str, Any]) -> dict[str, Any]:
@@ -878,6 +949,11 @@ class ProjectService:
         project_data = self._build_project_update_dict(request_data, user_id)
         self._apply_batch_jsonb_list_changes(
             body=request_data, current=current, project_data=project_data
+        )
+        await self._merge_custom_fields_into_payload(
+            body=request_data,
+            current=current,
+            payload=project_data,
         )
         if new_team_id is not None:
             project_data["team_id"] = new_team_id

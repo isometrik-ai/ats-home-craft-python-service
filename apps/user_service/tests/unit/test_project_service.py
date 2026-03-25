@@ -3,6 +3,7 @@
 import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -257,6 +258,36 @@ class _FakeTeamRepo:
         return None
 
 
+class _FakeCustomFieldService:
+    """Fake CustomFieldService for ProjectService unit tests."""
+
+    def __init__(self):
+        self.calls: dict[str, Any] = {}
+
+    async def validate_and_format_custom_fields(
+        self,
+        custom_fields: dict[str, Any],
+        entity_type,
+        required_custom_fields_for_presence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Validate and format custom fields."""
+        self.calls["validate_and_format_custom_fields"] = {
+            "custom_fields": custom_fields,
+            "entity_type": entity_type,
+            "required_custom_fields_for_presence": required_custom_fields_for_presence,
+        }
+        # Keep unit tests focused on service orchestration; return unchanged.
+        return dict(custom_fields)
+
+    async def ensure_required_fields_present(self, custom_fields, entity_type) -> None:
+        """Ensure required fields are present."""
+        self.calls["ensure_required_fields_present"] = {
+            "custom_fields": custom_fields,
+            "entity_type": entity_type,
+        }
+        return None
+
+
 def _ctx(org_id="org-1"):
     """Build reusable UserContext for tests."""
     return UserContext(
@@ -272,6 +303,7 @@ def _service_with_fakes(monkeypatch):
     fake_project_repo = _FakeProjectRepo()
     fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
+    fake_custom_fields = _FakeCustomFieldService()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
@@ -285,9 +317,13 @@ def _service_with_fakes(monkeypatch):
         "apps.user_service.app.services.project_service.TeamRepository",
         lambda db_connection=None: fake_team_repo,
     )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.CustomFieldService",
+        lambda db_connection=None, user_context=None: fake_custom_fields,
+    )
 
     service = ProjectService(user_context=_ctx(), db_connection=None)
-    return service, fake_project_repo, fake_client_repo, fake_team_repo
+    return service, fake_project_repo, fake_client_repo, fake_team_repo, fake_custom_fields
 
 
 def test_generate_project_id_normalizes_title():
@@ -644,7 +680,7 @@ def test_build_billing_info_parses_json():
 @pytest.mark.asyncio
 async def test_get_project_details_includes_team(monkeypatch):
     """get_project_details returns team info and derived project lead."""
-    service, fake_project_repo, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     now = datetime.now(timezone.utc)
     fake_project_repo.project_with_client_result = {
         "id": "project-1",
@@ -1129,7 +1165,7 @@ def test_build_project_update_dict_tech_stack(monkeypatch):
 @pytest.mark.asyncio
 async def test_ensure_project_team_creates_when_no_team_add(monkeypatch):
     """_ensure_project_team creates team when project has no team and add is requested."""
-    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     fake_team_repo.team_id_result = "new-team-1"
     project = {"id": "project-1", "project_title": "Test Project"}
     request = UpdateProjectRequest(
@@ -1174,7 +1210,7 @@ async def test_ensure_project_team_returns_existing_team_id(monkeypatch):
 @pytest.mark.asyncio
 async def test_ensure_team_raises_when_member_not_found(monkeypatch):
     """_ensure_project_team raises NotFoundException when member not found."""
-    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     fake_team_repo.members_valid = False
     project = {"id": "project-1", "project_title": "Test Project"}
     request = UpdateProjectRequest(
@@ -1196,7 +1232,7 @@ async def test_ensure_team_raises_when_member_not_found(monkeypatch):
 @pytest.mark.asyncio
 async def test_apply_team_members_changes_removes_member(monkeypatch):
     """_apply_team_members_changes removes member when remove is requested."""
-    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     request = UpdateProjectRequest(team_members=TeamMembersUpdate(remove="member-1"))
 
     await service._apply_team_members_changes("team-1", request, skip_add=False)
@@ -1210,7 +1246,7 @@ async def test_apply_team_members_changes_removes_member(monkeypatch):
 @pytest.mark.asyncio
 async def test_apply_team_members_changes_updates_member(monkeypatch):
     """_apply_team_members_changes updates member when update is requested."""
-    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
 
     request = UpdateProjectRequest(
         team_members=TeamMembersUpdate(
@@ -1235,7 +1271,7 @@ async def test_apply_team_members_changes_updates_member(monkeypatch):
 @pytest.mark.asyncio
 async def test_apply_team_members_changes_adds_member(monkeypatch):
     """_apply_team_members_changes adds member when add is requested."""
-    service, _, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     request = UpdateProjectRequest(
         team_members=TeamMembersUpdate(
             add=TeamMemberInput(
@@ -1452,7 +1488,7 @@ async def test_update_project_success_with_scalar_fields(monkeypatch):
 @pytest.mark.asyncio
 async def test_update_project_success_with_team_member_add(monkeypatch):
     """update_project successfully adds team member."""
-    service, fake_project_repo, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     fake_team_repo.team_id_result = "new-team-1"
     fake_project_repo.project_with_client_result = {
         "id": "project-1",
@@ -1919,7 +1955,7 @@ async def test_delete_project_raises_not_found(monkeypatch):
 @pytest.mark.asyncio
 async def test_delete_project_success_with_team(monkeypatch):
     """delete_project hard deletes team, repos, integrations; soft deletes project."""
-    service, fake_project_repo, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     fake_project_repo.project_basic_result = {
         "id": "project-uuid-1",
         "team_id": "team-uuid-1",
@@ -1949,7 +1985,7 @@ async def test_delete_project_success_with_team(monkeypatch):
 @pytest.mark.asyncio
 async def test_delete_project_success_without_team(monkeypatch):
     """delete_project skips team delete when project has no team."""
-    service, fake_project_repo, _, fake_team_repo = _service_with_fakes(monkeypatch)
+    service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     fake_project_repo.project_basic_result = {
         "id": "project-uuid-2",
         "team_id": None,
