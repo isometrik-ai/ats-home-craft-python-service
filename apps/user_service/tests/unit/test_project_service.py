@@ -1,5 +1,6 @@
 """Unit tests for ProjectService business logic."""
 
+# pylint: disable=too-many-lines
 import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -882,6 +883,7 @@ async def test_create_project_success(monkeypatch):
     fake_project_repo = _FakeProjectRepo()
     fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
+    fake_custom_fields = _FakeCustomFieldService()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
@@ -894,6 +896,10 @@ async def test_create_project_success(monkeypatch):
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
         lambda db_connection=None: fake_team_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.CustomFieldService",
+        lambda db_connection=None, user_context=None: fake_custom_fields,
     )
 
     service = ProjectService(user_context=_ctx(), db_connection=None)
@@ -917,6 +923,7 @@ async def test_create_project_with_team_members(monkeypatch):
     fake_project_repo = _FakeProjectRepo()
     fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
+    fake_custom_fields = _FakeCustomFieldService()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
@@ -929,6 +936,10 @@ async def test_create_project_with_team_members(monkeypatch):
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
         lambda db_connection=None: fake_team_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_service.CustomFieldService",
+        lambda db_connection=None, user_context=None: fake_custom_fields,
     )
 
     service = ProjectService(user_context=_ctx(), db_connection=None)
@@ -1112,8 +1123,6 @@ async def test_get_project_details_success(monkeypatch):
 
 
 # Update Project Tests
-
-
 def test_build_project_update_dict_only_provided_fields(monkeypatch):
     """_build_project_update_dict only includes non-None fields."""
     service, *_ = _service_with_fakes(monkeypatch)
