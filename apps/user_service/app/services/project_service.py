@@ -347,6 +347,15 @@ class ProjectService:
         if request_data.custom_fields:
             project_data["custom_fields"] = request_data.custom_fields
 
+        if request_data.documents:
+            docs: list[dict[str, Any]] = []
+            for doc in request_data.documents:
+                item = doc.model_dump(mode="json", exclude_none=True)
+                if not item.get("id"):
+                    item["id"] = str(uuid.uuid4())
+                docs.append(item)
+            project_data["documents"] = docs
+
         if team_id:
             project_data["team_id"] = team_id
 
