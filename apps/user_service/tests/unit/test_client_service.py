@@ -53,6 +53,7 @@ class _FakeClientRepo:
         self.clients_count_result = 0
         self.address_result = []
         self.company_contacts_result = []
+        self.primary_contact_for_update_result = None
 
     async def check_client_name_exists(self, name, organization_id, exclude_client_id=None):
         """Return name existence flag."""
@@ -155,6 +156,26 @@ class _FakeClientRepo:
     async def _delete_addresses_by_ids(self, client_id, address_ids):
         """Delete addresses by ids."""
         self.calls["delete_addresses_by_ids"] = (client_id, address_ids)
+
+    async def _get_primary_contact_for_update(self, client_id, organization_id):
+        """Return configured primary contact row for updates."""
+        self.calls["_get_primary_contact_for_update"] = (client_id, organization_id)
+        return self.primary_contact_for_update_result
+
+    async def _update_client_user(self, client_user_id, update_data):
+        """Record client_user updates."""
+        self.calls["_update_client_user"] = (client_user_id, update_data)
+        return True
+
+    async def clear_primary_contact_for_company(
+        self, company_client_id, organization_id, exclude_client_user_id=None
+    ):
+        """Record clear-primary operation."""
+        self.calls["clear_primary_contact_for_company"] = (
+            company_client_id,
+            organization_id,
+            exclude_client_user_id,
+        )
 
 
 class _FakeLeadRepo:
@@ -1814,6 +1835,50 @@ async def test_update_client_with_lead_management(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_client_sets_contact_as_primary(monkeypatch):
+    """is_primary_contact=True promotes current contact and unmarks other company contacts."""
+    fake_repo = _FakeClientRepo()
+    fake_repo.get_client_for_update_result = {
+        "id": "client-1",
+        "client_type": ClientType.PERSON.value,
+        "name": "Contact Name",
+        "industry": None,
+        "profile_photo_url": None,
+        "portal_access": False,
+        "tags": [],
+        "websites": "[]",
+        "billing_preferences": "{}",
+        "custom_fields": "{}",
+        "additional_data": "{}",
+        "social_pages": "[]",
+        "enrichment_done": False,
+        "last_enriched_at": None,
+    }
+    fake_repo.primary_contact_for_update_result = {
+        "id": "cu-1",
+        "phones": "[]",
+        "first_name": "A",
+        "middle_name": "",
+        "last_name": "B",
+        "client_company_id": "company-1",
+    }
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+
+    await service.update_client(
+        "client-1",
+        "org-1",
+        UpdateClientRequest(is_primary_contact=True),
+    )
+
+    assert fake_repo.calls["clear_primary_contact_for_company"] == ("company-1", "org-1", "cu-1")
+    assert fake_repo.calls["_update_client_user"] == ("cu-1", {"is_primary_contact": True})
+
+
+@pytest.mark.asyncio
 async def test_has_any_update_false_when_all_none():
     """_has_any_update returns False when all fields are None."""
     service = ClientService(db_connection=None)
@@ -1831,6 +1896,18 @@ async def test_has_any_update_true_when_any_field_set():
     assert service._has_any_update(UpdateClientRequest(industry="Tech")) is True
     assert service._has_any_update(UpdateClientRequest(portal_access=True)) is True
     assert service._has_any_update(UpdateClientRequest(tags=["a"])) is True
+    assert service._has_any_update(UpdateClientRequest(is_primary_contact=True)) is True
+
+
+def test_rejects_company_link_with_primary_toggle():
+    """client_company_id and is_primary_contact cannot be sent together."""
+    with pytest.raises(ValidationException) as exc_info:
+        UpdateClientRequest(client_company_id="company-1", is_primary_contact=True)
+
+    assert (
+        exc_info.value.message_key
+        == "clients.errors.client_company_and_primary_contact_mutually_exclusive"
+    )
 
 
 @pytest.mark.asyncio
