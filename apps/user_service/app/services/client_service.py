@@ -1618,7 +1618,8 @@ class ClientService:
             primary_contact=body.primary_contact,
             is_person=current.get("client_type") == ClientType.PERSON.value,
             profile_photo_url=body.profile_photo_url,
-            client_company_id=created_company_id,
+            client_company_id=body.client_company_id or created_company_id,
+            mark_as_non_primary=body.client_company_id is not None,
         )
 
         if body.lead_management is not None:
@@ -1672,6 +1673,7 @@ class ClientService:
         is_person: bool,
         profile_photo_url: str | None,
         client_company_id: str | None = None,
+        mark_as_non_primary: bool = False,
     ) -> str | None:
         """Apply primary_contact updates if present and return person full name if applicable."""
         if primary_contact is None and profile_photo_url is None and client_company_id is None:
@@ -1689,6 +1691,8 @@ class ClientService:
                 update_data["profile_photo_url"] = profile_photo_url
             if client_company_id is not None:
                 update_data["client_company_id"] = client_company_id
+                if mark_as_non_primary:
+                    update_data["is_primary_contact"] = False
             await self.client_repository._update_client_user(
                 primary_contact_row["id"],
                 update_data,
@@ -1701,6 +1705,7 @@ class ClientService:
             is_person=is_person,
             profile_photo_url=profile_photo_url,
             client_company_id=client_company_id,
+            mark_as_non_primary=mark_as_non_primary,
         )
 
     @staticmethod
@@ -1752,6 +1757,7 @@ class ClientService:
             getattr(body, name) is not None
             for name in (
                 "company_name",
+                "client_company_id",
                 "industry",
                 "profile_photo_url",
                 "portal_access",
@@ -2190,6 +2196,7 @@ class ClientService:
         is_person: bool,
         profile_photo_url: str | None = None,
         client_company_id: str | None = None,
+        mark_as_non_primary: bool = False,
     ) -> str | None:
         """Apply primary contact scalar fields and phones.
 
@@ -2200,6 +2207,8 @@ class ClientService:
         update_data = self._build_primary_contact_update_data(primary_contact)
         if client_company_id is not None:
             update_data["client_company_id"] = client_company_id
+            if mark_as_non_primary:
+                update_data["is_primary_contact"] = False
         if profile_photo_url is not None:
             update_data["profile_photo_url"] = profile_photo_url
         if primary_contact.phones is not None:

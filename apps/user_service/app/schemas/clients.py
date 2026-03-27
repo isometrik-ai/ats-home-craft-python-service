@@ -526,6 +526,13 @@ class UpdateClientRequest(BaseModel):
         max_length=200,
         description="Company name (company type only)",
     )
+    client_company_id: str | None = Field(
+        None,
+        description=(
+            "Linked company client ID for contact/person updates "
+            "(updates primary contact client_user.client_company_id)"
+        ),
+    )
     primary_contact: PrimaryContactUpdate | None = None
     industry: str | None = Field(None, max_length=100)
     profile_photo_url: str | None = Field(None, max_length=500)
