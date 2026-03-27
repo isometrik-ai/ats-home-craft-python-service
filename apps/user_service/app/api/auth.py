@@ -481,7 +481,6 @@ async def select_organization(
         http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
     },
 )
-@limiter.limit("100/minute")
 async def validate(
     request: Request,
     _current_user: dict = Depends(get_user_from_auth),
