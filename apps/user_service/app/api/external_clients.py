@@ -17,8 +17,8 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Requ
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-from apps.user_service.app.dependencies.external_auth import external_organization_id
 from apps.user_service.app.dependencies.db import db_conn, db_uow
+from apps.user_service.app.dependencies.external_auth import external_organization_id
 from apps.user_service.app.schemas.clients import UpdateClientRequest
 from apps.user_service.app.schemas.enums import ClientStatus, ClientType
 from apps.user_service.app.services.client_service import ClientService
@@ -47,6 +47,7 @@ def _build_filter_params(
         "page": page,
         "page_size": page_size,
     }
+
 
 @handle_api_exceptions("external list companies")
 @router.get(
