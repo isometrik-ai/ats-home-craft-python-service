@@ -643,6 +643,7 @@ class EntityType(str, Enum):
     COMPANY = "company"
     CONTACT = "contact"
     LEAD = "lead"
+    PROJECT = "project"
 
 
 class FieldType(str, Enum):

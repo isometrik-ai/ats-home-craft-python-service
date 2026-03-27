@@ -243,7 +243,9 @@
       "client_id_cannot_change": "Client ID cannot be changed after project creation.",
       "project_has_no_team": "Project has no team; cannot update team members.",
       "repository_not_found": "Repository not found.",
-      "integration_not_found": "Integration not found."
+      "integration_not_found": "Integration not found.",
+      "document_not_found": "Document not found.",
+      "document_id_already_exists": "A document with this id already exists in the project."
     },
     "success": {
       "project_created": "Project created successfully.",

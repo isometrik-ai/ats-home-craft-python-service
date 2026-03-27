@@ -4,6 +4,7 @@ This service handles all business logic related to projects, including
 validation, formatting, and orchestration of project operations.
 """
 
+import uuid
 from decimal import Decimal
 from typing import Any
 
@@ -15,7 +16,7 @@ from apps.user_service.app.db.repositories import (
     TeamRepository,
 )
 from apps.user_service.app.schemas.clients import PrimaryContactInfo
-from apps.user_service.app.schemas.enums import TeamRoles
+from apps.user_service.app.schemas.enums import EntityType, TeamRoles
 from apps.user_service.app.schemas.projects import (
     BillingInfo,
     ClientInfo,
@@ -28,6 +29,7 @@ from apps.user_service.app.schemas.projects import (
     UpdateProjectRequest,
 )
 from apps.user_service.app.schemas.teams import MemberData, TeamDbDelete, TeamDbIn
+from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -50,6 +52,8 @@ class ProjectService:
     Handles all business logic related to projects, including validation,
     formatting, and orchestration of project operations.
     """
+
+    JSONB_LIST_MAX_ITEMS = 1000
 
     def __init__(
         self,
@@ -345,8 +349,42 @@ class ProjectService:
         if request_data.custom_fields:
             project_data["custom_fields"] = request_data.custom_fields
 
+        if request_data.documents:
+            docs: list[dict[str, Any]] = []
+            for doc in request_data.documents:
+                item = doc.model_dump(mode="json", exclude_none=True)
+                if not item.get("id"):
+                    item["id"] = str(uuid.uuid4())
+                docs.append(item)
+            project_data["documents"] = docs
+
         if team_id:
             project_data["team_id"] = team_id
+
+    async def _apply_custom_fields_for_create(
+        self, project_data: dict[str, Any], request_data: CreateProjectRequest
+    ) -> None:
+        """Validate/format custom fields for projects create payloads."""
+        if not (self.user_context and self.user_context.organization_id):
+            return
+
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        entity_type = EntityType.PROJECT
+
+        if request_data.custom_fields:
+            validated = await custom_field_service.validate_and_format_custom_fields(
+                request_data.custom_fields,
+                entity_type,
+            )
+            project_data["custom_fields"] = validated
+        else:
+            await custom_field_service.ensure_required_fields_present(
+                request_data.custom_fields,
+                entity_type,
+            )
 
     def _apply_primary_relationships(
         self,
@@ -482,6 +520,7 @@ class ProjectService:
 
         # Prepare project data
         project_data = self._prepare_project_data(request_data, project_id, team_id)
+        await self._apply_custom_fields_for_create(project_data, request_data)
 
         # Create project
         project_record = await self.project_repository.create_project(project_data)
@@ -511,7 +550,6 @@ class ProjectService:
             "success_criteria",
             "additional_ai_context",
             "tags",
-            "custom_fields",
             "is_billable",
             "is_internal",
         )
@@ -527,6 +565,51 @@ class ProjectService:
         if request_data.tech_stack is not None:
             data["tech_stack"] = self._prepare_tech_stack_dict(request_data.tech_stack)
         return data
+
+    async def _merge_custom_fields_into_payload(
+        self,
+        body: UpdateProjectRequest,
+        current: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
+        """Merge body.custom_fields with current, validate, and set on payload."""
+        if body.custom_fields is None:
+            return
+
+        existing = parse_json_field(current.get("custom_fields")) or {}
+        if not isinstance(existing, dict):
+            existing = {}
+        merged = dict(existing)
+
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        entity_type = EntityType.PROJECT
+
+        fields_to_validate: dict[str, Any] = {}
+        for key, value in body.custom_fields.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                fields_to_validate[key] = value
+
+        if fields_to_validate:
+            required_presence = {**merged, **fields_to_validate}
+            validated_fields = await custom_field_service.validate_and_format_custom_fields(
+                fields_to_validate,
+                entity_type,
+                required_custom_fields_for_presence=required_presence,
+            )
+            merged.update(validated_fields)
+        else:
+            # If the request only removed fields, required fields still must be present.
+            await custom_field_service.ensure_required_fields_present(
+                merged,
+                entity_type,
+            )
+
+        payload["custom_fields"] = merged
 
     @staticmethod
     def _format_project_for_audit(project_data: dict[str, Any]) -> dict[str, Any]:
@@ -753,16 +836,142 @@ class ProjectService:
                 connected_by=user_id,
             )
 
+    @staticmethod
+    def _jsonb_list_remove(
+        updated: list[dict[str, Any]],
+        update_obj: Any,
+    ) -> list[dict[str, Any]]:
+        """Apply remove operation to a JSONB list (by id)."""
+        if hasattr(update_obj, "remove") and update_obj.remove:
+            remove_ids = {str(i) for i in update_obj.remove}
+            return [item for item in updated if str(item.get("id")) not in remove_ids]
+        return updated
+
+    @staticmethod
+    def _jsonb_list_update(
+        updated: list[dict[str, Any]],
+        update_obj: Any,
+        not_found_message_key: str,
+    ) -> list[dict[str, Any]]:
+        """Apply update operation to a JSONB list (merge by id)."""
+        if not (hasattr(update_obj, "update") and update_obj.update):
+            return updated
+        for item in update_obj.update:
+            data = item.model_dump(mode="json", exclude_none=True, exclude={"id"})
+            for i, existing_item in enumerate(updated):
+                if str(existing_item.get("id")) == item.id:
+                    updated[i] = {**existing_item, **data, "id": item.id}
+                    break
+            else:
+                raise NotFoundException(
+                    message_key=not_found_message_key,
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+        return updated
+
+    @staticmethod
+    def _jsonb_list_add(
+        updated: list[dict[str, Any]],
+        update_obj: Any,
+        *,
+        id_conflict_message_key: str | None,
+    ) -> list[dict[str, Any]]:
+        """Apply add operation to a JSONB list (append with generated id)."""
+        if not (hasattr(update_obj, "add") and update_obj.add):
+            return updated
+        if len(updated) + len(update_obj.add) > ProjectService.JSONB_LIST_MAX_ITEMS:
+            raise BadRequestException(
+                message_key="errors.validation_error",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"max_items": ProjectService.JSONB_LIST_MAX_ITEMS},
+            )
+        existing_ids = {str(item.get("id")) for item in updated if item.get("id") is not None}
+        for item in update_obj.add:
+            new_item = item.model_dump(mode="json", exclude_none=True)
+            new_id = str(uuid.uuid4())
+            if new_id in existing_ids:
+                if id_conflict_message_key:
+                    raise BadRequestException(
+                        message_key=id_conflict_message_key,
+                        custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    )
+                raise BadRequestException(
+                    message_key="errors.validation_error",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            # UI won't provide ids; keep same approach as clients
+            new_item["id"] = new_id
+            updated.append(new_item)
+            existing_ids.add(new_id)
+        return updated
+
+    @staticmethod
+    def _apply_jsonb_list_changes(
+        update_obj: Any,
+        current: dict[str, Any],
+        field_name: str,
+        not_found_message_key: str,
+        *,
+        id_conflict_message_key: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Same logic as ClientService._apply_jsonb_list_changes, but returns merged list.
+
+        Supports remove, update, add (any combination). Order: remove -> update -> add.
+        """
+        current_list = parse_json_field(current.get(field_name)) or []
+        if not isinstance(current_list, list):
+            current_list = []
+        updated: list[dict[str, Any]] = [i for i in current_list if isinstance(i, dict)]
+
+        updated = ProjectService._jsonb_list_remove(updated, update_obj)
+        updated = ProjectService._jsonb_list_update(updated, update_obj, not_found_message_key)
+        updated = ProjectService._jsonb_list_add(
+            updated,
+            update_obj,
+            id_conflict_message_key=id_conflict_message_key,
+        )
+
+        return updated
+
+    def _apply_batch_jsonb_list_changes(
+        self,
+        *,
+        body: UpdateProjectRequest,
+        current: dict[str, Any],
+        project_data: dict[str, Any],
+    ) -> None:
+        """Apply batch JSONB list changes (same structure as clients module).
+
+        We fold merged values into `project_data` so the project row is updated once.
+        """
+        if body.documents is not None:
+            project_data["documents"] = self._apply_jsonb_list_changes(
+                body.documents,
+                current,
+                "documents",
+                "projects.errors.document_not_found",
+                id_conflict_message_key="projects.errors.document_id_already_exists",
+            )
+
     async def _apply_project_row_update(
         self,
         project_uuid: str,
         organization_id: str,
+        current: dict[str, Any],
         request_data: UpdateProjectRequest,
         new_team_id: str | None,
     ) -> None:
         """Build project update dict; set primary_repo if needed."""
         user_id = self.user_context.user_id
         project_data = self._build_project_update_dict(request_data, user_id)
+        self._apply_batch_jsonb_list_changes(
+            body=request_data, current=current, project_data=project_data
+        )
+        await self._merge_custom_fields_into_payload(
+            body=request_data,
+            current=current,
+            payload=project_data,
+        )
         if new_team_id is not None:
             project_data["team_id"] = new_team_id
         if request_data.repositories:
@@ -842,7 +1051,7 @@ class ProjectService:
         await self._apply_repositories_changes(project_uuid, organization_id, user_id, request_data)
         await self._apply_integrations_changes(project_uuid, organization_id, user_id, request_data)
         await self._apply_project_row_update(
-            project_uuid, organization_id, request_data, new_team_id
+            project_uuid, organization_id, project, request_data, new_team_id
         )
         old_data = self._format_project_for_audit(project)
         return {"old_data": old_data}
@@ -1126,6 +1335,8 @@ class ProjectService:
         tech_stack_data = tech_raw if isinstance(tech_raw, dict) else {}
         custom_fields_data = parse_json_field(project.get("custom_fields"))
         custom_fields = custom_fields_data if isinstance(custom_fields_data, dict) else {}
+        documents_raw = parse_json_field(project.get("documents")) or []
+        documents = documents_raw if isinstance(documents_raw, list) else []
 
         return ProjectDetailData(
             id=project_uuid,
@@ -1173,6 +1384,7 @@ class ProjectService:
             primary_repo_url=project.get("primary_repo_url"),
             tags=project.get("tags", []) or [],
             custom_fields=custom_fields,
+            documents=documents,
             is_billable=project.get("is_billable", True),
             is_internal=project.get("is_internal", False),
             team=team_info,

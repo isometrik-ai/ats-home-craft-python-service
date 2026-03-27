@@ -22,6 +22,9 @@ from apps.user_service.app.schemas.enums import (
     SyncDirection,
 )
 
+# JSONB column names on the `projects` table (repository serialization, etc.)
+PROJECT_JSONB_COLUMNS = frozenset({"billing_info", "tech_stack", "custom_fields", "documents"})
+
 
 class BudgetInfo(BaseModel):
     """Budget information model."""
@@ -282,6 +285,65 @@ class IntegrationUpdateItem(BaseModel):
     integration_config: dict[str, Any] | None = None
 
 
+class ProjectDocument(BaseModel):
+    """Single project document item (stored in projects.documents JSONB array)."""
+
+    id: str | None = Field(default=None, description="Document UUID")
+    type: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Document type",
+    )
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Document name",
+    )
+    url: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="Document URL or file reference",
+    )
+
+
+class ProjectDocumentUpdateItem(BaseModel):
+    """Patch a single project document by id."""
+
+    id: str = Field(..., description="Document UUID")
+    type: str | None = Field(None, min_length=1, max_length=100)
+    name: str | None = Field(None, min_length=1, max_length=200)
+    url: str | None = Field(None, min_length=1, max_length=2000)
+
+
+class DocumentsUpdate(BaseModel):
+    """Documents update payload.
+
+    Multiple operations are allowed in one request:
+    - add: append one or many documents (ids auto-generated when omitted)
+    - update: patch one or many documents by id
+    - remove: delete one or many documents by id
+    """
+
+    add: list[ProjectDocument] | None = Field(
+        None,
+        max_length=200,
+        description="Documents to append",
+    )
+    update: list[ProjectDocumentUpdateItem] | None = Field(
+        None,
+        max_length=200,
+        description="Documents to patch by id",
+    )
+    remove: list[str] | None = Field(
+        None,
+        max_length=200,
+        description="Document ids to remove",
+    )
+
+
 class TeamMembersUpdate(BaseModel):
     """Single team member operation: add, update, or remove. Exactly one must be provided."""
 
@@ -341,6 +403,9 @@ class UpdateProjectRequest(BaseModel):
     )
     integrations: IntegrationsUpdate | None = Field(
         None, description="Single integration operation: add, update, or remove"
+    )
+    documents: DocumentsUpdate | None = Field(
+        None, description="Single documents operation: add, update, remove, or replace"
     )
 
     @model_validator(mode="after")
@@ -403,6 +468,11 @@ class CreateProjectRequest(BaseModel):
         None,
         max_length=10,
         description="Integrations",
+    )
+    documents: list[ProjectDocument] = Field(
+        default_factory=list,
+        max_length=200,
+        description="Project documents (URL or uploaded file reference)",
     )
 
     @model_validator(mode="after")
@@ -637,6 +707,7 @@ class ProjectDetailData(BaseModel):
     primary_repo_url: str | None = Field(None, description="Primary repository URL")
     tags: list[str] = Field(default_factory=list, description="Tags")
     custom_fields: dict[str, Any] = Field(default_factory=dict, description="Custom fields")
+    documents: list[ProjectDocument] = Field(default_factory=list, description="Project documents")
     is_billable: bool = Field(..., description="Is billable")
     is_internal: bool = Field(..., description="Is internal")
     team: TeamInfo | None = Field(None, description="Team information")
