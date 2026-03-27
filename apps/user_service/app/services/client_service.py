@@ -1581,6 +1581,7 @@ class ClientService:
         Raises:
             NotFoundException: If client not found
             ConflictException: If client name already exists
+            ValidationException: If client_company_id and is_primary_contact are provided together
         """
         if not self._has_any_update(body):
             return None
