@@ -22,6 +22,9 @@ from apps.user_service.app.schemas.enums import (
     SyncDirection,
 )
 
+# JSONB column names on the `projects` table (repository serialization, etc.)
+PROJECT_JSONB_COLUMNS = frozenset({"billing_info", "tech_stack", "custom_fields", "documents"})
+
 
 class BudgetInfo(BaseModel):
     """Budget information model."""

@@ -53,6 +53,8 @@ class ProjectService:
     formatting, and orchestration of project operations.
     """
 
+    JSONB_LIST_MAX_ITEMS = 1000
+
     def __init__(
         self,
         user_context: UserContext,
@@ -877,12 +879,16 @@ class ProjectService:
         """Apply add operation to a JSONB list (append with generated id)."""
         if not (hasattr(update_obj, "add") and update_obj.add):
             return updated
+        if len(updated) + len(update_obj.add) > ProjectService.JSONB_LIST_MAX_ITEMS:
+            raise BadRequestException(
+                message_key="errors.validation_error",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"max_items": ProjectService.JSONB_LIST_MAX_ITEMS},
+            )
         existing_ids = {str(item.get("id")) for item in updated if item.get("id") is not None}
         for item in update_obj.add:
             new_item = item.model_dump(mode="json", exclude_none=True)
-            # UI won't provide ids; keep same approach as clients
-            new_item["id"] = str(uuid.uuid4())
-            new_id = str(new_item.get("id"))
+            new_id = str(uuid.uuid4())
             if new_id in existing_ids:
                 if id_conflict_message_key:
                     raise BadRequestException(
@@ -893,6 +899,8 @@ class ProjectService:
                     message_key="errors.validation_error",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
+            # UI won't provide ids; keep same approach as clients
+            new_item["id"] = new_id
             updated.append(new_item)
             existing_ids.add(new_id)
         return updated

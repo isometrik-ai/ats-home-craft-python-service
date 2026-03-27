@@ -16,10 +16,10 @@ from apps.user_service.app.schemas.enums import (
     ProjectStatus,
     TeamRoles,
 )
-from apps.user_service.app.schemas.projects import ProjectListQueryParams
-
-# JSONB columns in projects table
-PROJECT_JSONB_COLUMNS = frozenset({"billing_info", "tech_stack", "custom_fields", "documents"})
+from apps.user_service.app.schemas.projects import (
+    PROJECT_JSONB_COLUMNS,
+    ProjectListQueryParams,
+)
 
 
 class ProjectRepository:
