@@ -230,6 +230,25 @@ class OrganizationRepository:
         row = await self.db_connection.fetchrow(query, organization_id, status.value)
         return dict(row) if row else None
 
+    async def get_organization_id_by_isometrik_project_id(
+        self,
+        project_id: str,
+    ) -> str | None:
+        """Resolve organization id by Isometrik project id.
+
+        This uses the dedicated `organizations.isometrik_project_id` column (preferred) rather than
+        reading from `settings` JSON.
+        """
+        deleted_org_status = OrganizationStatus.DELETED.value
+        query = """
+            SELECT o.id::text
+            FROM organizations o
+            WHERE o.status != $2
+              AND o.isometrik_project_id = $1
+            LIMIT 1
+        """
+        return await self.db_connection.fetchval(query, project_id, deleted_org_status)
+
     # VALIDATION OPERATIONS
     async def check_organization_exists(self, organization_id: str) -> bool:
         """Check if organization exists and is not deleted."""

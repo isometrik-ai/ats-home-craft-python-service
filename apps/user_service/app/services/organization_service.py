@@ -731,9 +731,24 @@ class OrganizationService:
     ) -> dict:
         """Assemble organization payload for repository."""
         # Add isometrik_application_details to settings if provided
+        isometrik_project_id: str | None = None
         if isometrik_details is not None:
             settings = settings.copy() if settings else {}
             settings["isometrik_application_details"] = isometrik_details
+            project_id_val = isometrik_details.get("projectId")
+            if project_id_val is not None:
+                if not isinstance(project_id_val, str):
+                    raise InternalServerErrorException(
+                        message_key="organizations.errors.invalid_isometrik_project_id",
+                        custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+                    )
+                project_id_val = project_id_val.strip()
+                if not project_id_val:
+                    raise InternalServerErrorException(
+                        message_key="organizations.errors.invalid_isometrik_project_id",
+                        custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+                    )
+                isometrik_project_id = project_id_val
 
         # Convert any remaining Pydantic models to dicts before JSON serialization
         serialized_settings_dict = serialize_pydantic_models(settings) if settings else None
@@ -758,6 +773,7 @@ class OrganizationService:
             "status": OrganizationStatus.ACTIVE.value,
             "description": body.company_data.description,
             "company_size": body.company_data.company_size,
+            "isometrik_project_id": isometrik_project_id,
             "settings": serialized_settings,
             "subscription": serialized_subscription,
             "created_by_id": self.user_context.user_id,
