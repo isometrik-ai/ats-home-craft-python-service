@@ -1686,9 +1686,6 @@ class ClientService:
         is_primary_contact: bool | None = None,
     ) -> str | None:
         """Apply primary_contact updates if present and return person full name if applicable."""
-        if primary_contact is None:
-            return None
-
         if profile_photo_url is None and client_company_id is None and is_primary_contact is None:
             return None
 
