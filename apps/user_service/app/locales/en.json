@@ -171,6 +171,7 @@
       "only_one_primary_phone": "Only one phone number can be marked as primary",
       "only_one_primary_website": "Only one website can be marked as primary",
       "only_one_primary_address": "Only one address can be marked as primary",
+      "client_company_and_primary_contact_mutually_exclusive": "client_company_id and is_primary_contact cannot be provided together.",
       "website_not_found": "Website not found",
       "social_page_not_found": "Social page not found",
       "phone_not_found": "Phone number not found",

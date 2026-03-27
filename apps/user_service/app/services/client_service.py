@@ -1593,6 +1593,13 @@ class ClientService:
             )
 
         self._validate_client_type_scope(body, current.get("client_type", ""))
+        # Defensive check mirroring UpdateClientRequest validator.
+        # Prevents implicit service-level combinations from creating invalid state.
+        if body.client_company_id is not None and body.is_primary_contact is not None:
+            raise ValidationException(
+                message_key="clients.errors.client_company_and_primary_contact_mutually_exclusive",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
 
         old_data = self._format_client_for_audit(current)
 
