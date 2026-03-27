@@ -533,6 +533,13 @@ class UpdateClientRequest(BaseModel):
             "(updates primary contact client_user.client_company_id)"
         ),
     )
+    is_primary_contact: bool | None = Field(
+        None,
+        description=(
+            "Set/unset this contact as primary for its linked company. "
+            "When true, other contacts under the same company are unmarked."
+        ),
+    )
     primary_contact: PrimaryContactUpdate | None = None
     industry: str | None = Field(None, max_length=100)
     profile_photo_url: str | None = Field(None, max_length=500)
@@ -591,6 +598,16 @@ class UpdateClientRequest(BaseModel):
     additional_data: dict[str, Any] | None = None
     enrichment_done: bool | None = None
     last_enriched_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_company_link_and_primary_contact(self) -> "UpdateClientRequest":
+        """Disallow passing company-link and primary toggle together."""
+        if self.client_company_id is not None and self.is_primary_contact is not None:
+            raise ValidationException(
+                message_key="clients.errors.client_company_and_primary_contact_mutually_exclusive",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
 
 class CreateClientRequest(BaseModel):

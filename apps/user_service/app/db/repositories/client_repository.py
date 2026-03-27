@@ -872,7 +872,7 @@ class ClientRepository:
             dict with id, phones (raw JSONB), and name parts; or None if no contact.
         """
         query = f"""
-            SELECT cu.id, cu.phones, cu.first_name, cu.middle_name, cu.last_name
+            SELECT cu.id, cu.phones, cu.first_name, cu.middle_name, cu.last_name, cu.client_company_id
             FROM client_users cu
             JOIN clients c ON c.id = $1
             WHERE c.id = $1 AND c.organization_id = $2
@@ -919,3 +919,27 @@ class ClientRepository:
             *params,
         )
         return row is not None
+
+    async def clear_primary_contact_for_company(
+        self,
+        company_client_id: str,
+        organization_id: str,
+        exclude_client_user_id: str | None = None,
+    ) -> None:
+        """Unmark existing primary contact(s) for a company."""
+        await self.db_connection.execute(
+            """
+            UPDATE client_users
+            SET is_primary_contact = FALSE,
+                updated_at = NOW()
+            WHERE client_company_id = $1
+              AND organization_id = $2
+              AND is_primary_contact = TRUE
+              AND ($3::uuid IS NULL OR id != $3::uuid)
+              AND status != $4
+            """,
+            company_client_id,
+            organization_id,
+            exclude_client_user_id,
+            ClientUserStatus.DELETED.value,
+        )

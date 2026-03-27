@@ -1619,7 +1619,9 @@ class ClientService:
             is_person=current.get("client_type") == ClientType.PERSON.value,
             profile_photo_url=body.profile_photo_url,
             client_company_id=body.client_company_id or created_company_id,
-            mark_as_non_primary=body.client_company_id is not None,
+            is_primary_contact=False
+            if body.client_company_id is not None
+            else body.is_primary_contact,
         )
 
         if body.lead_management is not None:
@@ -1673,10 +1675,15 @@ class ClientService:
         is_person: bool,
         profile_photo_url: str | None,
         client_company_id: str | None = None,
-        mark_as_non_primary: bool = False,
+        is_primary_contact: bool | None = None,
     ) -> str | None:
         """Apply primary_contact updates if present and return person full name if applicable."""
-        if primary_contact is None and profile_photo_url is None and client_company_id is None:
+        if (
+            primary_contact is None
+            and profile_photo_url is None
+            and client_company_id is None
+            and is_primary_contact is None
+        ):
             return None
 
         primary_contact_row = await self.client_repository._get_primary_contact_for_update(
@@ -1685,27 +1692,14 @@ class ClientService:
         if not primary_contact_row:
             return None
 
-        if primary_contact is None:
-            update_data: dict[str, Any] = {}
-            if profile_photo_url is not None:
-                update_data["profile_photo_url"] = profile_photo_url
-            if client_company_id is not None:
-                update_data["client_company_id"] = client_company_id
-                if mark_as_non_primary:
-                    update_data["is_primary_contact"] = False
-            await self.client_repository._update_client_user(
-                primary_contact_row["id"],
-                update_data,
-            )
-            return None
-
         return await self._apply_primary_contact_updates(
             primary_contact_row=primary_contact_row,
             primary_contact=primary_contact,
             is_person=is_person,
             profile_photo_url=profile_photo_url,
             client_company_id=client_company_id,
-            mark_as_non_primary=mark_as_non_primary,
+            is_primary_contact=is_primary_contact,
+            organization_id=organization_id,
         )
 
     @staticmethod
@@ -1758,6 +1752,7 @@ class ClientService:
             for name in (
                 "company_name",
                 "client_company_id",
+                "is_primary_contact",
                 "industry",
                 "profile_photo_url",
                 "portal_access",
@@ -2148,55 +2143,15 @@ class ClientService:
                 "clients.errors.key_person_not_found",
             )
 
-    async def _apply_primary_contact_phones(
-        self,
-        client_id: str,
-        organization_id: str,
-        phones_update: PhonesUpdate,
-    ) -> None:
-        """Apply batch phone add/update/remove to the primary contact client_user."""
-        primary = await self.client_repository._get_primary_contact_for_update(
-            client_id, organization_id
-        )
-        current_list = parse_json_field(primary.get("phones")) or []
-        if not isinstance(current_list, list):
-            current_list = []
-        updated = current_list.copy()
-
-        if phones_update.remove:
-            updated = [p for p in updated if str(p.get("id")) not in phones_update.remove]
-        if phones_update.update:
-            for item in phones_update.update:
-                data = item.model_dump(exclude_none=True, exclude={"id"})
-                found = False
-                for i, existing in enumerate(updated):
-                    if str(existing.get("id")) == item.id:
-                        updated[i] = {**existing, **data}
-                        found = True
-                        break
-                if not found:
-                    raise NotFoundException(
-                        message_key="clients.errors.phone_not_found",
-                        custom_code=CustomStatusCode.NOT_FOUND,
-                    )
-        if phones_update.add:
-            for item in phones_update.add:
-                new_item = item.model_dump(exclude_none=True)
-                new_item["id"] = str(uuid.uuid4())
-                updated.append(new_item)
-
-        await self.client_repository._update_client_user(
-            primary["id"], {"phones": json.dumps(updated)}
-        )
-
     async def _apply_primary_contact_updates(
         self,
         primary_contact_row: dict[str, Any],
-        primary_contact: PrimaryContactUpdate,
+        primary_contact: PrimaryContactUpdate | None,
         is_person: bool,
         profile_photo_url: str | None = None,
         client_company_id: str | None = None,
-        mark_as_non_primary: bool = False,
+        is_primary_contact: bool | None = None,
+        organization_id: str | None = None,
     ) -> str | None:
         """Apply primary contact scalar fields and phones.
 
@@ -2204,24 +2159,39 @@ class ClientService:
         """
         primary_id = primary_contact_row["id"]
 
-        update_data = self._build_primary_contact_update_data(primary_contact)
+        update_data = (
+            self._build_primary_contact_update_data(primary_contact)
+            if primary_contact is not None
+            else {}
+        )
         if client_company_id is not None:
             update_data["client_company_id"] = client_company_id
-            if mark_as_non_primary:
-                update_data["is_primary_contact"] = False
+        if is_primary_contact is False:
+            update_data["is_primary_contact"] = False
         if profile_photo_url is not None:
             update_data["profile_photo_url"] = profile_photo_url
-        if primary_contact.phones is not None:
+        if primary_contact is not None and primary_contact.phones is not None:
             update_data["phones"] = self._build_primary_contact_phones_json(
                 existing_phones_json=primary_contact_row.get("phones"),
                 phones_update=primary_contact.phones,
             )
 
+        if is_primary_contact is True:
+            resolved_company_id = client_company_id or primary_contact_row.get("client_company_id")
+            if resolved_company_id and organization_id:
+                await self.client_repository.clear_primary_contact_for_company(
+                    company_client_id=resolved_company_id,
+                    organization_id=organization_id,
+                    exclude_client_user_id=primary_id,
+                )
+            update_data["is_primary_contact"] = True
         if update_data:
             await self.client_repository._update_client_user(primary_id, update_data)
 
         # Person only: return computed full name so caller can fold it into client update_data.
-        if self._should_compute_person_full_name(is_person=is_person, update=primary_contact):
+        if primary_contact is not None and self._should_compute_person_full_name(
+            is_person=is_person, update=primary_contact
+        ):
             return self._compute_person_full_name(
                 primary_contact_row=primary_contact_row,
                 update=primary_contact,
