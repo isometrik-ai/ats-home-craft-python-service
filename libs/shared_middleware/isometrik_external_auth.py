@@ -24,9 +24,11 @@ from libs.shared_utils.logger import get_logger
 
 logger = get_logger("isometrik-external-auth")
 
+
 @dataclass(slots=True)
 class _ClientState:
     """State of the Isometrik HTTP client."""
+
     client: httpx.AsyncClient | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 

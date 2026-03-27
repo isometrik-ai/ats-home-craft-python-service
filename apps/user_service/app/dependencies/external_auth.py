@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncpg
 from fastapi import Depends
 
-from apps.user_service.app.db.repositories.organization_repository import OrganizationRepository
+from apps.user_service.app.db.repositories.organization_repository import (
+    OrganizationRepository,
+)
 from apps.user_service.app.dependencies.db import db_conn
 from libs.shared_middleware.isometrik_external_auth import (
     IsometrikExternalContext,
