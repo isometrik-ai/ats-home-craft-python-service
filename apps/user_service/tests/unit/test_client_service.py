@@ -295,6 +295,23 @@ def _ctx(org_id="org-1"):
     )
 
 
+def _cfc(
+    field_id: str,
+    value,
+    instance_id: str | None = "10000000-0000-4000-8000-000000000001",
+) -> dict:
+    """PATCH FieldCell fragment (include ``instance_id`` when updating an existing root)."""
+    cell: dict = {"field_id": field_id, "value": value}
+    if instance_id is not None:
+        cell["instance_id"] = instance_id
+    return cell
+
+
+def _cfc_create(field_id: str, value) -> dict:
+    """Create payload root FieldCell: ``field_id`` + discriminator only (no instance_id / type)."""
+    return {"field_id": field_id, "value": value}
+
+
 @pytest.mark.asyncio
 async def test_create_client_from_user_no_event(monkeypatch):
     """Raises ConflictException when user event is missing."""
@@ -767,7 +784,7 @@ async def test_client_raises_required_custom_fields_missing(monkeypatch):
         phone_number="1234567890",
         first_name="John",
         last_name="Doe",
-        # custom_fields omitted → defaults to {}
+        # custom_fields omitted → defaults to []
     )
 
     with pytest.raises(ValidationException) as exc_info:
@@ -807,7 +824,7 @@ async def test_client_allows_custom_fields_no_required_fields(monkeypatch):
         phone_number="1234567890",
         first_name="John",
         last_name="Doe",
-        # custom_fields omitted → defaults to {}
+        # custom_fields omitted → defaults to []
     )
 
     client_data = await service._prepare_client_data(request_data, "org-1")
@@ -848,7 +865,7 @@ async def test_prepare_client_data_serializes_jsonb_fields(monkeypatch):
         last_name="Doe",
         websites=[Website(url="https://example.com", type="primary", is_primary=True)],
         tags=["tag1", "tag2"],
-        custom_fields={"key": "value"},
+        custom_fields=[_cfc_create("field-1", "value")],
     )
 
     client_data = await service._prepare_client_data(request_data, "org-1")
@@ -892,13 +909,17 @@ async def test_prepare_client_data_validates_custom_fields(monkeypatch):
         phone_number="1234567890",
         first_name="John",
         last_name="Doe",
-        custom_fields={"age": 25},
+        custom_fields=[_cfc_create("field-1", 25)],
     )
 
     client_data = await service._prepare_client_data(request_data, "org-1")
 
     parsed_fields = parse_json_field(client_data["custom_fields"])
-    assert parsed_fields == {"age": 25.0}
+    assert len(parsed_fields) == 1
+    assert parsed_fields[0]["field_id"] == "field-1"
+    assert parsed_fields[0]["value"] == 25.0
+    assert parsed_fields[0]["type"] == "number"
+    assert parsed_fields[0]["instance_id"]
 
 
 @pytest.mark.asyncio
@@ -933,7 +954,7 @@ async def test_prepare_client_data_custom_fields_invalid(monkeypatch):
         phone_number="1234567890",
         first_name="John",
         last_name="Doe",
-        custom_fields={"age": "not a number"},
+        custom_fields=[_cfc_create("field-1", "not a number")],
     )
 
     with pytest.raises(ValidationException):
@@ -1455,7 +1476,10 @@ async def test_get_client_details_with_full_data(monkeypatch):
         "phone": "1234567890",
         "websites": '[{"url": "https://example.com", "type": "primary"}]',
         "billing_preferences": '{"payment_method": "credit_card"}',
-        "custom_fields": '{"key": "value"}',
+        "custom_fields": (
+            '[{"field_id":"cf1","instance_id":"20000000-0000-4000-8000-000000000001",'
+            '"type":"text","value":"value"}]'
+        ),
         "additional_data": "{}",
         "social_pages": "[]",
         "enrichment_done": False,
@@ -1496,6 +1520,27 @@ async def test_get_client_details_with_full_data(monkeypatch):
         "apps.user_service.app.services.client_service.ClientRepository",
         lambda db_connection=None: fake_repo,
     )
+    fake_cf = _FakeCustomFieldRepo()
+    fake_cf.get_fields_result = [
+        {
+            "id": "cf1",
+            "field_name": "Key",
+            "field_key": "key",
+            "field_type": "text",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_cf,
+    )
 
     service = ClientService(user_context=_ctx(), db_connection=None)
     result = await service.get_client_details("client-1", "org-1")
@@ -1506,7 +1551,16 @@ async def test_get_client_details_with_full_data(monkeypatch):
     assert result.primary_contact.last_name == "Doe"
     assert len(result.websites) == 1
     assert result.billing_preferences is not None
-    assert result.custom_fields == {"key": "value"}
+    assert result.custom_fields == [
+        {
+            "field_id": "cf1",
+            "field_key": "key",
+            "label": "Key",
+            "instance_id": "20000000-0000-4000-8000-000000000001",
+            "type": "text",
+            "value": "value",
+        }
+    ]
     assert result.lead is not None
     assert result.lead.stage_id == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     assert result.lead.lead_status == "prospect"
@@ -1717,7 +1771,7 @@ async def test_update_client_success_scalar_only(monkeypatch):
         "tags": [],
         "websites": "[]",
         "billing_preferences": "{}",
-        "custom_fields": "{}",
+        "custom_fields": "[]",
         "additional_data": "{}",
         "social_pages": "[]",
         "enrichment_done": False,
@@ -1762,7 +1816,7 @@ async def test_update_client_success_with_addresses(monkeypatch):
         "tags": [],
         "websites": "[]",
         "billing_preferences": "{}",
-        "custom_fields": "{}",
+        "custom_fields": "[]",
         "additional_data": "{}",
         "social_pages": "[]",
         "enrichment_done": False,
@@ -1801,7 +1855,7 @@ async def test_update_client_with_lead_management(monkeypatch):
         "tags": [],
         "websites": "[]",
         "billing_preferences": "{}",
-        "custom_fields": "{}",
+        "custom_fields": "[]",
         "additional_data": "{}",
         "social_pages": "[]",
         "enrichment_done": False,
@@ -1954,12 +2008,22 @@ async def test_build_client_update_payload_scalar_and_merge(monkeypatch):
         "name": "Old",
         "client_type": "person",
         "billing_preferences": '{"method": "invoice"}',
-        "custom_fields": '{"a": "1", "b": "2"}',
+        "custom_fields": (
+            '[{"field_id":"f1","instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",'
+            '"type":"text","value":"1"}]'
+        ),
     }
     body = UpdateClientRequest(
         company_name="New Name",
         billing_preferences=BillingPreferencesUpdate(terms="Net 30"),
-        custom_fields={"a": "updated", "b": None, "c": "new"},
+        custom_fields=[
+            {
+                "field_id": "f1",
+                "instance_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "value": "updated",
+            },
+            _cfc("f2", "new", instance_id=None),
+        ],
     )
 
     payload = await service._build_client_update_payload(body, current)
@@ -1968,9 +2032,15 @@ async def test_build_client_update_payload_scalar_and_merge(monkeypatch):
     assert payload["billing_preferences"]["method"] == "invoice"
     assert payload["billing_preferences"]["terms"] == "Net 30"
     custom_fields = json.loads(payload["custom_fields"])
-    assert custom_fields["a"] == "updated"
-    assert "b" not in custom_fields
-    assert custom_fields["c"] == "new"
+    assert len(custom_fields) == 2
+    assert custom_fields[0]["field_id"] == "f1"
+    assert custom_fields[0]["instance_id"] == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    assert custom_fields[0]["type"] == "text"
+    assert custom_fields[0]["value"] == "updated"
+    assert custom_fields[1]["field_id"] == "f2"
+    assert custom_fields[1]["type"] == "text"
+    assert custom_fields[1]["value"] == "new"
+    assert custom_fields[1]["instance_id"]
 
 
 @pytest.mark.asyncio
@@ -2458,7 +2528,7 @@ async def test_update_client_with_websites(monkeypatch):
         "tags": [],
         "websites": '[{"id": "web-1", "url": "https://old.com", "type": "primary"}]',
         "billing_preferences": "{}",
-        "custom_fields": "{}",
+        "custom_fields": "[]",
         "additional_data": "{}",
         "social_pages": "[]",
         "enrichment_done": False,
@@ -2494,7 +2564,7 @@ async def test_update_client_with_social_pages(monkeypatch):
         "tags": [],
         "websites": "[]",
         "billing_preferences": "{}",
-        "custom_fields": "{}",
+        "custom_fields": "[]",
         "additional_data": "{}",
         "social_pages": '[{"id": "social-1", "platform": "linkedin", "url": "https://old.com"}]',
         "enrichment_done": False,
@@ -2532,7 +2602,7 @@ async def test_update_client_with_empty_update_data(monkeypatch):
         "tags": [],
         "websites": "[]",
         "billing_preferences": "{}",
-        "custom_fields": "{}",
+        "custom_fields": "[]",
         "additional_data": "{}",
         "social_pages": "[]",
         "enrichment_done": False,
@@ -2594,24 +2664,24 @@ async def test_merge_custom_fields_into_payload(monkeypatch):
         lambda db_connection=None: fake_custom_field_repo,
     )
     service = ClientService(user_context=_ctx(), db_connection=None)
-    current = {
-        "client_type": "person",
-        "custom_fields": '{"existing": "field"}',
-    }
-    body = UpdateClientRequest(custom_fields={"age": 30})
+    current = {"client_type": "person", "custom_fields": "[]"}
+    body = UpdateClientRequest(custom_fields=[{"field_id": "field-1", "value": 30}])
     payload = {}
 
     await service._merge_custom_fields_into_payload(body, current, payload)
 
     assert "custom_fields" in payload
     parsed = parse_json_field(payload["custom_fields"])
-    assert parsed["age"] == 30.0
-    assert parsed["existing"] == "field"
+    assert len(parsed) == 1
+    assert parsed[0]["field_id"] == "field-1"
+    assert parsed[0]["value"] == 30.0
+    assert parsed[0]["type"] == "number"
+    assert parsed[0]["instance_id"]
 
 
 @pytest.mark.asyncio
-async def test_merge_custom_fields_into_payload_remove_field(monkeypatch):
-    """_merge_custom_fields_into_payload removes fields set to None."""
+async def test_merge_no_body_reconciles_optional_invalid(monkeypatch):
+    """PATCH without custom_fields reconciles; optional invalid stored scalar is nulled."""
     fake_custom_field_repo = _FakeCustomFieldRepo()
     fake_custom_field_repo.get_fields_result = [
         {
@@ -2636,20 +2706,148 @@ async def test_merge_custom_fields_into_payload_remove_field(monkeypatch):
     service = ClientService(user_context=_ctx(), db_connection=None)
     current = {
         "client_type": "person",
-        "custom_fields": '{"age": 25, "other": "value"}',
+        "custom_fields": (
+            '[{"field_id":"field-1","instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",'
+            '"type":"number","value":"nope"}]'
+        ),
     }
-    body = UpdateClientRequest(custom_fields={"age": None})
+    body = UpdateClientRequest()
     payload = {}
 
     await service._merge_custom_fields_into_payload(body, current, payload)
 
     parsed = parse_json_field(payload["custom_fields"])
-    assert "age" not in parsed
-    assert parsed["other"] == "value"
+    assert len(parsed) == 1
+    assert parsed[0]["field_id"] == "field-1"
+    assert parsed[0]["type"] == "number"
+    assert parsed[0]["value"] is None
+    assert parsed[0]["instance_id"] == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
 
 @pytest.mark.asyncio
-async def test_merge_fields_payload_preserves_required_fields(monkeypatch):
+async def test_merge_no_body_required_invalid_raises(monkeypatch):
+    """PATCH without custom_fields: required field with invalid stored value raises."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Age",
+            "field_key": "age",
+            "field_type": "number",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": True,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    current = {
+        "client_type": "person",
+        "custom_fields": (
+            '[{"field_id":"field-1","instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",'
+            '"type":"number","value":"nope"}]'
+        ),
+    }
+    body = UpdateClientRequest()
+    payload = {}
+
+    with pytest.raises(ValidationException):
+        await service._merge_custom_fields_into_payload(body, current, payload)
+
+
+@pytest.mark.asyncio
+async def test_merge_no_body_omits_payload_when_unchanged(monkeypatch):
+    """When reconcile output equals stored JSON, do not set custom_fields on update payload."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Age",
+            "field_key": "age",
+            "field_type": "number",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    current = {"client_type": "person", "custom_fields": "[]"}
+    body = UpdateClientRequest()
+    payload = {}
+
+    await service._merge_custom_fields_into_payload(body, current, payload)
+
+    assert "custom_fields" not in payload
+
+
+@pytest.mark.asyncio
+async def test_merge_remove_field(monkeypatch):
+    """Explicit null value on optional root clears that root from the stored array."""
+    fake_custom_field_repo = _FakeCustomFieldRepo()
+    fake_custom_field_repo.get_fields_result = [
+        {
+            "id": "field-1",
+            "field_name": "Age",
+            "field_key": "age",
+            "field_type": "number",
+            "parent_id": None,
+            "entity_type": "contact",
+            "show_on_create": True,
+            "show_on_detail": False,
+            "is_required": False,
+            "type_config": {},
+            "sort_order": 0,
+            "is_active": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: fake_custom_field_repo,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    current = {
+        "client_type": "person",
+        "custom_fields": (
+            '[{"field_id":"field-1","instance_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",'
+            '"type":"number","value":25}]'
+        ),
+    }
+    body = UpdateClientRequest(
+        custom_fields=[
+            {
+                "field_id": "field-1",
+                "instance_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "value": None,
+            }
+        ]
+    )
+    payload = {}
+
+    await service._merge_custom_fields_into_payload(body, current, payload)
+
+    parsed = parse_json_field(payload["custom_fields"])
+    assert parsed == []
+
+
+@pytest.mark.asyncio
+async def test_merge_preserves_required_fields(monkeypatch):
     """Updating only an optional custom field should not fail required fields."""
     fake_custom_field_repo = _FakeCustomFieldRepo()
     fake_custom_field_repo.get_fields_result = [
@@ -2690,16 +2888,24 @@ async def test_merge_fields_payload_preserves_required_fields(monkeypatch):
     service = ClientService(user_context=_ctx(), db_connection=None)
     current = {
         "client_type": "person",
-        "custom_fields": '{"name": "Acme", "description": "Old"}',
+        "custom_fields": (
+            "["
+            '{"field_id":"field-req","instance_id":"r1","type":"text","value":"Acme"},'
+            '{"field_id":"field-opt","instance_id":"o1","type":"text","value":"Old"}'
+            "]"
+        ),
     }
-    body = UpdateClientRequest(custom_fields={"description": "New"})
+    body = UpdateClientRequest(
+        custom_fields=[{"field_id": "field-opt", "instance_id": "o1", "value": "New"}]
+    )
     payload = {}
 
     await service._merge_custom_fields_into_payload(body, current, payload)
 
     parsed = parse_json_field(payload["custom_fields"])
-    assert parsed["name"] == "Acme"
-    assert parsed["description"] == "New"
+    by_id = {c["field_id"]: c for c in parsed}
+    assert by_id["field-req"]["value"] == "Acme"
+    assert by_id["field-opt"]["value"] == "New"
 
 
 @pytest.mark.asyncio
@@ -2744,9 +2950,13 @@ async def test_merge_fields_payload_missing_required_raises(monkeypatch):
     service = ClientService(user_context=_ctx(), db_connection=None)
     current = {
         "client_type": "person",
-        "custom_fields": '{"description": "Old"}',
+        "custom_fields": (
+            '[{"field_id":"field-opt","instance_id":"o1","type":"text","value":"Old"}]'
+        ),
     }
-    body = UpdateClientRequest(custom_fields={"description": "New"})
+    body = UpdateClientRequest(
+        custom_fields=[{"field_id": "field-opt", "instance_id": "o1", "value": "New"}]
+    )
     payload = {}
 
     with pytest.raises(ValidationException) as exc_info:
@@ -2796,15 +3006,33 @@ async def test_merge_custom_fields_into_payload_list_field(monkeypatch):
     service = ClientService(user_context=_ctx(), db_connection=None)
     current = {
         "client_type": "person",
-        "custom_fields": "{}",
+        "custom_fields": "[]",
     }
-    body = UpdateClientRequest(custom_fields={"tags": ["tag1", "tag2"]})
+    body = UpdateClientRequest(
+        custom_fields=[
+            {
+                "field_id": "field-1",
+                "items": [
+                    {"field_id": "field-2", "value": "tag1"},
+                    {"field_id": "field-2", "value": "tag2"},
+                ],
+            }
+        ]
+    )
     payload = {}
 
     await service._merge_custom_fields_into_payload(body, current, payload)
 
     parsed = json.loads(payload["custom_fields"])
-    assert parsed["tags"] == ["tag1", "tag2"]
+    assert len(parsed) == 1
+    assert parsed[0]["field_id"] == "field-1"
+    assert parsed[0]["type"] == "list"
+    rows = parsed[0]["items"]
+    assert len(rows) == 2
+    assert rows[0]["field_id"] == "field-2"
+    assert rows[0]["type"] == "text"
+    assert rows[0]["value"] == "tag1"
+    assert rows[1]["value"] == "tag2"
 
 
 @pytest.mark.asyncio

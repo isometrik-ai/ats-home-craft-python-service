@@ -483,7 +483,13 @@ async def test_create_client_with_custom_fields(monkeypatch, client):
         """Fake create client with custom fields; return result for enrichment."""
         del self
         assert request_data.client_type == "person"
-        assert request_data.custom_fields == {"age": 25, "tags": ["tag1", "tag2"]}
+        assert request_data.custom_fields == [
+            {"field_id": "00000000-0000-0000-0000-00000000a001", "value": 25},
+            {
+                "field_id": "00000000-0000-0000-0000-00000000a002",
+                "value": ["tag1", "tag2"],
+            },
+        ]
         return CreateClientResult(
             records=[],
             enrichment_items=[
@@ -515,11 +521,18 @@ async def test_create_client_with_custom_fields(monkeypatch, client):
         json={
             "client_type": "person",
             "email": "newclient@example.com",
-            "phone_isd_code": "+1",
-            "phone_number": "1234567890",
+            "phones": [
+                {"phone_isd_code": "+1", "phone_number": "1234567890", "is_primary": True},
+            ],
             "first_name": "Jane",
             "last_name": "Smith",
-            "custom_fields": {"age": 25, "tags": ["tag1", "tag2"]},
+            "custom_fields": [
+                {"field_id": "00000000-0000-0000-0000-00000000a001", "value": 25},
+                {
+                    "field_id": "00000000-0000-0000-0000-00000000a002",
+                    "value": ["tag1", "tag2"],
+                },
+            ],
         },
     )
     assert_success(res, 201)
@@ -541,7 +554,9 @@ async def test_update_client_with_custom_fields(monkeypatch, client):
         del self
         assert client_id == "00000000-0000-0000-0000-000000000123"
         assert organization_id == "org-1"
-        assert body.custom_fields == {"age": 30}
+        assert body.custom_fields == [
+            {"field_id": "00000000-0000-0000-0000-00000000a001", "value": 30},
+        ]
         return {"old_data": {"client_id": "client-123", "custom_fields": {"age": 25}}}
 
     monkeypatch.setattr(
@@ -559,6 +574,10 @@ async def test_update_client_with_custom_fields(monkeypatch, client):
 
     res = await client.patch(
         "/v1/clients/00000000-0000-0000-0000-000000000123",
-        json={"custom_fields": {"age": 30}},
+        json={
+            "custom_fields": [
+                {"field_id": "00000000-0000-0000-0000-00000000a001", "value": 30},
+            ],
+        },
     )
     assert_success(res, 200)

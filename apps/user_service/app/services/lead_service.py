@@ -71,18 +71,11 @@ class LeadService:
             db_connection=self.db_connection,
             user_context=self.user_context,
         )
-
-        if request_data.custom_fields:
-            validated = await custom_field_service.validate_and_format_custom_fields(
-                request_data.custom_fields,
-                entity_type,
-            )
-            lead_data["custom_fields"] = json.dumps(validated)
-        else:
-            await custom_field_service.ensure_required_fields_present(
-                request_data.custom_fields,
-                entity_type,
-            )
+        validated = await custom_field_service.validate_for_create(
+            request_data.custom_fields,
+            entity_type,
+        )
+        lead_data["custom_fields"] = validated
 
     async def create_lead(self, body: CreateLeadRequest) -> dict[str, Any]:
         """Create a lead for an existing client; enforce org scoping and custom field rules."""
@@ -156,7 +149,7 @@ class LeadService:
             "description": body.description,
             "owner_id": owner_id,
             "point_of_contact": point_of_contact,
-            "custom_fields": {},
+            "custom_fields": [],
         }
 
         await self._apply_custom_fields_if_needed(lead_row, body)
@@ -200,31 +193,27 @@ class LeadService:
         current: dict[str, Any],
         update_data: dict[str, Any],
     ) -> None:
-        """Merge ``custom_fields`` like clients: validate new keys, remove on ``null``."""
+        """Merge ``custom_fields`` with stored JSONB using current definitions."""
         if isinstance(body.custom_fields, Unset):
             return
         raw = current.get("custom_fields")
-        existing = parse_json_field(raw) if raw is not None else {}
-        if not isinstance(existing, dict):
-            existing = {}
-        merged = dict(existing)
+        existing = parse_json_field(raw) if raw is not None else []
+        if not isinstance(existing, list):
+            existing = []
         custom_field_service = CustomFieldService(
             db_connection=self.db_connection,
             user_context=self.user_context,
         )
-        fields_to_validate: dict[str, Any] = {}
-        for key, value in body.custom_fields.items():
-            if value is None:
-                merged.pop(key, None)
-            else:
-                fields_to_validate[key] = value
-        if fields_to_validate:
-            validated = await custom_field_service.validate_and_format_custom_fields(
-                fields_to_validate,
-                EntityType.LEAD,
-            )
-            merged.update(validated)
-        if merged != existing:
+        merged = await custom_field_service.merge_for_update(
+            body.custom_fields,
+            existing,
+            EntityType.LEAD,
+        )
+        if json.dumps(merged, sort_keys=True, default=str) != json.dumps(
+            existing,
+            sort_keys=True,
+            default=str,
+        ):
             update_data["custom_fields"] = merged
 
     async def update_lead(self, lead_id: str, body: UpdateLeadRequest) -> dict[str, Any]:
@@ -341,7 +330,7 @@ class LeadService:
             owner_name=row.get("owner_name") or None,
             point_of_contact_id=self._uuid_str(row.get("point_of_contact_id")),
             point_of_contact=row.get("point_of_contact"),
-            custom_fields=custom if isinstance(custom, dict) else {},
+            custom_fields=custom if isinstance(custom, list) else [],
             created_at=format_iso_datetime(row.get("created_at")) or "",
             updated_at=format_iso_datetime(row.get("updated_at")) or "",
         )
@@ -427,7 +416,31 @@ class LeadService:
                 message_key="leads.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return self._build_lead_detail(row)
+        detail = self._build_lead_detail(row)
+        detail["custom_fields"] = await self._resolve_lead_custom_fields_for_response(row)
+        return detail
+
+    async def _resolve_lead_custom_fields_for_response(
+        self,
+        row: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Resolve stored FieldCell array to read shape."""
+        custom = row.get("custom_fields")
+        if isinstance(custom, str):
+            raw = json.loads(custom) if custom else []
+        elif isinstance(custom, list):
+            raw = custom
+        else:
+            raw = []
+        if not raw or not (self.user_context and self.user_context.organization_id):
+            return raw if isinstance(raw, list) else []
+        cfs = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        definitions, _ = await cfs.get_custom_fields_list(EntityType.LEAD)
+        id_to_def = {str(d.id): d for d in definitions}
+        return cfs.resolve_fields_for_read(raw, id_to_def)
 
     async def delete_lead(self, lead_id: str) -> dict[str, Any]:
         """Hard-delete a lead for the current organization (client row is not deleted)."""

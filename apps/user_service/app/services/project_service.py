@@ -4,6 +4,7 @@ This service handles all business logic related to projects, including
 validation, formatting, and orchestration of project operations.
 """
 
+import json
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -346,9 +347,6 @@ class ProjectService:
 
         project_data["tech_stack"] = self._prepare_tech_stack_dict(request_data.tech_stack)
 
-        if request_data.custom_fields:
-            project_data["custom_fields"] = request_data.custom_fields
-
         if request_data.documents:
             docs: list[dict[str, Any]] = []
             for doc in request_data.documents:
@@ -373,18 +371,11 @@ class ProjectService:
             user_context=self.user_context,
         )
         entity_type = EntityType.PROJECT
-
-        if request_data.custom_fields:
-            validated = await custom_field_service.validate_and_format_custom_fields(
-                request_data.custom_fields,
-                entity_type,
-            )
-            project_data["custom_fields"] = validated
-        else:
-            await custom_field_service.ensure_required_fields_present(
-                request_data.custom_fields,
-                entity_type,
-            )
+        validated = await custom_field_service.validate_for_create(
+            request_data.custom_fields,
+            entity_type,
+        )
+        project_data["custom_fields"] = validated
 
     def _apply_primary_relationships(
         self,
@@ -576,10 +567,9 @@ class ProjectService:
         if body.custom_fields is None:
             return
 
-        existing = parse_json_field(current.get("custom_fields")) or {}
-        if not isinstance(existing, dict):
-            existing = {}
-        merged = dict(existing)
+        existing = parse_json_field(current.get("custom_fields"))
+        if not isinstance(existing, list):
+            existing = []
 
         custom_field_service = CustomFieldService(
             db_connection=self.db_connection,
@@ -587,29 +577,17 @@ class ProjectService:
         )
         entity_type = EntityType.PROJECT
 
-        fields_to_validate: dict[str, Any] = {}
-        for key, value in body.custom_fields.items():
-            if value is None:
-                merged.pop(key, None)
-            else:
-                fields_to_validate[key] = value
-
-        if fields_to_validate:
-            required_presence = {**merged, **fields_to_validate}
-            validated_fields = await custom_field_service.validate_and_format_custom_fields(
-                fields_to_validate,
-                entity_type,
-                required_custom_fields_for_presence=required_presence,
-            )
-            merged.update(validated_fields)
-        else:
-            # If the request only removed fields, required fields still must be present.
-            await custom_field_service.ensure_required_fields_present(
-                merged,
-                entity_type,
-            )
-
-        payload["custom_fields"] = merged
+        merged = await custom_field_service.merge_for_update(
+            body.custom_fields,
+            existing,
+            entity_type,
+        )
+        if json.dumps(merged, sort_keys=True, default=str) != json.dumps(
+            existing,
+            sort_keys=True,
+            default=str,
+        ):
+            payload["custom_fields"] = merged
 
     @staticmethod
     def _format_project_for_audit(project_data: dict[str, Any]) -> dict[str, Any]:
@@ -1334,7 +1312,19 @@ class ProjectService:
         tech_raw = parse_json_field(project.get("tech_stack"))
         tech_stack_data = tech_raw if isinstance(tech_raw, dict) else {}
         custom_fields_data = parse_json_field(project.get("custom_fields"))
-        custom_fields = custom_fields_data if isinstance(custom_fields_data, dict) else {}
+        root_cells = custom_fields_data if isinstance(custom_fields_data, list) else []
+        custom_fields: list[dict[str, Any]] = []
+        if root_cells and self.user_context and self.user_context.organization_id:
+            if self.db_connection:
+                cfs = CustomFieldService(
+                    db_connection=self.db_connection,
+                    user_context=self.user_context,
+                )
+                definitions, _ = await cfs.get_custom_fields_list(EntityType.PROJECT)
+                id_to_def = {str(d.id): d for d in definitions}
+                custom_fields = cfs.resolve_fields_for_read(root_cells, id_to_def)
+            else:
+                custom_fields = root_cells
         documents_raw = parse_json_field(project.get("documents")) or []
         documents = documents_raw if isinstance(documents_raw, list) else []
 

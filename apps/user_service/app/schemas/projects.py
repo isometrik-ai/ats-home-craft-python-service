@@ -392,7 +392,15 @@ class UpdateProjectRequest(BaseModel):
     success_criteria: str | None = Field(None, max_length=2000)
     additional_ai_context: str | None = Field(None, max_length=2000)
     tags: list[str] | None = Field(None, max_length=50)
-    custom_fields: dict[str, Any] | None = None
+    custom_fields: list[dict[str, Any]] | None = Field(
+        None,
+        description=(
+            "FieldCell PATCH: root entries use field_id plus value | sub_fields | items "
+            "(instance_id required for existing roots list ``items`` is authoritative). "
+            "Nested cells may use instance_id only (optional field_id must match). "
+            "Do not send type."
+        ),
+    )
     is_billable: bool | None = None
     is_internal: bool | None = None
     team_members: TeamMembersUpdate | None = Field(
@@ -451,7 +459,13 @@ class CreateProjectRequest(BaseModel):
         description="Additional AI context",
     )
     tags: list[str] | None = Field(None, max_length=50, description="Project tags")
-    custom_fields: dict[str, Any] | None = Field(None, description="Custom field key-value pairs")
+    custom_fields: list[dict[str, Any]] | None = Field(
+        None,
+        description=(
+            "Root FieldCell create: field_id plus exactly one of value | sub_fields | items. "
+            "Do not send instance_id or type."
+        ),
+    )
     is_billable: bool = Field(default=True, description="Whether project is billable")
     is_internal: bool = Field(default=False, description="Whether project is internal")
     team_members: list[TeamMemberInput] = Field(
@@ -706,7 +720,13 @@ class ProjectDetailData(BaseModel):
     primary_pm_tool: str | None = Field(None, description="Primary PM tool")
     primary_repo_url: str | None = Field(None, description="Primary repository URL")
     tags: list[str] = Field(default_factory=list, description="Tags")
-    custom_fields: dict[str, Any] = Field(default_factory=dict, description="Custom fields")
+    custom_fields: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Resolved FieldCells: field_id, instance_id, type, field_key, label, "
+            "and value | sub_fields | items"
+        ),
+    )
     documents: list[ProjectDocument] = Field(default_factory=list, description="Project documents")
     is_billable: bool = Field(..., description="Is billable")
     is_internal: bool = Field(..., description="Is internal")

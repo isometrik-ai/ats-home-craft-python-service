@@ -116,9 +116,9 @@ async def test_list_custom_fields(monkeypatch, client):
         del current_user, db_connection, permission_codes
         return _ctx()
 
-    async def fake_get_custom_fields_list(self, entity_type):
+    async def fake_get_custom_fields_list(self, entity_type, *, organization_id=None):
         """Fake get custom fields list."""
-        del self
+        del self, organization_id
         assert entity_type == EntityType.COMPANY
         field = CustomFieldResponse(
             id="field-1",
@@ -166,9 +166,9 @@ async def test_list_custom_fields_empty(monkeypatch, client):
         del current_user, db_connection, permission_codes
         return _ctx()
 
-    async def fake_get_custom_fields_list(self, entity_type):
+    async def fake_get_custom_fields_list(self, entity_type, *, organization_id=None):
         """Fake get custom fields list returning empty."""
-        del self, entity_type
+        del self, entity_type, organization_id
         return [], 0
 
     monkeypatch.setattr(

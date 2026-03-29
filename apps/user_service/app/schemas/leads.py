@@ -86,9 +86,12 @@ class CreateLeadRequest(BaseModel):
         default=None,
         description="Primary contact on client side (FK to clients.id per schema)",
     )
-    custom_fields: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Arbitrary key-value metadata",
+    custom_fields: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Root FieldCell create: field_id plus exactly one of value | sub_fields | items. "
+            "Do not send instance_id or type."
+        ),
     )
 
     @field_validator("client_id", "stage_id", "owner_id", "point_of_contact")
@@ -179,9 +182,14 @@ class UpdateLeadRequest(BaseModel):
         description="Primary contact UUID; null unassigns",
     )
     notes: str | None | Unset = Field(default=UNSET, description="Notes; null clears")
-    custom_fields: dict[str, Any] | Unset = Field(
+    custom_fields: list[dict[str, Any]] | Unset = Field(
         default=UNSET,
-        description="Merged with stored custom_fields; null values remove keys",
+        description=(
+            """FieldCell PATCH: root entries use field_id plus value | sub_fields | items
+            (instance_id required for existing roots; list ``items`` is authoritative).
+            "Nested cells may use instance_id only (optional field_id must match).
+            Do not send type."""
+        ),
     )
 
     @field_validator(
@@ -339,9 +347,12 @@ class LeadDetail(BaseModel):
         None,
         description="Display name of the point-of-contact client",
     )
-    custom_fields: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Custom metadata",
+    custom_fields: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Resolved FieldCells: field_id, instance_id, type, field_key, label,"
+            "and value | sub_fields | items"
+        ),
     )
     created_at: str = Field(..., description="Created at (ISO 8601)")
     updated_at: str = Field(..., description="Updated at (ISO 8601)")

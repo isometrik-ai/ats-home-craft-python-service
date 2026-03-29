@@ -265,28 +265,37 @@ class _FakeCustomFieldService:
     def __init__(self):
         self.calls: dict[str, Any] = {}
 
-    async def validate_and_format_custom_fields(
-        self,
-        custom_fields: dict[str, Any],
-        entity_type,
-        required_custom_fields_for_presence: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Validate and format custom fields."""
-        self.calls["validate_and_format_custom_fields"] = {
+    async def validate_for_create(self, custom_fields, entity_type) -> list[dict[str, Any]]:
+        """Validate for create; passthrough list for orchestration tests."""
+        self.calls["validate_for_create"] = {
             "custom_fields": custom_fields,
             "entity_type": entity_type,
-            "required_custom_fields_for_presence": required_custom_fields_for_presence,
         }
-        # Keep unit tests focused on service orchestration; return unchanged.
-        return dict(custom_fields)
+        return list(custom_fields) if custom_fields else []
 
-    async def ensure_required_fields_present(self, custom_fields, entity_type) -> None:
-        """Ensure required fields are present."""
-        self.calls["ensure_required_fields_present"] = {
-            "custom_fields": custom_fields,
+    async def merge_for_update(self, payload, stored, entity_type) -> list[dict[str, Any]]:
+        """Merge helper for update tests (FieldCell lists)."""
+        self.calls["merge_for_update"] = {
+            "payload": payload,
+            "stored": stored,
             "entity_type": entity_type,
         }
-        return None
+        stored_list = stored if isinstance(stored, list) else []
+        by_id: dict[str, dict[str, Any]] = {}
+        for cell in stored_list:
+            if isinstance(cell, dict) and cell.get("field_id"):
+                by_id[str(cell["field_id"])] = dict(cell)
+        for cell in payload or []:
+            if not isinstance(cell, dict):
+                continue
+            fid = str(cell.get("field_id") or "")
+            if not fid:
+                continue
+            if cell.get("value") is None and "value" in cell:
+                by_id.pop(fid, None)
+                continue
+            by_id[fid] = {**by_id.get(fid, {}), **cell, "field_id": fid}
+        return list(by_id.values())
 
 
 def _ctx(org_id="org-1"):
@@ -427,7 +436,9 @@ def test_prepare_project_data_populates_optional_fields(monkeypatch):
         success_criteria="Criteria",
         additional_ai_context="Context",
         tags=["alpha"],
-        custom_fields={"stage": "discovery"},
+        custom_fields=[
+            {"field_id": "stage", "value": "discovery"},
+        ],
         is_billable=False,
         is_internal=True,
         repositories=[
@@ -716,7 +727,9 @@ async def test_get_project_details_includes_team(monkeypatch):
         "primary_pm_tool": "linear",
         "primary_repo_url": "https://github.com/org/frontend",
         "tags": ["alpha"],
-        "custom_fields": json.dumps({"stage": "delivery"}),
+        "custom_fields": json.dumps(
+            [{"field_id": "stage", "instance_id": "d1", "value": "delivery"}]
+        ),
         "is_billable": True,
         "is_internal": False,
         "created_at": now,
@@ -1089,7 +1102,7 @@ async def test_get_project_details_success(monkeypatch):
         "primary_pm_tool": None,
         "primary_repo_url": None,
         "tags": [],
-        "custom_fields": {},
+        "custom_fields": [],
         "is_billable": True,
         "is_internal": False,
         "created_at": None,
