@@ -77,7 +77,7 @@ class LeadService:
         )
         lead_data["custom_fields"] = validated
 
-    async def create_lead(self, body: CreateLeadRequest) -> dict[str, Any]:
+    async def create_lead(self, body: CreateLeadRequest, external: bool = False) -> dict[str, Any]:
         """Create a lead for an existing client; enforce org scoping and custom field rules."""
         organization_id = self.user_context.organization_id
         user_id = self.user_context.user_id
@@ -109,8 +109,8 @@ class LeadService:
             )
         resolved_stage_id = str(stage["id"])
 
-        owner_id = body.owner_id if body.owner_id is not None else user_id
-        if body.owner_id is not None:
+        owner_id = None if external else (body.owner_id if body.owner_id is not None else user_id)
+        if (not external) and body.owner_id is not None:
             user_row = await self.user_repository.get_user_details_by_id(owner_id, ["id"])
             if not user_row:
                 raise NotFoundException(
