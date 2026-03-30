@@ -123,6 +123,7 @@ class CreateClientResult:
 
     records: list[dict[str, Any]]
     enrichment_items: list[dict[str, Any]]
+    lead_id: str | None = None
 
 
 class ClientService:
@@ -943,13 +944,14 @@ class ClientService:
         self,
         request_data: CreateClientRequest,
         client_id: str,
-    ) -> None:
+    ) -> str | None:
         """Create lead and address records if provided.
 
         Args:
             request_data: Request data
             client_id: Client ID
         """
+        lead_id: str | None = None
         # Create lead record if enabled (same insert path as API create_lead)
         if request_data.lead_management and request_data.lead_management.enabled:
             organization_id = self.user_context.organization_id
@@ -965,7 +967,8 @@ class ClientService:
                 "referral_source": lead.referral_source,
                 "lead_score": lead.lead_score,
             }
-            await self.lead_repository.create_lead(lead_row)
+            created_lead = await self.lead_repository.create_lead(lead_row)
+            lead_id = str(created_lead.get("id")) if created_lead and created_lead.get("id") else None
 
         # Create address records if provided
         if request_data.addresses:
@@ -984,6 +987,7 @@ class ClientService:
                 for address in request_data.addresses
             ]
             await self.client_repository.bulk_create_addresses(addresses_data)
+        return lead_id
 
     async def create_client(self, request_data: CreateClientRequest) -> CreateClientResult:
         """Create a new client with complete onboarding flow.
@@ -1052,7 +1056,7 @@ class ClientService:
                 ) from exc
             raise
 
-        await self._create_optional_records(request_data, primary_record["id"])
+        lead_id = await self._create_optional_records(request_data, primary_record["id"])
 
         if request_data.portal_access:
             try:
@@ -1064,7 +1068,7 @@ class ClientService:
             except Exception as e:
                 logger.error("Failed to send client creation email: %s", str(e))
         enrichment_items = self._get_enrichment_items_for_created_clients(records, organization_id)
-        return CreateClientResult(records=records, enrichment_items=enrichment_items)
+        return CreateClientResult(records=records, enrichment_items=enrichment_items, lead_id=lead_id)
 
     async def get_clients_list(
         self,
