@@ -159,8 +159,7 @@ async def test_get_project_details(monkeypatch, client):
                     last_name="Doe",
                     title=None,
                     email="john@example.com",
-                    phone_isd_code=None,
-                    phone=None,
+                    phones=[],
                 ),
             ),
             project_lead=ProjectLeadInfo(
@@ -192,7 +191,7 @@ async def test_get_project_details(monkeypatch, client):
             primary_pm_tool=None,
             primary_repo_url=None,
             tags=[],
-            custom_fields={},
+            custom_fields=[],
             is_billable=True,
             is_internal=False,
             team={

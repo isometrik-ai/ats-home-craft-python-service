@@ -817,7 +817,7 @@ class ClientRepository:
                 l.created_at as lead_created_at,
                 l.updated_at as lead_updated_at
             FROM clients c
-            {primary_contact_join}
+                {primary_contact_join}
             LEFT JOIN leads l ON l.client_id = c.id
             WHERE c.id = $1
                 AND c.organization_id = $2

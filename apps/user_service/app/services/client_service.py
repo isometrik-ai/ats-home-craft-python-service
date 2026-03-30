@@ -257,7 +257,8 @@ class ClientService:
         educational_history = parse_json_field(details.get("educational_history")) or []
         key_people = parse_json_field(details.get("key_people")) or []
         products = parse_json_field(details.get("products")) or []
-        custom_fields = parse_json_field(details.get("custom_fields")) or {}
+        raw_custom_fields = parse_json_field(details.get("custom_fields"))
+        root_cells = raw_custom_fields if isinstance(raw_custom_fields, list) else []
 
         phones_raw = details.get("phones")
         phones = parse_json_field(phones_raw)
@@ -266,16 +267,24 @@ class ClientService:
 
         custom_field_keys: list[str] = []
         custom_field_values: list[str] = []
-        for key, value in (custom_fields or {}).items():
-            custom_field_keys.append(str(key))
-            if value is None:
-                continue
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    if item is not None:
-                        custom_field_values.append(str(item))
-            else:
-                custom_field_values.append(str(value))
+        if root_cells:
+            entity_type_cf = (
+                EntityType.COMPANY
+                if details.get("client_type") == ClientType.COMPANY.value
+                else EntityType.CONTACT
+            )
+            cfs = CustomFieldService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            definitions_cf, _ = await cfs.get_custom_fields_list(
+                entity_type_cf,
+                organization_id=str(details["organization_id"]),
+            )
+            id_to_def_ts = {str(d.id): d for d in definitions_cf}
+            custom_field_keys, custom_field_values = (
+                CustomFieldService.field_cells_typesense_facets(root_cells, id_to_def_ts)
+            )
 
         created_at_dt = details.get("created_at")
         updated_at_dt = details.get("updated_at")
@@ -711,16 +720,10 @@ class ClientService:
             db_connection=self.db_connection,
             user_context=self.user_context,
         )
-
-        if request_data.custom_fields:
-            validated_custom_fields = await custom_field_service.validate_and_format_custom_fields(
-                request_data.custom_fields, entity_type
-            )
-            client_data["custom_fields"] = json.dumps(validated_custom_fields)
-        else:
-            await custom_field_service.ensure_required_fields_present(
-                request_data.custom_fields, entity_type
-            )
+        validated_custom_fields = await custom_field_service.validate_for_create(
+            request_data.custom_fields, entity_type
+        )
+        client_data["custom_fields"] = json.dumps(validated_custom_fields)
 
     def _apply_additional_and_social_pages(
         self, client_data: dict[str, Any], request_data: CreateClientRequest
@@ -1318,8 +1321,24 @@ class ClientService:
         if billing_preferences_data:
             billing_preferences = BillingPreferences(**billing_preferences_data)
 
-        # Format custom fields for response
-        custom_fields = parse_json_field(client.get("custom_fields")) or {}
+        custom_fields_raw = parse_json_field(client.get("custom_fields"))
+        custom_fields: list[Any] = custom_fields_raw if isinstance(custom_fields_raw, list) else []
+        if custom_fields:
+            entity_type_cf = (
+                EntityType.COMPANY
+                if client.get("client_type") == ClientType.COMPANY.value
+                else EntityType.CONTACT
+            )
+            cfs = CustomFieldService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            definitions_cf, _ = await cfs.get_custom_fields_list(
+                entity_type_cf,
+                organization_id=organization_id,
+            )
+            id_to_def_cf = {str(d.id): d for d in definitions_cf}
+            custom_fields = cfs.resolve_fields_for_read(custom_fields, id_to_def_cf)
 
         additional_data = parse_json_field(client.get("additional_data")) or {}
         sales_intelligence_raw = parse_json_field(client.get("sales_intelligence")) or {}
@@ -1861,45 +1880,30 @@ class ClientService:
         payload: dict[str, Any],
     ) -> None:
         """Merge body.custom_fields with current, validate, and set on payload."""
-        if body.custom_fields is None:
+        if not (self.user_context and self.user_context.organization_id):
             return
-        existing = parse_json_field(current.get("custom_fields")) or {}
-        merged = dict(existing)
 
-        # Determine entity type from client type
+        existing = parse_json_field(current.get("custom_fields"))
+        merged = existing if isinstance(existing, list) else []
+
         client_type = current.get("client_type", "")
         entity_type = (
             EntityType.COMPANY if client_type == ClientType.COMPANY.value else EntityType.CONTACT
         )
 
-        # Validate and format new/updated custom fields
         custom_field_service = CustomFieldService(
             db_connection=self.db_connection,
             user_context=self.user_context,
         )
 
-        # Merge: remove fields set to None, update/add others
-        fields_to_validate: dict[str, Any] = {}
-        for key, value in body.custom_fields.items():
-            if value is None:
-                merged.pop(key, None)
-            else:
-                fields_to_validate[key] = value
-
-        # Validate only the fields being updated/added
-        if fields_to_validate:
-            # Required-field validation must consider the full merged set
-            # (existing + newly provided values), even though we only validate
-            # /format the keys being updated.
-            required_presence = {**merged, **fields_to_validate}
-            validated_fields = await custom_field_service.validate_and_format_custom_fields(
-                fields_to_validate,
-                entity_type,
-                required_custom_fields_for_presence=required_presence,
-            )
-            merged.update(validated_fields)
-
-        payload["custom_fields"] = json.dumps(merged)
+        patch = body.custom_fields if body.custom_fields is not None else None
+        merged = await custom_field_service.merge_for_update(patch, merged, entity_type)
+        if json.dumps(merged, sort_keys=True, default=str) != json.dumps(
+            existing if isinstance(existing, list) else [],
+            sort_keys=True,
+            default=str,
+        ):
+            payload["custom_fields"] = json.dumps(merged)
 
     async def _build_client_update_payload(
         self, body: UpdateClientRequest, current: dict[str, Any]

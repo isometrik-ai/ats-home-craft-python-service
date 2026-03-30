@@ -589,10 +589,15 @@ class UpdateClientRequest(BaseModel):
     )
     lead_management: LeadManagementUpdate | None = None
     billing_preferences: BillingPreferencesUpdate | None = None
-    custom_fields: dict[str, Any] | None = Field(
+    custom_fields: list[dict[str, Any]] | None = Field(
         None,
         description=(
-            "Custom fields (validated against custom field definitions for the client type)"
+            """FieldCell PATCH: root entries use field_id plus exactly one of value
+            | sub_fields | items
+            (instance_id required for existing roots; list ``items`` is authoritative).
+            Nested cells may be updated with only instance_id plus
+            exactly one of value | sub_fields | items
+            (optional field_id must match that cell). Do not send type."""
         ),
     )
     additional_data: dict[str, Any] | None = None
@@ -650,10 +655,12 @@ class CreateClientRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, description="Tags", max_length=50)
     lead_management: LeadManagement | None = Field(None, description="Lead management")
     billing_preferences: BillingPreferences | None = Field(None, description="Billing preferences")
-    custom_fields: dict[str, Any] = Field(
-        default_factory=dict,
+    custom_fields: list[dict[str, Any]] = Field(
+        default_factory=list,
         description=(
-            "Custom fields (validated against custom field definitions for the client type)"
+            """Root FieldCell create payload:
+            field_id plus exactly one of value | sub_fields | items. "
+            Do not send instance_id or type."""
         ),
     )
     portal_access: bool = Field(
@@ -835,9 +842,12 @@ class ClientDetailsResponse(BaseModel):
     )
     websites: list[Website] = Field(default_factory=list, description="Websites")
     billing_preferences: BillingPreferences | None = Field(None, description="Billing preferences")
-    custom_fields: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Custom fields (formatted according to custom field definitions)",
+    custom_fields: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Resolved FieldCells: field_id, instance_id, type, field_key, label, "
+            "and value | sub_fields | items"
+        ),
     )
     addresses: list[ClientAddressResponse] = Field(default_factory=list, description="Addresses")
     lead: LeadInfo | None = Field(None, description="Lead information")

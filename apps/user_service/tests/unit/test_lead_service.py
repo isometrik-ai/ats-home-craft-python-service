@@ -228,22 +228,41 @@ def _patch_custom_field_service(monkeypatch: pytest.MonkeyPatch, calls: dict[str
             """Initialize CustomFieldService."""
             # Calls captured via closure; no instance state needed.
 
-        async def validate_and_format_custom_fields(
+        async def validate_for_create(
             self,
-            fields_to_validate: dict[str, Any],
+            custom_fields: list[dict[str, Any]] | None,
             entity_type: EntityType,
-        ) -> dict[str, Any]:
-            """Validate and format custom fields."""
-            calls["validate_and_format_custom_fields"] = (fields_to_validate, entity_type)
-            return fields_to_validate
+        ) -> list[dict[str, Any]]:
+            """Record call and return payload passthrough."""
+            calls["validate_for_create"] = (custom_fields, entity_type)
+            return list(custom_fields) if custom_fields else []
 
-        async def ensure_required_fields_present(
+        async def merge_for_update(
             self,
-            custom_fields: dict[str, Any],
+            payload: list[dict[str, Any]] | None,
+            stored: Any,
             entity_type: EntityType,
-        ) -> None:
-            """Ensure required fields are present."""
-            calls["ensure_required_fields_present"] = (custom_fields, entity_type)
+        ) -> list[dict[str, Any]]:
+            """Record call and merge FieldCell lists (test double)."""
+            calls["merge_for_update"] = (payload, stored, entity_type)
+            stored_list = stored if isinstance(stored, list) else []
+            by_id: dict[str, dict[str, Any]] = {}
+            for cell in stored_list:
+                if isinstance(cell, dict) and cell.get("field_id"):
+                    by_id[str(cell["field_id"])] = dict(cell)
+            for cell in payload or []:
+                if not isinstance(cell, dict):
+                    continue
+                fid = str(cell.get("field_id") or "")
+                if not fid:
+                    continue
+                if cell.get("value") is None and "value" in cell:
+                    by_id.pop(fid, None)
+                    continue
+                prev = by_id.get(fid, {})
+                nxt = {**prev, **cell, "field_id": fid}
+                by_id[fid] = nxt
+            return list(by_id.values())
 
     monkeypatch.setattr(
         "apps.user_service.app.services.lead_service.CustomFieldService",
@@ -374,8 +393,8 @@ async def test_create_lead_payload_and_poc_validation(monkeypatch):
     assert payload["point_of_contact"] == POINT_OF_CONTACT_ID
     assert not payload["custom_fields"]
 
-    assert not custom_calls["ensure_required_fields_present"][0]
-    assert custom_calls["ensure_required_fields_present"][1] == EntityType.LEAD
+    assert custom_calls["validate_for_create"][0] == []
+    assert custom_calls["validate_for_create"][1] == EntityType.LEAD
     # owner_id was omitted, so no user lookup should occur.
     assert not user_repo.calls
 
@@ -427,7 +446,7 @@ async def test_update_lead_missing_raises():
 async def test_update_lead_stage_validation():
     """update_lead validates stage_id existence when stage_id is updated to a non-null UUID."""
     service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
-    lead_repo.get_lead_detail_by_id_result = {"id": LEAD_ID, "custom_fields": {}}
+    lead_repo.get_lead_detail_by_id_result = {"id": LEAD_ID, "custom_fields": []}
     stage_repo.get_stage_by_id_result = None
 
     with pytest.raises(NotFoundException) as exc_info:
@@ -444,30 +463,45 @@ async def test_update_lead_stage_validation():
 
 @pytest.mark.asyncio
 async def test_update_lead_custom_fields_merge(monkeypatch):
-    """update_lead merges custom_fields: remove keys with null and validate new keys."""
+    """update_lead merges custom_fields FieldCells; explicit null clears optional root."""
     service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
     lead_repo.get_lead_detail_by_id_result = {
         "id": LEAD_ID,
-        "custom_fields": '{"old_key": "x", "keep_key": "y"}',
+        "custom_fields": (
+            "["
+            '{"field_id":"f_old","instance_id":"a","value":"x"},'
+            '{"field_id":"f_keep","instance_id":"b","value":"y"}'
+            "]"
+        ),
     }
-    lead_repo.update_lead_result = {
-        "id": LEAD_ID,
-        "custom_fields": {"keep_key": "y", "new_key": "z"},
-    }
+    merged = [
+        {"field_id": "f_keep", "instance_id": "b", "value": "y"},
+        {"field_id": "f_new", "instance_id": "n", "value": "z"},
+    ]
+    lead_repo.update_lead_result = {"id": LEAD_ID, "custom_fields": merged}
 
     custom_calls: dict[str, Any] = {}
     _patch_custom_field_service(monkeypatch, custom_calls)
 
     updated = await service.update_lead(
         LEAD_ID,
-        UpdateLeadRequest(custom_fields={"old_key": None, "new_key": "z"}),
+        UpdateLeadRequest(
+            custom_fields=[
+                {"field_id": "f_old", "value": None},
+                {"field_id": "f_new", "instance_id": "n", "value": "z"},
+            ]
+        ),
     )
 
     assert updated == lead_repo.update_lead_result
     update_data = lead_repo.calls["update_lead"][2]
-    assert update_data["custom_fields"] == {"keep_key": "y", "new_key": "z"}
-    assert custom_calls["validate_and_format_custom_fields"][0] == {"new_key": "z"}
-    assert custom_calls["validate_and_format_custom_fields"][1] == EntityType.LEAD
+    assert update_data["custom_fields"] == merged
+    patch_arg = custom_calls["merge_for_update"][0]
+    assert patch_arg == [
+        {"field_id": "f_old", "value": None},
+        {"field_id": "f_new", "instance_id": "n", "value": "z"},
+    ]
+    assert custom_calls["merge_for_update"][2] == EntityType.LEAD
     # No stage/owner/poc validations were triggered for this body.
     assert not stage_repo.calls
     assert not client_repo.calls
@@ -612,9 +646,38 @@ async def test_list_leads_kanban_groups():
 
 
 @pytest.mark.asyncio
-async def test_get_lead_detail_custom_fields():
-    """get_lead returns LeadDetail JSON and parses custom_fields string."""
+async def test_get_lead_detail_custom_fields(monkeypatch):
+    """get_lead returns LeadDetail JSON with resolved custom_fields (id-keyed read shape)."""
     service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+
+    class _CFRepo:
+        """Minimal fake custom field repository for lead detail read tests."""
+
+        get_fields_result = [
+            {
+                "id": "foo",
+                "field_name": "Foo",
+                "field_key": "foo_label",
+                "field_type": "text",
+                "parent_id": None,
+                "entity_type": "lead",
+                "show_on_create": True,
+                "show_on_detail": False,
+                "is_required": False,
+                "type_config": {},
+                "sort_order": 0,
+                "is_active": True,
+            }
+        ]
+
+        async def get_custom_fields_by_entity_type(self, _organization_id, _entity_type):
+            """Return canned field definitions (no DB)."""
+            return self.get_fields_result
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.CustomFieldRepository",
+        lambda db_connection=None: _CFRepo(),
+    )
     now = datetime(2026, 1, 2, tzinfo=timezone.utc)
     lead_repo.get_lead_detail_by_id_result = {
         "id": LEAD_ID,
@@ -637,7 +700,7 @@ async def test_get_lead_detail_custom_fields():
         "owner_name": "Owner Name",
         "point_of_contact_id": POINT_OF_CONTACT_ID,
         "point_of_contact": "PoC Name",
-        "custom_fields": '{"foo": "bar"}',
+        "custom_fields": ('[{"field_id":"foo","instance_id":"f1","type":"text","value":"bar"}]'),
         "created_at": now,
         "updated_at": now,
     }
@@ -647,7 +710,16 @@ async def test_get_lead_detail_custom_fields():
     assert detail["id"] == LEAD_ID
     assert detail["client_name"] == "Client Co"
     assert detail["stage_name"] == "Qualified"
-    assert detail["custom_fields"] == {"foo": "bar"}
+    assert detail["custom_fields"] == [
+        {
+            "field_id": "foo",
+            "field_key": "foo_label",
+            "label": "Foo",
+            "instance_id": "f1",
+            "type": "text",
+            "value": "bar",
+        }
+    ]
     assert detail["created_at"] == now.isoformat()
     assert detail["updated_at"] == now.isoformat()
     assert detail["converted_at"].startswith("2026-01-11T")
