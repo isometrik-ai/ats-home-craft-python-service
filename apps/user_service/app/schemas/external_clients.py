@@ -8,38 +8,36 @@ while still mapping to the existing internal `UpdateClientRequest` expected by
 
 from __future__ import annotations
 
-
-from datetime import date
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.user_service.app.schemas.clients import (
-    AddressesUpdate,
     Address,
-    BillingPreferencesUpdate,
+    AddressesUpdate,
     BillingPreferences,
+    BillingPreferencesUpdate,
     ClientAddressResponse,
     CompanyContact,
-    KeyPerson,
-    EducationalHistoryUpdate,
+    CreateClientRequest,
     EducationalHistoryItem,
+    EducationalHistoryUpdate,
     KeyPeopleUpdate,
+    KeyPerson,
+    LeadInfo,
     LeadManagement,
     LeadManagementUpdate,
-    LeadInfo,
-    LinkedPagesUpdate,
     LinkedPageItem,
+    LinkedPagesUpdate,
     Phone,
     PhoneInput,
     PrimaryContactInfo,
     PrimaryContactUpdate,
     Product,
     ProductsUpdate,
-    CreateClientRequest,
-    SocialPagesUpdate,
     SocialPage,
+    SocialPagesUpdate,
     UpdateClientRequest,
     Website,
     WebsitesUpdate,
@@ -68,9 +66,7 @@ class ExternalCreateContactRequest(BaseModel):
     # Link to company (existing or create via name)
     client_company_id: str | None = None
     company_name: str | None = Field(
-        None,
-        max_length=200,
-        description="Company name to link/create"
+        None, max_length=200, description="Company name to link/create"
     )
 
     # Common fields
@@ -97,6 +93,7 @@ class ExternalCreateContactRequest(BaseModel):
             **{k: v for k, v in data.items() if k != "portal_access"},
             **({"portal_access": portal_access} if portal_access is not None else {}),
         )
+
 
 class ExternalCreateCompanyPrimaryContact(BaseModel):
     """Primary contact details for creating a company externally."""

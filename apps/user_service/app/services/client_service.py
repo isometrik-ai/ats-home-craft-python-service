@@ -968,7 +968,9 @@ class ClientService:
                 "lead_score": lead.lead_score,
             }
             created_lead = await self.lead_repository.create_lead(lead_row)
-            lead_id = str(created_lead.get("id")) if created_lead and created_lead.get("id") else None
+            lead_id = (
+                str(created_lead.get("id")) if created_lead and created_lead.get("id") else None
+            )
 
         # Create address records if provided
         if request_data.addresses:
@@ -1068,7 +1070,9 @@ class ClientService:
             except Exception as e:
                 logger.error("Failed to send client creation email: %s", str(e))
         enrichment_items = self._get_enrichment_items_for_created_clients(records, organization_id)
-        return CreateClientResult(records=records, enrichment_items=enrichment_items, lead_id=lead_id)
+        return CreateClientResult(
+            records=records, enrichment_items=enrichment_items, lead_id=lead_id
+        )
 
     async def get_clients_list(
         self,

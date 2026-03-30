@@ -20,22 +20,25 @@ from supabase import AsyncClient
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.external_auth import external_organization_id
+from apps.user_service.app.dependencies.supabase import supabase_service
+from apps.user_service.app.schemas.enums import ClientStatus, ClientType
 from apps.user_service.app.schemas.external_clients import (
-    ExternalCreateCompanyRequest,
-    ExternalCreateContactRequest,
-    ExternalCreateCompanyResult,
-    ExternalCreateContactResult,
     ExternalCompanyDetailsResponse,
     ExternalCompanyListItem,
     ExternalContactDetailsResponse,
     ExternalContactListItem,
+    ExternalCreateCompanyRequest,
+    ExternalCreateCompanyResult,
+    ExternalCreateContactRequest,
+    ExternalCreateContactResult,
     ExternalUpdateCompanyRequest,
     ExternalUpdateContactRequest,
 )
-from apps.user_service.app.schemas.enums import ClientStatus, ClientType
-from apps.user_service.app.services.client_service import ClientEnrichmentService, ClientService
+from apps.user_service.app.services.client_service import (
+    ClientEnrichmentService,
+    ClientService,
+)
 from apps.user_service.app.utils.common_utils import UserContext, handle_api_exceptions
-from apps.user_service.app.dependencies.supabase import supabase_service
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -48,11 +51,11 @@ def _resolve_created_ids(records: list[dict]) -> tuple[str | None, str | None]:
     """Return (company_id, contact_id) from created client records."""
     company_id: str | None = None
     contact_id: str | None = None
-    for r in records or []:
-        if r.get("client_type") == ClientType.COMPANY.value:
-            company_id = str(r.get("id")) if r.get("id") else company_id
-        elif r.get("client_type") == ClientType.PERSON.value:
-            contact_id = str(r.get("id")) if r.get("id") else contact_id
+    for record in records or []:
+        if record.get("client_type") == ClientType.COMPANY.value:
+            company_id = str(record.get("id")) if record.get("id") else company_id
+        elif record.get("client_type") == ClientType.PERSON.value:
+            contact_id = str(record.get("id")) if record.get("id") else contact_id
     # In rare cases, a create may only create one row.
     return company_id, contact_id
 
@@ -203,7 +206,7 @@ async def external_list_contacts(
     clients = result["clients"]
     total = result["total"]
     items = []
-    for item in (clients or []):
+    for item in clients or []:
         primary = item.get("primary_contact") or {}
         phones = primary.get("phones") or []
         items.append(
@@ -265,6 +268,7 @@ async def external_create_company(
     organization_id: str = Depends(external_organization_id),
     body: ExternalCreateCompanyRequest = Body(...),
 ):
+    """External create company endpoint (Isometrik credential auth)."""
     service_body = body.to_create_client_request()
     user_context = UserContext(
         user_id="external_integration",
@@ -339,6 +343,7 @@ async def external_create_contact(
     organization_id: str = Depends(external_organization_id),
     body: ExternalCreateContactRequest = Body(...),
 ):
+    """External create contact endpoint (Isometrik credential auth)."""
     service_body = body.to_create_client_request()
     user_context = UserContext(
         user_id="external_integration",
@@ -533,7 +538,6 @@ async def external_get_contact_details(
             updated_at=details.updated_at,
         ).model_dump(exclude_none=True, mode="json"),
     )
-
 
 
 @handle_api_exceptions("external update company")
