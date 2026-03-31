@@ -39,7 +39,12 @@ from apps.user_service.app.services.client_service import (
     ClientService,
 )
 from apps.user_service.app.utils.common_utils import UserContext, handle_api_exceptions
-from libs.shared_utils.response_factory import list_response, success_response
+from libs.shared_utils.http_exceptions import ConflictException
+from libs.shared_utils.response_factory import (
+    error_response,
+    list_response,
+    success_response,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 # External integrations should not share the same path-space as internal `/clients/*`
@@ -281,7 +286,21 @@ async def external_create_company(
             db_connection=db_connection,
             supabase_client=sb_client,
         )
-        result = await service.create_client(request_data=service_body)
+        try:
+            result = await service.create_client(request_data=service_body)
+        except ConflictException as exc:
+            existing_client_id = exc.params.get("client_id") if exc.params else None
+            if exc.message_key == "clients.errors.email_already_exists" and existing_client_id:
+                return error_response(
+                    request=request,
+                    message_key=exc.message_key,
+                    status_code=exc.status_code,
+                    custom_code=exc.custom_code,
+                    params=exc.params,
+                    errors=[{"company_id": str(existing_client_id)}],
+                    headers=exc.headers if hasattr(exc, "headers") else None,
+                )
+            raise
         company_id, contact_id = _resolve_created_ids(result.records or [])
         lead_id = result.lead_id
 
@@ -356,7 +375,21 @@ async def external_create_contact(
             db_connection=db_connection,
             supabase_client=sb_client,
         )
-        result = await service.create_client(request_data=service_body)
+        try:
+            result = await service.create_client(request_data=service_body)
+        except ConflictException as exc:
+            existing_client_id = exc.params.get("client_id") if exc.params else None
+            if exc.message_key == "clients.errors.email_already_exists" and existing_client_id:
+                return error_response(
+                    request=request,
+                    message_key=exc.message_key,
+                    status_code=exc.status_code,
+                    custom_code=exc.custom_code,
+                    params=exc.params,
+                    errors=[{"contact_id": str(existing_client_id)}],
+                    headers=exc.headers if hasattr(exc, "headers") else None,
+                )
+            raise
         company_id, contact_id = _resolve_created_ids(result.records or [])
         lead_id = result.lead_id
 

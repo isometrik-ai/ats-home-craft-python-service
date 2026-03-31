@@ -616,8 +616,8 @@ class ClientRepository:
         email: str,
         organization_id: str,
         exclude_client_id: str | None = None,
-    ) -> bool:
-        """Check if a client with the given email exists for this organization.
+    ) -> str | None:
+        """Return existing client id for a matching email in this organization.
 
         Email is resolved via the linked auth user for active client_users.
 
@@ -628,8 +628,8 @@ class ClientRepository:
                 (useful when updating an existing client).
 
         Returns:
-            True if a non-deleted client in this organization is already linked
-            to an auth user with the given email, False otherwise.
+            Matching client ID if a non-deleted client in this organization is
+            already linked to an auth user with the given email, else None.
         """
         conditions = [
             "LOWER(au.email) = LOWER($1)",
@@ -651,16 +651,14 @@ class ClientRepository:
 
         where_clause = " AND ".join(conditions)
         query = f"""
-            SELECT EXISTS(
-                SELECT 1
-                FROM client_users cu
-                JOIN clients c ON c.id = cu.client_id
-                JOIN auth.users au ON au.id = cu.user_id
-                WHERE {where_clause}
-            )
+            SELECT c.id::text
+            FROM client_users cu
+            JOIN clients c ON c.id = cu.client_id
+            JOIN auth.users au ON au.id = cu.user_id
+            WHERE {where_clause}
+            LIMIT 1
         """
-        exists = await self.db_connection.fetchval(query, *params)
-        return bool(exists)
+        return await self.db_connection.fetchval(query, *params)
 
     # ADDRESS OPERATIONS
     async def bulk_create_addresses(self, addresses_data: list[dict]) -> list[dict]:
