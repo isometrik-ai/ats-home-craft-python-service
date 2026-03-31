@@ -83,7 +83,7 @@ class LeadService:
         user_id = self.user_context.user_id
         client_id = body.client_id
 
-        client_exists, lead_exists = await self.lead_repository.get_client_and_lead_existence(
+        client_exists = await self.lead_repository.get_client_existence(
             organization_id,
             client_id,
         )
@@ -91,11 +91,6 @@ class LeadService:
             raise NotFoundException(
                 message_key="clients.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        if lead_exists:
-            raise DuplicateValueException(
-                message_key="leads.errors.lead_already_exists",
-                custom_code=CustomStatusCode.DUPLICATE_ENTRY,
             )
 
         stage = await self.lead_stage_repository.get_stage_by_id(

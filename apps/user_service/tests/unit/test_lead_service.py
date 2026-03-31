@@ -21,7 +21,7 @@ from apps.user_service.app.schemas.leads import (
 )
 from apps.user_service.app.services.lead_service import LeadService
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import DuplicateValueException, NotFoundException
+from libs.shared_utils.http_exceptions import NotFoundException
 
 ORG_ID = "org-1"
 CTX_USER_ID = "33333333-3333-3333-3333-333333333333"
@@ -49,7 +49,7 @@ class _FakeLeadRepository:
 
     def __init__(self) -> None:
         self.calls: dict[str, Any] = {}
-        self.get_client_and_lead_existence_result: tuple[bool, bool] = (True, False)
+        self.get_client_existence_result: bool = True
         self.create_lead_result: dict[str, Any] = {"id": LEAD_ID}
         self.get_lead_detail_by_id_result: dict[str, Any] | None = None
         self.update_lead_result: dict[str, Any] | None = None
@@ -58,14 +58,14 @@ class _FakeLeadRepository:
         self.list_leads_for_kanban_result: list[dict[str, Any]] = []
         self.delete_lead_result: dict[str, Any] | None = None
 
-    async def get_client_and_lead_existence(
+    async def get_client_existence(
         self,
         organization_id: str,
         client_id: str,
-    ) -> tuple[bool, bool]:
-        """Return client and lead existence."""
-        self.calls["get_client_and_lead_existence"] = (organization_id, client_id)
-        return self.get_client_and_lead_existence_result
+    ) -> bool:
+        """Return client existence."""
+        self.calls["get_client_existence"] = (organization_id, client_id)
+        return self.get_client_existence_result
 
     async def create_lead(self, lead_row: dict[str, Any]) -> dict[str, Any]:
         """Create lead."""
@@ -274,7 +274,7 @@ def _patch_custom_field_service(monkeypatch: pytest.MonkeyPatch, calls: dict[str
 async def test_create_lead_client_missing_raises(monkeypatch):
     """create_lead raises NotFoundException when client doesn't exist."""
     service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
-    lead_repo.get_client_and_lead_existence_result = (False, False)
+    lead_repo.get_client_existence_result = False
 
     custom_calls: dict[str, Any] = {}
     _patch_custom_field_service(monkeypatch, custom_calls)
@@ -298,35 +298,10 @@ async def test_create_lead_client_missing_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_lead_duplicate_raises(monkeypatch):
-    """create_lead raises DuplicateValueException when lead already exists."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
-    lead_repo.get_client_and_lead_existence_result = (True, True)
-
-    custom_calls: dict[str, Any] = {}
-    _patch_custom_field_service(monkeypatch, custom_calls)
-
-    body = CreateLeadRequest(
-        client_id=CLIENT_ID,
-        name="New Lead",
-        stage_id=STAGE_ID_1,
-    )
-
-    with pytest.raises(DuplicateValueException) as exc_info:
-        await service.create_lead(body)
-
-    assert exc_info.value.message_key == "leads.errors.lead_already_exists"
-    assert not custom_calls  # Should fail before custom-field validation.
-    assert not stage_repo.calls
-    assert not client_repo.calls
-    assert not user_repo.calls
-
-
-@pytest.mark.asyncio
 async def test_create_lead_stage_missing_raises(monkeypatch):
     """create_lead raises NotFoundException when provided stage doesn't exist."""
     service, lead_repo, stage_repo, _, _ = _service_with_fakes()
-    lead_repo.get_client_and_lead_existence_result = (True, False)
+    lead_repo.get_client_existence_result = True
     stage_repo.get_stage_by_id_result = None
 
     custom_calls: dict[str, Any] = {}
@@ -349,7 +324,7 @@ async def test_create_lead_stage_missing_raises(monkeypatch):
 async def test_create_lead_payload_and_poc_validation(monkeypatch):
     """Successful create_lead builds the expected DB payload and validates PoC."""
     service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
-    lead_repo.get_client_and_lead_existence_result = (True, False)
+    lead_repo.get_client_existence_result = True
     stage_repo.get_stage_by_id_result = {"id": STAGE_ID_1}
     client_repo.client_exists_in_organization_result = True
 
@@ -377,7 +352,7 @@ async def test_create_lead_payload_and_poc_validation(monkeypatch):
     result = await service.create_lead(body)
 
     assert result == lead_repo.create_lead_result
-    assert lead_repo.calls["get_client_and_lead_existence"] == (ORG_ID, CLIENT_ID)
+    assert lead_repo.calls["get_client_existence"] == (ORG_ID, CLIENT_ID)
     assert stage_repo.calls["get_stage_by_id"] == (ORG_ID, STAGE_ID_1)
     assert client_repo.calls["client_exists_in_organization"] == (ORG_ID, POINT_OF_CONTACT_ID)
 
@@ -403,7 +378,7 @@ async def test_create_lead_payload_and_poc_validation(monkeypatch):
 async def test_create_lead_owner_id_validation(monkeypatch):
     """create_lead validates owner_id against user repository when explicitly provided."""
     service, lead_repo, stage_repo, _, user_repo = _service_with_fakes()
-    lead_repo.get_client_and_lead_existence_result = (True, False)
+    lead_repo.get_client_existence_result = True
     stage_repo.get_stage_by_id_result = {"id": STAGE_ID_1}
     user_repo.get_user_details_by_id_result = {"id": OWNER_ID}
 
