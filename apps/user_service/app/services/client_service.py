@@ -570,14 +570,15 @@ class ClientService:
             )
 
         # Validate email uniqueness at organization level (via client + client_user linkage)
-        email_exists = await self.client_repository._check_client_email_exists(
+        existing_client_id = await self.client_repository._check_client_email_exists(
             email=request_data.email,
             organization_id=organization_id,
         )
-        if email_exists:
+        if existing_client_id:
             raise ConflictException(
                 message_key="clients.errors.email_already_exists",
                 custom_code=CustomStatusCode.CONFLICT,
+                params={"client_id": existing_client_id},
             )
 
         return organization

@@ -48,6 +48,7 @@ class _FakeClientRepo:
         self.name_exists = False
         self.client_result = None
         self.client_email_exists = False
+        self.existing_client_id = None
         self.client_details_result = None
         self.clients_list_result = []
         self.clients_count_result = 0
@@ -65,13 +66,15 @@ class _FakeClientRepo:
         return self.name_exists
 
     async def _check_client_email_exists(self, email, organization_id, exclude_client_id=None):
-        """Return email existence flag at org level."""
+        """Return existing client id at org level (or None)."""
         self.calls["check_client_email_exists"] = {
             "email": email,
             "organization_id": organization_id,
             "exclude_client_id": exclude_client_id,
         }
-        return self.client_email_exists
+        if self.existing_client_id is not None:
+            return self.existing_client_id
+        return "existing-client-1" if self.client_email_exists else None
 
     async def create_client(self, clients_data):
         """Create clients; accepts list of dicts, returns list of records."""
@@ -425,7 +428,7 @@ async def test_client_from_user_raises_org_not_found(monkeypatch):
 async def test_create_client_raises_email_exists(monkeypatch):
     """Raises ConflictException when email already exists for organization."""
     fake_repo = _FakeClientRepo()
-    fake_repo.client_email_exists = True
+    fake_repo.existing_client_id = "client-existing-123"
     fake_user_repo = _FakeUserRepo()
     fake_org_repo = _FakeOrgRepo()
 
@@ -458,8 +461,9 @@ async def test_create_client_raises_email_exists(monkeypatch):
         ],
     )
 
-    with pytest.raises(ConflictException):
+    with pytest.raises(ConflictException) as exc_info:
         await service.create_client(request_data)
+    assert exc_info.value.params["client_id"] == "client-existing-123"
 
 
 @pytest.mark.asyncio
