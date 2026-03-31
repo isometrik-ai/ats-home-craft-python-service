@@ -165,28 +165,24 @@ class LeadRepository:
     def __init__(self, db_connection: asyncpg.Connection) -> None:
         self.db_connection = db_connection
 
-    async def get_client_and_lead_existence(
+    async def get_client_existence(
         self,
         organization_id: str,
         client_id: str,
-    ) -> tuple[bool, bool]:
-        """Return ``(client_exists, lead_exists)`` for create-lead validation in one query."""
+    ) -> bool:
+        """Return whether the client exists in the organization."""
         row = await self.db_connection.fetchrow(
             """
             SELECT
                 EXISTS(
                     SELECT 1 FROM clients c
                     WHERE c.organization_id = $1 AND c.id = $2::uuid
-                ) AS client_exists,
-                EXISTS(
-                    SELECT 1 FROM leads l
-                    WHERE l.organization_id = $1 AND l.client_id = $2::uuid
-                ) AS lead_exists
+                ) AS client_exists
             """,
             organization_id,
             client_id,
         )
-        return bool(row["client_exists"]), bool(row["lead_exists"])
+        return bool(row["client_exists"])
 
     async def create_lead(self, row: dict[str, Any]) -> dict[str, Any]:
         """Insert a lead row; unknown keys should not be passed (service-layer allowlist)."""
