@@ -40,7 +40,11 @@ from apps.user_service.app.services.client_service import (
 )
 from apps.user_service.app.utils.common_utils import UserContext, handle_api_exceptions
 from libs.shared_utils.http_exceptions import ConflictException
-from libs.shared_utils.response_factory import error_response, list_response, success_response
+from libs.shared_utils.response_factory import (
+    error_response,
+    list_response,
+    success_response,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 # External integrations should not share the same path-space as internal `/clients/*`
