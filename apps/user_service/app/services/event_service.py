@@ -165,7 +165,11 @@ class EventService:
                 "aggregate_id": str(record["id"]),
                 "organization_id": str(record["organization_id"]),
                 "actor_user_id": actor_user_id,
-                "payload": {"module": "clients", "action": "create"},
+                "payload": {
+                    "module": "clients",
+                    "action": "create",
+                    "client_type": str(record.get("client_type", "")),
+                },
             }
             for record in records
         ]
