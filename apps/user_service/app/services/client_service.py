@@ -1713,7 +1713,13 @@ class ClientService:
         is_primary_contact: bool | None = None,
     ) -> str | None:
         """Apply primary_contact updates if present and return person full name if applicable."""
-        if profile_photo_url is None and client_company_id is None and is_primary_contact is None:
+        if (
+            primary_contact is None
+            and profile_photo_url is None
+            and client_company_id is None
+            and is_primary_contact is None
+            and primary_contact is None
+        ):
             return None
 
         primary_contact_row = await self.client_repository._get_primary_contact_for_update(
