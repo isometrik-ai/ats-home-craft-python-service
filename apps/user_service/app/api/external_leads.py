@@ -212,7 +212,7 @@ async def external_update_lead(
     )
     async with db_connection.transaction():
         service = LeadService(user_context=user_context, db_connection=db_connection)
-        updated = await service.update_lead(lead_id=lead_id, body=body)
+        _, updated = await service.update_lead(lead_id=lead_id, body=body)
         resolved_id = (
             str(updated.get("id"))
             if isinstance(updated, dict) and updated.get("id") is not None
