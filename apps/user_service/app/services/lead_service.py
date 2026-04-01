@@ -211,8 +211,12 @@ class LeadService:
         ):
             update_data["custom_fields"] = merged
 
-    async def update_lead(self, lead_id: str, body: UpdateLeadRequest) -> dict[str, Any]:
-        """Partially update a lead (org-scoped) with custom-field merge and stage rules."""
+    async def update_lead(
+        self,
+        lead_id: str,
+        body: UpdateLeadRequest,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Partially update a lead and return (previous_state, updated_state)."""
         organization_id = self.user_context.organization_id
         current = await self.lead_repository.get_lead_detail_by_id(organization_id, lead_id)
         if not current:
@@ -258,7 +262,7 @@ class LeadService:
                 )
 
         if not update_data:
-            return current
+            return current, current
 
         updated = await self.lead_repository.update_lead(organization_id, lead_id, update_data)
         if not updated:
@@ -266,7 +270,7 @@ class LeadService:
                 message_key="leads.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return updated
+        return current, updated
 
     @staticmethod
     def _uuid_str(value: Any) -> str | None:

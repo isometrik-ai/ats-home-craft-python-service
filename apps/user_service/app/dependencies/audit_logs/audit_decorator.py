@@ -106,13 +106,16 @@ async def _log_audit_event(
         request, request_body, audit_state, status_code, table_name
     )
 
-    if audit_state["raw_old"]:
+    if audit_state["raw_old"] is not None and audit_state["raw_new"] is not None:
+        old_delta, new_delta, changed_fields = build_changed_data(
+            audit_state["raw_old"],
+            audit_state["raw_new"],
+        )
+        request.state.audit_old_values = {"data": old_delta}
+        request.state.audit_new_values["data"] = new_delta
+        request.state.audit_changed_fields = changed_fields
+    elif audit_state["raw_old"] is not None:
         request.state.audit_old_values = {"data": audit_state["raw_old"]}
-        # Only calculate changed fields if both old and new data are available
-        if audit_state["raw_new"] is not None:
-            request.state.audit_changed_fields = get_changed_fields(
-                audit_state["raw_old"], audit_state["raw_new"]
-            )
 
     audit_event_data = AuditEventData(
         user_context=user_context,
@@ -172,39 +175,56 @@ def _build_new_values(
     }
 
 
-def get_changed_fields(old_data: dict | None, new_data: dict | None, prefix: str = "") -> list[str]:
-    """Recursively compares old and new data to identify changed fields.
+def _values_are_equal(old_val: Any, new_val: Any) -> bool:
+    """Compare values safely for nested/list JSON audit payloads."""
+    if isinstance(old_val, (dict, list)) or isinstance(new_val, (dict, list)):
+        return json.dumps(old_val, sort_keys=True, default=str) == json.dumps(
+            new_val,
+            sort_keys=True,
+            default=str,
+        )
+    return old_val == new_val
 
-    Only includes fields that exist in both old and new data and have different values.
 
-    Args:
-        old_data (dict | None): Original data dictionary
-        new_data (dict | None): Updated data dictionary
-        prefix (str): Optional prefix for nested field names (default: "")
+def build_changed_data(
+    old_data: dict | None,
+    new_data: dict | None,
+    prefix: str = "",
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Return filtered old/new dictionaries and changed field names."""
+    old_data = old_data or {}
+    new_data = new_data or {}
+    old_delta: dict[str, Any] = {}
+    new_delta: dict[str, Any] = {}
+    changed_fields: list[str] = []
 
-    Returns:
-        list[str]: List of changed field names
-    """
-    # Handle None values gracefully
-    if old_data is None or new_data is None:
-        return []
-
-    changed = []
-
-    # Only compare fields that exist in both old and new data
     common_keys = set(old_data.keys()) & set(new_data.keys())
 
-    for key in common_keys:
+    for key in sorted(common_keys):
         full_key = f"{prefix}.{key}" if prefix else key
         old_val = old_data.get(key)
         new_val = new_data.get(key)
 
         if isinstance(old_val, dict) and isinstance(new_val, dict):
-            changed.extend(get_changed_fields(old_val, new_val, prefix=full_key))
-        elif old_val != new_val:
-            changed.append(full_key)
+            nested_old, nested_new, nested_changed = build_changed_data(
+                old_val,
+                new_val,
+                prefix=full_key,
+            )
+            if nested_changed:
+                old_delta[key] = nested_old
+                new_delta[key] = nested_new
+                changed_fields.extend(nested_changed)
+            continue
 
-    return changed
+        if _values_are_equal(old_val, new_val):
+            continue
+
+        old_delta[key] = old_val
+        new_delta[key] = new_val
+        changed_fields.append(full_key)
+
+    return old_delta, new_delta, changed_fields
 
 
 async def maybe_log_audit_on_error(

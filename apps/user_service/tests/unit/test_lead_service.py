@@ -458,7 +458,7 @@ async def test_update_lead_custom_fields_merge(monkeypatch):
     custom_calls: dict[str, Any] = {}
     _patch_custom_field_service(monkeypatch, custom_calls)
 
-    updated = await service.update_lead(
+    previous, updated = await service.update_lead(
         LEAD_ID,
         UpdateLeadRequest(
             custom_fields=[
@@ -468,6 +468,7 @@ async def test_update_lead_custom_fields_merge(monkeypatch):
         ),
     )
 
+    assert previous == lead_repo.get_lead_detail_by_id_result
     assert updated == lead_repo.update_lead_result
     update_data = lead_repo.calls["update_lead"][2]
     assert update_data["custom_fields"] == merged
@@ -490,8 +491,9 @@ async def test_update_lead_clear_stage_id():
     lead_repo.get_lead_detail_by_id_result = {"id": LEAD_ID}
     lead_repo.update_lead_result = {"id": LEAD_ID}
 
-    updated = await service.update_lead(LEAD_ID, UpdateLeadRequest(stage_id=None))
+    previous, updated = await service.update_lead(LEAD_ID, UpdateLeadRequest(stage_id=None))
 
+    assert previous == lead_repo.get_lead_detail_by_id_result
     assert updated == lead_repo.update_lead_result
     assert "get_stage_by_id" not in stage_repo.calls
     update_data = lead_repo.calls["update_lead"][2]
