@@ -168,7 +168,8 @@ class _FakeClientRepo:
     async def _update_client_user(self, client_user_id, update_data):
         """Record client_user updates."""
         self.calls["_update_client_user"] = (client_user_id, update_data)
-        return True
+        base_row = self.primary_contact_for_update_result or {"id": client_user_id}
+        return {**base_row, **update_data}
 
     async def clear_primary_contact_for_company(
         self, company_client_id, organization_id, exclude_client_user_id=None
@@ -3071,16 +3072,16 @@ async def test_apply_jsonb_list_changes_websites_remove_only(monkeypatch):
     service = ClientService(db_connection=None)
     websites_update = WebsitesUpdate(remove=["web-1"])
     current = {"websites": '[{"id": "web-1", "url": "https://example.com", "type": "primary"}]'}
+    payload = {}
 
     await service._apply_jsonb_list_changes(
-        "client-1",
-        "org-1",
         websites_update,
         current,
+        payload,
         "websites",
         "clients.errors.website_not_found",
     )
-    assert "update_client" in fake_repo.calls
+    assert "websites" in payload
 
 
 @pytest.mark.asyncio
@@ -3096,13 +3097,13 @@ async def test_apply_jsonb_list_changes_websites_not_found(monkeypatch):
         update=[WebsiteUpdateItem(id="nonexistent", url="https://example.com", type="primary")]
     )
     current = {"websites": "[]"}
+    payload = {}
 
     with pytest.raises(NotFoundException) as exc_info:
         await service._apply_jsonb_list_changes(
-            "client-1",
-            "org-1",
             websites_update,
             current,
+            payload,
             "websites",
             "clients.errors.website_not_found",
         )
@@ -3143,17 +3144,17 @@ async def test_apply_jsonb_list_changes_websites_non_list(monkeypatch):
     service = ClientService(db_connection=None)
     websites_update = WebsitesUpdate(add=[WebsiteInput(url="https://example.com", type="primary")])
     current = {"websites": "invalid"}
+    payload = {}
 
     await service._apply_jsonb_list_changes(
-        "client-1",
-        "org-1",
         websites_update,
         current,
+        payload,
         "websites",
         "clients.errors.website_not_found",
     )
 
-    assert "update_client" in fake_repo.calls
+    assert "websites" in payload
 
 
 @pytest.mark.asyncio
@@ -3171,16 +3172,16 @@ async def test_apply_jsonb_list_changes_social_pages_remove(monkeypatch):
             '[{"id": "social-1", "platform": "linkedin", "url": "https://example.com"}]'
         )
     }
+    payload = {}
 
     await service._apply_jsonb_list_changes(
-        "client-1",
-        "org-1",
         social_pages_update,
         current,
+        payload,
         "social_pages",
         "clients.errors.social_page_not_found",
     )
-    assert "update_client" in fake_repo.calls
+    assert "social_pages" in payload
 
 
 @pytest.mark.asyncio
@@ -3198,13 +3199,13 @@ async def test_apply_jsonb_changes_social_pages_not_found(monkeypatch):
         ]
     )
     current = {"social_pages": "[]"}
+    payload = {}
 
     with pytest.raises(NotFoundException) as exc_info:
         await service._apply_jsonb_list_changes(
-            "client-1",
-            "org-1",
             social_pages_update,
             current,
+            payload,
             "social_pages",
             "clients.errors.social_page_not_found",
         )
@@ -3230,17 +3231,17 @@ async def test_apply_jsonb_social_pages_non_list(monkeypatch):
         add=[SocialPageInput(platform="linkedin", url="https://example.com")]
     )
     current = {"social_pages": "invalid"}
+    payload = {}
 
     await service._apply_jsonb_list_changes(
-        "client-1",
-        "org-1",
         social_pages_update,
         current,
+        payload,
         "social_pages",
         "clients.errors.social_page_not_found",
     )
 
-    assert "update_client" in fake_repo.calls
+    assert "social_pages" in payload
 
 
 class _FakeAddressForEnrichment:
