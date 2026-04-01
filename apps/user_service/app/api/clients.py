@@ -580,25 +580,25 @@ async def update_client(
     body: UpdateClientRequest = Body(...),
 ):
     """Update client by ID. Only provided fields are applied."""
-    request.state.audit_table = "clients"
-    request.state.audit_requested_id = client_id
-    request.state.audit_description = f"Updated client: {client_id}"
-    request.state.audit_risk_level = "medium"
-
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_EDIT,
-    )
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-
     update_event: dict | None = None
     created_company_id: str | None = None
     async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CLIENTS_MANAGEMENT_EDIT,
+        )
+
+        request.state.audit_table = "clients"
+        request.state.audit_requested_id = client_id
+        request.state.audit_description = f"Updated client: {client_id}"
+        request.state.audit_risk_level = "medium"
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+
         client_service = ClientService(
             user_context=user_context,
             db_connection=db_connection,
@@ -609,9 +609,7 @@ async def update_client(
         if result:
             created_company_id = result.get("created_company_id")
             request.state.raw_audit_old_data = result.get("old_data")
-            request.state.raw_audit_new_data = body.model_dump(
-                exclude_unset=True, exclude_none=True
-            )
+            request.state.raw_audit_new_data = result.get("new_data")
             changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
             update_event = await event_service.create_lifecycle_event(
                 event_type=ClientEventType.UPDATED.value,

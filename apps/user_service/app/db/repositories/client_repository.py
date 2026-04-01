@@ -888,7 +888,9 @@ class ClientRepository:
         )
         return dict(row) if row else None
 
-    async def _update_client_user(self, client_user_id: str, update_data: dict[str, Any]) -> bool:
+    async def _update_client_user(
+        self, client_user_id: str, update_data: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """Update a client_user by id. Only provided keys are updated.
 
         Args:
@@ -896,10 +898,10 @@ class ClientRepository:
             update_data: Keys to update (e.g. phones). For phones pass JSON string.
 
         Returns:
-            True if a row was updated.
+            Updated client_user row fields for audit, or None if not updated.
         """
         if not update_data:
-            return True
+            return None
         set_parts = [
             f"{k} = ${i}::jsonb" if k == "phones" else f"{k} = ${i}"
             for i, k in enumerate(update_data, start=1)
@@ -912,11 +914,12 @@ class ClientRepository:
             UPDATE client_users
             SET {set_expr}
             WHERE id = ${num_params + 1}
-            RETURNING id
+            RETURNING id, first_name, middle_name, last_name, phones, client_company_id,
+                      is_primary_contact, profile_photo_url
             """,
             *params,
         )
-        return row is not None
+        return dict(row) if row else None
 
     async def clear_primary_contact_for_company(
         self,

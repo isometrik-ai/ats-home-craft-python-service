@@ -1604,7 +1604,7 @@ class ClientService:
             body: PATCH body; only non-None fields are applied
 
         Returns:
-            dict | None: Result with old_data for audit when update is applied, None when no-op
+            dict | None: Result with old/new data for audit when update is applied, None when no-op
 
         Raises:
             NotFoundException: If client not found
@@ -1643,12 +1643,11 @@ class ClientService:
 
         await self._apply_batch_jsonb_list_changes(
             body=body,
-            client_id=client_id,
-            organization_id=organization_id,
             current=current,
+            payload=update_data,
         )
 
-        person_name_from_primary_contact = await self._apply_primary_contact_update_if_needed(
+        primary_contact_audit = await self._apply_primary_contact_update_if_needed(
             client_id=client_id,
             organization_id=organization_id,
             primary_contact=body.primary_contact,
@@ -1658,6 +1657,9 @@ class ClientService:
             is_primary_contact=False
             if body.client_company_id is not None
             else body.is_primary_contact,
+        )
+        person_name_from_primary_contact = (
+            primary_contact_audit.get("person_full_name") if primary_contact_audit else None
         )
 
         if body.lead_management is not None:
@@ -1670,10 +1672,22 @@ class ClientService:
         ):
             update_data["name"] = person_name_from_primary_contact
 
+        updated_client_row = None
         if update_data:
-            await self.client_repository.update_client(client_id, organization_id, update_data)
+            updated_client_row = await self.client_repository.update_client(
+                client_id, organization_id, update_data
+            )
 
-        return {"old_data": old_data, "created_company_id": created_company_id}
+        new_data = self._format_client_for_audit(updated_client_row or current)
+        if primary_contact_audit:
+            old_data["client_user"] = primary_contact_audit["old_client_user"]
+            new_data["client_user"] = primary_contact_audit["new_client_user"]
+
+        return {
+            "old_data": old_data,
+            "new_data": new_data,
+            "created_company_id": created_company_id,
+        }
 
     async def _create_and_link_company_for_person_update(
         self,
@@ -1712,8 +1726,8 @@ class ClientService:
         profile_photo_url: str | None,
         client_company_id: str | None = None,
         is_primary_contact: bool | None = None,
-    ) -> str | None:
-        """Apply primary_contact updates if present and return person full name if applicable."""
+    ) -> dict[str, Any] | None:
+        """Apply primary_contact updates and return audit snapshots when contact changed."""
         if (
             primary_contact is None
             and profile_photo_url is None
@@ -2020,10 +2034,9 @@ class ClientService:
 
     async def _apply_jsonb_list_changes(
         self,
-        client_id: str,
-        organization_id: str,
         update_obj: Any,
         current: dict[str, Any],
+        payload: dict[str, Any],
         field_name: str,
         not_found_message_key: str,
     ) -> None:
@@ -2036,10 +2049,9 @@ class ClientService:
         - add: Add new items with auto-generated UUIDs
 
         Args:
-            client_id: Client ID
-            organization_id: Organization ID
             update_obj: Update object with optional add, update, remove attributes
             current: Current client data dict
+            payload: Final client update payload to populate
             field_name: Name of the JSONB field to update (e.g., "websites", "work_history")
             not_found_message_key: Message key for NotFoundException when update item not found
 
@@ -2078,89 +2090,80 @@ class ClientService:
                 new_item["id"] = str(uuid.uuid4())
                 updated.append(new_item)
 
-        # Update the JSONB field
-        await self.client_repository.update_client(
-            client_id, organization_id, {field_name: json.dumps(updated)}
-        )
+        # Stage JSONB change for the final single client-row update.
+        payload[field_name] = updated
+        current[field_name] = updated
 
     async def _apply_batch_jsonb_list_changes(
         self,
         body: UpdateClientRequest,
-        client_id: str,
-        organization_id: str,
         current: dict[str, Any],
+        payload: dict[str, Any],
     ) -> None:
         """Apply batch JSONB list changes."""
         # Apply batch list operations (addresses, websites, social_pages)
         if body.addresses is not None:
-            await self._apply_addresses_changes(client_id, body.addresses)
+            await self._apply_addresses_changes(str(current["id"]), body.addresses)
 
         if body.websites is not None:
             await self._apply_jsonb_list_changes(
-                client_id,
-                organization_id,
                 body.websites,
                 current,
+                payload,
                 "websites",
                 "clients.errors.website_not_found",
             )
 
         if body.social_pages is not None:
             await self._apply_jsonb_list_changes(
-                client_id,
-                organization_id,
                 body.social_pages,
                 current,
+                payload,
                 "social_pages",
                 "clients.errors.social_page_not_found",
             )
 
         if body.work_history is not None:
             await self._apply_jsonb_list_changes(
-                client_id,
-                organization_id,
                 body.work_history,
                 current,
+                payload,
                 "work_history",
                 "clients.errors.work_history_item_not_found",
             )
 
         if body.educational_history is not None:
             await self._apply_jsonb_list_changes(
-                client_id,
-                organization_id,
                 body.educational_history,
                 current,
+                payload,
                 "educational_history",
                 "clients.errors.educational_history_item_not_found",
             )
 
         if body.linked_pages is not None:
             await self._apply_jsonb_list_changes(
-                client_id,
-                organization_id,
                 body.linked_pages,
                 current,
+                payload,
                 "linked_pages",
                 "clients.errors.linked_page_not_found",
             )
 
         if body.products is not None:
             await self._apply_jsonb_list_changes(
-                client_id,
-                organization_id,
                 body.products,
                 current,
+                payload,
                 "products",
                 "clients.errors.product_not_found",
             )
 
         if body.key_people is not None:
             await self._apply_jsonb_list_changes(
-                client_id,
-                organization_id,
                 body.key_people,
                 current,
+                payload,
                 "key_people",
                 "clients.errors.key_person_not_found",
             )
@@ -2174,10 +2177,11 @@ class ClientService:
         client_company_id: str | None = None,
         is_primary_contact: bool | None = None,
         organization_id: str | None = None,
-    ) -> str | None:
+    ) -> dict[str, Any]:
         """Apply primary contact scalar fields and phones.
 
-        Returns computed full name (person only) when name parts provided; otherwise None.
+        Returns:
+            dict[str, Any]: person_full_name and client_user old/new snapshots for audit.
         """
         primary_id = primary_contact_row["id"]
 
@@ -2207,19 +2211,51 @@ class ClientService:
                     exclude_client_user_id=primary_id,
                 )
             update_data["is_primary_contact"] = True
+        old_contact_snapshot = self._format_client_user_for_audit(primary_contact_row)
+        updated_contact_row = None
         if update_data:
-            await self.client_repository._update_client_user(primary_id, update_data)
+            updated_contact_row = await self.client_repository._update_client_user(
+                primary_id, update_data
+            )
+        new_contact_snapshot = self._format_client_user_for_audit(
+            updated_contact_row or primary_contact_row
+        )
 
         # Person only: return computed full name so caller can fold it into client update_data.
+        person_full_name = None
         if primary_contact is not None and self._should_compute_person_full_name(
             is_person=is_person, update=primary_contact
         ):
-            return self._compute_person_full_name(
+            person_full_name = self._compute_person_full_name(
                 primary_contact_row=primary_contact_row,
                 update=primary_contact,
             )
 
-        return None
+        return {
+            "person_full_name": person_full_name,
+            "old_client_user": old_contact_snapshot,
+            "new_client_user": new_contact_snapshot,
+        }
+
+    @staticmethod
+    def _format_client_user_for_audit(client_user_data: dict[str, Any]) -> dict[str, Any]:
+        """Format primary contact row for client-user audit snapshots."""
+        return {
+            "client_user_id": (
+                str(client_user_data.get("id")) if client_user_data.get("id") else None
+            ),
+            "first_name": client_user_data.get("first_name"),
+            "middle_name": client_user_data.get("middle_name"),
+            "last_name": client_user_data.get("last_name"),
+            "phones": parse_json_field(client_user_data.get("phones")),
+            "client_company_id": (
+                str(client_user_data.get("client_company_id"))
+                if client_user_data.get("client_company_id")
+                else None
+            ),
+            "is_primary_contact": client_user_data.get("is_primary_contact"),
+            "profile_photo_url": client_user_data.get("profile_photo_url"),
+        }
 
     @staticmethod
     def _build_primary_contact_update_data(update: PrimaryContactUpdate) -> dict[str, Any]:
