@@ -380,14 +380,16 @@ async def external_create_contact(
         except ConflictException as exc:
             existing_client_id = exc.params.get("client_id") if exc.params else None
             if exc.message_key == "clients.errors.email_already_exists" and existing_client_id:
-                return error_response(
+                existing_company_id = exc.params.get("company_id") if exc.params else None
+                return success_response(
                     request=request,
-                    message_key=exc.message_key,
-                    status_code=exc.status_code,
-                    custom_code=exc.custom_code,
-                    params=exc.params,
-                    errors=[{"contact_id": str(existing_client_id)}],
-                    headers=exc.headers if hasattr(exc, "headers") else None,
+                    message_key="clients.success.client_created",
+                    custom_code=CustomStatusCode.CREATED,
+                    status_code=http_status.HTTP_201_CREATED,
+                    data=ExternalCreateContactResult(
+                        contact_id=str(existing_client_id),
+                        company_id=str(existing_company_id) if existing_company_id else None,
+                    ).model_dump(exclude_none=True, mode="json"),
                 )
             raise
         company_id, contact_id = _resolve_created_ids(result.records or [])
