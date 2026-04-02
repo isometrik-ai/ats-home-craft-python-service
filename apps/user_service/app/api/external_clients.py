@@ -18,8 +18,9 @@ from fastapi import status as http_status
 from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.dependencies.external_auth import external_organization_id
+from apps.user_service.app.dependencies.external_auth import get_organization_context
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.enums import ClientStatus, ClientType
 from apps.user_service.app.schemas.external_clients import (
@@ -38,7 +39,10 @@ from apps.user_service.app.services.client_service import (
     ClientEnrichmentService,
     ClientService,
 )
-from apps.user_service.app.utils.common_utils import UserContext, handle_api_exceptions
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    handle_api_exceptions,
+)
 from libs.shared_utils.http_exceptions import ConflictException
 from libs.shared_utils.response_factory import (
     error_response,
@@ -107,7 +111,7 @@ def _build_filter_params(
 async def external_list_companies(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
     search: str | None = Query(None, min_length=2, description="Search term"),
     status: ClientStatus | None = Query(None, description="Filter by status"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -189,7 +193,7 @@ async def external_list_companies(
 async def external_list_contacts(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
     search: str | None = Query(None, min_length=2, description="Search term"),
     status: ClientStatus | None = Query(None, description="Filter by status"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -265,16 +269,24 @@ async def external_list_contacts(
     },
 )
 @limiter.limit("60/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="clients",
+    category="CLIENT",
+)
 async def external_create_company(
     request: Request,
     background_tasks: BackgroundTasks,
     db_connection: asyncpg.Connection = Depends(db_conn),
     sb_client: AsyncClient = Depends(supabase_service),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
     body: ExternalCreateCompanyRequest = Body(...),
 ):
     """External create company endpoint (Isometrik credential auth)."""
     service_body = body.to_create_client_request()
+    actor_email = request.state.external_actor_email
     user_context = UserContext(
         user_id="external_integration",
         email="external_integration@system.local",
@@ -303,6 +315,21 @@ async def external_create_company(
             raise
         company_id, contact_id = _resolve_created_ids(result.records or [])
         lead_id = result.lead_id
+
+    request.state.audit_table = "clients"
+    request.state.audit_description = f"Created external company client: {company_id or 'unknown'}"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": "00000000-0000-0000-0000-000000000000",
+        "user_email": actor_email,
+        "organization_id": organization_id,
+    }
+    request.state.raw_audit_new_data = {
+        "company_id": str(company_id) if company_id else None,
+        "contact_id": str(contact_id) if contact_id else None,
+        "lead_id": lead_id,
+        "records": result.records or [],
+    }
 
     # Enrichment (best-effort) after commit
     if result.enrichment_items:
@@ -354,16 +381,24 @@ async def external_create_company(
     },
 )
 @limiter.limit("60/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="clients",
+    category="CLIENT",
+)
 async def external_create_contact(
     request: Request,
     background_tasks: BackgroundTasks,
     db_connection: asyncpg.Connection = Depends(db_conn),
     sb_client: AsyncClient = Depends(supabase_service),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
     body: ExternalCreateContactRequest = Body(...),
 ):
     """External create contact endpoint (Isometrik credential auth)."""
     service_body = body.to_create_client_request()
+    actor_email = request.state.external_actor_email
     user_context = UserContext(
         user_id="external_integration",
         email="external_integration@system.local",
@@ -394,6 +429,21 @@ async def external_create_contact(
             raise
         company_id, contact_id = _resolve_created_ids(result.records or [])
         lead_id = result.lead_id
+
+    request.state.audit_table = "clients"
+    request.state.audit_description = f"Created external contact client: {contact_id or 'unknown'}"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": "00000000-0000-0000-0000-000000000000",
+        "user_email": actor_email,
+        "organization_id": organization_id,
+    }
+    request.state.raw_audit_new_data = {
+        "company_id": str(company_id) if company_id else None,
+        "contact_id": str(contact_id) if contact_id else None,
+        "lead_id": lead_id,
+        "records": result.records or [],
+    }
 
     if result.enrichment_items:
         enrichment_service = ClientEnrichmentService.from_settings()
@@ -448,7 +498,7 @@ async def external_get_company_details(
     request: Request,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_uow),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
 ):
     """External get company details endpoint (Isometrik credential auth)."""
     service = ClientService(db_connection=db_connection)
@@ -527,7 +577,7 @@ async def external_get_contact_details(
     request: Request,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_uow),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
 ):
     """External get contact details endpoint (Isometrik credential auth)."""
     service = ClientService(db_connection=db_connection)
@@ -597,29 +647,41 @@ async def external_get_contact_details(
     },
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="clients",
+    category="CLIENT",
+)
 async def external_update_company(
     request: Request,
     background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
     body: ExternalUpdateCompanyRequest = Body(...),
 ):
     """External update company endpoint (Isometrik credential auth)."""
-    service = ClientService(db_connection=db_connection)
-    details = await service.get_client_details(client_id, organization_id)
-    if details.client_type != ClientType.COMPANY:
-        return success_response(
-            request=request,
-            message_key="clients.errors.not_found",
-            custom_code=CustomStatusCode.NOT_FOUND,
-            status_code=http_status.HTTP_404_NOT_FOUND,
-        )
+    actor_email = request.state.external_actor_email
 
     update_result: dict | None = None
     internal_body = body.to_update_client_request()
     async with db_connection.transaction():
+        service = ClientService(db_connection=db_connection)
         update_result = await service.update_client(client_id, organization_id, internal_body)
+    request.state.audit_table = "clients"
+    request.state.audit_requested_id = client_id
+    request.state.audit_description = f"Updated external company client: {client_id}"
+    request.state.audit_risk_level = "medium"
+    request.state.audit_user_context = {
+        "user_id": "00000000-0000-0000-0000-000000000000",
+        "user_email": actor_email,
+        "organization_id": organization_id,
+    }
+    if update_result:
+        request.state.raw_audit_old_data = update_result.get("old_data")
+        request.state.raw_audit_new_data = update_result.get("new_data")
 
     # Best-effort Typesense indexing after update, offloaded to background task.
     created_company_id = update_result.get("created_company_id") if update_result else None
@@ -687,29 +749,41 @@ async def external_update_company(
     },
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="clients",
+    category="CLIENT",
+)
 async def external_update_contact(
     request: Request,
     background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
     body: ExternalUpdateContactRequest = Body(...),
 ):
     """External update contact endpoint (Isometrik credential auth)."""
-    service = ClientService(db_connection=db_connection)
-    details = await service.get_client_details(client_id, organization_id)
-    if details.client_type != ClientType.PERSON:
-        return success_response(
-            request=request,
-            message_key="clients.errors.not_found",
-            custom_code=CustomStatusCode.NOT_FOUND,
-            status_code=http_status.HTTP_404_NOT_FOUND,
-        )
+    actor_email = request.state.external_actor_email
 
     update_result: dict | None = None
     internal_body = body.to_update_client_request()
     async with db_connection.transaction():
+        service = ClientService(db_connection=db_connection)
         update_result = await service.update_client(client_id, organization_id, internal_body)
+    request.state.audit_table = "clients"
+    request.state.audit_requested_id = client_id
+    request.state.audit_description = f"Updated external contact client: {client_id}"
+    request.state.audit_risk_level = "medium"
+    request.state.audit_user_context = {
+        "user_id": "00000000-0000-0000-0000-000000000000",
+        "user_email": actor_email,
+        "organization_id": organization_id,
+    }
+    if update_result:
+        request.state.raw_audit_old_data = update_result.get("old_data")
+        request.state.raw_audit_new_data = update_result.get("new_data")
 
     # Best-effort Typesense indexing after update, offloaded to background task.
     created_company_id = update_result.get("created_company_id") if update_result else None
@@ -776,15 +850,23 @@ async def external_update_contact(
     },
 )
 @limiter.limit("60/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="clients",
+    category="CLIENT",
+)
 async def external_delete_company(
     request: Request,
     background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
 ):
     """External delete company endpoint (Isometrik credential auth)."""
     service = ClientService(db_connection=db_connection)
+    actor_email = request.state.external_actor_email
     details = await service.get_client_details(client_id, organization_id)
     if details.client_type != ClientType.COMPANY:
         return success_response(
@@ -796,6 +878,21 @@ async def external_delete_company(
 
     async with db_connection.transaction():
         await service.delete_client(client_id, organization_id)
+
+    request.state.audit_table = "clients"
+    request.state.audit_requested_id = client_id
+    request.state.audit_description = f"Deleted external company client: {client_id}"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": "00000000-0000-0000-0000-000000000000",
+        "user_email": actor_email,
+        "organization_id": organization_id,
+    }
+    request.state.raw_audit_old_data = (
+        details.model_dump(exclude_none=True, mode="json")
+        if hasattr(details, "model_dump")
+        else details.__dict__
+    )
 
     # Best-effort Typesense deletion, offloaded to background task.
     background_tasks.add_task(
@@ -832,15 +929,23 @@ async def external_delete_company(
     },
 )
 @limiter.limit("60/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="clients",
+    category="CLIENT",
+)
 async def external_delete_contact(
     request: Request,
     background_tasks: BackgroundTasks,
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
-    organization_id: str = Depends(external_organization_id),
+    organization_id: str = Depends(get_organization_context),
 ):
     """External delete contact endpoint (Isometrik credential auth)."""
     service = ClientService(db_connection=db_connection)
+    actor_email = request.state.external_actor_email
     details = await service.get_client_details(client_id, organization_id)
     if details.client_type != ClientType.PERSON:
         return success_response(
@@ -852,6 +957,21 @@ async def external_delete_contact(
 
     async with db_connection.transaction():
         await service.delete_client(client_id, organization_id)
+
+    request.state.audit_table = "clients"
+    request.state.audit_requested_id = client_id
+    request.state.audit_description = f"Deleted external contact client: {client_id}"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": "00000000-0000-0000-0000-000000000000",
+        "user_email": actor_email,
+        "organization_id": organization_id,
+    }
+    request.state.raw_audit_old_data = (
+        details.model_dump(exclude_none=True, mode="json")
+        if hasattr(details, "model_dump")
+        else details.__dict__
+    )
 
     # Best-effort Typesense deletion, offloaded to background task.
     background_tasks.add_task(

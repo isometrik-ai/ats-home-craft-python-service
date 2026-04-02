@@ -7,10 +7,12 @@ standardize common operations.
 
 import hashlib
 import json
+import re
 import secrets
 import string
 import time
 import traceback
+import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -82,6 +84,19 @@ class PerformanceTimer:
 def enum_member_title_label(member: Enum) -> str:
     """Title-case label from an enum member name."""
     return member.name.replace("_", " ").title()
+
+
+def name_to_email_domain_label(value: str) -> str:
+    """Convert an arbitrary organization name to a safe email domain label.
+
+    Example: "T's org" -> "ts-org"
+    """
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    lowered = ascii_value.strip().lower()
+    lowered = lowered.replace("&", "and")
+    lowered = re.sub(r"[^a-z0-9]+", "-", lowered)
+    lowered = re.sub(r"-{2,}", "-", lowered).strip("-")
+    return lowered[:63] or "org"
 
 
 # ============================================================================
