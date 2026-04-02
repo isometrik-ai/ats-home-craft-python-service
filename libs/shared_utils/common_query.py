@@ -41,6 +41,10 @@ LEADS_MANAGEMENT_DELETE = "leads_management.delete"
 
 USERS_MANAGEMENT_DELETE = "users_management.delete"
 
+# Audit Logs
+# "view_system" is intended to mean org-wide (system-level) audit logs visibility.
+AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM = "audit_logs_management.view_system"
+
 DEFAULT_PERMISSIONS = [
     # User Management
     (
@@ -117,80 +121,12 @@ DEFAULT_PERMISSIONS = [
         "Remove teams from the system",
         "teams",
     ),
-    # Case Management
+    # Audit Logs
     (
-        "cases_management.view",
-        "View Cases",
-        "View case list and details",
-        "cases",
-    ),
-    (
-        "cases_management.create",
-        "Create Cases",
-        "Create new legal cases",
-        "cases",
-    ),
-    (
-        "cases_management.edit",
-        "Edit Cases",
-        "Modify case information",
-        "cases",
-    ),
-    (
-        "cases_management.delete",
-        "Delete Cases",
-        "Remove cases from the system",
-        "cases",
-    ),
-    (
-        "cases_management.assign",
-        "Assign Cases",
-        "Assign cases to team members",
-        "cases",
-    ),
-    # Document Management
-    (
-        "documents_management.view",
-        "View Documents",
-        "View documents",
-        "documents",
-    ),
-    (
-        "documents_management.upload",
-        "Upload Documents",
-        "Upload new documents",
-        "documents",
-    ),
-    (
-        "documents_management.edit",
-        "Edit Documents",
-        "Modify document information",
-        "documents",
-    ),
-    (
-        "documents_management.delete",
-        "Delete Documents",
-        "Remove documents",
-        "documents",
-    ),
-    (
-        "documents_management.download",
-        "Download Documents",
-        "Download documents",
-        "documents",
-    ),
-    # Reports & Analytics
-    (
-        "reports_management.view",
-        "View Reports",
-        "Access reports and analytics",
-        "reports",
-    ),
-    (
-        "reports_management.export",
-        "Export Reports",
-        "Export reports to external formats",
-        "reports",
+        AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM,
+        "View System Audit Logs",
+        "View organization-wide audit logs",
+        "audit_logs",
     ),
     # System Settings
     (

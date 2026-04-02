@@ -14,10 +14,14 @@ from apps.user_service.app.schemas.audit_logs import AuditLogFilter
 from apps.user_service.app.services.audit_log_service import AuditLogService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
+    extract_user_context,
     handle_api_exceptions,
 )
-from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE
+from libs.shared_middleware.jwt_auth import check_user_access_async, get_user_from_auth
+from libs.shared_utils.common_query import (
+    AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM,
+    SETTINGS_SYSTEM_MANAGE,
+)
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -59,15 +63,25 @@ async def get_audit_logs(
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
 ):
     """Get all audit logs for the current organization"""
-    # Extract and validate user context from JWT token & check permission
-    user_context = await check_permissions(current_user, db_connection, SETTINGS_SYSTEM_MANAGE)
+    # Extract and validate user context from JWT token.
+    user_context = await extract_user_context(current_user, db_connection)
+
+    can_view_system_audit_logs = await check_user_access_async(
+        permission_code=[AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM],
+        user_id=user_context.user_id,
+        organization_id=user_context.organization_id,
+        db_connection=db_connection,
+    )
+
+    # If role does not have system-level visibility, force personal scope and ignore query param.
+    effective_user_id = user_id if can_view_system_audit_logs else user_context.user_id
 
     # Create service and delegate to service
     audit_log_service = AuditLogService(user_context=user_context, db_connection=db_connection)
 
     filters = AuditLogFilter(
         search=search,
-        user_id=user_id,
+        user_id=effective_user_id,
         limit=page_size,
         offset=(page - 1) * page_size,
         organization_id=user_context.organization_id,
