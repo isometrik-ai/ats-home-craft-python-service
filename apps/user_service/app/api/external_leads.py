@@ -71,7 +71,10 @@ async def external_list_leads(
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
 ):
     """External list leads endpoint (Isometrik credential auth)."""
-    actor_email = getattr(request.state, "external_actor_email", None) or f"api@{name_to_email_domain_label(organization_id)}.com"
+    actor_email = (
+        getattr(request.state, "external_actor_email", None)
+        or f"api@{name_to_email_domain_label(organization_id)}.com"
+    )
     user_context = UserContext(
         user_id="00000000-0000-0000-0000-000000000000",
         email=actor_email,
@@ -127,7 +130,10 @@ async def external_get_lead(
     organization_id: str = Depends(get_organization_context),
 ):
     """External get lead endpoint (Isometrik credential auth)."""
-    actor_email = getattr(request.state, "external_actor_email", None) or f"api@{name_to_email_domain_label(organization_id)}.com"
+    actor_email = (
+        getattr(request.state, "external_actor_email", None)
+        or f"api@{name_to_email_domain_label(organization_id)}.com"
+    )
     user_context = UserContext(
         user_id="00000000-0000-0000-0000-000000000000",
         email=actor_email,
@@ -179,7 +185,10 @@ async def external_create_lead(
     body: CreateLeadRequest = Body(...),
 ):
     """External create lead endpoint (Isometrik credential auth)."""
-    actor_email = getattr(request.state, "external_actor_email", None) or f"api@{name_to_email_domain_label(organization_id)}.com"
+    actor_email = (
+        getattr(request.state, "external_actor_email", None)
+        or f"api@{name_to_email_domain_label(organization_id)}.com"
+    )
     user_context = UserContext(
         user_id=None,
         email=actor_email,
@@ -243,7 +252,10 @@ async def external_update_lead(
     body: UpdateLeadRequest = Body(...),
 ):
     """External update lead endpoint (Isometrik credential auth)."""
-    actor_email = getattr(request.state, "external_actor_email", None) or f"api@{name_to_email_domain_label(organization_id)}.com"
+    actor_email = (
+        getattr(request.state, "external_actor_email", None)
+        or f"api@{name_to_email_domain_label(organization_id)}.com"
+    )
     user_context = UserContext(
         user_id=None,
         email=actor_email,
@@ -312,7 +324,10 @@ async def external_delete_lead(
     organization_id: str = Depends(get_organization_context),
 ):
     """External delete lead endpoint (Isometrik credential auth)."""
-    actor_email = getattr(request.state, "external_actor_email", None) or f"api@{name_to_email_domain_label(organization_id)}.com"
+    actor_email = (
+        getattr(request.state, "external_actor_email", None)
+        or f"api@{name_to_email_domain_label(organization_id)}.com"
+    )
     user_context = UserContext(
         user_id=None,
         email=actor_email,

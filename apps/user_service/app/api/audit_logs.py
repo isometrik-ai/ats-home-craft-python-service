@@ -72,7 +72,7 @@ async def get_audit_logs(
         offset=(page - 1) * page_size,
         organization_id=user_context.organization_id,
     )
-    
+
     result = await audit_log_service.get_audit_logs(filter_params=filters)
 
     audit_logs = result["audit_logs"]

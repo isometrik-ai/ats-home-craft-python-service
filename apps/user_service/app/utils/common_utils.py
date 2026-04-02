@@ -91,9 +91,7 @@ def name_to_email_domain_label(value: str) -> str:
 
     Example: "T's org" -> "ts-org"
     """
-    ascii_value = (
-        unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-    )
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
     lowered = ascii_value.strip().lower()
     lowered = lowered.replace("&", "and")
     lowered = re.sub(r"[^a-z0-9]+", "-", lowered)

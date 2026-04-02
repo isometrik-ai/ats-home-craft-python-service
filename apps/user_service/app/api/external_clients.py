@@ -317,9 +317,7 @@ async def external_create_company(
         lead_id = result.lead_id
 
     request.state.audit_table = "clients"
-    request.state.audit_description = (
-        f"Created external company client: {company_id or 'unknown'}"
-    )
+    request.state.audit_description = f"Created external company client: {company_id or 'unknown'}"
     request.state.audit_risk_level = "high"
     request.state.audit_user_context = {
         "user_id": "00000000-0000-0000-0000-000000000000",
@@ -433,9 +431,7 @@ async def external_create_contact(
         lead_id = result.lead_id
 
     request.state.audit_table = "clients"
-    request.state.audit_description = (
-        f"Created external contact client: {contact_id or 'unknown'}"
-    )
+    request.state.audit_description = f"Created external contact client: {contact_id or 'unknown'}"
     request.state.audit_risk_level = "high"
     request.state.audit_user_context = {
         "user_id": "00000000-0000-0000-0000-000000000000",
