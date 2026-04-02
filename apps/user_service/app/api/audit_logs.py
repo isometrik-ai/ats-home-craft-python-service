@@ -10,6 +10,7 @@ from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.schemas.audit_logs import AuditLogFilter
 from apps.user_service.app.services.audit_log_service import AuditLogService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -50,6 +51,10 @@ async def get_audit_logs(
         None,
         description="Search term to filter audit logs by description",
     ),
+    user_id: str | None = Query(
+        None,
+        description="Filter audit logs by user ID",
+    ),
     page: int = Query(1, ge=1, description="The page number for pagination"),
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
 ):
@@ -59,7 +64,16 @@ async def get_audit_logs(
 
     # Create service and delegate to service
     audit_log_service = AuditLogService(user_context=user_context, db_connection=db_connection)
-    result = await audit_log_service.get_audit_logs(search=search, page=page, page_size=page_size)
+
+    filters = AuditLogFilter(
+        search=search,
+        user_id=user_id,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+        organization_id=user_context.organization_id,
+    )
+    
+    result = await audit_log_service.get_audit_logs(filter_params=filters)
 
     audit_logs = result["audit_logs"]
     total_count = result["total_count"]

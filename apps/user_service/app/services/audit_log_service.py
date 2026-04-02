@@ -304,29 +304,16 @@ class AuditLogService:
 
     async def get_audit_logs(
         self,
-        search: str | None = None,
-        page: int = 1,
-        page_size: int = 20,
+        filter_params: AuditLogFilter,
     ) -> dict[str, Any]:
         """Get paginated list of audit logs for the current organization and user.
 
         Args:
-            search: Search term to filter audit logs
-            page: Page number for pagination
-            page_size: Number of items per page
+            filter_params: Filter parameters
 
         Returns:
             dict containing paginated audit logs and total count
         """
-        # Create filter parameters
-        filter_params = AuditLogFilter(
-            organization_id=self.user_context.organization_id,
-            search=search,
-            limit=page_size,
-            offset=(page - 1) * page_size,
-            user_id=self.user_context.user_id,
-        )
-
         # Get audit logs using repository
         audit_logs_data = await self.audit_log_repository.get_audit_logs_list(filter_params)
 
