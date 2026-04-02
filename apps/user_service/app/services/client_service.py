@@ -569,19 +569,46 @@ class ClientService:
                 params={"organization_id": organization_id},
             )
 
-        # Validate email uniqueness at organization level (via client + client_user linkage)
-        existing_client_id = await self.client_repository._check_client_email_exists(
-            email=request_data.email,
-            organization_id=organization_id,
-        )
-        if existing_client_id:
-            raise ConflictException(
-                message_key="clients.errors.email_already_exists",
-                custom_code=CustomStatusCode.CONFLICT,
-                params={"client_id": existing_client_id},
+        # Validate email uniqueness at organization level (via client + client_user linkage).
+        # Company-only create is allowed without a primary contact;
+        # in that case email may be absent.
+        if request_data.email:
+            existing_client_id = await self.client_repository._check_client_email_exists(
+                email=request_data.email,
+                organization_id=organization_id,
             )
+            if existing_client_id:
+                raise ConflictException(
+                    message_key="clients.errors.email_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                    params={"client_id": existing_client_id},
+                )
 
         return organization
+
+    def _should_create_client_user_on_create(self, request_data: CreateClientRequest) -> bool:
+        """Return True when create flow should provision a user + client_user row."""
+        if request_data.client_type == ClientType.PERSON:
+            return True
+        if request_data.client_type == ClientType.COMPANY:
+            return bool(request_data.email and request_data.first_name and request_data.last_name)
+        return False
+
+    async def _provision_primary_contact_user(
+        self,
+        request_data: CreateClientRequest,
+        organization: dict[str, Any],
+        organization_id: str,
+    ) -> tuple[str, str, str | None]:
+        """Provision/reuse auth user and create Isometrik user for primary contact."""
+        user_repository = UserRepository(db_connection=self.db_connection)
+        existing_user = await user_repository.get_auth_user_by_email(request_data.email)
+        return await self._create_auth_and_isometrik_user(
+            request_data,
+            organization,
+            organization_id,
+            existing_user=existing_user,
+        )
 
     async def _create_auth_and_isometrik_user(
         self,
@@ -766,6 +793,9 @@ class ClientService:
         # through `_prepare_client_data(...)`, so custom-field required validation
         # is only applied for the payload built by `_prepare_client_data(...)`.
         if request_data.client_type == ClientType.COMPANY:
+            # Allow company-only create when primary contact fields are omitted.
+            if not self._should_create_client_user_on_create(request_data):
+                return [await self._prepare_client_data(request_data, organization_id)]
             return [
                 await self._prepare_client_data(request_data, organization_id),
                 self._prepare_primary_contact_person_client_data(request_data, organization_id),
@@ -1020,23 +1050,67 @@ class ClientService:
 
         organization = await self._validate_client_creation(request_data, organization_id)
 
-        # Reuse existing auth user for this email when possible; otherwise create a new one.
-        user_repository = UserRepository(db_connection=self.db_connection)
-        existing_user = await user_repository.get_auth_user_by_email(request_data.email)
+        should_create_client_user = self._should_create_client_user_on_create(request_data)
 
-        user_id, isometrik_user_id, password = await self._create_auth_and_isometrik_user(
-            request_data,
-            organization,
-            organization_id,
-            existing_user=existing_user,
-        )
+        # Provision auth/Isometrik only when we are creating a primary contact user.
+        user_id: str | None = None
+        isometrik_user_id: str | None = None
+        password: str | None = None
+        if should_create_client_user:
+            user_id, isometrik_user_id, password = await self._provision_primary_contact_user(
+                request_data=request_data,
+                organization=organization,
+                organization_id=organization_id,
+            )
 
         payloads = await self._build_create_client_payloads(request_data, organization_id)
         records = await self.client_repository.create_client(payloads)
+        if not records:
+            raise ServiceUnavailableException(
+                message_key="clients.errors.creation_failed",
+                custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+            )
+
+        primary_record = await self._maybe_create_client_user_for_created_clients(
+            request_data=request_data,
+            records=records,
+            organization_id=organization_id,
+            should_create_client_user=should_create_client_user,
+            user_id=user_id,
+            isometrik_user_id=isometrik_user_id,
+        )
+        await self._maybe_link_primary_contact_to_new_company(request_data, primary_record)
+
+        lead_id = await self._create_optional_records(request_data, primary_record["id"])
+
+        self._maybe_send_client_creation_email(
+            request_data=request_data,
+            should_create_client_user=should_create_client_user,
+            organization_name=organization["name"],
+            password=password,
+        )
+        enrichment_items = self._get_enrichment_items_for_created_clients(records, organization_id)
+        return CreateClientResult(
+            records=records, enrichment_items=enrichment_items, lead_id=lead_id
+        )
+
+    async def _maybe_create_client_user_for_created_clients(
+        self,
+        *,
+        request_data: CreateClientRequest,
+        records: list[dict[str, Any]],
+        organization_id: str,
+        should_create_client_user: bool,
+        user_id: str | None,
+        isometrik_user_id: str | None,
+    ) -> dict[str, Any]:
+        """Maybe create client user for created clients."""
+        if not should_create_client_user:
+            return records[0]
+
         primary_record, client_id_for_user, client_company_id = (
             self._resolve_created_client_records(records, request_data)
         )
-
         client_user_data = self._prepare_client_user_data(
             request_data,
             client_id_for_user,
@@ -1045,6 +1119,14 @@ class ClientService:
             isometrik_user_id,
             client_company_id=client_company_id,
         )
+        await self._create_client_user_with_primary_contact_uniqueness(client_user_data)
+        return primary_record
+
+    async def _create_client_user_with_primary_contact_uniqueness(
+        self,
+        client_user_data: dict[str, Any],
+    ) -> None:
+        """Create client user with primary contact uniqueness."""
         try:
             await self.client_repository.create_client_user(client_user_data)
         except UniqueViolationError as exc:
@@ -1059,21 +1141,41 @@ class ClientService:
                 ) from exc
             raise
 
-        lead_id = await self._create_optional_records(request_data, primary_record["id"])
-
-        if request_data.portal_access:
-            try:
-                send_client_creation_email(
-                    email=request_data.email,
-                    organization_name=organization["name"],
-                    password=password,
-                )
-            except Exception as e:
-                logger.error("Failed to send client creation email: %s", str(e))
-        enrichment_items = self._get_enrichment_items_for_created_clients(records, organization_id)
-        return CreateClientResult(
-            records=records, enrichment_items=enrichment_items, lead_id=lead_id
+    async def _maybe_link_primary_contact_to_new_company(
+        self,
+        request_data: CreateClientRequest,
+        primary_record: dict[str, Any],
+    ) -> None:
+        """Maybe link primary contact to new company."""
+        if request_data.client_type != ClientType.COMPANY or not request_data.primary_contact_id:
+            return
+        await self.client_repository._update_client_user(
+            request_data.primary_contact_id,
+            {
+                "client_company_id": str(primary_record["id"]),
+                "is_primary_contact": True,
+            },
         )
+
+    def _maybe_send_client_creation_email(
+        self,
+        *,
+        request_data: CreateClientRequest,
+        should_create_client_user: bool,
+        organization_name: str,
+        password: str | None,
+    ) -> None:
+        """Maybe send client creation email."""
+        if not (should_create_client_user and request_data.portal_access):
+            return
+        try:
+            send_client_creation_email(
+                email=request_data.email,
+                organization_name=organization_name,
+                password=password,
+            )
+        except Exception as exc:
+            logger.error("Failed to send client creation email: %s", str(exc))
 
     async def get_clients_list(
         self,
