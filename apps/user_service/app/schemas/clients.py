@@ -619,16 +619,16 @@ class CreateClientRequest(BaseModel):
     """Request schema for creating a client."""
 
     client_type: ClientType = Field(..., description="Client type")
-    email: str = Field(..., description="Email address")
+    email: str | None = Field(None, description="Email address (required for person/portal access)")
     phones: list[PhoneInput] = Field(
         default_factory=list,
         max_length=20,
         description="Phone numbers for primary contact",
     )
 
-    # Name fields (required for both types)
-    first_name: str = Field(..., description="First name", max_length=100)
-    last_name: str = Field(..., description="Last name", max_length=100)
+    # Primary contact fields (required for person; optional for company-only create)
+    first_name: str | None = Field(None, description="First name", max_length=100)
+    last_name: str | None = Field(None, description="Last name", max_length=100)
 
     # Person type fields
     prefix: str | None = Field(None, description="Name prefix", max_length=10)
@@ -647,6 +647,13 @@ class CreateClientRequest(BaseModel):
     # Company type fields
     name: str | None = Field(None, description="Company name", max_length=200)
     industry: str | None = Field(None, description="Industry", max_length=100)
+    primary_contact_id: str | None = Field(
+        None,
+        description=(
+            "Existing client_user id to link as company primary contact "
+            "(company create only; sets client_users.client_company_id)"
+        ),
+    )
 
     # Common fields
     profile_photo_url: str | None = Field(None, description="Profile photo URL", max_length=500)
@@ -719,6 +726,68 @@ class CreateClientRequest(BaseModel):
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         return phones
+
+    @model_validator(mode="after")
+    def validate_required_fields_by_type(self) -> "CreateClientRequest":
+        """Validate required fields based on client_type and primary-contact intent.
+
+        - PERSON: requires email, first_name, last_name
+        - COMPANY:
+          - always requires company name (validated separately)
+          - allows company-only create with no primary-contact fields
+          - if any primary-contact fields are provided (or portal access is enabled),
+            require email + first_name + last_name.
+        """
+        is_person = self.client_type == ClientType.PERSON
+        is_company = self.client_type == ClientType.COMPANY
+
+        if is_person:
+            if not self.email:
+                raise ValidationException(
+                    message_key="clients.errors.email_required",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            if not self.first_name or not self.last_name:
+                raise ValidationException(
+                    message_key="clients.errors.first_last_name_required",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            return self
+
+        if is_company:
+            if self.primary_contact_id and self.client_type != ClientType.COMPANY:
+                raise ValidationException(
+                    message_key="clients.errors.person_fields_not_allowed_for_company",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            primary_contact_intended = any(
+                [
+                    bool(self.primary_contact_id),
+                    bool(self.email),
+                    bool(self.first_name),
+                    bool(self.last_name),
+                    bool(self.phones),
+                    bool(self.portal_access),
+                ]
+            )
+            if primary_contact_intended:
+                # If the caller is linking an existing primary contact, do not require
+                # creating a new auth user for it.
+                if self.primary_contact_id:
+                    return self
+                if not self.email:
+                    raise ValidationException(
+                        message_key="clients.errors.email_required",
+                        custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    )
+                if not self.first_name or not self.last_name:
+                    raise ValidationException(
+                        message_key="clients.errors.first_last_name_required",
+                        custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    )
+            return self
+
+        return self
 
 
 class CreateClientFromUserRequest(BaseModel):
