@@ -278,6 +278,23 @@ class ClientRepository:
         )
         return bool(val)
 
+    async def get_client_type_in_organization(
+        self,
+        organization_id: str,
+        client_id: str,
+    ) -> str | None:
+        """Return ``clients.client_type`` for the id in the org, or ``None`` if missing."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT client_type::text AS client_type
+            FROM clients
+            WHERE organization_id = $1 AND id = $2::uuid
+            """,
+            organization_id,
+            client_id,
+        )
+        return str(row["client_type"]) if row and row["client_type"] is not None else None
+
     # READ OPERATIONS
     async def get_clients_list(
         self,

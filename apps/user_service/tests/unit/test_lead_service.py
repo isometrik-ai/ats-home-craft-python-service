@@ -9,10 +9,9 @@ from typing import Any
 import pytest
 
 from apps.user_service.app.schemas.enums import (
+    DealType,
     EntityType,
-    IntakeStage,
     LeadsListMode,
-    LeadStatus,
 )
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
@@ -53,6 +52,7 @@ class _FakeLeadRepository:
         self.create_lead_result: dict[str, Any] = {"id": LEAD_ID}
         self.get_lead_detail_by_id_result: dict[str, Any] | None = None
         self.update_lead_result: dict[str, Any] | None = None
+        self.lead_reference_validation_result: tuple[bool | None, dict[str, str]] = (True, {})
         self.count_leads_filtered_result: int = 0
         self.list_leads_page_result: list[dict[str, Any]] = []
         self.list_leads_for_kanban_result: list[dict[str, Any]] = []
@@ -67,9 +67,14 @@ class _FakeLeadRepository:
         self.calls["get_client_existence"] = (organization_id, client_id)
         return self.get_client_existence_result
 
-    async def create_lead(self, lead_row: dict[str, Any]) -> dict[str, Any]:
+    async def create_lead(
+        self,
+        lead_row: dict[str, Any],
+        contacts: list[tuple[str, str | None]] | None = None,
+    ) -> dict[str, Any]:
         """Create lead."""
         self.calls["create_lead"] = lead_row
+        self.calls["create_lead_contacts"] = contacts
         return self.create_lead_result
 
     async def get_lead_detail_by_id(
@@ -90,6 +95,37 @@ class _FakeLeadRepository:
         """Update lead."""
         self.calls["update_lead"] = (organization_id, lead_id, update_data)
         return self.update_lead_result
+
+    async def update_lead_with_contacts(
+        self,
+        organization_id: str,
+        lead_id: str,
+        update_data: dict[str, Any],
+        contacts_payload: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        """Update lead and optionally sync contacts."""
+        self.calls["update_lead_with_contacts"] = (
+            organization_id,
+            lead_id,
+            update_data,
+            contacts_payload,
+        )
+        return self.update_lead_result
+
+    async def fetch_lead_reference_validation(
+        self,
+        organization_id: str,
+        client_ids: list[str],
+        *,
+        stage_id: str | None = None,
+    ) -> tuple[bool | None, dict[str, str]]:
+        """Fetch stage + client types (same query path as create and PATCH contacts)."""
+        self.calls["fetch_lead_reference_validation"] = (
+            organization_id,
+            client_ids,
+            stage_id,
+        )
+        return self.lead_reference_validation_result
 
     async def count_leads_filtered(
         self,
@@ -160,23 +196,6 @@ class _FakeLeadStageRepository:
         return self.list_stages_by_organization_result
 
 
-class _FakeClientRepository:
-    """Lightweight fake ClientRepository."""
-
-    def __init__(self) -> None:
-        self.calls: dict[str, Any] = {}
-        self.client_exists_in_organization_result: bool = True
-
-    async def client_exists_in_organization(
-        self,
-        organization_id: str,
-        client_id: str,
-    ) -> bool:
-        """Check if client exists in organization."""
-        self.calls["client_exists_in_organization"] = (organization_id, client_id)
-        return self.client_exists_in_organization_result
-
-
 class _FakeUserRepository:
     """Lightweight fake UserRepository."""
 
@@ -198,24 +217,21 @@ def _service_with_fakes() -> tuple[
     LeadService,
     _FakeLeadRepository,
     _FakeLeadStageRepository,
-    _FakeClientRepository,
     _FakeUserRepository,
 ]:
     """Create service with injected fake repositories."""
     lead_repo = _FakeLeadRepository()
     stage_repo = _FakeLeadStageRepository()
-    client_repo = _FakeClientRepository()
     user_repo = _FakeUserRepository()
 
     service = LeadService(
         db_connection=None,
         user_context=_ctx(),
-        client_repository=client_repo,
         lead_repository=lead_repo,
         lead_stage_repository=stage_repo,
         user_repository=user_repo,
     )
-    return service, lead_repo, stage_repo, client_repo, user_repo
+    return service, lead_repo, stage_repo, user_repo
 
 
 def _patch_custom_field_service(monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any]) -> None:
@@ -272,19 +288,18 @@ def _patch_custom_field_service(monkeypatch: pytest.MonkeyPatch, calls: dict[str
 
 @pytest.mark.asyncio
 async def test_create_lead_client_missing_raises(monkeypatch):
-    """create_lead raises NotFoundException when client doesn't exist."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
-    lead_repo.get_client_existence_result = False
+    """create_lead raises NotFoundException when a referenced client id is not in the org."""
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
+    lead_repo.lead_reference_validation_result = (True, {})
 
     custom_calls: dict[str, Any] = {}
     _patch_custom_field_service(monkeypatch, custom_calls)
 
     body = CreateLeadRequest(
-        client_id=CLIENT_ID,
         name="New Lead",
         stage_id=STAGE_ID_1,
-        intake_stage=IntakeStage.INITIAL_CONTACT,
-        lead_status=LeadStatus.PROSPECT,
+        deal_type=DealType.NEW_BUSINESS,
+        client_company_id=CLIENT_ID,
     )
 
     with pytest.raises(NotFoundException) as exc_info:
@@ -293,24 +308,22 @@ async def test_create_lead_client_missing_raises(monkeypatch):
     assert exc_info.value.message_key == "clients.errors.not_found"
     assert not custom_calls  # Should fail before custom-field validation.
     assert not stage_repo.calls
-    assert not client_repo.calls
     assert not user_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_create_lead_stage_missing_raises(monkeypatch):
-    """create_lead raises NotFoundException when provided stage doesn't exist."""
-    service, lead_repo, stage_repo, _, _ = _service_with_fakes()
-    lead_repo.get_client_existence_result = True
-    stage_repo.get_stage_by_id_result = None
+    """create_lead raises NotFoundException when the pipeline stage does not exist."""
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
+    lead_repo.lead_reference_validation_result = (False, {})
 
     custom_calls: dict[str, Any] = {}
     _patch_custom_field_service(monkeypatch, custom_calls)
 
     body = CreateLeadRequest(
-        client_id=CLIENT_ID,
         name="New Lead",
         stage_id=STAGE_ID_1,
+        deal_type=DealType.NEW_BUSINESS,
     )
 
     with pytest.raises(NotFoundException) as exc_info:
@@ -322,51 +335,40 @@ async def test_create_lead_stage_missing_raises(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_create_lead_payload_and_poc_validation(monkeypatch):
-    """Successful create_lead builds the expected DB payload and validates PoC."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
-    lead_repo.get_client_existence_result = True
-    stage_repo.get_stage_by_id_result = {"id": STAGE_ID_1}
-    client_repo.client_exists_in_organization_result = True
+    """Successful create_lead builds the expected DB payload."""
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
+    lead_repo.lead_reference_validation_result = (True, {})
 
     custom_calls: dict[str, Any] = {}
     _patch_custom_field_service(monkeypatch, custom_calls)
 
-    converted_at = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     body = CreateLeadRequest(
-        client_id=CLIENT_ID,
         name="New Lead",
         stage_id=STAGE_ID_1,
-        intake_stage=IntakeStage.INITIAL_CONTACT,
+        deal_type=DealType.NEW_BUSINESS,
         lead_source="Referral",
         referral_source="Partner",
         lead_score="high",
         close_date=date(2026, 1, 10),
-        converted_at=converted_at,
-        notes="Notes",
         amount=Decimal("100.50"),
         description="Opportunity desc",
-        point_of_contact=POINT_OF_CONTACT_ID,
-        lead_status=LeadStatus.QUALIFIED,
     )
 
     result = await service.create_lead(body)
 
     assert result == lead_repo.create_lead_result
-    assert lead_repo.calls["get_client_existence"] == (ORG_ID, CLIENT_ID)
-    assert stage_repo.calls["get_stage_by_id"] == (ORG_ID, STAGE_ID_1)
-    assert client_repo.calls["client_exists_in_organization"] == (ORG_ID, POINT_OF_CONTACT_ID)
+    assert lead_repo.calls["fetch_lead_reference_validation"] == (ORG_ID, [], STAGE_ID_1)
+    assert not stage_repo.calls
 
     payload = lead_repo.calls["create_lead"]
-    assert payload["client_id"] == CLIENT_ID
     assert payload["organization_id"] == ORG_ID
     assert payload["name"] == "New Lead"
     assert payload["stage_id"] == STAGE_ID_1
-    assert payload["lead_status"] == LeadStatus.QUALIFIED.value
-    assert payload["intake_stage"] == IntakeStage.INITIAL_CONTACT.value
-    assert payload["created_by"] == CTX_USER_ID
+    assert payload["deal_type"] == DealType.NEW_BUSINESS.value
+    assert payload["lead_source"] == "Referral"
     assert payload["owner_id"] == CTX_USER_ID  # owner_id defaults to creator
-    assert payload["point_of_contact"] == POINT_OF_CONTACT_ID
     assert not payload["custom_fields"]
+    assert lead_repo.calls["create_lead_contacts"] == []
 
     assert custom_calls["validate_for_create"][0] == []
     assert custom_calls["validate_for_create"][1] == EntityType.LEAD
@@ -377,18 +379,17 @@ async def test_create_lead_payload_and_poc_validation(monkeypatch):
 @pytest.mark.asyncio
 async def test_create_lead_owner_id_validation(monkeypatch):
     """create_lead validates owner_id against user repository when explicitly provided."""
-    service, lead_repo, stage_repo, _, user_repo = _service_with_fakes()
-    lead_repo.get_client_existence_result = True
-    stage_repo.get_stage_by_id_result = {"id": STAGE_ID_1}
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
+    lead_repo.lead_reference_validation_result = (True, {})
     user_repo.get_user_details_by_id_result = {"id": OWNER_ID}
 
     custom_calls: dict[str, Any] = {}
     _patch_custom_field_service(monkeypatch, custom_calls)
 
     body = CreateLeadRequest(
-        client_id=CLIENT_ID,
         name="New Lead",
         stage_id=STAGE_ID_1,
+        deal_type=DealType.NEW_BUSINESS,
         owner_id=OWNER_ID,
     )
 
@@ -397,32 +398,30 @@ async def test_create_lead_owner_id_validation(monkeypatch):
     assert result == lead_repo.create_lead_result
     assert user_repo.calls["get_user_details_by_id"] == (OWNER_ID, ["id"])
     payload = lead_repo.calls["create_lead"]
-    assert payload["created_by"] == CTX_USER_ID
     assert payload["owner_id"] == OWNER_ID
 
 
 @pytest.mark.asyncio
 async def test_update_lead_missing_raises():
     """update_lead raises NotFoundException when the lead doesn't exist."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
     lead_repo.get_lead_detail_by_id_result = None
 
     with pytest.raises(NotFoundException) as exc_info:
         await service.update_lead(LEAD_ID, UpdateLeadRequest(name="New name"))
 
     assert exc_info.value.message_key == "leads.errors.not_found"
-    assert "update_lead" not in lead_repo.calls
+    assert "update_lead_with_contacts" not in lead_repo.calls
     assert not stage_repo.calls
-    assert not client_repo.calls
     assert not user_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_update_lead_stage_validation():
     """update_lead validates stage_id existence when stage_id is updated to a non-null UUID."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
     lead_repo.get_lead_detail_by_id_result = {"id": LEAD_ID, "custom_fields": []}
-    stage_repo.get_stage_by_id_result = None
+    lead_repo.lead_reference_validation_result = (False, {})
 
     with pytest.raises(NotFoundException) as exc_info:
         await service.update_lead(
@@ -431,15 +430,16 @@ async def test_update_lead_stage_validation():
         )
 
     assert exc_info.value.message_key == "lead_stages.errors.stage_not_found"
-    assert "update_lead" not in lead_repo.calls
-    assert not client_repo.calls
+    assert "update_lead_with_contacts" not in lead_repo.calls
+    assert lead_repo.calls["fetch_lead_reference_validation"] == (ORG_ID, [], STAGE_ID_2)
     assert not user_repo.calls
+    assert "get_stage_by_id" not in stage_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_update_lead_custom_fields_merge(monkeypatch):
     """update_lead merges custom_fields FieldCells; explicit null clears optional root."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
     lead_repo.get_lead_detail_by_id_result = {
         "id": LEAD_ID,
         "custom_fields": (
@@ -470,8 +470,9 @@ async def test_update_lead_custom_fields_merge(monkeypatch):
 
     assert previous == lead_repo.get_lead_detail_by_id_result
     assert updated == lead_repo.update_lead_result
-    update_data = lead_repo.calls["update_lead"][2]
+    update_data = lead_repo.calls["update_lead_with_contacts"][2]
     assert update_data["custom_fields"] == merged
+    assert lead_repo.calls["update_lead_with_contacts"][3] is None
     patch_arg = custom_calls["merge_for_update"][0]
     assert patch_arg == [
         {"field_id": "f_old", "value": None},
@@ -480,14 +481,13 @@ async def test_update_lead_custom_fields_merge(monkeypatch):
     assert custom_calls["merge_for_update"][2] == EntityType.LEAD
     # No stage/owner/poc validations were triggered for this body.
     assert not stage_repo.calls
-    assert not client_repo.calls
     assert not user_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_update_lead_clear_stage_id():
     """update_lead allows clearing stage_id with explicit null (no stage validation)."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
     lead_repo.get_lead_detail_by_id_result = {"id": LEAD_ID}
     lead_repo.update_lead_result = {"id": LEAD_ID}
 
@@ -496,16 +496,16 @@ async def test_update_lead_clear_stage_id():
     assert previous == lead_repo.get_lead_detail_by_id_result
     assert updated == lead_repo.update_lead_result
     assert "get_stage_by_id" not in stage_repo.calls
-    update_data = lead_repo.calls["update_lead"][2]
+    update_data = lead_repo.calls["update_lead_with_contacts"][2]
     assert update_data["stage_id"] is None
-    assert not client_repo.calls
+    assert lead_repo.calls["update_lead_with_contacts"][3] is None
     assert not user_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_list_leads_list_mode():
     """list_leads in LIST mode returns flat paginated list with total count."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
     lead_repo.count_leads_filtered_result = 12
     now = datetime(2026, 1, 2, tzinfo=timezone.utc)
     lead_repo.list_leads_page_result = [
@@ -550,14 +550,13 @@ async def test_list_leads_list_mode():
     assert lead_repo.calls["count_leads_filtered"] == (ORG_ID, STAGE_ID_1, "lead")
     assert lead_repo.calls["list_leads_page"] == (ORG_ID, STAGE_ID_1, "lead", 10, 10)
     assert not stage_repo.calls
-    assert not client_repo.calls
     assert not user_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_list_leads_kanban_groups():
     """list_leads in KANBAN mode returns stage groups + optional unassigned group."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
     stage_repo.list_stages_by_organization_result = [
         {"id": STAGE_ID_1, "stage_name": "Qualified", "sort_order": 1},
         {"id": STAGE_ID_2, "stage_name": "Lost", "sort_order": 2},
@@ -618,14 +617,13 @@ async def test_list_leads_kanban_groups():
     assert groups[2]["sort_order"] == 3
     assert stage_repo.calls["list_stages_by_organization"] == ORG_ID
     assert lead_repo.calls["list_leads_for_kanban"] == (ORG_ID, None, None)
-    assert not client_repo.calls
     assert not user_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_get_lead_detail_custom_fields(monkeypatch):
     """get_lead returns LeadDetail JSON with resolved custom_fields (id-keyed read shape)."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
 
     class _CFRepo:
         """Minimal fake custom field repository for lead detail read tests."""
@@ -701,14 +699,13 @@ async def test_get_lead_detail_custom_fields(monkeypatch):
     assert detail["updated_at"] == now.isoformat()
     assert detail["converted_at"].startswith("2026-01-11T")
     assert not stage_repo.calls
-    assert not client_repo.calls
     assert not user_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_get_lead_missing_raises():
     """get_lead raises NotFoundException when repository returns None."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
     lead_repo.get_lead_detail_by_id_result = None
 
     with pytest.raises(NotFoundException) as exc_info:
@@ -716,14 +713,13 @@ async def test_get_lead_missing_raises():
 
     assert exc_info.value.message_key == "leads.errors.not_found"
     assert not stage_repo.calls
-    assert not client_repo.calls
     assert not user_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_delete_lead_returns_or_raises():
     """delete_lead returns deleted row and raises when missing."""
-    service, lead_repo, stage_repo, client_repo, user_repo = _service_with_fakes()
+    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
     lead_repo.delete_lead_result = {"id": LEAD_ID}
 
     deleted = await service.delete_lead(LEAD_ID)
@@ -736,5 +732,4 @@ async def test_delete_lead_returns_or_raises():
 
     assert exc_info.value.message_key == "leads.errors.not_found"
     assert not stage_repo.calls
-    assert not client_repo.calls
     assert not user_repo.calls

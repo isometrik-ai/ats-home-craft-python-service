@@ -455,6 +455,21 @@ class LeadsListMode(str, Enum):
     KANBAN = "kanban"
 
 
+class DealType(str, Enum):
+    """Deal classification for leads (stored as lowercase text in ``public.leads``)."""
+
+    NEW_BUSINESS = "New Business"
+    EXISTING_BUSINESS = "Existing Business"
+
+
+class Priority(str, Enum):
+    """Lead priority (stored as lowercase text in ``public.leads``)."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class IntakeStage(str, Enum):
     """Intake stage enumeration."""
 
