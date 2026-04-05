@@ -74,7 +74,10 @@ class ExternalCreateContactRequest(BaseModel):
     websites: list[Website] = Field(default_factory=list, max_length=10)
     addresses: list[Address] = Field(default_factory=list, max_length=10)
     tags: list[str] = Field(default_factory=list, max_length=50)
-    lead_management: LeadManagement | None = None
+    lead_management: LeadManagement | None = Field(
+        None,
+        description="Optional v2 lead on create (``public.leads`` + ``lead_contacts``)",
+    )
     billing_preferences: BillingPreferences | None = None
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     portal_access: bool | None = None
@@ -126,7 +129,10 @@ class ExternalCreateCompanyRequest(BaseModel):
     websites: list[Website] = Field(default_factory=list, max_length=10)
     addresses: list[Address] = Field(default_factory=list, max_length=10)
     tags: list[str] = Field(default_factory=list, max_length=50)
-    lead_management: LeadManagement | None = None
+    lead_management: LeadManagement | None = Field(
+        None,
+        description="Optional v2 lead on create (``public.leads`` + ``lead_contacts``)",
+    )
     billing_preferences: BillingPreferences | None = None
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     portal_access: bool | None = None
@@ -265,7 +271,14 @@ class ExternalCompanyDetailsResponse(BaseModel):
     billing_preferences: BillingPreferences | None = None
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     addresses: list[ClientAddressResponse] = Field(default_factory=list)
-    lead: LeadInfo | None = None
+    leads: list[LeadInfo] = Field(
+        default_factory=list,
+        description=(
+            "Leads linked to this client (company and/or contact), newest first by "
+            "``updated_at``. Use the first item as the primary pipeline snapshot when only "
+            "one lead exists."
+        ),
+    )
     additional_data: dict[str, Any] = Field(default_factory=dict)
     sales_intelligence: dict[str, Any] = Field(default_factory=dict)
     social_pages: list[SocialPage] = Field(default_factory=list)
@@ -303,7 +316,14 @@ class ExternalContactDetailsResponse(BaseModel):
     billing_preferences: BillingPreferences | None = None
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     addresses: list[ClientAddressResponse] = Field(default_factory=list)
-    lead: LeadInfo | None = None
+    leads: list[LeadInfo] = Field(
+        default_factory=list,
+        description=(
+            "Leads linked to this client (company and/or contact), newest first by "
+            "``updated_at``. Use the first item as the primary pipeline snapshot when only "
+            "one lead exists."
+        ),
+    )
     additional_data: dict[str, Any] = Field(default_factory=dict)
     sales_intelligence: dict[str, Any] = Field(default_factory=dict)
     social_pages: list[SocialPage] = Field(default_factory=list)
@@ -347,7 +367,10 @@ class ExternalUpdateCompanyRequest(BaseModel):
     products: ProductsUpdate | None = None
     key_people: KeyPeopleUpdate | None = None
 
-    lead_management: LeadManagementUpdate | None = None
+    lead_management: LeadManagementUpdate | None = Field(
+        None,
+        description="Patch an existing lead by ``lead_id`` (v2 ``public.leads`` columns)",
+    )
     billing_preferences: BillingPreferencesUpdate | None = None
     custom_fields: list[dict[str, Any]] | None = None
     additional_data: dict[str, Any] | None = None
@@ -397,7 +420,10 @@ class ExternalUpdateContactRequest(BaseModel):
     educational_history: EducationalHistoryUpdate | None = None
     skills: list[str] | None = Field(None, max_length=100)
 
-    lead_management: LeadManagementUpdate | None = None
+    lead_management: LeadManagementUpdate | None = Field(
+        None,
+        description="Patch an existing lead by ``lead_id`` (v2 ``public.leads`` columns)",
+    )
     billing_preferences: BillingPreferencesUpdate | None = None
     custom_fields: list[dict[str, Any]] | None = None
     additional_data: dict[str, Any] | None = None

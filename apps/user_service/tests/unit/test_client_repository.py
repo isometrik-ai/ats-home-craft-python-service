@@ -311,15 +311,24 @@ async def test_get_company_contacts_builds_query_and_params():
 async def test_get_client_details_with_primary_contact():
     """get_client_details_with_primary_contact returns None when client not found."""
     conn = _FakeConn()
-    conn.fetchrow_result = None
+    conn.fetch_result = []
     repo = ClientRepository(db_connection=conn)
 
     result = await repo.get_client_details_with_primary_contact("client-1", "org-1")
 
     assert result is None
-    query = conn.fetchrow_calls[0][0]
+    query = conn.fetch_calls[0][0]
     assert "LEFT JOIN client_users" in query
-    assert "LEFT JOIN leads" in query
+    assert "LEFT JOIN leads l ON l.organization_id = c.organization_id" in query
+    assert "c.client_type = 'company' AND l.client_company_id = c.id" in query
+    assert "c.client_type = 'person'" in query
+    assert "FROM lead_contacts lc" in query
+    assert "lc.contact_client_id = c.id" in query
+    assert "l.id AS lead_id" in query
+    assert "LEFT JOIN lead_stages ls" in query
+    assert "l.deal_type AS lead_deal_type" in query
+    assert "ORDER BY l.updated_at DESC NULLS LAST, l.created_at DESC" in query
+    assert "jsonb_agg" not in query
 
 
 @pytest.mark.asyncio

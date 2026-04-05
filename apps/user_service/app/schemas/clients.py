@@ -4,6 +4,7 @@ This module contains Pydantic models for client management operations.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -12,8 +13,6 @@ from apps.user_service.app.schemas.enums import (
     AddressType,
     ClientStatus,
     ClientType,
-    IntakeStage,
-    LeadStatus,
 )
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -52,18 +51,25 @@ class Address(BaseModel):
 
 
 class LeadManagement(BaseModel):
-    """Lead management schema."""
+    """Lead management schema (aligned with v2 ``public.leads`` + ``lead_contacts``)."""
 
     enabled: bool = Field(default=False, description="Enable lead management")
-    stage_id: str | None = Field(None, description="Pipeline stage ID for the new lead")
-    lead_status: LeadStatus | None = Field(
-        None,
-        description="Optional legacy status field; prefer stage_id for pipeline placement",
+    stage_id: str | None = Field(
+        None, description="Pipeline stage ID for the new lead (required when enabled)"
     )
-    intake_stage: IntakeStage | None = Field(None, description="Intake stage")
     lead_source: str | None = Field(None, description="Lead source", max_length=100)
     referral_source: str | None = Field(None, description="Referral source", max_length=200)
     lead_score: str | None = Field(None, description="Lead score")
+
+    @model_validator(mode="after")
+    def require_stage_when_enabled(self) -> "LeadManagement":
+        """``stage_id`` is required when creating an associated lead."""
+        if self.enabled and not (self.stage_id and str(self.stage_id).strip()):
+            raise ValidationException(
+                message_key="clients.errors.lead_stage_id_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
 
 class BillingPreferences(BaseModel):
@@ -472,13 +478,11 @@ class SocialPagesUpdate(BaseModel):
 
 
 class LeadManagementUpdate(BaseModel):
-    """Lead update by lead_id."""
+    """Lead update by lead_id (v2 ``public.leads`` columns only)."""
 
     lead_id: str = Field(..., description="Lead ID to update")
     enabled: bool | None = None
     stage_id: str | None = Field(None, description="Pipeline stage ID to assign")
-    lead_status: LeadStatus | None = None
-    intake_stage: IntakeStage | None = None
     lead_source: str | None = Field(None, max_length=100)
     referral_source: str | None = Field(None, max_length=200)
     lead_score: str | None = None
@@ -856,19 +860,23 @@ class ClientAddressResponse(BaseModel):
 
 
 class LeadInfo(BaseModel):
-    """Lead information schema."""
+    """Lead summary on client detail (subset aligned with lead list/detail)."""
 
     id: str = Field(..., description="Lead ID")
+    name: str = Field(..., description="Lead title")
     stage_id: str | None = Field(None, description="Pipeline stage ID")
-    lead_status: LeadStatus | None = Field(None, description="Lead status")
-    intake_stage: IntakeStage | None = Field(None, description="Intake stage")
-    lead_source: str | None = Field(None, description="Lead source")
-    referral_source: str | None = Field(None, description="Referral source")
-    lead_score: str | None = Field(None, description="Lead score")
-    converted_at: str | None = Field(None, description="Conversion timestamp")
-    notes: str | None = Field(None, description="Lead notes")
-    created_at: str = Field(..., description="Creation timestamp")
-    updated_at: str = Field(..., description="Update timestamp")
+    stage_name: str | None = Field(None, description="Stage display name")
+    deal_type: str | None = Field(None, description="Deal type (enum value)")
+    priority: str | None = Field(None, description="Priority (enum value)")
+    lead_score: str | None = Field(None, description="Score label")
+    close_date: date | None = Field(None, description="Expected close date")
+    amount: Decimal | None = Field(None, description="Estimated deal value")
+    owner_id: str | None = Field(None, description="Owning user UUID")
+    owner_name: str | None = Field(None, description="Owner display name")
+    lead_source: str | None = Field(None, description="Origin channel")
+    referral_source: str | None = Field(None, description="Referrer")
+    created_at: str | None = Field(None, description="Created at (ISO 8601)")
+    updated_at: str | None = Field(None, description="Updated at (ISO 8601)")
 
 
 class CompanyContact(BaseModel):
@@ -919,7 +927,14 @@ class ClientDetailsResponse(BaseModel):
         ),
     )
     addresses: list[ClientAddressResponse] = Field(default_factory=list, description="Addresses")
-    lead: LeadInfo | None = Field(None, description="Lead information")
+    leads: list[LeadInfo] = Field(
+        default_factory=list,
+        description=(
+            "Leads linked to this client (company and/or contact), newest first by "
+            "``updated_at``. Use the first item as the primary pipeline snapshot when only "
+            "one lead exists."
+        ),
+    )
     additional_data: dict[str, Any] = Field(
         default_factory=dict, description="Dynamic data stored as passed"
     )

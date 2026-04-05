@@ -983,22 +983,31 @@ class ClientService:
             client_id: Client ID
         """
         lead_id: str | None = None
-        # Create lead record if enabled (same insert path as API create_lead)
+        # Lead for the primary created client: company → client_company_id only;
+        # person → no client_company_id, link via lead_contacts only.
         if request_data.lead_management and request_data.lead_management.enabled:
             organization_id = self.user_context.organization_id
             lead = request_data.lead_management
+            if request_data.client_type == ClientType.COMPANY:
+                client_company_id = client_id
+                contact_rows: list[tuple[str, str | None]] = []
+            else:
+                client_company_id = None
+                contact_rows = [(client_id, None)]
+            owner_id = self.user_context.user_id if self.user_context else None
             lead_row = {
-                "client_id": client_id,
                 "organization_id": organization_id,
                 "name": self._get_client_name_for_create(request_data),
                 "stage_id": lead.stage_id or None,
-                "lead_status": lead.lead_status.value if lead.lead_status else None,
-                "intake_stage": lead.intake_stage.value if lead.intake_stage else None,
+                "client_company_id": client_company_id,
                 "lead_source": lead.lead_source,
                 "referral_source": lead.referral_source,
                 "lead_score": lead.lead_score,
+                "notes": [],
+                "custom_fields": [],
+                "owner_id": owner_id,
             }
-            created_lead = await self.lead_repository.create_lead(lead_row)
+            created_lead = await self.lead_repository.create_lead(lead_row, contacts=contact_rows)
             lead_id = (
                 str(created_lead.get("id")) if created_lead and created_lead.get("id") else None
             )
@@ -1514,22 +1523,38 @@ class ClientService:
             else []
         )
 
-        # Format lead information if exists
-        lead_info = None
-        if client.get("lead_id"):
-            raw_stage_id = client.get("stage_id")
-            lead_info = LeadInfo(
-                id=str(client.get("lead_id")),
-                stage_id=str(raw_stage_id) if raw_stage_id is not None else None,
-                lead_status=client.get("lead_status"),
-                intake_stage=client.get("intake_stage"),
-                lead_source=client.get("lead_source"),
-                referral_source=client.get("referral_source"),
-                lead_score=str(client.get("lead_score")),
-                converted_at=format_iso_datetime(client.get("converted_at")),
-                notes=client.get("lead_notes"),
-                created_at=format_iso_datetime(client.get("lead_created_at")) or "",
-                updated_at=format_iso_datetime(client.get("lead_updated_at")) or "",
+        # Repository returns a list; str covers JSON-encoded values from older paths or edges.
+        raw_linked = client.get("linked_leads")
+        if isinstance(raw_linked, str):
+            raw_linked = safe_json_loads(raw_linked, [])
+        lead_rows = [
+            row
+            for row in (raw_linked if isinstance(raw_linked, list) else [])
+            if isinstance(row, dict)
+        ]
+
+        leads_info: list[LeadInfo] = []
+        for row in lead_rows:
+            raw_stage = row.get("stage_id")
+            raw_owner = row.get("owner_id")
+            leads_info.append(
+                LeadInfo(
+                    id=str(row["id"]),
+                    name=(row.get("name") or "").strip() or "",
+                    stage_id=str(raw_stage) if raw_stage is not None else None,
+                    stage_name=row.get("stage_name"),
+                    deal_type=row.get("deal_type"),
+                    priority=row.get("priority"),
+                    lead_score=row.get("lead_score"),
+                    close_date=row.get("close_date"),
+                    amount=row.get("amount"),
+                    owner_id=str(raw_owner) if raw_owner is not None else None,
+                    owner_name=row.get("owner_name"),
+                    lead_source=row.get("lead_source"),
+                    referral_source=row.get("referral_source"),
+                    created_at=format_iso_datetime(row.get("created_at")),
+                    updated_at=format_iso_datetime(row.get("updated_at")),
+                )
             )
 
         # Format addresses
@@ -1585,7 +1610,7 @@ class ClientService:
             billing_preferences=billing_preferences,
             custom_fields=custom_fields,
             addresses=formatted_addresses,
-            lead=lead_info,
+            leads=leads_info,
             additional_data=additional_data,
             sales_intelligence=sales_intelligence,
             social_pages=social_pages,
@@ -2129,6 +2154,12 @@ class ClientService:
             exclude_none=True,
             mode="json",
         )
+        lead_data.pop("enabled", None)
+        if "notes" in lead_data:
+            note_text = lead_data["notes"]
+            if isinstance(note_text, str):
+                stripped = note_text.strip()
+                lead_data["notes"] = [{"title": "Note", "content": stripped}] if stripped else []
         if not lead_data:
             return
         organization_id = self.user_context.organization_id

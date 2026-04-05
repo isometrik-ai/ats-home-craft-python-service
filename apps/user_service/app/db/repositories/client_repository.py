@@ -30,6 +30,23 @@ PRIMARY_CONTACT_JOIN_PREDICATE = """
 )
 """.strip()
 
+_LINKED_LEAD_DETAIL_KEYS: tuple[str, ...] = (
+    "lead_id",
+    "lead_name",
+    "lead_stage_id",
+    "lead_stage_name",
+    "lead_deal_type",
+    "lead_priority",
+    "lead_lead_score",
+    "lead_close_date",
+    "lead_amount",
+    "lead_owner_id",
+    "lead_lead_source",
+    "lead_referral_source",
+    "lead_created_at",
+    "lead_updated_at",
+)
+
 
 # Columns that are JSONB in DB (object/dict or array of objects). Values are serialized
 CLIENT_JSONB_COLUMNS = frozenset(
@@ -763,14 +780,18 @@ class ClientRepository:
     async def get_client_details_with_primary_contact(
         self, client_id: str, organization_id: str
     ) -> dict | None:
-        """Get client details with primary contact and lead information.
+        """Get client details with primary contact and linked leads (single round trip).
+
+        Linked leads: company rows use ``leads.client_company_id = c.id``; person rows use
+        ``lead_contacts.contact_client_id = c.id`` (via ``EXISTS``). Branch follows
+        ``c.client_type``, same idea as ``PRIMARY_CONTACT_JOIN_PREDICATE``.
 
         Args:
             client_id: Client ID
             organization_id: Organization ID
 
         Returns:
-            dict | None: Client record with primary contact and lead info or None if not found
+            dict | None: Client row including ``linked_leads`` (list of objects), or None
         """
         deleted_client_user_status = ClientUserStatus.DELETED.value
         deleted_client_status = ClientStatus.DELETED.value
@@ -820,32 +841,88 @@ class ClientRepository:
                 cu.profile_photo_url AS contact_profile_photo_url,
                 au.email,
                 cu.phones,
-                l.id as lead_id,
-                l.stage_id,
-                l.lead_status,
-                l.intake_stage,
-                l.lead_source,
-                l.referral_source,
-                NULLIF(l.lead_score, '')::text AS lead_score,
-                l.converted_at,
-                l.notes as lead_notes,
-                l.created_at as lead_created_at,
-                l.updated_at as lead_updated_at
+                l.id AS lead_id,
+                l.name AS lead_name,
+                l.stage_id AS lead_stage_id,
+                ls.stage_name AS lead_stage_name,
+                l.deal_type AS lead_deal_type,
+                l.priority AS lead_priority,
+                l.lead_score AS lead_lead_score,
+                l.close_date AS lead_close_date,
+                l.amount AS lead_amount,
+                l.owner_id AS lead_owner_id,
+                l.lead_source AS lead_lead_source,
+                l.referral_source AS lead_referral_source,
+                l.created_at AS lead_created_at,
+                l.updated_at AS lead_updated_at
             FROM clients c
                 {primary_contact_join}
-            LEFT JOIN leads l ON l.client_id = c.id
+            LEFT JOIN leads l ON l.organization_id = c.organization_id
+                AND (
+                    (c.client_type = 'company' AND l.client_company_id = c.id)
+                    OR (
+                        c.client_type = 'person'
+                        AND EXISTS (
+                            SELECT 1
+                            FROM lead_contacts lc
+                            WHERE lc.lead_id = l.id
+                              AND lc.organization_id = l.organization_id
+                              AND lc.contact_client_id = c.id
+                        )
+                    )
+                )
+            LEFT JOIN lead_stages ls
+                ON ls.id = l.stage_id
+               AND ls.organization_id = l.organization_id
             WHERE c.id = $1
                 AND c.organization_id = $2
                 AND c.status != $4
+            ORDER BY l.updated_at DESC NULLS LAST, l.created_at DESC
         """
-        row = await self.db_connection.fetchrow(
+        rows = await self.db_connection.fetch(
             query,
             client_id,
             organization_id,
             deleted_client_user_status,
             deleted_client_status,
         )
-        return dict(row) if row else None
+        if not rows:
+            return None
+        linked_leads = []
+        seen_lead_ids: set[str] = set()
+        for row in rows:
+            if not row["lead_id"]:
+                continue
+            lid = str(row["lead_id"])
+            if lid in seen_lead_ids:
+                continue
+            seen_lead_ids.add(lid)
+            oid = row.get("lead_owner_id")
+            linked_leads.append(
+                {
+                    "id": lid,
+                    "name": (row.get("lead_name") or "").strip() or "",
+                    "stage_id": str(row["lead_stage_id"])
+                    if row.get("lead_stage_id") is not None
+                    else None,
+                    "stage_name": row.get("lead_stage_name"),
+                    "deal_type": row.get("lead_deal_type"),
+                    "priority": row.get("lead_priority"),
+                    "lead_score": row.get("lead_lead_score"),
+                    "close_date": row.get("lead_close_date"),
+                    "amount": row.get("lead_amount"),
+                    "owner_id": str(oid) if oid is not None else None,
+                    "lead_source": row.get("lead_lead_source"),
+                    "referral_source": row.get("lead_referral_source"),
+                    "created_at": row.get("lead_created_at"),
+                    "updated_at": row.get("lead_updated_at"),
+                }
+            )
+        result = dict(rows[0])
+        for key in _LINKED_LEAD_DETAIL_KEYS:
+            result.pop(key, None)
+        result["linked_leads"] = linked_leads
+        return result
 
     async def get_company_contacts(
         self,
