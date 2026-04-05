@@ -96,8 +96,8 @@ class LeadService:
 
         seen: set[str] = set()
         ordered: list[str] = []
-        for c in body.contacts:
-            cid = c.contact_client_id
+        for company in body.contacts:
+            cid = company.contact_client_id
             if cid in seen:
                 raise ValidationException(
                     message_key="leads.errors.contacts_duplicate",
@@ -113,13 +113,13 @@ class LeadService:
     def _require_person_clients(types_map: dict[str, str], contact_client_ids: list[str]) -> None:
         """Ensure every id exists in the org and is a person client."""
         for cid in contact_client_ids:
-            ct = types_map.get(cid)
-            if not ct:
+            client_type = types_map.get(cid)
+            if not client_type:
                 raise NotFoundException(
                     message_key="clients.errors.not_found",
                     custom_code=CustomStatusCode.NOT_FOUND,
                 )
-            if ct != ClientType.PERSON.value:
+            if client_type != ClientType.PERSON.value:
                 raise ValidationException(
                     message_key="leads.errors.contact_must_be_person",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -176,6 +176,7 @@ class LeadService:
             self._require_person_clients(types_map, contact_client_ids)
 
     async def _ensure_user_exists(self, user_id: str) -> None:
+        """Ensure the user exists in the organization."""
         user_row = await self.user_repository.get_user_details_by_id(user_id, ["id"])
         if not user_row:
             raise NotFoundException(
@@ -450,11 +451,11 @@ class LeadService:
             parsed = []
         items = parsed if isinstance(parsed, list) else []
         out: list[LeadNoteItem] = []
-        for it in items:
-            if not isinstance(it, dict):
+        for item in items:
+            if not isinstance(item, dict):
                 continue
-            title = (it.get("title") or "").strip()
-            content = (it.get("content") or "").strip()
+            title = (item.get("title") or "").strip()
+            content = (item.get("content") or "").strip()
             if not title or not content:
                 continue
             out.append(LeadNoteItem(title=title, content=content))

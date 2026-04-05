@@ -357,9 +357,9 @@ class LeadRepository:
 
         contact_ids = [cid for cid, _ in pairs]
         labels = [lab for _, lab in pairs]
-        n = len(CREATE_LEAD_COLUMNS)
-        p_ids = n + 1
-        p_labels = n + 2
+        num_columns = len(CREATE_LEAD_COLUMNS)
+        p_ids = num_columns + 1
+        p_labels = num_columns + 2
         query = f"""
             WITH new_lead AS (
                 INSERT INTO {self.TABLE_NAME} ({cols_sql})
@@ -483,15 +483,15 @@ class LeadRepository:
         payload.pop("contact_name", None)
 
         contacts: list[dict[str, Any]] = []
-        for r in rows:
-            contact_client_id = r["contact_client_id"]
+        for row in rows:
+            contact_client_id = row["contact_client_id"]
             if contact_client_id is None:
                 continue
             contacts.append(
                 {
                     "contact_client_id": contact_client_id,
-                    "label": r["label"],
-                    "contact_name": r["contact_name"],
+                    "label": row["label"],
+                    "contact_name": row["contact_name"],
                 }
             )
 

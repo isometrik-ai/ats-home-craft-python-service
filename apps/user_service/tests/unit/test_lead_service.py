@@ -12,6 +12,7 @@ from apps.user_service.app.schemas.enums import (
     DealType,
     EntityType,
     LeadsListMode,
+    Priority,
 )
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
@@ -53,8 +54,7 @@ class _FakeLeadRepository:
         self.get_lead_detail_by_id_result: dict[str, Any] | None = None
         self.update_lead_result: dict[str, Any] | None = None
         self.lead_reference_validation_result: tuple[bool | None, dict[str, str]] = (True, {})
-        self.count_leads_filtered_result: int = 0
-        self.list_leads_page_result: list[dict[str, Any]] = []
+        self.list_leads_page_with_total_result: tuple[list[dict[str, Any]], int] = ([], 0)
         self.list_leads_for_kanban_result: list[dict[str, Any]] = []
         self.delete_lead_result: dict[str, Any] | None = None
 
@@ -84,6 +84,15 @@ class _FakeLeadRepository:
     ) -> dict[str, Any] | None:
         """Get lead detail by id."""
         self.calls["get_lead_detail_by_id"] = (organization_id, lead_id)
+        return self.get_lead_detail_by_id_result
+
+    async def get_lead_detail_with_contacts_by_id(
+        self,
+        organization_id: str,
+        lead_id: str,
+    ) -> dict[str, Any] | None:
+        """Same row shape as detail; ``get_lead`` reads contacts from this path."""
+        self.calls["get_lead_detail_with_contacts_by_id"] = (organization_id, lead_id)
         return self.get_lead_detail_by_id_result
 
     async def update_lead(
@@ -127,18 +136,7 @@ class _FakeLeadRepository:
         )
         return self.lead_reference_validation_result
 
-    async def count_leads_filtered(
-        self,
-        organization_id: str,
-        *,
-        stage_id: str | None = None,
-        search: str | None = None,
-    ) -> int:
-        """Count leads filtered."""
-        self.calls["count_leads_filtered"] = (organization_id, stage_id, search)
-        return self.count_leads_filtered_result
-
-    async def list_leads_page(
+    async def list_leads_page_with_total(
         self,
         organization_id: str,
         *,
@@ -146,10 +144,16 @@ class _FakeLeadRepository:
         search: str | None = None,
         limit: int = 20,
         offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        """List leads page."""
-        self.calls["list_leads_page"] = (organization_id, stage_id, search, limit, offset)
-        return self.list_leads_page_result
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated list with total (window count)."""
+        self.calls["list_leads_page_with_total"] = (
+            organization_id,
+            stage_id,
+            search,
+            limit,
+            offset,
+        )
+        return self.list_leads_page_with_total_result
 
     async def list_leads_for_kanban(
         self,
@@ -314,7 +318,7 @@ async def test_create_lead_client_missing_raises(monkeypatch):
 @pytest.mark.asyncio
 async def test_create_lead_stage_missing_raises(monkeypatch):
     """create_lead raises NotFoundException when the pipeline stage does not exist."""
-    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
+    service, lead_repo, _, _ = _service_with_fakes()
     lead_repo.lead_reference_validation_result = (False, {})
 
     custom_calls: dict[str, Any] = {}
@@ -379,7 +383,7 @@ async def test_create_lead_payload_and_poc_validation(monkeypatch):
 @pytest.mark.asyncio
 async def test_create_lead_owner_id_validation(monkeypatch):
     """create_lead validates owner_id against user repository when explicitly provided."""
-    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
+    service, lead_repo, _, user_repo = _service_with_fakes()
     lead_repo.lead_reference_validation_result = (True, {})
     user_repo.get_user_details_by_id_result = {"id": OWNER_ID}
 
@@ -506,27 +510,29 @@ async def test_update_lead_clear_stage_id():
 async def test_list_leads_list_mode():
     """list_leads in LIST mode returns flat paginated list with total count."""
     service, lead_repo, stage_repo, user_repo = _service_with_fakes()
-    lead_repo.count_leads_filtered_result = 12
     now = datetime(2026, 1, 2, tzinfo=timezone.utc)
-    lead_repo.list_leads_page_result = [
-        {
-            "id": LEAD_ID,
-            "client_id": CLIENT_ID,
-            "client_name": "Client Co",
-            "name": "Lead A",
-            "stage_id": STAGE_ID_1,
-            "stage_name": "Qualified",
-            "lead_score": "high",
-            "close_date": date(2026, 1, 10),
-            "amount": Decimal("50.00"),
-            "owner_id": OWNER_ID,
-            "owner_name": "Owner Name",
-            "point_of_contact_id": POINT_OF_CONTACT_ID,
-            "point_of_contact": "PoC Name",
-            "created_at": now,
-            "updated_at": now,
-        }
-    ]
+    lead_repo.list_leads_page_with_total_result = (
+        [
+            {
+                "id": LEAD_ID,
+                "client_company_id": CLIENT_ID,
+                "company_name": "Client Co",
+                "name": "Lead A",
+                "stage_id": STAGE_ID_1,
+                "stage_name": "Qualified",
+                "deal_type": DealType.NEW_BUSINESS.value,
+                "priority": Priority.HIGH.value,
+                "lead_score": "high",
+                "close_date": date(2026, 1, 10),
+                "amount": Decimal("50.00"),
+                "owner_id": OWNER_ID,
+                "owner_name": "Owner Name",
+                "created_at": now,
+                "updated_at": now,
+            }
+        ],
+        12,
+    )
 
     query = LeadsListQueryParams(
         mode=LeadsListMode.LIST,
@@ -542,13 +548,12 @@ async def test_list_leads_list_mode():
     assert page == 2
     assert len(items) == 1
     assert items[0]["id"] == LEAD_ID
-    assert items[0]["client_name"] == "Client Co"
+    assert items[0]["company_name"] == "Client Co"
     assert items[0]["stage_id"] == STAGE_ID_1
     assert items[0]["close_date"] == "2026-01-10"
     assert items[0]["created_at"] == now.isoformat()
     assert items[0]["updated_at"] == now.isoformat()
-    assert lead_repo.calls["count_leads_filtered"] == (ORG_ID, STAGE_ID_1, "lead")
-    assert lead_repo.calls["list_leads_page"] == (ORG_ID, STAGE_ID_1, "lead", 10, 10)
+    assert lead_repo.calls["list_leads_page_with_total"] == (ORG_ID, STAGE_ID_1, "lead", 10, 10)
     assert not stage_repo.calls
     assert not user_repo.calls
 
@@ -566,35 +571,35 @@ async def test_list_leads_kanban_groups():
     lead_repo.list_leads_for_kanban_result = [
         {
             "id": LEAD_ID,
-            "client_id": CLIENT_ID,
-            "client_name": "Client Co",
+            "client_company_id": CLIENT_ID,
+            "company_name": "Client Co",
             "name": "Lead A",
             "stage_id": STAGE_ID_1,
             "stage_name": "Qualified",
+            "deal_type": DealType.NEW_BUSINESS.value,
+            "priority": None,
             "lead_score": None,
             "close_date": None,
             "amount": None,
             "owner_id": None,
             "owner_name": None,
-            "point_of_contact_id": None,
-            "point_of_contact": None,
             "created_at": now,
             "updated_at": now,
         },
         {
             "id": "77777777-7777-7777-7777-777777777777",
-            "client_id": "99999999-9999-9999-9999-999999999999",
-            "client_name": "Client Unassigned",
+            "client_company_id": "99999999-9999-9999-9999-999999999999",
+            "company_name": "Client Unassigned",
             "name": "Lead B",
             "stage_id": None,
             "stage_name": None,
+            "deal_type": None,
+            "priority": None,
             "lead_score": None,
             "close_date": None,
             "amount": None,
             "owner_id": None,
             "owner_name": None,
-            "point_of_contact_id": None,
-            "point_of_contact": None,
             "created_at": now,
             "updated_at": now,
         },
@@ -656,25 +661,22 @@ async def test_get_lead_detail_custom_fields(monkeypatch):
     now = datetime(2026, 1, 2, tzinfo=timezone.utc)
     lead_repo.get_lead_detail_by_id_result = {
         "id": LEAD_ID,
-        "client_id": CLIENT_ID,
-        "client_name": "Client Co",
+        "client_company_id": CLIENT_ID,
+        "company_name": "Client Co",
         "name": "Lead A",
         "stage_id": STAGE_ID_1,
         "stage_name": "Qualified",
-        "intake_stage": "Initial",
+        "deal_type": DealType.NEW_BUSINESS.value,
+        "priority": Priority.HIGH.value,
         "lead_source": "Referral",
         "referral_source": None,
         "lead_score": "high",
         "close_date": date(2026, 1, 10),
-        "converted_at": datetime(2026, 1, 11, tzinfo=timezone.utc),
-        "notes": "Some notes",
+        "notes": [{"title": "N", "content": "Some notes"}],
         "amount": Decimal("123.45"),
-        "created_by": CTX_USER_ID,
         "description": "Opportunity desc",
         "owner_id": OWNER_ID,
         "owner_name": "Owner Name",
-        "point_of_contact_id": POINT_OF_CONTACT_ID,
-        "point_of_contact": "PoC Name",
         "custom_fields": ('[{"field_id":"foo","instance_id":"f1","type":"text","value":"bar"}]'),
         "created_at": now,
         "updated_at": now,
@@ -683,8 +685,9 @@ async def test_get_lead_detail_custom_fields(monkeypatch):
     detail = await service.get_lead(LEAD_ID)
 
     assert detail["id"] == LEAD_ID
-    assert detail["client_name"] == "Client Co"
+    assert detail["company_name"] == "Client Co"
     assert detail["stage_name"] == "Qualified"
+    assert detail["notes"] == [{"title": "N", "content": "Some notes"}]
     assert detail["custom_fields"] == [
         {
             "field_id": "foo",
@@ -697,7 +700,7 @@ async def test_get_lead_detail_custom_fields(monkeypatch):
     ]
     assert detail["created_at"] == now.isoformat()
     assert detail["updated_at"] == now.isoformat()
-    assert detail["converted_at"].startswith("2026-01-11T")
+    assert lead_repo.calls["get_lead_detail_with_contacts_by_id"] == (ORG_ID, LEAD_ID)
     assert not stage_repo.calls
     assert not user_repo.calls
 

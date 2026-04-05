@@ -141,7 +141,7 @@ async def test_fetch_lead_validation_empty_client_ids():
 
 
 @pytest.mark.asyncio
-async def test_fetch_lead_reference_validation_no_db_when_empty_types_only():
+async def test_fetch_lead_reference_no_db_empty_types_only():
     """When no stage and no client ids, skip the database round trip."""
     conn = _FakeConn()
     repo = LeadRepository(db_connection=conn)
@@ -252,45 +252,22 @@ async def test_update_lead_calls_fetchrow():
 
 
 @pytest.mark.asyncio
-async def test_count_leads_filtered_returns_int():
-    """count_leads_filtered uses fetchrow and casts COUNT(*) to int."""
-    conn = _FakeConn()
-    conn.fetchrow_result = {"n": "3"}
-    repo = LeadRepository(db_connection=conn)
-
-    result = await repo.count_leads_filtered(
-        "org-1",
-        stage_id="22222222-2222-2222-2222-222222222222",
-        search="lead",
-    )
-
-    assert result == 3
-    assert len(conn.fetchrow_calls) == 1
-    query, args = conn.fetchrow_calls[0]
-    assert "COUNT(*)::int" in query
-    assert args == (
-        "org-1",
-        "22222222-2222-2222-2222-222222222222",
-        "%lead%",
-    )
-
-
-@pytest.mark.asyncio
-async def test_list_leads_page_uses_limit_offset():
-    """list_leads_page uses LIMIT/OFFSET and passes optional filters."""
+async def test_list_with_total_uses_limit_offset_window_count():
+    """list_leads_page_with_total uses window COUNT, LIMIT/OFFSET, and optional filters."""
     conn = _FakeConn()
     conn.fetch_result = [
         {
             "id": "lead-1",
             "client_company_id": None,
             "name": "Lead A",
+            "total_count": 7,
         }
     ]
     repo = LeadRepository(db_connection=conn)
 
-    rows = await repo.list_leads_page(
+    rows, total = await repo.list_leads_page_with_total(
         "org-1",
-        stage_id=None,
+        stage_id="22222222-2222-2222-2222-222222222222",
         search="lead",
         limit=10,
         offset=20,
@@ -298,12 +275,34 @@ async def test_list_leads_page_uses_limit_offset():
 
     assert len(rows) == 1
     assert rows[0]["id"] == "lead-1"
+    assert rows[0].get("total_count") == 7
+    assert total == 7
     assert len(conn.fetch_calls) == 1
     query, args = conn.fetch_calls[0]
     assert "FROM leads" in query
+    assert "COUNT(*) OVER()" in query
     assert "LIMIT $4::int" in query
     assert "OFFSET $5::int" in query
-    assert args == ("org-1", None, "%lead%", 10, 20)
+    assert args == (
+        "org-1",
+        "22222222-2222-2222-2222-222222222222",
+        "%lead%",
+        10,
+        20,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_with_total_empty_returns_zero_total():
+    """When fetch returns no rows, total is 0."""
+    conn = _FakeConn()
+    conn.fetch_result = []
+    repo = LeadRepository(db_connection=conn)
+
+    rows, total = await repo.list_leads_page_with_total("org-1", limit=10, offset=0)
+
+    assert rows == []
+    assert total == 0
 
 
 @pytest.mark.asyncio

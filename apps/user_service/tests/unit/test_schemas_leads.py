@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+from pydantic import ValidationError
 
-from apps.user_service.app.schemas.enums import IntakeStage, LeadStatus
+from apps.user_service.app.schemas.enums import DealType
 from apps.user_service.app.schemas.lead_stages import UNSET
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
@@ -17,44 +18,37 @@ from libs.shared_utils.http_exceptions import ValidationException
 CLIENT_ID = "11111111-1111-1111-1111-111111111111"
 STAGE_ID = "22222222-2222-2222-2222-222222222222"
 OWNER_ID = "33333333-3333-3333-3333-333333333333"
-POC_ID = "44444444-4444-4444-4444-444444444444"
 
 
 def test_create_lead_blank_optional_to_none():
     """CreateLeadRequest strips whitespace and converts blank strings to None."""
     req = CreateLeadRequest(
-        client_id=CLIENT_ID,
         name="Lead",
         stage_id=STAGE_ID,
-        intake_stage=IntakeStage.INITIAL_CONTACT,
+        deal_type=DealType.NEW_BUSINESS,
         lead_source="   ",
         referral_source=" Partner  ",
         lead_score="   ",
-        notes="   ",
         description="   ",
         owner_id=OWNER_ID,
-        point_of_contact=POC_ID,
-        lead_status=LeadStatus.PROSPECT,
+        client_company_id=CLIENT_ID,
         close_date=date(2026, 1, 1),
     )
 
-    assert req.intake_stage == IntakeStage.INITIAL_CONTACT
     assert req.lead_source is None
     assert req.referral_source == "Partner"
     assert req.lead_score is None
-    assert req.notes is None
     assert req.description is None
+    assert req.notes == []
 
 
-def test_create_lead_rejects_invalid_uuid_fields():
-    """CreateLeadRequest validates UUID fields."""
-    with pytest.raises(ValidationException) as exc_info:
+def test_create_lead_requires_deal_type():
+    """CreateLeadRequest requires ``deal_type`` (v2)."""
+    with pytest.raises(ValidationError):
         CreateLeadRequest(
-            client_id="not-a-uuid",
             name="Lead",
             stage_id=STAGE_ID,
         )
-    assert exc_info.value.message_key == "errors.invalid_uuid_format"
 
 
 def test_update_lead_rejects_empty_payload():
@@ -70,11 +64,10 @@ def test_update_lead_normalizes_blank_strings_to_none():
     assert req.name is None
 
 
-def test_update_lead_uuid_validation():
-    """UpdateLeadRequest validates UUIDs when field is present and not UNSET/None."""
-    with pytest.raises(ValidationException) as exc_info:
-        UpdateLeadRequest(stage_id="not-a-uuid")
-    assert exc_info.value.message_key == "errors.invalid_uuid_format"
+def test_update_lead_stage_id_is_plain_string():
+    """UpdateLeadRequest keeps ``stage_id`` as a string (UUID format enforced in services/API)."""
+    req = UpdateLeadRequest(stage_id="not-a-uuid")
+    assert req.stage_id == "not-a-uuid"
 
 
 def test_update_lead_unset_no_changes():
