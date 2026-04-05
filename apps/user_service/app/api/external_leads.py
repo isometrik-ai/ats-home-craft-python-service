@@ -44,7 +44,8 @@ router = APIRouter(prefix="/integrations/leads", tags=["Leads (External)"])
     summary="List leads (external auth)",
     description=(
         "List leads for the organization resolved from Isometrik credentials "
-        "(`licenseKey`/`appSecret`). Supports search, stage filtering, and pagination."
+        "(`licenseKey`/`appSecret`). Supports search (lead name, company name, or linked "
+        "contact names), stage filtering, and pagination."
     ),
     responses={
         http_status.HTTP_200_OK: {"description": "Leads retrieved successfully"},
@@ -64,8 +65,7 @@ async def external_list_leads(
     stage_id: str | None = Query(None, description="Filter by pipeline stage"),
     search: str | None = Query(
         None,
-        min_length=2,
-        description="Search by lead name or client name",
+        description="Search by lead name, company name, or any linked contact name",
     ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
@@ -155,12 +155,19 @@ async def external_get_lead(
     "",
     status_code=http_status.HTTP_201_CREATED,
     summary="Create a lead (external auth)",
-    description="Create a new lead using external auth (Isometrik credentials).",
+    description=(
+        "Create a new v2 lead using external auth (Isometrik credentials). Body matches "
+        "``POST /leads``: company link via ``client_company_id``, person clients via "
+        "``contacts``, required ``deal_type``, structured ``notes``, and FieldCell "
+        "``custom_fields`` create rules."
+    ),
     responses={
         http_status.HTTP_201_CREATED: {"description": "Lead created successfully"},
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
         http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
-        http_status.HTTP_404_NOT_FOUND: {"description": "Client, stage, or user not found"},
+        http_status.HTTP_404_NOT_FOUND: {
+            "description": "Company/contact client, pipeline stage, or referenced user not found"
+        },
         http_status.HTTP_409_CONFLICT: {"description": "A lead already exists for this client"},
         http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
         http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
@@ -199,7 +206,7 @@ async def external_create_lead(
         created = await service.create_lead(body, external=True)
 
     request.state.audit_table = "leads"
-    request.state.audit_description = f"Created external lead for client: {body.client_id}"
+    request.state.audit_description = f"Created external lead for client: {body.client_company_id}"
     request.state.audit_risk_level = "medium"
     request.state.audit_user_context = {
         "user_id": "00000000-0000-0000-0000-000000000000",
@@ -221,7 +228,11 @@ async def external_create_lead(
     "/{lead_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Update a lead (external auth)",
-    description="Update a lead (PATCH semantics) using external auth (Isometrik credentials).",
+    description=(
+        "Update a lead (PATCH semantics) using external auth (Isometrik credentials). "
+        "Same rules as ``PATCH /leads/{lead_id}``: ``contacts`` and ``notes`` replace "
+        "their arrays when set; ``custom_fields`` follow FieldCell PATCH rules."
+    ),
     responses={
         http_status.HTTP_200_OK: {"description": "Lead updated successfully"},
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},

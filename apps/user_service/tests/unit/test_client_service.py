@@ -27,7 +27,7 @@ from apps.user_service.app.schemas.clients import (
     WebsitesUpdate,
     WebsiteUpdateItem,
 )
-from apps.user_service.app.schemas.enums import ClientType, LeadStatus, UserEventStatus
+from apps.user_service.app.schemas.enums import ClientType, UserEventStatus
 from apps.user_service.app.services.client_service import ClientService
 from apps.user_service.app.utils.common_utils import UserContext, parse_json_field
 from libs.shared_utils.http_exceptions import (
@@ -187,11 +187,25 @@ class _FakeLeadRepo:
 
     def __init__(self):
         self.calls = {}
+        self.client_type_by_id: dict[str, str] = {}
 
-    async def create_lead(self, lead_data):
+    async def fetch_lead_reference_validation(self, organization_id, client_ids, *, stage_id=None):
+        """Return stage OK and client id -> client_type for validation."""
+        self.calls["fetch_lead_reference_validation"] = (
+            organization_id,
+            list(client_ids),
+            stage_id,
+        )
+        types_map = {
+            str(cid): self.client_type_by_id.get(str(cid), ClientType.PERSON.value)
+            for cid in client_ids
+        }
+        return True, types_map
+
+    async def create_lead(self, row, contacts=None):
         """Record create (same repository method as API lead create)."""
-        self.calls["create_lead"] = lead_data
-        return {"id": "lead-1", **lead_data}
+        self.calls["create_lead"] = {"row": row, "contacts": contacts}
+        return {"id": "lead-1", **row}
 
     async def delete_leads_by_client_id(self, client_id):
         """Record delete by client id."""
@@ -1048,10 +1062,47 @@ async def test_create_optional_records_creates_lead(monkeypatch):
     )
 
     await service._create_optional_records(request_data, "client-1")
-    assert fake_lead.calls["create_lead"]["client_id"] == "client-1"
-    assert fake_lead.calls["create_lead"]["organization_id"] == "org-1"
-    assert fake_lead.calls["create_lead"]["name"] == "John Doe"
-    assert fake_lead.calls["create_lead"]["stage_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    created = fake_lead.calls["create_lead"]
+    row = created["row"]
+    assert created["contacts"] == [("client-1", None)]
+    assert row["organization_id"] == "org-1"
+    assert row["name"] == "John Doe"
+    assert row["stage_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    assert row["client_company_id"] is None
+    assert row["owner_id"] == "u1"
+    assert row["custom_fields"] == []
+    assert row["notes"] == []
+
+
+@pytest.mark.asyncio
+async def test_create_optional_records_lead_for_company(monkeypatch):
+    """Company primary client: lead uses client_company_id, no lead_contacts."""
+    fake_repo = _FakeClientRepo()
+    fake_lead = _FakeLeadRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.ClientRepository",
+        lambda db_connection=None: fake_repo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_service.LeadRepository",
+        lambda db_connection=None: fake_lead,
+    )
+    service = ClientService(user_context=_ctx(), db_connection=None)
+    request_data = CreateClientRequest(
+        client_type=ClientType.COMPANY,
+        name="Acme Legal",
+        lead_management=LeadManagement(
+            enabled=True,
+            stage_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        ),
+    )
+
+    await service._create_optional_records(request_data, "co-1")
+    created = fake_lead.calls["create_lead"]
+    row = created["row"]
+    assert created["contacts"] == []
+    assert row["client_company_id"] == "co-1"
+    assert row["name"] == "Acme Legal"
 
 
 @pytest.mark.asyncio
@@ -1489,17 +1540,14 @@ async def test_get_client_details_with_full_data(monkeypatch):
         "social_pages": "[]",
         "enrichment_done": False,
         "last_enriched_at": None,
-        "lead_id": "lead-1",
-        "stage_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-        "lead_status": "prospect",
-        "intake_stage": "Initial Contact",
-        "lead_source": "website",
-        "referral_source": "google",
-        "lead_score": "85",
-        "converted_at": datetime.datetime.now(),
-        "lead_notes": "Interested",
-        "lead_created_at": datetime.datetime.now(),
-        "lead_updated_at": datetime.datetime.now(),
+        "linked_leads": [
+            {
+                "id": "lead-1",
+                "name": "Acme opportunity",
+                "stage_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                "stage_name": "Qualified",
+            }
+        ],
     }
     fake_repo.address_result = [
         {
@@ -1566,9 +1614,10 @@ async def test_get_client_details_with_full_data(monkeypatch):
             "value": "value",
         }
     ]
-    assert result.lead is not None
-    assert result.lead.stage_id == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    assert result.lead.lead_status == "prospect"
+    assert len(result.leads) == 1
+    assert result.leads[0].name == "Acme opportunity"
+    assert result.leads[0].stage_id == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    assert result.leads[0].stage_name == "Qualified"
     assert len(result.addresses) == 1
     assert result.addresses[0].address_line1 == "123 Main St"
 
@@ -1589,7 +1638,6 @@ async def test_get_client_details_includes_contacts(monkeypatch):
         "websites": "[]",
         "billing_preferences": None,
         "custom_fields": None,
-        "lead_id": None,
     }
     fake_repo.address_result = []
     fake_repo.company_contacts_result = [
@@ -1638,7 +1686,7 @@ async def test_get_client_details_includes_contacts(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_client_details_without_lead(monkeypatch):
-    """get_client_details handles client without lead information."""
+    """get_client_details returns empty leads when none are linked."""
     fake_repo = _FakeClientRepo()
     fake_repo.client_details_result = {
         "id": "client-1",
@@ -1654,7 +1702,6 @@ async def test_get_client_details_without_lead(monkeypatch):
         "websites": "[]",
         "billing_preferences": None,
         "custom_fields": None,
-        "lead_id": None,
     }
     fake_repo.address_result = []
 
@@ -1667,7 +1714,7 @@ async def test_get_client_details_without_lead(monkeypatch):
     result = await service.get_client_details("client-1", "org-1")
 
     assert result.id == "client-1"
-    assert result.lead is None
+    assert result.leads == []
     assert len(result.addresses) == 0
     assert len(result.websites) == 0
 
@@ -1690,7 +1737,6 @@ async def test_get_client_details_null_coordinates(monkeypatch):
         "websites": "[]",
         "billing_preferences": None,
         "custom_fields": None,
-        "lead_id": None,
     }
     fake_repo.address_result = [
         {
@@ -1879,7 +1925,7 @@ async def test_update_client_with_lead_management(monkeypatch):
         industry="Legal",
         lead_management=LeadManagementUpdate(
             lead_id="lead-1",
-            lead_status=LeadStatus.QUALIFIED,
+            stage_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             notes="Updated notes",
         ),
     )
@@ -1889,7 +1935,10 @@ async def test_update_client_with_lead_management(monkeypatch):
     assert fake_lead.calls["update_lead"] == (
         "org-1",
         "lead-1",
-        {"lead_status": LeadStatus.QUALIFIED.value, "notes": "Updated notes"},
+        {
+            "stage_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "notes": [{"title": "Note", "content": "Updated notes"}],
+        },
     )
 
 
@@ -2077,13 +2126,16 @@ async def test_apply_lead_update_calls_repository(monkeypatch):
         email="u@example.com",
         organization_id="org-1",
     )
-    lead = LeadManagementUpdate(lead_id="lead-1", lead_status=LeadStatus.CONVERTED)
+    lead = LeadManagementUpdate(
+        lead_id="lead-1",
+        stage_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    )
 
     await service._apply_lead_update(lead)
     assert fake_lead.calls["update_lead"] == (
         "org-1",
         "lead-1",
-        {"lead_status": LeadStatus.CONVERTED.value},
+        {"stage_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
     )
 
 

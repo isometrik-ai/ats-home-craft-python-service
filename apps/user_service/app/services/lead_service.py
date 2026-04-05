@@ -1,4 +1,4 @@
-"""Business logic for leads (public.leads)."""
+"""Business logic for leads (public.leads, public.lead_contacts)."""
 
 import json
 from collections import defaultdict
@@ -7,19 +7,20 @@ from typing import Any
 import asyncpg
 from asyncpg import UniqueViolationError
 
-from apps.user_service.app.db.repositories.client_repository import ClientRepository
 from apps.user_service.app.db.repositories.lead_repository import LeadRepository
 from apps.user_service.app.db.repositories.lead_stage_repository import (
     LeadStageRepository,
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
-from apps.user_service.app.schemas.enums import EntityType, LeadsListMode
+from apps.user_service.app.schemas.enums import ClientType, EntityType, LeadsListMode
 from apps.user_service.app.schemas.lead_stages import Unset
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
+    LeadContactDetail,
     LeadDetail,
     LeadKanbanStageGroup,
     LeadListItem,
+    LeadNoteItem,
     LeadsListQueryParams,
     UpdateLeadRequest,
 )
@@ -32,6 +33,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_utils.http_exceptions import (
     DuplicateValueException,
     NotFoundException,
+    ValidationException,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -43,14 +45,12 @@ class LeadService:
         self,
         db_connection: asyncpg.Connection,
         user_context: UserContext | None = None,
-        client_repository: ClientRepository | None = None,
         lead_repository: LeadRepository | None = None,
         lead_stage_repository: LeadStageRepository | None = None,
         user_repository: UserRepository | None = None,
     ) -> None:
         self.user_context = user_context
         self.db_connection = db_connection
-        self.client_repository = client_repository or ClientRepository(db_connection=db_connection)
         self.lead_repository = lead_repository or LeadRepository(db_connection=db_connection)
         self.lead_stage_repository = lead_stage_repository or LeadStageRepository(
             db_connection=db_connection
@@ -77,85 +77,208 @@ class LeadService:
         )
         lead_data["custom_fields"] = validated
 
-    async def create_lead(self, body: CreateLeadRequest, external: bool = False) -> dict[str, Any]:
-        """Create a lead for an existing client; enforce org scoping and custom field rules."""
-        organization_id = self.user_context.organization_id
-        user_id = self.user_context.user_id
-        client_id = body.client_id
+    @staticmethod
+    def _unique_client_ids_for_refs(
+        company_id: str | None,
+        contact_client_ids: list[str],
+    ) -> list[str]:
+        """Distinct client ids for ``fetch_lead_reference_validation`` (stable order)."""
+        parts = ([company_id] if company_id is not None else []) + contact_client_ids
+        return list(dict.fromkeys(parts))
 
-        client_exists = await self.lead_repository.get_client_existence(
-            organization_id,
-            client_id,
-        )
-        if not client_exists:
-            raise NotFoundException(
-                message_key="clients.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
+    @staticmethod
+    def _parse_create_contacts(
+        body: CreateLeadRequest,
+    ) -> tuple[list[str], list[tuple[str, str | None]]]:
+        """Reject duplicate contact ids; return (ordered ids, ``lead_contacts`` insert rows)."""
+        if not body.contacts:
+            return [], []
 
-        stage = await self.lead_stage_repository.get_stage_by_id(
-            organization_id,
-            body.stage_id,
-        )
-        if not stage:
-            raise NotFoundException(
-                message_key="lead_stages.errors.stage_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        resolved_stage_id = str(stage["id"])
-
-        owner_id = None if external else (body.owner_id if body.owner_id is not None else user_id)
-        if (not external) and body.owner_id is not None:
-            user_row = await self.user_repository.get_user_details_by_id(owner_id, ["id"])
-            if not user_row:
-                raise NotFoundException(
-                    message_key="users.errors.user_not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                    params={"user_id": owner_id},
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for company in body.contacts:
+            cid = company.contact_client_id
+            if cid in seen:
+                raise ValidationException(
+                    message_key="leads.errors.contacts_duplicate",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
+            seen.add(cid)
+            ordered.append(cid)
 
-        point_of_contact: str | None = body.point_of_contact
-        if point_of_contact is not None:
-            poc_ok = await self.client_repository.client_exists_in_organization(
-                organization_id,
-                point_of_contact,
-            )
-            if not poc_ok:
+        rows = [(c.contact_client_id, c.label) for c in body.contacts]
+        return ordered, rows
+
+    @staticmethod
+    def _require_person_clients(types_map: dict[str, str], contact_client_ids: list[str]) -> None:
+        """Ensure every id exists in the org and is a person client."""
+        for cid in contact_client_ids:
+            client_type = types_map.get(cid)
+            if not client_type:
                 raise NotFoundException(
                     message_key="clients.errors.not_found",
                     custom_code=CustomStatusCode.NOT_FOUND,
                 )
+            if client_type != ClientType.PERSON.value:
+                raise ValidationException(
+                    message_key="leads.errors.contact_must_be_person",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
 
-        lead_row: dict[str, Any] = {
-            "client_id": client_id,
+    @staticmethod
+    def _ensure_company_from_types_map(types_map: dict[str, str], company_id: str) -> None:
+        """Validate optional company FK is an existing company client."""
+        client_type = types_map.get(company_id)
+        if client_type is None:
+            raise NotFoundException(
+                message_key="clients.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if client_type != ClientType.COMPANY.value:
+            raise ValidationException(
+                message_key="leads.errors.company_must_be_company",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    @staticmethod
+    def _raise_if_stage_missing(stage_id: str | None, stage_ok: bool | None) -> None:
+        """No-op when ``stage_id`` is omitted; raise when a requested stage does not exist."""
+        if stage_id is None or stage_ok is None:
+            return
+        if not stage_ok:
+            raise NotFoundException(
+                message_key="lead_stages.errors.stage_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    async def _fetch_and_validate_lead_references(
+        self,
+        organization_id: str,
+        *,
+        unique_client_ids: list[str],
+        stage_id_to_validate: str | None,
+        company_id: str | None,
+        contact_client_ids: list[str],
+    ) -> None:
+        """Single round trip for pipeline stage + client types; enforce company/person rules."""
+        if not unique_client_ids and stage_id_to_validate is None:
+            return
+
+        stage_ok, types_map = await self.lead_repository.fetch_lead_reference_validation(
+            organization_id,
+            unique_client_ids,
+            stage_id=stage_id_to_validate,
+        )
+        LeadService._raise_if_stage_missing(stage_id_to_validate, stage_ok)
+        if company_id:
+            self._ensure_company_from_types_map(types_map, company_id)
+        if contact_client_ids:
+            self._require_person_clients(types_map, contact_client_ids)
+
+    async def _ensure_user_exists(self, user_id: str) -> None:
+        """Ensure the user exists in the organization."""
+        user_row = await self.user_repository.get_user_details_by_id(user_id, ["id"])
+        if not user_row:
+            raise NotFoundException(
+                message_key="users.errors.user_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+                params={"user_id": user_id},
+            )
+
+    async def _resolve_create_owner_id(
+        self,
+        body: CreateLeadRequest,
+        external: bool,
+        user_id: str,
+    ) -> str | None:
+        """Resolve owner id for create; validate explicit owner when not external."""
+        if external:
+            return None
+        owner_id = body.owner_id if body.owner_id is not None else user_id
+        if body.owner_id is not None:
+            await self._ensure_user_exists(owner_id)
+        return owner_id
+
+    @staticmethod
+    def _lead_row_dict_for_create(
+        organization_id: str,
+        body: CreateLeadRequest,
+        owner_id: str | None,
+    ) -> dict[str, Any]:
+        """Build the insert payload for ``create_lead`` (before custom fields)."""
+        notes_payload = [n.model_dump() for n in body.notes]
+        return {
             "organization_id": organization_id,
             "name": body.name,
-            "stage_id": resolved_stage_id,
-            "lead_status": body.lead_status.value if body.lead_status is not None else None,
-            "intake_stage": body.intake_stage,
+            "stage_id": body.stage_id,
+            "client_company_id": body.client_company_id,
             "lead_source": body.lead_source,
             "referral_source": body.referral_source,
             "lead_score": body.lead_score,
+            "deal_type": body.deal_type.value,
+            "priority": body.priority.value if body.priority is not None else None,
             "close_date": body.close_date,
-            "converted_at": body.converted_at,
-            "notes": body.notes,
             "amount": body.amount,
-            "created_by": user_id,
             "description": body.description,
-            "owner_id": owner_id,
-            "point_of_contact": point_of_contact,
+            "notes": notes_payload,
             "custom_fields": [],
+            "owner_id": owner_id,
         }
+
+    async def create_lead(self, body: CreateLeadRequest, external: bool = False) -> dict[str, Any]:
+        """Create a lead (v2); optional company and ``lead_contacts``."""
+        organization_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+
+        contact_ids_ordered, contact_rows = LeadService._parse_create_contacts(body)
+        unique_client_ids = LeadService._unique_client_ids_for_refs(
+            body.client_company_id,
+            contact_ids_ordered,
+        )
+        await self._fetch_and_validate_lead_references(
+            organization_id,
+            unique_client_ids=unique_client_ids,
+            stage_id_to_validate=body.stage_id,
+            company_id=body.client_company_id,
+            contact_client_ids=contact_ids_ordered,
+        )
+        owner_id = await self._resolve_create_owner_id(body, external, user_id)
+        lead_row = self._lead_row_dict_for_create(organization_id, body, owner_id)
 
         await self._apply_custom_fields_if_needed(lead_row, body)
 
         try:
-            return await self.lead_repository.create_lead(lead_row)
+            return await self.lead_repository.create_lead(lead_row, contacts=contact_rows)
         except UniqueViolationError as exc:
             raise DuplicateValueException(
-                message_key="leads.errors.lead_already_exists",
+                message_key="leads.errors.duplicate_contact",
                 custom_code=CustomStatusCode.DUPLICATE_ENTRY,
             ) from exc
+
+    @staticmethod
+    def _normalize_patch_contacts(
+        contacts: list[Any],
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        """Dedupe contact ids and build sync rows in one pass."""
+        seen: set[str] = set()
+        ids: list[str] = []
+        rows: list[dict[str, Any]] = []
+        for entry in contacts:
+            cid = getattr(entry, "contact_client_id", None)
+            if not cid:
+                raise ValidationException(
+                    message_key="leads.errors.contact_client_id_required",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            if cid in seen:
+                raise ValidationException(
+                    message_key="leads.errors.contacts_duplicate",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            seen.add(cid)
+            ids.append(cid)
+            rows.append({"contact_client_id": cid, "label": getattr(entry, "label", None)})
+        return ids, rows
 
     @staticmethod
     def _apply_lead_scalar_updates(body: UpdateLeadRequest, update_data: dict[str, Any]) -> None:
@@ -163,24 +286,29 @@ class LeadService:
         for attr in (
             "name",
             "stage_id",
-            "intake_stage",
             "lead_source",
             "referral_source",
             "lead_score",
             "close_date",
-            "converted_at",
             "amount",
             "description",
             "owner_id",
-            "point_of_contact",
-            "notes",
+            "client_company_id",
         ):
             val = getattr(body, attr)
             if not isinstance(val, Unset):
                 update_data[attr] = val
-        status = body.lead_status
-        if not isinstance(status, Unset):
-            update_data["lead_status"] = status.value if status is not None else None
+
+        if not isinstance(body.deal_type, Unset):
+            update_data["deal_type"] = body.deal_type.value if body.deal_type is not None else None
+        if not isinstance(body.priority, Unset):
+            update_data["priority"] = body.priority.value if body.priority is not None else None
+
+        if not isinstance(body.notes, Unset):
+            notes_list = body.notes
+            update_data["notes"] = (
+                [n.model_dump() for n in notes_list] if notes_list is not None else []
+            )
 
     async def _merge_custom_fields_into_lead_update(
         self,
@@ -229,47 +357,61 @@ class LeadService:
         self._apply_lead_scalar_updates(body, update_data)
         await self._merge_custom_fields_into_lead_update(body, current, update_data)
 
-        new_stage_row: dict[str, Any] | None = None
+        contacts_changed = not isinstance(body.contacts, Unset)
+        contacts_payload: list[dict[str, Any]] | None = None
+        contact_ids_for_batch: list[str] = []
+
+        if contacts_changed:
+            # Replace semantics: UNSET => no change; None/[] => clear all; list => full replace.
+            if body.contacts is None or (isinstance(body.contacts, list) and not body.contacts):
+                contacts_payload = []
+            else:
+                contact_ids_for_batch, contacts_payload = self._normalize_patch_contacts(
+                    body.contacts
+                )
+
+        company_id_for_batch: str | None = None
+        if not isinstance(body.client_company_id, Unset) and body.client_company_id is not None:
+            company_id_for_batch = body.client_company_id
+
+        stage_id_to_validate: str | None = None
         if not isinstance(body.stage_id, Unset) and body.stage_id is not None:
-            new_stage_row = await self.lead_stage_repository.get_stage_by_id(
+            stage_id_to_validate = body.stage_id
+
+        unique_client_ids = LeadService._unique_client_ids_for_refs(
+            company_id_for_batch,
+            contact_ids_for_batch,
+        )
+        needs_ref_fetch = bool(unique_client_ids) or stage_id_to_validate is not None
+        if needs_ref_fetch:
+            await self._fetch_and_validate_lead_references(
                 organization_id,
-                body.stage_id,
+                unique_client_ids=unique_client_ids,
+                stage_id_to_validate=stage_id_to_validate,
+                company_id=company_id_for_batch,
+                contact_client_ids=contact_ids_for_batch,
             )
-            if not new_stage_row:
-                raise NotFoundException(
-                    message_key="lead_stages.errors.stage_not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                )
 
-        if not isinstance(body.owner_id, Unset) and body.owner_id is not None:
-            user_row = await self.user_repository.get_user_details_by_id(body.owner_id, ["id"])
-            if not user_row:
-                raise NotFoundException(
-                    message_key="users.errors.user_not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                    params={"user_id": body.owner_id},
-                )
-
-        if not isinstance(body.point_of_contact, Unset) and body.point_of_contact is not None:
-            poc_ok = await self.client_repository.client_exists_in_organization(
-                organization_id,
-                body.point_of_contact,
-            )
-            if not poc_ok:
-                raise NotFoundException(
-                    message_key="clients.errors.not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                )
-
-        if not update_data:
+        # If nothing is changing (no scalar/custom_fields and no contacts), short-circuit.
+        if not update_data and not contacts_changed:
             return current, current
 
-        updated = await self.lead_repository.update_lead(organization_id, lead_id, update_data)
+        if not isinstance(body.owner_id, Unset) and body.owner_id is not None:
+            await self._ensure_user_exists(body.owner_id)
+
+        sync_contacts = contacts_payload if contacts_changed else None
+        updated = await self.lead_repository.update_lead_with_contacts(
+            organization_id,
+            lead_id,
+            update_data,
+            sync_contacts,
+        )
         if not updated:
             raise NotFoundException(
                 message_key="leads.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+
         return current, updated
 
     @staticmethod
@@ -283,53 +425,81 @@ class LeadService:
         """Map a joined list/kanban row to ``LeadListItem`` JSON."""
         item = LeadListItem(
             id=str(row["id"]),
-            client_id=str(row["client_id"]),
-            client_name=row["client_name"] or "",
+            client_company_id=self._uuid_str(row.get("client_company_id")),
+            company_name=row.get("company_name") or "",
             name=row.get("name"),
             stage_id=self._uuid_str(row.get("stage_id")),
             stage_name=row.get("stage_name"),
+            deal_type=row.get("deal_type"),
+            priority=row.get("priority"),
             lead_score=row.get("lead_score"),
             close_date=row.get("close_date"),
             amount=row.get("amount"),
             owner_id=self._uuid_str(row.get("owner_id")),
             owner_name=row.get("owner_name") or None,
-            point_of_contact_id=self._uuid_str(row.get("point_of_contact_id")),
-            point_of_contact=row.get("point_of_contact"),
             created_at=format_iso_datetime(row.get("created_at")) or "",
             updated_at=format_iso_datetime(row.get("updated_at")) or "",
         )
         return item.model_dump(mode="json")
 
-    def _build_lead_detail(self, row: dict[str, Any]) -> dict[str, Any]:
-        """Map a detail row to ``LeadDetail`` (excludes ``lead_status``)."""
-        custom = row.get("custom_fields")
-        if isinstance(custom, str):
-            custom = json.loads(custom) if custom else {}
-        elif custom is None:
-            custom = {}
+    @staticmethod
+    def _normalize_notes_for_detail(raw_notes: Any) -> list[LeadNoteItem]:
+        """Normalize notes field to ``LeadNoteItem`` list."""
+        try:
+            parsed = parse_json_field(raw_notes) or []
+        except json.JSONDecodeError:
+            parsed = []
+        items = parsed if isinstance(parsed, list) else []
+        out: list[LeadNoteItem] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = (item.get("title") or "").strip()
+            content = (item.get("content") or "").strip()
+            if not title or not content:
+                continue
+            out.append(LeadNoteItem(title=title, content=content))
+        return out
+
+    def _build_lead_detail(
+        self,
+        row: dict[str, Any],
+        contacts: list[dict[str, Any]],
+        *,
+        custom_fields: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Map a detail row and contact rows to ``LeadDetail`` JSON."""
+        custom_fields_payload = custom_fields or []
+
+        contact_models = [
+            LeadContactDetail(
+                contact_client_id=str(c["contact_client_id"]),
+                label=c.get("label"),
+                contact_name=c.get("contact_name"),
+            )
+            for c in contacts
+        ]
 
         detail = LeadDetail(
             id=str(row["id"]),
-            client_id=str(row["client_id"]),
-            client_name=row.get("client_name") or "",
+            client_company_id=self._uuid_str(row.get("client_company_id")),
+            company_name=row.get("company_name") or "",
             name=row.get("name"),
             stage_id=self._uuid_str(row.get("stage_id")),
             stage_name=row.get("stage_name"),
-            intake_stage=row.get("intake_stage"),
+            deal_type=row.get("deal_type"),
+            priority=row.get("priority"),
             lead_source=row.get("lead_source"),
             referral_source=row.get("referral_source"),
             lead_score=row.get("lead_score"),
             close_date=row.get("close_date"),
-            converted_at=format_iso_datetime(row.get("converted_at")),
-            notes=row.get("notes"),
+            notes=self._normalize_notes_for_detail(row.get("notes")),
             amount=row.get("amount"),
-            created_by=self._uuid_str(row.get("created_by")),
             description=row.get("description"),
             owner_id=self._uuid_str(row.get("owner_id")),
             owner_name=row.get("owner_name") or None,
-            point_of_contact_id=self._uuid_str(row.get("point_of_contact_id")),
-            point_of_contact=row.get("point_of_contact"),
-            custom_fields=custom if isinstance(custom, list) else [],
+            contacts=contact_models,
+            custom_fields=custom_fields_payload,
             created_at=format_iso_datetime(row.get("created_at")) or "",
             updated_at=format_iso_datetime(row.get("updated_at")) or "",
         )
@@ -345,22 +515,17 @@ class LeadService:
         search = query.search
 
         if query.mode == LeadsListMode.LIST:
-            total = await self.lead_repository.count_leads_filtered(
-                organization_id,
-                stage_id=stage_id,
-                search=search,
-            )
             offset = (query.page - 1) * query.limit
-            rows = await self.lead_repository.list_leads_page(
+            rows, total = await self.lead_repository.list_leads_page_with_total(
                 organization_id,
                 stage_id=stage_id,
                 search=search,
                 limit=query.limit,
                 offset=offset,
             )
-            items = [self._build_list_item(r) for r in rows]
-            return items, total, query.page
+            return [self._build_list_item(r) for r in rows], total, query.page
 
+        # KANBAN — unchanged
         stage_rows = await self.lead_stage_repository.list_stages_by_organization(organization_id)
         lead_rows = await self.lead_repository.list_leads_for_kanban(
             organization_id,
@@ -409,15 +574,28 @@ class LeadService:
     async def get_lead(self, lead_id: str) -> dict[str, Any]:
         """Return one lead by id for the current organization."""
         organization_id = self.user_context.organization_id
-        row = await self.lead_repository.get_lead_detail_by_id(organization_id, lead_id)
+        row = await self.lead_repository.get_lead_detail_with_contacts_by_id(
+            organization_id, lead_id
+        )
         if not row:
             raise NotFoundException(
                 message_key="leads.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        detail = self._build_lead_detail(row)
-        detail["custom_fields"] = await self._resolve_lead_custom_fields_for_response(row)
-        return detail
+        contacts_raw = row.get("contacts")
+        if isinstance(contacts_raw, str):
+            contacts = json.loads(contacts_raw) if contacts_raw else []
+        elif isinstance(contacts_raw, list):
+            contacts = contacts_raw
+        else:
+            contacts = []
+
+        resolved_custom_fields = await self._resolve_lead_custom_fields_for_response(row)
+        return self._build_lead_detail(
+            row,
+            contacts,
+            custom_fields=resolved_custom_fields,
+        )
 
     async def _resolve_lead_custom_fields_for_response(
         self,
@@ -442,7 +620,7 @@ class LeadService:
         return cfs.resolve_fields_for_read(raw, id_to_def)
 
     async def delete_lead(self, lead_id: str) -> dict[str, Any]:
-        """Hard-delete a lead for the current organization (client row is not deleted)."""
+        """Hard-delete a lead for the current organization (client rows are not deleted)."""
         organization_id = self.user_context.organization_id
         deleted = await self.lead_repository.delete_lead(organization_id, lead_id)
         if not deleted:

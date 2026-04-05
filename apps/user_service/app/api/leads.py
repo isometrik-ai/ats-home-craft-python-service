@@ -90,7 +90,7 @@ async def create_lead(
         )
 
         request.state.audit_table = "leads"
-        request.state.audit_description = f"Created lead for client: {body.client_id}"
+        request.state.audit_description = f"Created lead for client: {body.client_company_id}"
         request.state.audit_risk_level = "medium"
         request.state.audit_user_context = {
             "user_id": user_context.user_id,

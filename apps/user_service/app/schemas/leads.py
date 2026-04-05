@@ -1,10 +1,10 @@
 """Leads Schemas Module.
 
 Pydantic models for lead create, update, list, detail, and query operations.
-Aligned with ``public.leads`` and LEADS_API_DOC.
+Aligned with ``public.leads`` v2 and ``public.lead_contacts``.
 """
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -12,80 +12,105 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    ValidationInfo,
     field_validator,
     model_validator,
 )
 
-from apps.user_service.app.schemas.enums import IntakeStage, LeadsListMode, LeadStatus
+from apps.user_service.app.schemas.enums import DealType, LeadsListMode, Priority
 from apps.user_service.app.schemas.lead_stages import UNSET, Unset
-from apps.user_service.app.utils.common_utils import validate_uuid_format
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
-# Maps Pydantic field names to human-readable labels for ``validate_uuid_format``.
-_LEAD_UUID_FIELD_LABELS: dict[str, str] = {
-    "client_id": "client ID",
-    "stage_id": "stage ID",
-    "owner_id": "owner ID",
-    "point_of_contact": "point of contact ID",
-}
 
-
-class CreateLeadRequest(BaseModel):
-    """Request body for ``POST /leads``.
-
-    ``created_by`` and ``organization_id`` are not accepted; enforced via
-    ``extra="forbid"``.
-    """
+class LeadNoteItem(BaseModel):
+    """One structured note in ``leads.notes`` (JSONB array)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    client_id: str = Field(
-        ...,
-        description="Existing client UUID (one lead per client)",
+    title: str = Field(..., max_length=500)
+    content: str = Field(..., max_length=50000)
+
+    @field_validator("title", "content", mode="before")
+    @classmethod
+    def strip_whitespace(cls, value: str) -> str:
+        """Strip whitespace; treat blank strings as unset (``None``)."""
+        return value.strip()
+
+    @field_validator("title", "content")
+    @classmethod
+    def non_empty_after_strip(cls, value: str) -> str:
+        """Raise ValueError if stripped value is empty."""
+        if not value:
+            raise ValueError("must not be empty")
+        return value
+
+
+class LeadContactCreate(BaseModel):
+    """Person client linked to a lead (``lead_contacts``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_client_id: str = Field(..., description="Person client UUID")
+    label: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional role or tag (e.g. decision_maker)",
     )
-    name: str = Field(..., description="Lead display title")
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        """Strip whitespace; blank becomes ``None``."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class CreateLeadRequest(BaseModel):
+    """Request body for ``POST /leads`` (v2 ``public.leads``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, description="Lead display title")
     stage_id: str = Field(
         ...,
         description="Pipeline stage UUID (must belong to the organization)",
     )
-    lead_status: LeadStatus | None = Field(
-        default=None,
-        description="Internal status (not exposed in API responses)",
-    )
-    intake_stage: IntakeStage | None = Field(
-        default=None,
-        description="How the lead entered the pipeline",
-    )
-    lead_source: str | None = Field(default=None, description="Origin channel")
+    lead_source: str | None = Field(default=None, max_length=255, description="Origin channel")
     referral_source: str | None = Field(
         default=None,
+        max_length=255,
         description="Referrer name or id",
     )
-    lead_score: str | None = Field(default=None, description="Score label or tier")
+    lead_score: str | None = Field(default=None, max_length=255, description="Score label or tier")
     close_date: date | None = Field(
         default=None,
         description="Expected close date (YYYY-MM-DD)",
     )
-    converted_at: datetime | None = Field(
-        default=None,
-        description="Conversion timestamp (optional on create)",
-    )
-    notes: str | None = Field(default=None, description="Internal notes")
     amount: Decimal | None = Field(default=None, description="Estimated deal value")
     description: str | None = Field(
         default=None,
+        max_length=20000,
         description="Longer opportunity description",
     )
     owner_id: str | None = Field(
         default=None,
         description="Owning user; defaults to creator when omitted (service layer)",
     )
-    point_of_contact: str | None = Field(
+    client_company_id: str | None = Field(
         default=None,
-        description="Primary contact on client side (FK to clients.id per schema)",
+        description="Optional company client UUID (must be client_type=company)",
     )
+    contacts: list[LeadContactCreate] | None = Field(
+        default=None,
+        description="Person clients on the lead; optional labels per association",
+    )
+    deal_type: DealType = Field(..., description="New vs existing business")
+    priority: Priority | None = Field(default=None, description="Priority tier")
+    notes: list[LeadNoteItem] = Field(default_factory=list, description="Structured notes")
     custom_fields: list[dict[str, Any]] = Field(
         default_factory=list,
         description=(
@@ -94,27 +119,7 @@ class CreateLeadRequest(BaseModel):
         ),
     )
 
-    @field_validator("client_id", "stage_id", "owner_id", "point_of_contact")
-    @classmethod
-    def validate_uuid_fields(
-        cls,
-        value: str | None,
-        info: ValidationInfo,
-    ) -> str | None:
-        """Validate UUID format for ID fields; skip when the value is omitted."""
-        if value is None:
-            return None
-        label = _LEAD_UUID_FIELD_LABELS[info.field_name]
-        validate_uuid_format(value, label)
-        return value
-
-    @field_validator(
-        "lead_source",
-        "referral_source",
-        "lead_score",
-        "notes",
-        "description",
-    )
+    @field_validator("lead_source", "referral_source", "lead_score", "description")
     @classmethod
     def normalize_blank_strings(cls, value: str | None) -> str | None:
         """Strip whitespace; treat blank strings as unset (``None``)."""
@@ -128,6 +133,7 @@ class UpdateLeadRequest(BaseModel):
     """Request body for ``PATCH /leads/{lead_id}``.
 
     Omitted fields are left unchanged; explicit ``null`` clears nullable fields.
+    ``notes`` replaces the full array when set (not ``UNSET``).
     """
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
@@ -136,14 +142,6 @@ class UpdateLeadRequest(BaseModel):
     stage_id: str | None | Unset = Field(
         default=UNSET,
         description="Pipeline stage UUID; null clears",
-    )
-    lead_status: LeadStatus | None | Unset = Field(
-        default=UNSET,
-        description="Internal status; null clears",
-    )
-    intake_stage: IntakeStage | None | Unset = Field(
-        default=UNSET,
-        description="Intake label; null clears",
     )
     lead_source: str | None | Unset = Field(
         default=UNSET,
@@ -161,10 +159,6 @@ class UpdateLeadRequest(BaseModel):
         default=UNSET,
         description="Expected close date; null clears",
     )
-    converted_at: datetime | None | Unset = Field(
-        default=UNSET,
-        description="Conversion time; null clears",
-    )
     amount: Decimal | None | Unset = Field(
         default=UNSET,
         description="Deal value; null clears",
@@ -177,17 +171,29 @@ class UpdateLeadRequest(BaseModel):
         default=UNSET,
         description="Owner user UUID; null unassigns",
     )
-    point_of_contact: str | None | Unset = Field(
+    client_company_id: str | None | Unset = Field(
         default=UNSET,
-        description="Primary contact UUID; null unassigns",
+        description="Company client UUID; null clears association",
     )
-    notes: str | None | Unset = Field(default=UNSET, description="Notes; null clears")
+    deal_type: DealType | None | Unset = Field(default=UNSET, description="Deal type; null clears")
+    priority: Priority | None | Unset = Field(default=UNSET, description="Priority; null clears")
+    notes: list[LeadNoteItem] | None | Unset = Field(
+        default=UNSET,
+        description="Replace entire notes array when set",
+    )
+    contacts: list[LeadContactCreate] | None | Unset = Field(
+        default=UNSET,
+        description=(
+            "Replace entire lead_contacts array when set; omit key leaves contacts unchanged; "
+            "null or empty list clears all contacts."
+        ),
+    )
     custom_fields: list[dict[str, Any]] | Unset = Field(
         default=UNSET,
         description=(
             """FieldCell PATCH: root entries use field_id plus value | sub_fields | items
             (instance_id required for existing roots; list ``items`` is authoritative).
-            "Nested cells may use instance_id only (optional field_id must match).
+            Nested cells may use instance_id only (optional field_id must match).
             Do not send type."""
         ),
     )
@@ -197,38 +203,22 @@ class UpdateLeadRequest(BaseModel):
         "lead_source",
         "referral_source",
         "lead_score",
-        "notes",
         "description",
         mode="before",
     )
     @classmethod
-    def normalize_update_strings(
-        cls,
-        value: str | None | Unset,
-    ) -> str | None | Unset:
-        """Strip string fields before validation; preserve ``UNSET`` and explicit null."""
-        if isinstance(value, Unset) or value is None:
+    def normalize_blank_strings(cls, value: Any) -> Any:
+        """Strip whitespace; treat blank strings as unset (``None``); leave ``UNSET`` unchanged."""
+        if value is UNSET or value is None:
             return value
-        stripped = value.strip()
-        return stripped or None
-
-    @field_validator("stage_id", "owner_id", "point_of_contact", mode="before")
-    @classmethod
-    def validate_update_uuid_fields(
-        cls,
-        value: str | None | Unset,
-        info: ValidationInfo,
-    ) -> str | None | Unset:
-        """Validate UUIDs on update when the field is present and not ``UNSET``."""
-        if isinstance(value, Unset) or value is None:
-            return value
-        label = _LEAD_UUID_FIELD_LABELS[info.field_name]
-        validate_uuid_format(value, label)
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
         return value
 
     @model_validator(mode="after")
     def require_at_least_one_field(self) -> "UpdateLeadRequest":
-        """Reject empty PATCH bodies."""
+        """Raise ValidationException if no fields are set."""
         if not self.model_fields_set:
             raise ValidationException(
                 message_key="leads.errors.empty_update_payload",
@@ -247,7 +237,9 @@ class LeadsListQueryParams(BaseModel):
         description="list (flat paginated) or kanban (grouped by stage)",
     )
     stage_id: str | None = Field(default=None, description="Filter by pipeline stage")
-    search: str | None = Field(default=None, description="Search by lead name or client name")
+    search: str | None = Field(
+        default=None, description="Search by lead name, company name, or any linked contact name"
+    )
     page: int = Field(default=1, ge=1, description="Page number (list mode)")
     limit: int = Field(
         default=20,
@@ -259,7 +251,7 @@ class LeadsListQueryParams(BaseModel):
     @field_validator("search")
     @classmethod
     def normalize_search(cls, value: str | None) -> str | None:
-        """Strip search; treat blank as omitted."""
+        """Strip whitespace; treat blank strings as unset (``None``)."""
         if value is None:
             return None
         stripped = value.strip()
@@ -272,11 +264,13 @@ class LeadListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str = Field(..., description="Lead UUID")
-    client_id: str = Field(..., description="Client UUID")
-    client_name: str = Field(..., description="Resolved client display name")
+    client_company_id: str | None = Field(None, description="Linked company client UUID")
+    company_name: str = Field("", description="Resolved company display name")
     name: str | None = Field(None, description="Lead title")
     stage_id: str | None = Field(None, description="Current stage UUID")
     stage_name: str | None = Field(None, description="Resolved stage display name")
+    deal_type: str | None = Field(None, description="Deal type (enum value)")
+    priority: str | None = Field(None, description="Priority (enum value)")
     lead_score: str | None = Field(None, description="Score label")
     close_date: date | None = Field(None, description="Expected close date")
     amount: Decimal | None = Field(None, description="Estimated value")
@@ -284,14 +278,6 @@ class LeadListItem(BaseModel):
     owner_name: str | None = Field(
         None,
         description="Owner display name from auth.users (raw_user_meta_data first/last name)",
-    )
-    point_of_contact_id: str | None = Field(
-        None,
-        description="Point-of-contact client UUID (FK to clients.id)",
-    )
-    point_of_contact: str | None = Field(
-        None,
-        description="Display name of the point-of-contact client",
     )
     created_at: str = Field(..., description="Created at (ISO 8601)")
     updated_at: str = Field(..., description="Updated at (ISO 8601)")
@@ -313,39 +299,44 @@ class LeadKanbanStageGroup(BaseModel):
     )
 
 
+class LeadContactDetail(BaseModel):
+    """Contact row for ``GET /leads/{id}`` (from ``lead_contacts``)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_client_id: str = Field(..., description="Person client UUID")
+    label: str | None = Field(None, description="Optional role or tag for this link")
+    contact_name: str | None = Field(None, description="Resolved person display name")
+
+
 class LeadDetail(BaseModel):
-    """Full lead payload for ``GET /leads/{lead_id}`` (excludes ``lead_status``)."""
+    """Full lead payload for ``GET /leads/{lead_id}`` (v2)."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: str = Field(..., description="Lead UUID")
-    client_id: str = Field(..., description="Client UUID")
-    client_name: str = Field(..., description="Resolved client display name")
+    client_company_id: str | None = Field(None, description="Linked company client UUID")
+    company_name: str = Field("", description="Resolved company display name")
     name: str | None = Field(None, description="Lead title")
     stage_id: str | None = Field(None, description="Current stage UUID")
     stage_name: str | None = Field(None, description="Resolved stage display name")
-    intake_stage: str | None = Field(None, description="Intake label")
+    deal_type: str | None = Field(None, description="Deal type (enum value)")
+    priority: str | None = Field(None, description="Priority (enum value)")
     lead_source: str | None = Field(None, description="Origin channel")
     referral_source: str | None = Field(None, description="Referrer")
     lead_score: str | None = Field(None, description="Score label")
     close_date: date | None = Field(None, description="Expected close date")
-    converted_at: str | None = Field(None, description="Conversion time (ISO 8601)")
-    notes: str | None = Field(None, description="Internal notes")
+    notes: list[LeadNoteItem] = Field(default_factory=list, description="Structured notes")
     amount: Decimal | None = Field(None, description="Estimated value")
-    created_by: str | None = Field(None, description="User who created the lead")
     description: str | None = Field(None, description="Opportunity description")
     owner_id: str | None = Field(None, description="Owning organization member user UUID")
     owner_name: str | None = Field(
         None,
         description="Owner display name from auth.users (raw_user_meta_data first/last name)",
     )
-    point_of_contact_id: str | None = Field(
-        None,
-        description="Point-of-contact client UUID (FK to clients.id)",
-    )
-    point_of_contact: str | None = Field(
-        None,
-        description="Display name of the point-of-contact client",
+    contacts: list[LeadContactDetail] = Field(
+        default_factory=list,
+        description="Person clients linked via lead_contacts",
     )
     custom_fields: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -366,4 +357,7 @@ __all__ = [
     "LeadListItem",
     "LeadKanbanStageGroup",
     "LeadDetail",
+    "LeadNoteItem",
+    "LeadContactCreate",
+    "LeadContactDetail",
 ]
