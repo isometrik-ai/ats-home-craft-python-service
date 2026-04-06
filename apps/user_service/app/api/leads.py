@@ -25,6 +25,7 @@ from apps.user_service.app.schemas.leads import (
     LeadsListQueryParams,
     UpdateLeadRequest,
 )
+from apps.user_service.app.services.activity_service import ActivityService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.lead_service import LeadService
 from apps.user_service.app.utils.common_utils import (
@@ -104,6 +105,8 @@ async def create_lead(
         )
         event_service = EventService(db_connection=db_connection)
         created = await lead_service.create_lead(body)
+        # Ensure CREATE audit logs can be linked back to this lead in the activity feed.
+        request.state.audit_requested_id = str(created.get("id", ""))
         create_event = await event_service.create_lifecycle_event(
             event_type=LeadEventType.CREATED.value,
             aggregate_id=str(created["id"]),
@@ -128,6 +131,88 @@ async def create_lead(
         message_key="leads.success.lead_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("get lead activity")
+@router.get(
+    "/activity/{lead_id}/",
+    status_code=http_status.HTTP_200_OK,
+    description=(
+        "Activity feed for a lead. `page` / `page_size` paginate (newest first). "
+        "`data` contains flattened lines (often one per changed field). `total` and `total_pages` "
+        "refer to audit rows; `len(data)` may be larger than `page_size`."
+    ),
+    summary="Get lead activity",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Lead activity retrieved successfully"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Lead not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    },
+)
+@limiter.limit("100/minute")
+async def get_lead_activity(
+    request: Request,
+    lead_id: str = Path(..., description="Lead ID"),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Audit log rows per page"),
+):
+    """Get activity for a lead (offset pagination)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=LEADS_MANAGEMENT_VIEW,
+    )
+
+    # Ensure lead exists (and org-scoped) before returning activity.
+    lead_service = LeadService(user_context=user_context, db_connection=db_connection)
+    await lead_service.get_lead(lead_id)
+
+    activity_service = ActivityService(user_context=user_context, db_connection=db_connection)
+    items, total = await activity_service.get_lead_activity(
+        lead_id=lead_id,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+
+    if not items:
+        # No activity on this lead vs empty page
+        # (e.g. page past total_pages): same pagination fields.
+        if total == 0:
+            return list_response(
+                request=request,
+                items=[],
+                total=total,
+                message_key="success.no_data",
+                custom_code=CustomStatusCode.NO_CONTENT,
+                status_code=http_status.HTTP_200_OK,
+                page=page,
+                page_size=page_size,
+            )
+        return list_response(
+            request=request,
+            items=[],
+            total=total,
+            message_key="success.retrieved",
+            custom_code=CustomStatusCode.SUCCESS,
+            status_code=http_status.HTTP_200_OK,
+            page=page,
+            page_size=page_size,
+        )
+
+    return list_response(
+        request=request,
+        items=items,
+        total=total,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        page=page,
+        page_size=page_size,
     )
 
 
