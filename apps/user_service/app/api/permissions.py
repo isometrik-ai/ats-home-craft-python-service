@@ -193,6 +193,7 @@ async def create_permission(
     # Create service with user context and delegate to service
     permission_service = PermissionsService(user_context, db_connection)
     permission = await permission_service.create_permission(permission_data)
+    request.state.audit_requested_id = str(getattr(permission, "id", "")) or ""
 
     # Set audit data for successful creation
     request.state.raw_audit_new_data = {
