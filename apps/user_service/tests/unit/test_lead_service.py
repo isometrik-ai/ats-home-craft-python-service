@@ -381,6 +381,27 @@ async def test_create_lead_payload_and_poc_validation(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_lead_omitted_deal_type(monkeypatch):
+    """create_lead passes None for deal_type when omitted (optional create field)."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    lead_repo.lead_reference_validation_result = (True, {})
+
+    custom_calls: dict[str, Any] = {}
+    _patch_custom_field_service(monkeypatch, custom_calls)
+
+    body = CreateLeadRequest(
+        name="New Lead",
+        stage_id=STAGE_ID_1,
+        deal_type=None,
+    )
+
+    await service.create_lead(body)
+
+    payload = lead_repo.calls["create_lead"]
+    assert payload["deal_type"] is None
+
+
+@pytest.mark.asyncio
 async def test_create_lead_owner_id_validation(monkeypatch):
     """create_lead validates owner_id against user repository when explicitly provided."""
     service, lead_repo, _, user_repo = _service_with_fakes()

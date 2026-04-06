@@ -530,7 +530,7 @@ class InviteService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         # Check organization capacity
-        await self.validate_organization_subscription(organization_data)
+        # await self.validate_organization_subscription(organization_data)
 
         # Check if user is already a member
         existing_member = await self.invite_repository.check_user_membership(

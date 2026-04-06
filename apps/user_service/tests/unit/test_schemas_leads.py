@@ -41,6 +41,17 @@ def test_create_lead_blank_optional_to_none():
     assert req.notes == []
 
 
+def test_create_lead_deal_type_optional_and_nullable():
+    """CreateLeadRequest allows omitted deal_type and JSON null."""
+    omitted = CreateLeadRequest(name="Lead", stage_id=STAGE_ID)
+    assert omitted.deal_type is None
+
+    from_null = CreateLeadRequest.model_validate(
+        {"name": "Lead", "stage_id": STAGE_ID, "deal_type": None}
+    )
+    assert from_null.deal_type is None
+
+
 def test_update_lead_rejects_empty_payload():
     """UpdateLeadRequest rejects when no field is explicitly set."""
     with pytest.raises(ValidationException) as exc_info:

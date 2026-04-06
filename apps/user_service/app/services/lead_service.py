@@ -215,7 +215,7 @@ class LeadService:
             "lead_source": body.lead_source,
             "referral_source": body.referral_source,
             "lead_score": body.lead_score,
-            "deal_type": body.deal_type.value,
+            "deal_type": body.deal_type.value if body.deal_type is not None else None,
             "priority": body.priority.value if body.priority is not None else None,
             "close_date": body.close_date,
             "amount": body.amount,
