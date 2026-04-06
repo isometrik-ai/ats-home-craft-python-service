@@ -326,6 +326,7 @@ async def create_organization(
     result = await organization_service.create_organization(
         body=body, slug=None, session_id=session_id
     )
+    request.state.audit_requested_id = str(result.get("organization_id", "")) if result else ""
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
@@ -572,6 +573,7 @@ async def request_organization_deletion(
         db_connection=db_connection,
     )
     result = await organization_service.create_delete_request(organization_id=organization_id)
+    request.state.audit_requested_id = str(result.get("id", "")) if result else ""
 
     return success_response(
         request=request,
