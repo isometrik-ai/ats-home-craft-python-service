@@ -665,7 +665,7 @@ class ProjectRepository:
 
     async def update_project(
         self, project_id: str, organization_id: str, data: dict[str, Any]
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Partially update a project. Only keys present in data are updated.
 
         Args:
@@ -674,7 +674,7 @@ class ProjectRepository:
             data: Field names and values to update (must not include client_id or project_id)
         """
         if not data:
-            return
+            return None
 
         set_parts = []
         values: list[Any] = []
@@ -688,12 +688,13 @@ class ProjectRepository:
             values.append(value)
             idx += 1
         if not set_parts:
-            return
+            return None
         set_parts.append("updated_at = NOW()")
         values.extend([project_id, organization_id])
         where = f"WHERE id = ${idx} AND organization_id = ${idx + 1} AND status != 'archived'"
-        query = f"UPDATE projects SET {', '.join(set_parts)} {where}"
-        await self.db_connection.execute(query, *values)
+        query = f"UPDATE projects SET {', '.join(set_parts)} {where} RETURNING *"
+        row = await self.db_connection.fetchrow(query, *values)
+        return dict(row) if row else None
 
     async def get_project_repository_ids_existing(
         self, project_id: str, organization_id: str, repository_ids: list[str]
