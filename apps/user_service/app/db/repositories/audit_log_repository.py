@@ -13,6 +13,7 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.schemas.audit_logs import AuditLogFilter
+from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("audit_log_repository")
@@ -24,6 +25,19 @@ AUDIT_LOG_LIST_FIELDS = (
     "old_values, new_values, changed_fields, compliance_tags, "
     "risk_level, ip_address, description, timestamp, "
     "status_code, category"
+)
+
+# Same fields, but qualified for joined queries (keeps output keys stable).
+AUDIT_LOG_LIST_FIELDS_ALIASED = (
+    "al.id AS id, al.organization_id AS organization_id, al.user_id AS user_id, "
+    "al.user_email AS user_email, al.user_role AS user_role, "
+    "al.action_type AS action_type, al.data_classification AS data_classification, "
+    "al.table_name AS table_name, al.record_id AS record_id, "
+    "al.old_values AS old_values, al.new_values AS new_values, "
+    "al.changed_fields AS changed_fields, al.compliance_tags AS compliance_tags, "
+    "al.risk_level AS risk_level, al.ip_address AS ip_address, "
+    "al.description AS description, al.timestamp AS timestamp, "
+    "al.status_code AS status_code, al.category AS category"
 )
 
 # Common field list for audit log detail queries (includes hash fields)
@@ -245,6 +259,112 @@ class AuditLogRepository:
 
         result = await self.db_connection.fetchval(query, organization_id)
         return result
+
+    async def get_activity_logs_for_record_with_actor_names(
+        self,
+        *,
+        organization_id: str,
+        table_name: str,
+        record_id: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated audit rows for a record with actor / display joins (activity feed source).
+
+        ``limit``/``offset`` apply to **audit log rows** (not flattened field-level lines).
+
+        Total count uses a separate ``COUNT(*)`` on ``audit_logs`` only (no joins). The main
+        ``SELECT`` omits ``COUNT(*) OVER ()`` so PostgreSQL does not evaluate joins/window over
+        every matching row before ``LIMIT``—only the requested page is fully joined.
+        """
+        count_query = """
+            SELECT COUNT(*)::int AS total
+            FROM audit_logs al
+            WHERE al.organization_id = $1
+              AND al.table_name = $2
+              AND al.record_id = $3
+        """
+        page_query = f"""
+            SELECT
+                {AUDIT_LOG_LIST_FIELDS_ALIASED},
+                om.first_name AS actor_first_name,
+                om.last_name AS actor_last_name,
+                old_ls.stage_name AS old_stage_name,
+                new_ls.stage_name AS new_stage_name,
+                old_c.name AS old_company_name,
+                new_c.name AS new_company_name,
+                NULLIF(
+                    TRIM(
+                        CONCAT_WS(
+                            ' ',
+                            NULLIF(TRIM(COALESCE(old_u.raw_user_meta_data->>'first_name', '')), ''),
+                            NULLIF(TRIM(COALESCE(old_u.raw_user_meta_data->>'last_name', '')), '')
+                        )
+                    ),
+                    ''
+                ) AS old_owner_name,
+                COALESCE(
+                    NULLIF(
+                        TRIM(
+                            CONCAT_WS(
+                                ' ',
+                                NULLIF(TRIM(COALESCE(new_u.raw_user_meta_data->>'first_name', '')), ''),
+                                NULLIF(TRIM(COALESCE(new_u.raw_user_meta_data->>'last_name', '')), '')
+                            )
+                        ),
+                        ''
+                    ),
+                    new_u.email
+                ) AS new_owner_name
+            FROM audit_logs al
+            LEFT JOIN organization_members om
+                ON om.user_id = al.user_id
+               AND om.organization_id = al.organization_id
+               AND om.status != $6
+            LEFT JOIN lead_stages old_ls
+                ON old_ls.organization_id = al.organization_id
+               AND old_ls.id = NULLIF(al.old_values->'data'->>'stage_id', '')::uuid
+            LEFT JOIN lead_stages new_ls
+                ON new_ls.organization_id = al.organization_id
+               AND new_ls.id = NULLIF(al.new_values->'data'->>'stage_id', '')::uuid
+            LEFT JOIN clients old_c
+                ON old_c.organization_id = al.organization_id
+               AND old_c.id = NULLIF(al.old_values->'data'->>'client_company_id', '')::uuid
+            LEFT JOIN clients new_c
+                ON new_c.organization_id = al.organization_id
+               AND new_c.id = NULLIF(al.new_values->'data'->>'client_company_id', '')::uuid
+            LEFT JOIN auth.users old_u
+                ON old_u.id = NULLIF(al.old_values->'data'->>'owner_id', '')::uuid
+            LEFT JOIN auth.users new_u
+                ON new_u.id = NULLIF(al.new_values->'data'->>'owner_id', '')::uuid
+            WHERE al.organization_id = $1
+              AND al.table_name = $2
+              AND al.record_id = $3
+            ORDER BY al.timestamp DESC, al.id DESC
+            LIMIT $4 OFFSET $5
+        """
+        # Same connection: run sequentially (asyncpg does not allow concurrent commands).
+        count_row = await self.db_connection.fetchrow(
+            count_query,
+            organization_id,
+            table_name,
+            record_id,
+        )
+        rows = await self.db_connection.fetch(
+            page_query,
+            organization_id,
+            table_name,
+            record_id,
+            limit,
+            offset,
+            OrganizationMemberStatus.DELETED.value,
+        )
+        total = int((count_row or {}).get("total") or 0)
+        if not rows:
+            return [], total
+
+        items: list[dict[str, Any]] = [dict(row) for row in rows]
+        return items, total
 
     async def create_audit_log(self, audit_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new audit log entry.
