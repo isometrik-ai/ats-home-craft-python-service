@@ -123,6 +123,7 @@ class CreateClientResult:
 
     records: list[dict[str, Any]]
     enrichment_items: list[dict[str, Any]]
+    primary_record_id: str
     lead_id: str | None = None
 
 
@@ -1100,7 +1101,10 @@ class ClientService:
         )
         enrichment_items = self._get_enrichment_items_for_created_clients(records, organization_id)
         return CreateClientResult(
-            records=records, enrichment_items=enrichment_items, lead_id=lead_id
+            records=records,
+            enrichment_items=enrichment_items,
+            primary_record_id=str(primary_record["id"]),
+            lead_id=lead_id,
         )
 
     async def _maybe_create_client_user_for_created_clients(

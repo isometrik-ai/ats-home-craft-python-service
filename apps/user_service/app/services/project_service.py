@@ -479,7 +479,7 @@ class ProjectService:
             connected_by=user_id,
         )
 
-    async def create_project(self, request_data: CreateProjectRequest) -> None:
+    async def create_project(self, request_data: CreateProjectRequest) -> dict[str, Any]:
         """Create a new project with complete flow.
 
         Flow:
@@ -522,6 +522,11 @@ class ProjectService:
 
         # Create integrations if provided
         await self._create_project_integrations(project_uuid, request_data)
+
+        return {
+            "id": project_uuid,
+            "new_data": self._format_project_for_audit(project_record),
+        }
 
     def _build_project_update_dict(
         self, request_data: UpdateProjectRequest, updated_by: str
@@ -938,7 +943,7 @@ class ProjectService:
         current: dict[str, Any],
         request_data: UpdateProjectRequest,
         new_team_id: str | None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Build project update dict; set primary_repo if needed."""
         user_id = self.user_context.user_id
         project_data = self._build_project_update_dict(request_data, user_id)
@@ -975,13 +980,14 @@ class ProjectService:
 
             project_data["primary_repo_url"] = primary_repo_url
         if project_data:
-            await self.project_repository.update_project(
+            return await self.project_repository.update_project(
                 project_uuid, organization_id, project_data
             )
+        return None
 
     async def update_project(
         self, project_id: str, request_data: UpdateProjectRequest
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         """Update a project. Only provided fields are updated. List fields use add/update/remove.
 
         Invariant: at most one primary repository per project.
@@ -1028,13 +1034,14 @@ class ProjectService:
             )
         await self._apply_repositories_changes(project_uuid, organization_id, user_id, request_data)
         await self._apply_integrations_changes(project_uuid, organization_id, user_id, request_data)
-        await self._apply_project_row_update(
+        updated_row = await self._apply_project_row_update(
             project_uuid, organization_id, project, request_data, new_team_id
         )
         old_data = self._format_project_for_audit(project)
-        return {"old_data": old_data}
+        new_data = self._format_project_for_audit(updated_row or project)
+        return {"old_data": old_data, "new_data": new_data}
 
-    async def delete_project(self, project_id: str) -> None:
+    async def delete_project(self, project_id: str) -> dict[str, Any]:
         """Delete a project: hard delete related entities, soft delete project.
 
         Hard deletes: team, team members, repositories, integrations.
@@ -1051,10 +1058,7 @@ class ProjectService:
         organization_id = self.user_context.organization_id
         user_id = self.user_context.user_id
 
-        project = await self.project_repository.get_project_basic_information(
-            project_id=project_id,
-            organization_id=organization_id,
-        )
+        project = await self.project_repository.get_project_with_client(project_id, organization_id)
         if not project:
             raise NotFoundException(
                 message_key="projects.errors.project_not_found",
@@ -1077,6 +1081,7 @@ class ProjectService:
             organization_id,
             updated_by=user_id,
         )
+        return self._format_project_for_audit(project)
 
     async def list_projects(
         self, filters: ProjectListQueryParams
