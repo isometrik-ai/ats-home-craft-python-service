@@ -108,7 +108,7 @@ class CreateLeadRequest(BaseModel):
         default=None,
         description="Person clients on the lead; optional labels per association",
     )
-    deal_type: DealType = Field(..., description="New vs existing business")
+    deal_type: DealType = Field(None, description="New vs existing business")
     priority: Priority | None = Field(default=None, description="Priority tier")
     notes: list[LeadNoteItem] = Field(default_factory=list, description="Structured notes")
     custom_fields: list[dict[str, Any]] = Field(

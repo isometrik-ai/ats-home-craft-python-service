@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
-from pydantic import ValidationError
 
 from apps.user_service.app.schemas.enums import DealType
 from apps.user_service.app.schemas.lead_stages import UNSET
@@ -40,15 +39,6 @@ def test_create_lead_blank_optional_to_none():
     assert req.lead_score is None
     assert req.description is None
     assert req.notes == []
-
-
-def test_create_lead_requires_deal_type():
-    """CreateLeadRequest requires ``deal_type`` (v2)."""
-    with pytest.raises(ValidationError):
-        CreateLeadRequest(
-            name="Lead",
-            stage_id=STAGE_ID,
-        )
 
 
 def test_update_lead_rejects_empty_payload():
