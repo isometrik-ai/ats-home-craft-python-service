@@ -84,30 +84,29 @@ async def create_project(
 
     All operations are executed within a single transaction.
     """
-    # Set audit context
-    request.state.audit_table = "projects"
-    request.state.audit_description = f"Created project: {body.project_title}"
-    request.state.audit_risk_level = "medium"
-
-    # Check permissions and get user context
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
         permission_codes=PROJECTS_MANAGEMENT_CREATE,
     )
 
-    # Create service and delegate to service
-    project_service = ProjectService(
-        user_context=user_context,
-        db_connection=db_connection,
-    )
-    await project_service.create_project(body)
-
+    request.state.audit_table = "projects"
+    request.state.audit_description = f"Created project: {body.project_title}"
+    request.state.audit_risk_level = "medium"
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
         "user_email": user_context.email,
         "organization_id": user_context.organization_id,
     }
+
+    # Create service and delegate to service
+    project_service = ProjectService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    created = await project_service.create_project(body) or {}
+    request.state.audit_requested_id = str(created.get("id", ""))
+    request.state.raw_audit_new_data = created.get("new_data")
 
     return success_response(
         request=request,
@@ -285,31 +284,29 @@ async def update_project(
     List-type fields (team_members, repositories, integrations) support single operations:
     exactly one of add, update, or remove per call. All operations run in a single transaction.
     """
-    request.state.audit_table = "projects"
-    request.state.audit_description = f"Updated project: {project_id}"
-    request.state.audit_risk_level = "medium"
-
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
 
-    project_service = ProjectService(
-        user_context=user_context,
-        db_connection=db_connection,
-    )
-    result = await project_service.update_project(project_id, body)
-
+    request.state.audit_table = "projects"
+    request.state.audit_requested_id = project_id
+    request.state.audit_description = f"Updated project: {project_id}"
+    request.state.audit_risk_level = "medium"
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
         "user_email": user_context.email,
         "organization_id": user_context.organization_id,
     }
 
-    if result:
-        request.state.raw_audit_old_data = result.get("old_data")
-        request.state.raw_audit_new_data = body.model_dump(exclude_unset=True, exclude_none=True)
+    project_service = ProjectService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    result = await project_service.update_project(project_id, body) or {}
+    request.state.raw_audit_old_data = result.get("old_data")
+    request.state.raw_audit_new_data = result.get("new_data")
 
     return success_response(
         request=request,
@@ -354,27 +351,28 @@ async def delete_project(
     Hard deletes all related: team, team members, repositories, integrations.
     Soft deletes the project (sets status to archived) for audit retention.
     """
-    request.state.audit_table = "projects"
-    request.state.audit_description = f"Deleted project: {project_id}"
-    request.state.audit_risk_level = "high"
-
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
 
-    project_service = ProjectService(
-        user_context=user_context,
-        db_connection=db_connection,
-    )
-    await project_service.delete_project(project_id)
-
+    request.state.audit_table = "projects"
+    request.state.audit_requested_id = project_id
+    request.state.audit_description = f"Deleted project: {project_id}"
+    request.state.audit_risk_level = "high"
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
         "user_email": user_context.email,
         "organization_id": user_context.organization_id,
     }
+
+    project_service = ProjectService(
+        user_context=user_context,
+        db_connection=db_connection,
+    )
+    deleted = await project_service.delete_project(project_id)
+    request.state.raw_audit_old_data = deleted
 
     return success_response(
         request=request,
