@@ -106,6 +106,8 @@ async def create_client_from_user(
     """
     # Set audit context for client creation
     request.state.audit_table = "clients"
+    # Best-effort: link audit row to the initiating user id.
+    request.state.audit_requested_id = str(body.user_id)
     request.state.audit_description = f"Created client from user: {body.user_id}"
     request.state.audit_risk_level = "high"
     request.state.audit_user_context = {
@@ -215,6 +217,7 @@ async def create_client(
         )
         event_service = EventService(db_connection=db_connection)
         result = await client_service.create_client(request_data=body)
+        requested_id = result.primary_record_id
         create_events = await event_service.create_client_created_events(
             records=result.records,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
@@ -252,6 +255,7 @@ async def create_client(
         "user_email": user_context.email,
         "organization_id": user_context.organization_id,
     }
+    request.state.audit_requested_id = requested_id
 
     return success_response(
         request=request,

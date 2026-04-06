@@ -103,7 +103,8 @@ async def create_custom_field(
         user_context=user_context,
         db_connection=db_connection,
     )
-    await custom_field_service.create_custom_field(body)
+    field_id = await custom_field_service.create_custom_field(body)
+    request.state.audit_requested_id = str(field_id)
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
