@@ -151,6 +151,7 @@ async def test_create_client(monkeypatch, client):
                     "client_type": "person",
                 }
             ],
+            primary_record_id="client-new-1",
         )
 
     monkeypatch.setattr(
@@ -207,6 +208,7 @@ async def test_create_person_client_with_company_id(monkeypatch, client):
                     "client_type": "person",
                 }
             ],
+            primary_record_id="client-new-2",
         )
 
     monkeypatch.setattr(
@@ -266,6 +268,7 @@ async def test_create_client_company_returns_201(monkeypatch, client):
                     "client_type": "person",
                 },
             ],
+            primary_record_id="client-co-1",
         )
 
     monkeypatch.setattr(
@@ -499,6 +502,7 @@ async def test_create_client_with_custom_fields(monkeypatch, client):
                     "client_type": "person",
                 }
             ],
+            primary_record_id="client-cf-1",
         )
 
     monkeypatch.setattr(
