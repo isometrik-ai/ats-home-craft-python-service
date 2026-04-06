@@ -576,6 +576,62 @@ def parse_json_field(field_value: str | dict[str, Any] | None) -> dict[str, Any]
     return {}
 
 
+def safe_str(value: Any) -> str:
+    """Convert a value into a stable string (ids/labels)."""
+    return "" if value is None else str(value)
+
+
+def title_case_field(field: str) -> str:
+    """Humanize a snake_case field name for messages."""
+    cleaned = field.replace("_", " ").strip()
+    if cleaned.lower().endswith(" id"):
+        cleaned = cleaned[: -len(" id")].strip()
+    return cleaned
+
+
+def get_nested(data: Any, path: str) -> Any:
+    """Resolve a dotted path (e.g. `a.b.c`) against dicts safely."""
+    if not path or not isinstance(data, dict):
+        return None
+    cur: Any = data
+    for part in path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def parse_json_any(value: Any, default: Any = None) -> Any:
+    """Parse JSON-like values that may arrive as dict/list/JSON-string."""
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str):
+        return default
+
+    parsed = parse_json_field(value)
+    return parsed if parsed != {} else default
+
+
+def extract_audit_data_value(audit_values: dict[str, Any] | None, field_path: str) -> Any:
+    """Extract a changed field value from audit `{"data": ...}` payloads.
+
+    Supports `field` and `data.field` shapes for `changed_fields`.
+    """
+    if not audit_values or not field_path:
+        return None
+
+    normalized = field_path[5:] if field_path.startswith("data.") else field_path
+    data = audit_values.get("data")
+    if not isinstance(data, dict):
+        return None
+
+    if "." in normalized:
+        return get_nested(data, normalized)
+    return data.get(normalized)
+
+
 def serialize_jsonb_param(column_name: str, value: Any, jsonb_columns: frozenset[str]) -> Any:
     """Serialize JSONB column values to a JSON string for asyncpg; pass others through."""
     if column_name in jsonb_columns and isinstance(value, (dict, list)):
