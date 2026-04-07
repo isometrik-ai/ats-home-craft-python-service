@@ -10,7 +10,7 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.db.repositories.events_repository import EventsRepository
-from apps.user_service.app.schemas.enums import ClientEventType, KafkaTopics
+from apps.user_service.app.schemas.enums import ClientEventType, ClientType, KafkaTopics
 from apps.user_service.app.services.kafka_event_service import get_kafka_event_service
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_utils.logger import get_logger
@@ -25,6 +25,20 @@ class EventService:
 
     def __init__(self, db_connection: asyncpg.Connection | None = None) -> None:
         self.db_connection = db_connection
+
+    @staticmethod
+    def _normalize_client_type_for_api_path(value: Any) -> str:
+        """Normalize DB `client_type` into the resource name used by our API paths.
+
+        - company -> companies
+        - person -> contacts
+        """
+        client_type = str(value or "").strip().lower()
+        if client_type == ClientType.COMPANY.value:
+            return "companies"
+        if client_type == ClientType.PERSON.value:
+            return "contacts"
+        return ""
 
     @staticmethod
     def _resolve_topics(topics: list[KafkaTopic]) -> list[str]:
@@ -168,7 +182,9 @@ class EventService:
                 "payload": {
                     "module": "clients",
                     "action": "create",
-                    "client_type": str(record.get("client_type", "")),
+                    "client_type": self._normalize_client_type_for_api_path(
+                        record.get("client_type")
+                    ),
                 },
             }
             for record in records
