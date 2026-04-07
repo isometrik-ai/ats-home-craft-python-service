@@ -208,6 +208,7 @@ async def create_invitation(
         user_context=user_context, db_connection=db_connection, sb_client=sb_client
     )
     result = await invite_service.create_invitation(organization_id, body)
+    request.state.audit_requested_id = str(result.get("invite_id", "")) if result else ""
 
     return success_response(
         request=request,

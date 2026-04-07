@@ -122,7 +122,7 @@ async def _log_audit_event(
         action_type=action_type,
         data_classification=data_classification,
         table_name=audit_state["table"],
-        record_id=str(uuid4()),
+        record_id=audit_state["requested_id"] or str(uuid4()),
         old_values=getattr(request.state, "audit_old_values", None),
         new_values=request.state.audit_new_values,
         changed_fields=getattr(request.state, "audit_changed_fields", None),

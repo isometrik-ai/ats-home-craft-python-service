@@ -481,8 +481,8 @@ async def test_update_project_updates_only_provided_fields():
 
     await repo.update_project("project-1", "org-1", update_data)
 
-    assert len(conn.execute_calls) == 1
-    query = conn.execute_calls[0][0]
+    assert len(conn.fetchrow_calls) == 1
+    query = conn.fetchrow_calls[0][0]
     assert "UPDATE projects" in query
     assert "project_title = $" in query
     assert "status = $" in query
@@ -508,7 +508,7 @@ async def test_update_project_skips_forbidden_fields():
 
     await repo.update_project("project-1", "org-1", update_data)
 
-    query = conn.execute_calls[0][0]
+    query = conn.fetchrow_calls[0][0]
     assert "client_id" not in query
     assert "project_id" not in query
     assert "id = $" in query  # Only in WHERE clause
@@ -528,7 +528,7 @@ async def test_update_project_serializes_jsonb_fields():
 
     await repo.update_project("project-1", "org-1", update_data)
 
-    query = conn.execute_calls[0][0]
+    query = conn.fetchrow_calls[0][0]
     # Verify JSONB fields are in the query
     assert "billing_info = $" in query
     assert "tech_stack = $" in query

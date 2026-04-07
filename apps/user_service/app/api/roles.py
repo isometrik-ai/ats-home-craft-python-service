@@ -190,6 +190,7 @@ async def create_new_role(
 
     role_service = RoleService(db_connection=db_connection, user_context=user_context)
     created_role = await role_service.create_role(role_data)
+    request.state.audit_requested_id = str(created_role.get("id", "")) if created_role else ""
 
     request.state.raw_audit_new_data = {
         "role_id": str(created_role["id"]),

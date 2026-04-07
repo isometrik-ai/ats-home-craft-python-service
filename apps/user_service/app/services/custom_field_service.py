@@ -250,7 +250,7 @@ class CustomFieldService:
         organization_id: str,
         user_id: str,
         entity_type: str,
-    ) -> None:
+    ) -> str:
         """Iteratively create a field and all nested sub-fields using a queue.
 
         Uses iterative approach with a queue to avoid recursion.
@@ -271,6 +271,7 @@ class CustomFieldService:
         queue: deque[tuple[CreateCustomFieldRequest, str | None, int]] = deque(
             [(root_field_request, initial_parent_id, 0)]
         )
+        root_created_id: str | None = None
 
         while queue:
             field_request, parent_id, depth = queue.popleft()
@@ -298,6 +299,8 @@ class CustomFieldService:
                 field_data
             )
             created_field_id = str(created_field_result["id"])
+            if root_created_id is None and depth == 0 and parent_id == initial_parent_id:
+                root_created_id = created_field_id
 
             # Bulk create sibling sub-fields if this is an object or list type with sub_fields
             if (
@@ -320,7 +323,9 @@ class CustomFieldService:
                     depth,
                 )
 
-    async def create_custom_field(self, request_data: CreateCustomFieldRequest) -> None:
+        return root_created_id or ""
+
+    async def create_custom_field(self, request_data: CreateCustomFieldRequest) -> str:
         """Create a new custom field definition.
 
         Supports creating:
@@ -348,7 +353,7 @@ class CustomFieldService:
         user_id = self.user_context.user_id
 
         # Iteratively create field and all nested sub-fields
-        await self._create_field_iterative(
+        return await self._create_field_iterative(
             request_data,
             organization_id,
             user_id,

@@ -1965,28 +1965,28 @@ async def test_apply_project_row_update_with_only_updated_by(monkeypatch):
 async def test_delete_project_raises_not_found(monkeypatch):
     """delete_project raises NotFoundException when project not found."""
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_basic_result = None
+    fake_project_repo.project_with_client_result = None
 
     with pytest.raises(NotFoundException) as exc_info:
         await service.delete_project("project-123")
 
     assert exc_info.value.message_key == "projects.errors.project_not_found"
-    assert "get_project_basic_information" in fake_project_repo.calls
+    assert "get_project_with_client" in fake_project_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_delete_project_success_with_team(monkeypatch):
     """delete_project hard deletes team, repos, integrations; soft deletes project."""
     service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_basic_result = {
+    fake_project_repo.project_with_client_result = {
         "id": "project-uuid-1",
         "team_id": "team-uuid-1",
     }
 
     await service.delete_project("project-123")
 
-    assert "get_project_basic_information" in fake_project_repo.calls
-    assert fake_project_repo.calls["get_project_basic_information"][0] == "project-123"
+    assert "get_project_with_client" in fake_project_repo.calls
+    assert fake_project_repo.calls["get_project_with_client"][0] == "project-123"
     assert "delete_team_and_members" in fake_team_repo.calls
     team_delete = fake_team_repo.calls["delete_team_and_members"]
     assert team_delete.team_id == "team-uuid-1"
@@ -2008,14 +2008,14 @@ async def test_delete_project_success_with_team(monkeypatch):
 async def test_delete_project_success_without_team(monkeypatch):
     """delete_project skips team delete when project has no team."""
     service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_basic_result = {
+    fake_project_repo.project_with_client_result = {
         "id": "project-uuid-2",
         "team_id": None,
     }
 
     await service.delete_project("project-456")
 
-    assert "get_project_basic_information" in fake_project_repo.calls
+    assert "get_project_with_client" in fake_project_repo.calls
     assert "delete_team_and_members" not in fake_team_repo.calls
     assert "delete_all_project_repositories" in fake_project_repo.calls
     assert "delete_all_project_integrations" in fake_project_repo.calls

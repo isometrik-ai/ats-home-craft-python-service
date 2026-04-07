@@ -88,6 +88,7 @@ async def create_lead_stage(
         db_connection=db_connection,
     )
     created_stage = await lead_stage_service.create_lead_stage(body)
+    request.state.audit_requested_id = str(created_stage.get("id", "")) if created_stage else ""
     request.state.raw_audit_new_data = created_stage
 
     return success_response(

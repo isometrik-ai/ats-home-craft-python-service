@@ -206,6 +206,9 @@ async def external_create_lead(
         created = await service.create_lead(body, external=True)
 
     request.state.audit_table = "leads"
+    request.state.audit_requested_id = (
+        str(created.get("id", "")) if isinstance(created, dict) else ""
+    )
     request.state.audit_description = f"Created external lead for client: {body.client_company_id}"
     request.state.audit_risk_level = "medium"
     request.state.audit_user_context = {

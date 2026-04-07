@@ -71,7 +71,7 @@ class TeamService:
     async def create_team(
         self,
         request: CreateTeamRequest,
-    ) -> None:
+    ) -> str:
         """Create a new team with validation and member assignment.
 
         Args:
@@ -106,7 +106,7 @@ class TeamService:
             created_by=self.user_context.user_id,
             member_data=member_data,
         )
-        await self.team_repository.create_team(db_in)
+        return str(await self.team_repository.create_team(db_in))
 
     async def list_teams(
         self,

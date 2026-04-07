@@ -123,7 +123,8 @@ async def create_team_endpoint(
 
     # Create service with user context and delegate to service
     team_service = TeamService(db_connection=db_connection, user_context=user_context)
-    await team_service.create_team(body)
+    team_id = await team_service.create_team(body)
+    request.state.audit_requested_id = str(team_id)
 
     return success_response(
         request=request,

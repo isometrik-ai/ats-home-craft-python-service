@@ -194,6 +194,25 @@ class LeadStageRepository:
         rows = await self.db_connection.fetch(query, organization_id)
         return [dict(row) for row in rows]
 
+    async def get_stages_by_ids(
+        self,
+        *,
+        organization_id: str,
+        stage_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Fetch multiple stages by id for one organization."""
+        if not stage_ids:
+            return []
+        cols = self._stage_columns_expr()
+        query = f"""
+            SELECT {cols}
+            FROM {self.TABLE_NAME}
+            WHERE organization_id = $1
+              AND id = ANY($2::uuid[])
+        """
+        rows = await self.db_connection.fetch(query, organization_id, stage_ids)
+        return [dict(row) for row in rows]
+
     async def get_stage_by_id(self, organization_id: str, stage_id: str) -> dict[str, Any] | None:
         """Return one lead stage by id, scoped to the organization."""
         query = self._sql_select_stages(
