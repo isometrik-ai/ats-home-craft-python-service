@@ -476,6 +476,8 @@ class LeadService:
                 contact_client_id=str(c["contact_client_id"]),
                 label=c.get("label"),
                 contact_name=c.get("contact_name"),
+                email=c.get("email"),
+                phones=c.get("phones"),
             )
             for c in contacts
         ]

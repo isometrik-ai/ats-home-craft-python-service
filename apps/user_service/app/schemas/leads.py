@@ -16,6 +16,7 @@ from pydantic import (
     model_validator,
 )
 
+from apps.user_service.app.schemas.clients import Phone
 from apps.user_service.app.schemas.enums import DealType, LeadsListMode, Priority
 from apps.user_service.app.schemas.lead_stages import UNSET, Unset
 from libs.shared_utils.http_exceptions import ValidationException
@@ -310,6 +311,8 @@ class LeadContactDetail(BaseModel):
     contact_client_id: str = Field(..., description="Person client UUID")
     label: str | None = Field(None, description="Optional role or tag for this link")
     contact_name: str | None = Field(None, description="Resolved person display name")
+    email: str | None = Field(None, description="Email address")
+    phones: list[Phone] = Field(default_factory=list, description="Phone numbers")
 
 
 class LeadDetail(BaseModel):

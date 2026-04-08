@@ -177,7 +177,9 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
         ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name,
         lc.contact_client_id AS contact_client_id,
         lc.label AS label,
-        c.name AS contact_name
+        c.name AS contact_name,
+        au.email AS contact_email,
+        COALESCE(cu.phones, '[]'::jsonb) AS contact_phones
     FROM leads l
     {_LEADS_JOIN_DISPLAY.strip()}
     LEFT JOIN lead_contacts lc
@@ -186,6 +188,12 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
     LEFT JOIN clients c
         ON c.id = lc.contact_client_id
        AND c.organization_id = lc.organization_id
+    LEFT JOIN client_users cu
+        ON cu.client_id = c.id
+       AND cu.organization_id = c.organization_id
+       AND cu.status != 'deleted'
+    LEFT JOIN auth.users au
+        ON au.id = cu.user_id
     WHERE l.organization_id = $1
       AND l.id = $2::uuid
     ORDER BY lc.created_at ASC
@@ -481,6 +489,8 @@ class LeadRepository:
         payload.pop("contact_client_id", None)
         payload.pop("label", None)
         payload.pop("contact_name", None)
+        payload.pop("contact_email", None)
+        payload.pop("contact_phones", None)
 
         contacts: list[dict[str, Any]] = []
         for row in rows:
@@ -492,6 +502,8 @@ class LeadRepository:
                     "contact_client_id": contact_client_id,
                     "label": row["label"],
                     "contact_name": row["contact_name"],
+                    "email": row.get("contact_email"),
+                    "phones": parse_json_field(row.get("contact_phones")) or [],
                 }
             )
 
