@@ -12,19 +12,24 @@ operations are scoped to that organization.
 """
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.external_auth import get_organization_context
-from apps.user_service.app.schemas.enums import LeadsListMode
+from apps.user_service.app.schemas.enums import (
+    KafkaTopics,
+    LeadEventType,
+    LeadsListMode,
+)
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
     LeadsListQueryParams,
     UpdateLeadRequest,
 )
+from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.lead_service import LeadService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -35,6 +40,7 @@ from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/integrations/leads", tags=["Leads (External)"])
+LEAD_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
 
 @handle_api_exceptions("external list leads")
@@ -187,6 +193,7 @@ async def external_get_lead(
 )
 async def external_create_lead(
     request: Request,
+    background_tasks: BackgroundTasks,
     db_connection: asyncpg.Connection = Depends(db_conn),
     organization_id: str = Depends(get_organization_context),
     body: CreateLeadRequest = Body(...),
@@ -201,9 +208,22 @@ async def external_create_lead(
         email=actor_email,
         organization_id=organization_id,
     )
+    create_event: dict | None = None
+    event_key: str | None = None
     async with db_connection.transaction():
         service = LeadService(user_context=user_context, db_connection=db_connection)
+        event_service = EventService(db_connection=db_connection)
         created = await service.create_lead(body, external=True)
+        if isinstance(created, dict) and created.get("id") is not None:
+            create_event = await event_service.create_lifecycle_event(
+                event_type=LeadEventType.CREATED.value,
+                aggregate_id=str(created["id"]),
+                organization_id=organization_id,
+                actor_user_id=None,
+                payload={"module": "leads", "action": "create"},
+                topics=LEAD_KAFKA_TOPICS,
+            )
+            event_key = str(created["id"])
 
     request.state.audit_table = "leads"
     request.state.audit_requested_id = (
@@ -217,6 +237,14 @@ async def external_create_lead(
         "organization_id": organization_id,
     }
     request.state.raw_audit_new_data = created
+
+    if create_event is not None and event_key is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=create_event,
+            key=event_key,
+            topics=LEAD_KAFKA_TOPICS,
+        )
     return success_response(
         request=request,
         message_key="leads.success.lead_created",
@@ -260,6 +288,7 @@ async def external_create_lead(
 )
 async def external_update_lead(
     request: Request,
+    background_tasks: BackgroundTasks,
     lead_id: str = Path(..., description="Lead ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
     organization_id: str = Depends(get_organization_context),
@@ -275,13 +304,23 @@ async def external_update_lead(
         email=actor_email,
         organization_id=organization_id,
     )
+    update_event: dict | None = None
     async with db_connection.transaction():
         service = LeadService(user_context=user_context, db_connection=db_connection)
+        event_service = EventService(db_connection=db_connection)
         previous, updated = await service.update_lead(lead_id=lead_id, body=body)
         resolved_id = (
             str(updated.get("id"))
             if isinstance(updated, dict) and updated.get("id") is not None
             else str(lead_id)
+        )
+        update_event = await event_service.create_lifecycle_event(
+            event_type=LeadEventType.UPDATED.value,
+            aggregate_id=lead_id,
+            organization_id=organization_id,
+            actor_user_id=None,
+            payload={"module": "leads", "action": "update"},
+            topics=LEAD_KAFKA_TOPICS,
         )
 
     request.state.audit_table = "leads"
@@ -295,6 +334,14 @@ async def external_update_lead(
     }
     request.state.raw_audit_old_data = previous
     request.state.raw_audit_new_data = updated
+
+    if update_event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=update_event,
+            key=lead_id,
+            topics=LEAD_KAFKA_TOPICS,
+        )
     return success_response(
         request=request,
         message_key="leads.success.lead_updated",
@@ -333,6 +380,7 @@ async def external_update_lead(
 )
 async def external_delete_lead(
     request: Request,
+    background_tasks: BackgroundTasks,
     lead_id: str = Path(..., description="Lead ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
     organization_id: str = Depends(get_organization_context),
@@ -347,9 +395,19 @@ async def external_delete_lead(
         email=actor_email,
         organization_id=organization_id,
     )
+    delete_event: dict | None = None
     async with db_connection.transaction():
         service = LeadService(user_context=user_context, db_connection=db_connection)
+        event_service = EventService(db_connection=db_connection)
         deleted = await service.delete_lead(lead_id)
+        delete_event = await event_service.create_lifecycle_event(
+            event_type=LeadEventType.DELETED.value,
+            aggregate_id=lead_id,
+            organization_id=organization_id,
+            actor_user_id=None,
+            payload={"module": "leads", "action": "delete"},
+            topics=LEAD_KAFKA_TOPICS,
+        )
 
     request.state.audit_table = "leads"
     request.state.audit_requested_id = lead_id
@@ -361,6 +419,14 @@ async def external_delete_lead(
         "organization_id": organization_id,
     }
     request.state.raw_audit_old_data = deleted
+
+    if delete_event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=delete_event,
+            key=lead_id,
+            topics=LEAD_KAFKA_TOPICS,
+        )
     return success_response(
         request=request,
         message_key="leads.success.lead_deleted",
