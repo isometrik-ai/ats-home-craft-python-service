@@ -26,21 +26,31 @@ from apps.user_service.app.schemas.enums import ClientStatus
 from apps.user_service.app.schemas.contacts_v2 import CreateContactRequest
 
 
-class PrimaryContactRef(BaseModel):
-    """Primary contact selection during company create."""
+class CompanyContactLink(BaseModel):
+    """Optional contact association during company create.
+
+    Supports:
+    - link an existing contact
+    - create a new contact inline and link it
+    - optionally set as company primary contact
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    contact_id: str | None = Field(None, description="Existing contact id to set as primary")
-    create_contact: CreateContactRequest | None = Field(
+    contact_id: str | None = Field(None, description="Existing contact id to link to the company")
+    contact: CreateContactRequest | None = Field(
         None,
-        description="Create a new contact inline and set it as primary.",
+        description="Create a new contact inline and link it to the company.",
+    )
+    is_primary: bool = Field(
+        default=False,
+        description="If true, set this contact as the company's primary contact.",
     )
 
     @model_validator(mode="after")
-    def validate_exactly_one(self) -> "PrimaryContactRef":
-        if bool(self.contact_id) == bool(self.create_contact):
-            raise ValueError("Provide exactly one of contact_id or create_contact.")
+    def validate_exactly_one(self) -> "CompanyContactLink":
+        if bool(self.contact_id) == bool(self.contact):
+            raise ValueError("Provide exactly one of contact_id or contact.")
         return self
 
 
@@ -49,8 +59,8 @@ class CreateCompanyRequest(BaseModel):
 
     Supports ADR operations:
     - company only
-    - company + set existing contact as primary (membership is created first)
-    - company + create new contact as primary
+    - company + link existing contact (primary/non-primary)
+    - company + create new contact + link (primary/non-primary)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -74,7 +84,8 @@ class CreateCompanyRequest(BaseModel):
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     additional_data: dict[str, Any] = Field(default_factory=dict)
 
-    primary_contact: PrimaryContactRef | None = None
+    # New, developer-friendly association input (one contact on create).
+    contact: CompanyContactLink | None = None
 
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
 
@@ -118,7 +129,9 @@ class CompanyPrimaryContactChange(BaseModel):
     contact_id: str | None = None
 
     # create a new contact and set as primary
-    create_contact: CreateContactRequest | None = None
+    contact: CreateContactRequest | None = Field(
+        default=None
+    )
 
     # unset primary
     unset: bool = False
@@ -129,13 +142,13 @@ class CompanyPrimaryContactChange(BaseModel):
             1
             for v in (
                 bool(self.contact_id),
-                bool(self.create_contact),
+                bool(self.contact),
                 bool(self.unset),
             )
             if v
         )
         if supplied != 1:
-            raise ValueError("Provide exactly one of contact_id, create_contact, or unset=true.")
+            raise ValueError("Provide exactly one of contact_id, contact, or unset=true.")
         return self
 
 

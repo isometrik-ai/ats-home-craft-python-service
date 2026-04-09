@@ -33,41 +33,301 @@ class CompaniesRepository(BaseRepository):
     def __init__(self, db_connection: asyncpg.Connection) -> None:
         super().__init__(db_connection=db_connection)
 
-    async def create_companies(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        required = ["organization_id", "name"]
-        optional = [
-            "primary_contact_id",
-            "status",
-            "industry",
-            "profile_photo_url",
-            "portal_access",
-            "tags",
-            "websites",
-            "billing_preferences",
-            "custom_fields",
-            "additional_data",
-            "social_pages",
-            "linked_pages",
-            "products",
-            "key_people",
-            "sales_intelligence",
-            "description",
-            "target_market_segments",
-            "current_tech_stack",
-            "preferred_communication_channels",
-            "industry_specific_terminologies",
-            "enrichment_done",
-            "enrichment_status",
-            "enrichment_request_id",
-            "last_enriched_at",
-        ]
-        return await self.bulk_insert_returning(
-            table="companies",
-            required_columns=required,
-            optional_columns=optional,
-            rows=rows,
-            jsonb_columns=COMPANY_JSONB_COLUMNS,
+    async def create_company_with_optional_contact_link(
+        self,
+        *,
+        organization_id: str,
+        company_data: dict[str, Any],
+        addresses: list[dict[str, Any]] | None,
+        contact_id: str | None,
+        contact_data: dict[str, Any] | None = None,
+        contact_addresses: list[dict[str, Any]] | None = None,
+        set_primary: bool,
+    ) -> dict[str, Any]:
+        """Create company + optional addresses + optional contact (existing or created) + optional primary in one trip.
+
+        Returns:
+            dict with keys:
+            - company_id (str)
+            - company (dict): inserted company row
+            - contact_id (str | None): linked/created contact id (if requested)
+            - contact (dict | None): inserted contact row (only when created inline)
+            - contact_found (bool): whether the provided contact_id exists in org and not deleted
+        """
+        addresses_payload = addresses or []
+        # company_id is available only after company insert, so we inject it in SQL.
+        addresses_json = json.dumps(addresses_payload) if addresses_payload else None
+        contact_addresses_payload = contact_addresses or []
+        contact_addresses_json = json.dumps(contact_addresses_payload) if contact_addresses_payload else None
+
+        if contact_id is not None and contact_data is not None:
+            raise ValueError("Provide only one of contact_id or contact_data.")
+
+        row = await self.db_connection.fetchrow(
+            """
+            WITH contact_exists AS (
+              SELECT ct.id
+              FROM contacts ct
+              WHERE $19::uuid IS NOT NULL
+                AND ct.id = $19::uuid
+                AND ct.organization_id = $1::uuid
+                AND ct.status != $20::text
+            ),
+            new_contact AS (
+              INSERT INTO contacts (
+                organization_id,
+                user_id,
+                isometrik_user_id,
+                status,
+                prefix,
+                first_name,
+                middle_name,
+                last_name,
+                title,
+                date_of_birth,
+                profile_photo_url,
+                phones,
+                tags,
+                custom_fields,
+                additional_data,
+                social_pages
+              )
+              SELECT
+                $1::uuid,
+                c.user_id,
+                c.isometrik_user_id,
+                c.status,
+                c.prefix,
+                c.first_name,
+                c.middle_name,
+                c.last_name,
+                c.title,
+                c.date_of_birth,
+                c.profile_photo_url,
+                c.phones,
+                c.tags,
+                c.custom_fields,
+                c.additional_data,
+                c.social_pages
+              FROM jsonb_to_recordset(COALESCE($21::jsonb, '[]'::jsonb)) AS c(
+                user_id uuid,
+                isometrik_user_id text,
+                status text,
+                prefix text,
+                first_name text,
+                middle_name text,
+                last_name text,
+                title text,
+                date_of_birth date,
+                profile_photo_url text,
+                phones jsonb,
+                tags text[],
+                custom_fields jsonb,
+                additional_data jsonb,
+                social_pages jsonb
+              )
+              WHERE $19::uuid IS NULL
+              RETURNING *
+            ),
+            contact AS (
+              SELECT
+                COALESCE(
+                  (SELECT id FROM contact_exists),
+                  (SELECT id FROM new_contact)
+                ) AS id
+            ),
+            company AS (
+              INSERT INTO companies (
+                organization_id,
+                primary_contact_id,
+                status,
+                name,
+                industry,
+                profile_photo_url,
+                portal_access,
+                tags,
+                websites,
+                billing_preferences,
+                social_pages,
+                target_market_segments,
+                current_tech_stack,
+                preferred_communication_channels,
+                industry_specific_terminologies,
+                description,
+                custom_fields,
+                additional_data
+              )
+              VALUES (
+                $1::uuid,
+                CASE WHEN $23::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
+                $2::text,
+                $3::text,
+                $4::text,
+                $5::text,
+                $6::boolean,
+                $7::text[],
+                $8::jsonb,
+                $9::jsonb,
+                $10::jsonb,
+                $11::text[],
+                $12::text[],
+                $13::text[],
+                $14::text[],
+                $15::text,
+                $16::jsonb,
+                $17::jsonb
+              )
+              RETURNING *
+            ),
+            inserted_addresses AS (
+              INSERT INTO company_addresses (
+                company_id,
+                place_id,
+                address_line1,
+                address_line2,
+                city,
+                state,
+                postal_code,
+                country,
+                latitude,
+                longitude,
+                address_type,
+                address_data,
+                is_primary
+              )
+              SELECT
+                (SELECT id FROM company) AS company_id,
+                a.place_id,
+                a.address_line1,
+                a.address_line2,
+                a.city,
+                a.state,
+                a.postal_code,
+                a.country,
+                a.latitude,
+                a.longitude,
+                a.address_type,
+                COALESCE(a.address_data, '{}'::jsonb) AS address_data,
+                a.is_primary
+              FROM jsonb_to_recordset(COALESCE($18::jsonb, '[]'::jsonb)) AS a(
+                place_id text,
+                address_line1 text,
+                address_line2 text,
+                city text,
+                state text,
+                postal_code text,
+                country text,
+                latitude double precision,
+                longitude double precision,
+                address_type text,
+                address_data jsonb,
+                is_primary boolean
+              )
+              RETURNING 1
+            ),
+            inserted_contact_addresses AS (
+              INSERT INTO contact_addresses (
+                contact_id,
+                place_id,
+                address_line1,
+                address_line2,
+                city,
+                state,
+                postal_code,
+                country,
+                latitude,
+                longitude,
+                address_type,
+                address_data,
+                is_primary
+              )
+              SELECT
+                (SELECT id FROM contact) AS contact_id,
+                a.place_id,
+                a.address_line1,
+                a.address_line2,
+                a.city,
+                a.state,
+                a.postal_code,
+                a.country,
+                a.latitude,
+                a.longitude,
+                a.address_type,
+                COALESCE(a.address_data, '{}'::jsonb) AS address_data,
+                a.is_primary
+              FROM jsonb_to_recordset(COALESCE($22::jsonb, '[]'::jsonb)) AS a(
+                place_id text,
+                address_line1 text,
+                address_line2 text,
+                city text,
+                state text,
+                postal_code text,
+                country text,
+                latitude double precision,
+                longitude double precision,
+                address_type text,
+                address_data jsonb,
+                is_primary boolean
+              )
+              WHERE (SELECT id FROM contact) IS NOT NULL
+                AND (SELECT id FROM new_contact) IS NOT NULL
+              RETURNING 1
+            ),
+            membership AS (
+              INSERT INTO contact_companies (organization_id, contact_id, company_id)
+              SELECT $1::uuid, (SELECT id FROM contact), (SELECT id FROM company)
+              WHERE (SELECT id FROM contact) IS NOT NULL
+              ON CONFLICT (contact_id, company_id) DO NOTHING
+              RETURNING contact_id, company_id
+            )
+            SELECT
+              (SELECT id::text FROM company) AS company_id,
+              (SELECT to_jsonb(co) FROM companies AS co WHERE co.id = (SELECT id FROM company)) AS company,
+              (SELECT id::text FROM contact) AS contact_id,
+              (SELECT to_jsonb(new_contact) FROM new_contact) AS contact,
+              (SELECT EXISTS(SELECT 1 FROM contact_exists)) AS contact_found
+            """,
+            organization_id,
+            company_data.get("status"),
+            company_data.get("name"),
+            company_data.get("industry"),
+            company_data.get("profile_photo_url"),
+            company_data.get("portal_access"),
+            company_data.get("tags"),
+            company_data.get("websites"),
+            company_data.get("billing_preferences"),
+            company_data.get("social_pages"),
+            company_data.get("target_market_segments"),
+            company_data.get("current_tech_stack"),
+            company_data.get("preferred_communication_channels"),
+            company_data.get("industry_specific_terminologies"),
+            company_data.get("description"),
+            company_data.get("custom_fields"),
+            company_data.get("additional_data"),
+            addresses_json,
+            contact_id,
+            ClientStatus.DELETED.value,
+            json.dumps([contact_data]) if contact_data else None,
+            contact_addresses_json,
+            bool(set_primary),
         )
+        if not row:
+            return {
+                "company_id": None,
+                "company": None,
+                "contact_id": None,
+                "contact": None,
+                "contact_found": False,
+            }
+        company_row = row.get("company")
+        contact_row = row.get("contact")
+        return {
+            "company_id": str(row["company_id"]),
+            "company": dict(company_row) if isinstance(company_row, dict) else company_row,
+            "contact_id": row.get("contact_id"),
+            "contact": dict(contact_row) if isinstance(contact_row, dict) else contact_row,
+            "contact_found": bool(row.get("contact_found")),
+        }
 
     async def get_company_for_update(self, *, company_id: str, organization_id: str) -> dict | None:
         row = await self.db_connection.fetchrow(
@@ -100,40 +360,13 @@ class CompaniesRepository(BaseRepository):
             touch_updated_at=True,
         )
 
-    async def clear_primary_contact_if_matches(
-        self,
-        *,
-        company_id: str,
-        organization_id: str,
-        contact_id: str,
-    ) -> bool:
-        """Clear primary contact only when it currently matches `contact_id`.
-
-        Returns:
-            bool: True when an update occurred, False otherwise.
-        """
-        row = await self.db_connection.fetchrow(
-            """
-            UPDATE companies
-            SET primary_contact_id = NULL, updated_at = NOW()
-            WHERE id = $1::uuid
-              AND organization_id = $2::uuid
-              AND primary_contact_id = $3::uuid
-            RETURNING id
-            """,
-            company_id,
-            organization_id,
-            contact_id,
-        )
-        return bool(row)
-
-    async def soft_delete_company(self, *, company_id: str, organization_id: str) -> None:
+    async def soft_delete_company(self, *, company_id: str, organization_id: str) -> dict[str, Any]:
         row = await self.db_connection.fetchrow(
             """
             UPDATE companies
             SET status = $3, updated_at = NOW()
             WHERE id = $1::uuid AND organization_id = $2::uuid AND status != $3
-            RETURNING id
+            RETURNING *
             """,
             company_id,
             organization_id,
@@ -144,6 +377,7 @@ class CompaniesRepository(BaseRepository):
                 message_key="clients.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        return dict(row)
 
     async def create_company_addresses(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         required = ["company_id"]
@@ -208,18 +442,6 @@ class CompaniesRepository(BaseRepository):
             address_ids,
         )
 
-    async def get_company_addresses(self, *, company_id: str) -> list[dict[str, Any]]:
-        rows = await self.db_connection.fetch(
-            """
-            SELECT *
-            FROM company_addresses
-            WHERE company_id = $1::uuid
-            ORDER BY is_primary DESC, created_at ASC
-            """,
-            company_id,
-        )
-        return [dict(r) for r in rows]
-
     async def get_company_details(
         self,
         *,
@@ -241,10 +463,12 @@ class CompaniesRepository(BaseRepository):
                 'first_name', ct.first_name,
                 'last_name',  ct.last_name,
                 'title',      ct.title,
-                'email',      ct.email,
+                'email',      NULLIF(au.email::text, ''),
                 'phones',     ct.phones
               ) AS primary_contact
               FROM contacts ct
+              LEFT JOIN auth.users au
+                ON au.id = ct.user_id
               WHERE ct.id = co.primary_contact_id
                 AND ct.organization_id = co.organization_id
                 AND ct.status != 'deleted'
@@ -256,7 +480,8 @@ class CompaniesRepository(BaseRepository):
                   'first_name', ct.first_name,
                   'last_name',  ct.last_name,
                   'title',      ct.title,
-                  'email',      ct.email,
+                  'email',      NULLIF(au.email::text, ''),
+                  'phones',     ct.phones,
                   'is_primary', (co.primary_contact_id = ct.id)
                 )
                 ORDER BY ct.created_at ASC
@@ -266,6 +491,8 @@ class CompaniesRepository(BaseRepository):
                 ON ct.id = cc.contact_id
                AND ct.organization_id = co.organization_id
                AND ct.status != 'deleted'
+              LEFT JOIN auth.users au
+                ON au.id = ct.user_id
               WHERE cc.organization_id = co.organization_id
                 AND cc.company_id = co.id
             ) contacts ON TRUE
@@ -338,7 +565,7 @@ class CompaniesRepository(BaseRepository):
               co.profile_photo_url,
               co.primary_contact_id::text AS primary_contact_id,
               (ct.first_name || ' ' || ct.last_name) AS primary_contact_name,
-              ct.email AS primary_contact_email,
+              NULLIF(au.email::text, '') AS primary_contact_email,
               co.created_at,
               co.updated_at
             FROM companies co
@@ -346,6 +573,8 @@ class CompaniesRepository(BaseRepository):
               ON ct.id = co.primary_contact_id
              AND ct.organization_id = co.organization_id
              AND ct.status != 'deleted'
+            LEFT JOIN auth.users au
+              ON au.id = ct.user_id
             WHERE {where_sql}
             ORDER BY co.created_at DESC
             OFFSET ${idx} LIMIT ${idx + 1}

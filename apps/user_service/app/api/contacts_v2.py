@@ -26,6 +26,7 @@ from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.client_enrichment_service import ClientEnrichmentService
 from apps.user_service.app.services.typesense_index_service_v2 import (
     delete_contact_background,
+    index_companies_background,
     index_contacts_background,
 )
 from apps.user_service.app.utils.common_utils import check_permissions, handle_api_exceptions
@@ -63,7 +64,7 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
         "link the contact to an existing company or create a new company by name and associate it."
         "Side effects:"
         "- Emits lifecycle events (Kafka topic: CRM events)"
-        "- Schedules Typesense indexing for the contact"
+        "- Schedules Typesense indexing for the contact (and for a company if one was created inline)"
         "- Schedules enrichment for the created/affected entities (if configured)"
     ),
     responses=COMMON_ERROR_RESPONSES,
@@ -114,7 +115,8 @@ async def create_contact(
 
     Side effects:
         - Creates lifecycle events for created entities (best-effort publish via BackgroundTasks).
-        - Indexes the created contact in Typesense (BackgroundTasks).
+        - Indexes the created contact in Typesense (BackgroundTasks), and a new company in Typesense
+          when one was created in the same request (BackgroundTasks).
         - Triggers enrichment for the created contact and any created company (BackgroundTasks).
     """
     created_events: list[tuple[dict, str]] = []
@@ -168,10 +170,21 @@ async def create_contact(
             topics=CLIENT_KAFKA_TOPICS,
         )
     if contact_id is not None:
-        background_tasks.add_task(
-            index_contacts_background,
-            [(contact_id, user_context.organization_id)],
-        )
+        org_id = user_context.organization_id
+        for entity in result.get("created_entities") or []:
+            eid = entity.get("entity_id")
+            if not eid:
+                continue
+            if entity.get("entity_table") == "contacts" and entity.get("action") == "create":
+                background_tasks.add_task(
+                    index_contacts_background,
+                    [(str(eid), org_id)],
+                )
+            elif entity.get("entity_table") == "companies" and entity.get("action") == "create_company":
+                background_tasks.add_task(
+                    index_companies_background,
+                    [(str(eid), org_id)],
+                )
         # Enrichment for created contact and optionally created company.
         enrichment_service = ClientEnrichmentService.from_settings()
         for item in result.get("enrichment_targets") or []:

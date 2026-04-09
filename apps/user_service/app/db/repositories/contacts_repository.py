@@ -9,7 +9,6 @@ import asyncpg
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.enums import ClientStatus
-from apps.user_service.app.utils.common_utils import serialize_jsonb_param
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -111,15 +110,6 @@ class ContactsRepository(BaseRepository):
             - company_id (str | None)
             - contact (dict | None): inserted contact row
         """
-        # asyncpg JSON/JSONB parameters are expected as JSON strings in this codebase.
-        # Reuse the shared serializer used by BaseRepository helpers.
-        phones = serialize_jsonb_param("phones", contact_data.get("phones"), CONTACT_JSONB_COLUMNS)
-        custom_fields = serialize_jsonb_param("custom_fields", contact_data.get("custom_fields"), CONTACT_JSONB_COLUMNS)
-        additional_data = serialize_jsonb_param(
-            "additional_data", contact_data.get("additional_data"), CONTACT_JSONB_COLUMNS
-        )
-        social_pages = serialize_jsonb_param("social_pages", contact_data.get("social_pages"), CONTACT_JSONB_COLUMNS)
-
         row = await self.db_connection.fetchrow(
             """
             WITH new_company AS (
@@ -205,11 +195,11 @@ class ContactsRepository(BaseRepository):
             contact_data.get("title"),
             contact_data.get("date_of_birth"),
             contact_data.get("profile_photo_url"),
-            phones,
+            contact_data.get("phones"),
             contact_data.get("tags"),
-            custom_fields,
-            additional_data,
-            social_pages,
+            contact_data.get("custom_fields"),
+            contact_data.get("additional_data"),
+            contact_data.get("social_pages"),
             bool(make_primary),
         )
         if not row:

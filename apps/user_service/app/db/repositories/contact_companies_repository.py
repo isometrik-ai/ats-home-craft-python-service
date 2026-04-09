@@ -382,10 +382,12 @@ class ContactCompaniesRepository:
               ct.first_name,
               ct.last_name,
               ct.title,
-              ct.email,
+              NULLIF(au.email::text, '') AS email,
               (co.primary_contact_id = ct.id) AS is_primary
             FROM contact_companies cc
             INNER JOIN contacts ct ON ct.id = cc.contact_id
+            LEFT JOIN auth.users au
+              ON au.id = ct.user_id
             INNER JOIN companies co ON co.id = cc.company_id
             WHERE cc.organization_id = $1::uuid
               AND cc.company_id = $2::uuid

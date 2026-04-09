@@ -196,22 +196,61 @@ async def _build_company_document(
     if not details:
         return None
 
-    primary = details.get("primary_contact") or {}
-    first_name = primary.get("first_name") if isinstance(primary, dict) else ""
-    last_name = primary.get("last_name") if isinstance(primary, dict) else ""
-    full_name = " ".join(part for part in (first_name, last_name) if part)
+    # Store all contacts (not just primary) and also flatten into string[] fields
+    # so Typesense full-text search can match against contact attributes.
+    contacts_raw = details.get("contacts") or []
+    contacts: list[dict[str, Any]] = []
+    contact_full_names: list[str] = []
+    contact_titles: list[str] = []
+    contact_emails: list[str] = []
+    contact_phone_numbers: list[str] = []
+    if isinstance(contacts_raw, list) and contacts_raw:
+        for c in contacts_raw:
+            if not isinstance(c, dict):
+                continue
+            first_name = (c.get("first_name") or "").strip()
+            last_name = (c.get("last_name") or "").strip()
+            full_name = " ".join(part for part in (first_name, last_name) if part).strip()
+            title = (c.get("title") or "").strip()
+            email = (c.get("email") or "").strip().lower()
+            is_primary = bool(c.get("is_primary"))
 
-    phones = parse_json_field(primary.get("phones") if isinstance(primary, dict) else None) or []
-    phone_numbers: list[str] = []
-    if isinstance(phones, list):
-        for phone_entry in phones:
-            if not isinstance(phone_entry, dict):
-                continue
-            number = (phone_entry.get("phone_number") or "").strip()
-            isd_code = (phone_entry.get("phone_isd_code") or "").strip()
-            if not number:
-                continue
-            phone_numbers.append(f"{isd_code}{number}" if isd_code else number)
+            phones = parse_json_field(c.get("phones")) or []
+            phones_display: list[dict[str, Any]] = []
+            phone_numbers: list[str] = []
+            if isinstance(phones, list):
+                for phone_entry in phones:
+                    normalized = _normalize_phone_entry(phone_entry)
+                    if normalized is None:
+                        continue
+                    phones_display.append(normalized)
+                    number = (normalized.get("phone_number") or "").strip()
+                    isd_code = (normalized.get("phone_isd_code") or "").strip()
+                    if not number:
+                        continue
+                    phone_numbers.append(f"{isd_code}{number}" if isd_code else number)
+
+            contact_doc = {
+                "id": (c.get("id") or "").strip(),
+                "first_name": first_name or None,
+                "last_name": last_name or None,
+                "full_name": full_name or "",
+                "title": title or None,
+                "email": email or None,
+                "is_primary": is_primary,
+                "phones_display": phones_display or None,
+                "phone_numbers": phone_numbers or None,
+            }
+            contacts.append({k: v for k, v in contact_doc.items() if v is not None and v != ""})
+
+            if full_name:
+                contact_full_names.append(full_name)
+            if title:
+                contact_titles.append(title)
+            if email:
+                contact_emails.append(email)
+            if phone_numbers:
+                contact_phone_numbers.extend(phone_numbers)
 
     # Custom field facets.
     custom_field_keys: list[str] = []
@@ -241,18 +280,11 @@ async def _build_company_document(
         "status": details.get("status"),
         "name": details.get("name") or "",
         "industry": details.get("industry") or None,
-        "primary_contact_first_name": first_name or "",
-        "primary_contact_last_name": last_name or "",
-        "primary_contact_full_name": full_name or "",
-        "primary_contact_title": (
-            (primary.get("title") if isinstance(primary, dict) else "") or ""
-        ),
-        "email": (
-            (
-                primary.get("email") if isinstance(primary, dict) else ""
-            ) 
-            or "").lower() or None,
-        "phone_numbers": phone_numbers or None,
+        "contacts": contacts or None,
+        "contact_full_names": contact_full_names or None,
+        "contact_titles": contact_titles or None,
+        "contact_emails": contact_emails or None,
+        "contact_phone_numbers": contact_phone_numbers or None,
         "tags": details.get("tags") or [],
         "description": details.get("description") or "",
         "target_market_segments": details.get("target_market_segments") or [],

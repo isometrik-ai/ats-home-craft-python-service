@@ -47,6 +47,7 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     generate_random_password,
     parse_json_field,
+    serialize_jsonb_param,
 )
 from apps.user_service.app.config.app_settings import app_settings, shared_settings
 from apps.user_service.app.services.client_enrichment_service import ClientEnrichmentService
@@ -64,9 +65,11 @@ from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
     get_isometrik_data_from_settings,
 )
+from apps.user_service.app.db.repositories.contacts_repository import CONTACT_JSONB_COLUMNS
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from fastapi import BackgroundTasks
 from apps.user_service.app.services.event_service import EventService
+from apps.user_service.app.utils.email_utils import send_client_creation_email
 
 logger = get_logger("contacts_service_v2")
 
@@ -107,11 +110,11 @@ class ContactsServiceV2:
         first_name: str | None,
         last_name: str | None,
         prefix: str | None,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str | None]:
         """Create/reuse Supabase auth user and create Isometrik user for a contact.
 
         Returns:
-            (user_id, isometrik_user_id)
+            (user_id, isometrik_user_id, password_if_created)
         """
         if not self.supabase_client:
             raise ServiceUnavailableException(
@@ -131,10 +134,12 @@ class ContactsServiceV2:
         email_norm = email.strip()
         user_repo = UserRepository(db_connection=self.db_connection)
         existing_user = await user_repo.get_auth_user_by_email(email_norm)
+        created_password: str | None = None
         if existing_user and existing_user.get("id"):
             user_id = str(existing_user["id"])
         else:
             password = generate_random_password()
+            created_password = password
             # Keep this metadata block identical to ClientService._create_auth_and_isometrik_user
             user_metadata: dict[str, Any] = {
                 "timezone": "UTC",
@@ -178,7 +183,7 @@ class ContactsServiceV2:
                 message_key="clients.errors.isometrik_user_creation_failed",
                 custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
             )
-        return user_id, str(isometrik_response["userId"])
+        return user_id, str(isometrik_response["userId"]), created_password
 
     @staticmethod
     def _parse_company_create_input(
@@ -237,23 +242,43 @@ class ContactsServiceV2:
         self,
         *,
         email: str | None,
+        portal_access: bool,
         first_name: str | None,
         last_name: str | None,
         prefix: str | None,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None]:
         """Provision auth identity only when an email is provided.
 
         Returns:
-            (user_id, isometrik_user_id) when created/reused, otherwise (None, None).
+            (user_id, isometrik_user_id, password_if_created) when created/reused, otherwise (None, None, None).
         """
-        if not email:
-            return None, None
+        if not (portal_access and email):
+            return None, None, None
         return await self._provision_contact_auth_identity(
             email=email,
             first_name=first_name,
             last_name=last_name,
             prefix=prefix,
         )
+
+    def _maybe_send_contact_creation_email(
+        self,
+        *,
+        portal_access: bool,
+        email: str | None,
+        organization_name: str,
+        password: str | None,
+    ) -> None:
+        if not (portal_access and email):
+            return
+        try:
+            send_client_creation_email(
+                email=email,
+                organization_name=organization_name,
+                password=password,
+            )
+        except Exception as exc:
+            logger.error("Failed to send contact creation email: %s", str(exc))
 
     async def _create_addresses_if_any(
         self,
@@ -381,12 +406,49 @@ class ContactsServiceV2:
         # Custom fields: validate/normalize exactly as existing behavior.
         validated_custom_fields = await self._validate_custom_fields_for_create(body.custom_fields)
 
-        user_id, isometrik_user_id = await self._provision_identity_if_needed(
+        organization = await self.org_repo.get_organization_by_id(org_id)
+        if not organization:
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+                params={"organization_id": org_id},
+            )
+        org_name = str(organization.get("name") or shared_settings.company_name or "")
+
+        user_id, isometrik_user_id, created_password = await self._provision_identity_if_needed(
             email=email_norm,
+            portal_access=bool(body.portal_access),
             first_name=body.first_name,
             last_name=body.last_name,
             prefix=body.prefix,
         )
+
+        list_payload_inputs: dict[str, list[dict[str, Any]]] = {
+            "phones": [p.model_dump(mode="json", exclude_none=True) for p in body.phones],
+            "social_pages": [p.model_dump(mode="json", exclude_none=True) for p in body.social_pages],
+        }
+        list_payloads: dict[str, list[dict[str, Any]]] = {}
+        for field_name, items in list_payload_inputs.items():
+            list_payloads[field_name] = self._ensure_list_item_ids(items)
+
+        phones_payload = list_payloads["phones"]
+        social_pages_payload = list_payloads["social_pages"]
+
+        # Prepare JSONB params once at the service layer (avoid repeating this logic in repositories).
+        jsonb_inputs: dict[str, Any] = {
+            "phones": phones_payload,
+            "custom_fields": validated_custom_fields,
+            "additional_data": body.additional_data,
+            "social_pages": social_pages_payload,
+        }
+        jsonb_params: dict[str, Any] = {}
+        for field_name, value in jsonb_inputs.items():
+            jsonb_params[field_name] = serialize_jsonb_param(field_name, value, CONTACT_JSONB_COLUMNS)
+
+        phones_jsonb = jsonb_params["phones"]
+        custom_fields_jsonb = jsonb_params["custom_fields"]
+        additional_data_jsonb = jsonb_params["additional_data"]
+        social_pages_jsonb = jsonb_params["social_pages"]
 
         created = await self.contacts_repo.create_contact_with_optional_company_link(
             organization_id=org_id,
@@ -402,15 +464,11 @@ class ContactsServiceV2:
                 "date_of_birth": body.date_of_birth,
                 "profile_photo_url": body.profile_photo_url,
                 "email": email_norm,
-                "phones": self._ensure_list_item_ids(
-                    [p.model_dump(mode="json", exclude_none=True) for p in body.phones]
-                ),
+                "phones": phones_jsonb,
                 "tags": body.tags,
-                "custom_fields": validated_custom_fields,
-                "additional_data": body.additional_data,
-                "social_pages": self._ensure_list_item_ids(
-                    [p.model_dump(mode="json", exclude_none=True) for p in body.social_pages]
-                ),
+                "custom_fields": custom_fields_jsonb,
+                "additional_data": additional_data_jsonb,
+                "social_pages": social_pages_jsonb,
             },
             company_id=company_id,
             company_name=company_name,
@@ -426,6 +484,13 @@ class ContactsServiceV2:
             )
 
         await self._create_addresses_if_any(contact_id=contact_id, addresses=body.addresses)
+
+        self._maybe_send_contact_creation_email(
+            portal_access=bool(body.portal_access),
+            email=email_norm,
+            organization_name=org_name,
+            password=created_password,
+        )
 
         person_payload = self._build_person_payload(
             body=body,

@@ -62,6 +62,10 @@ class CreateContactRequest(BaseModel):
 
     # core identity/person fields
     email: str | None = Field(None, description="Contact email address (optional).")
+    portal_access: bool = Field(
+        default=False,
+        description="If true, provisions a portal user for this contact and sends an invite email.",
+    )
     prefix: str | None = Field(None, max_length=50)
     first_name: str | None = Field(None, max_length=100)
     middle_name: str | None = Field(None, max_length=100)

@@ -8,9 +8,12 @@ Resource-specific endpoints targeting the split tables (`companies`, `contacts`,
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
+from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.companies_v2 import (
     CompanyDetailsResponse,
     CompanySummaryResponse,
@@ -24,6 +27,7 @@ from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service_v2 import (
     delete_company_background,
     index_companies_background,
+    index_contacts_background,
 )
 from apps.user_service.app.utils.common_utils import check_permissions, handle_api_exceptions
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -40,35 +44,81 @@ router = APIRouter(prefix="/companies", tags=["Companies v2"])
 
 CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
+COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
+    401: {"description": "Unauthorized (missing/invalid JWT)."},
+    403: {"description": "Forbidden (insufficient permissions)."},
+    404: {"description": "Not found."},
+    422: {"description": "Validation error."},
+    429: {"description": "Too many requests (rate limited)."},
+    500: {"description": "Internal server error."},
+}
+
 
 @handle_api_exceptions("create company")
-@router.post("", status_code=http_status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Create a company",
+    description=(
+        "Creates a company in the v2 split-table model. Depending on the payload, this can also "
+        "link a contact (existing or created inline) and optionally set it as primary.\n\n"
+        "Side effects:\n"
+        "- Emits lifecycle events (Kafka topic: CRM events)\n"
+        "- Schedules Typesense indexing for the company (and for a contact if one was created inline)\n"
+        "- Schedules enrichment for the created/affected entities (if configured)"
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=[
+        "gdpr",
+        "pii",
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="companies",
+    category="CLIENT",
+)
 async def create_company(
     request: Request,
     background_tasks: BackgroundTasks,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
     body: CreateCompanyRequest = Body(...),
 ):
-    """Create a company (v2).
-
-    Supports ADR create flows:
-    - Company only
-    - Company + set existing contact as primary
-    - Company + create new contact as primary
-    """
+    """Create a company (v2); indexes an inline-created contact in Typesense when applicable."""
     created_events: list[tuple[dict, str]] = []
+    company_id: str | None = None
     async with db_connection.transaction():
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
             permission_codes=CLIENTS_MANAGEMENT_CREATE,
         )
-        service = CompaniesServiceV2(db_connection=db_connection, user_context=user_context)
+        request.state.audit_table = "companies"
+        request.state.audit_description = "Created company"
+        request.state.audit_risk_level = "high"
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        service = CompaniesServiceV2(
+            db_connection=db_connection,
+            user_context=user_context,
+            supabase_client=sb_client,
+        )
         event_service = EventService(db_connection=db_connection)
         result = await service.create_company(body)
         company_id = result["company_id"]
+        request.state.audit_requested_id = str(company_id)
+        request.state.audit_description = f"Created company: {company_id}"
+        request.state.raw_audit_old_data = result.get("old_data")
+        request.state.raw_audit_new_data = result.get("new_data")
 
         for entity in result.get("created_entities") or []:
             entity_id = entity.get("entity_id")
@@ -92,10 +142,21 @@ async def create_company(
             key=key,
             topics=CLIENT_KAFKA_TOPICS,
         )
-    background_tasks.add_task(
-        index_companies_background,
-        [(company_id, user_context.organization_id)],
-    )
+    if company_id is not None:
+        background_tasks.add_task(
+            index_companies_background,
+            [(company_id, user_context.organization_id)],
+        )
+        for entity in result.get("created_entities") or []:
+            if (
+                entity.get("entity_table") == "contacts"
+                and entity.get("action") == "create_contact"
+                and entity.get("entity_id")
+            ):
+                background_tasks.add_task(
+                    index_contacts_background,
+                    [(str(entity["entity_id"]), user_context.organization_id)],
+                )
     # Enrichment for created company and optionally created primary contact.
     enrichment_service = ClientEnrichmentService.from_settings()
     for item in result.get("enrichment_targets") or []:
@@ -117,7 +178,12 @@ async def create_company(
 
 
 @handle_api_exceptions("list companies")
-@router.get("", status_code=http_status.HTTP_200_OK)
+@router.get(
+    "",
+    status_code=http_status.HTTP_200_OK,
+    summary="List companies (database)",
+    responses=COMMON_ERROR_RESPONSES,
+)
 @limiter.limit("100/minute")
 async def list_companies(
     request: Request,
@@ -167,7 +233,12 @@ async def list_companies(
 
 
 @handle_api_exceptions("search companies")
-@router.get("/search", status_code=http_status.HTTP_200_OK)
+@router.get(
+    "/search",
+    status_code=http_status.HTTP_200_OK,
+    summary="Search companies (Typesense)",
+    responses=COMMON_ERROR_RESPONSES,
+)
 @limiter.limit("100/minute")
 async def search_companies(
     request: Request,
@@ -217,7 +288,12 @@ async def search_companies(
 
 
 @handle_api_exceptions("get company details")
-@router.get("/{company_id}", status_code=http_status.HTTP_200_OK)
+@router.get(
+    "/{company_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get company details",
+    responses=COMMON_ERROR_RESPONSES,
+)
 @limiter.limit("100/minute")
 async def get_company_details(
     request: Request,
@@ -244,8 +320,26 @@ async def get_company_details(
 
 
 @handle_api_exceptions("update company")
-@router.patch("/{company_id}", status_code=http_status.HTTP_200_OK)
+@router.patch(
+    "/{company_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Update a company",
+    description=(
+        "Updates company fields and related nested data (e.g., addresses). "
+        "Side effects:\n"
+        "- Emits an UPDATED lifecycle event\n"
+        "- Schedules Typesense re-indexing for the company"
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="companies",
+    category="CLIENT",
+)
 async def update_company(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -255,6 +349,7 @@ async def update_company(
     body: UpdateCompanyRequest = Body(...),
 ):
     """Patch company fields (v2)."""
+    update_event: dict | None = None
     async with db_connection.transaction():
         user_context = await check_permissions(
             current_user=current_user,
@@ -263,8 +358,19 @@ async def update_company(
         )
         service = CompaniesServiceV2(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
-        await service.update_company(company_id=company_id, body=body)
+        request.state.audit_table = "companies"
+        request.state.audit_requested_id = company_id
+        request.state.audit_description = f"Updated company: {company_id}"
+        request.state.audit_risk_level = "medium"
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        result = await service.update_company(company_id=company_id, body=body)
         changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
+        request.state.raw_audit_old_data = result.get("old_data")
+        request.state.raw_audit_new_data = result.get("new_data")
         update_event = await event_service.create_lifecycle_event(
             event_type=ClientEventType.UPDATED.value,
             aggregate_id=company_id,
@@ -274,15 +380,14 @@ async def update_company(
             topics=CLIENT_KAFKA_TOPICS,
         )
 
-    background_tasks.add_task(
-        EventService.publish_event_background,
-        event=update_event,
-        key=company_id,
-        topics=CLIENT_KAFKA_TOPICS,
-    )
-    background_tasks.add_task(
-        index_companies_background,
-        [(company_id, user_context.organization_id)],
+    CompaniesServiceV2.schedule_company_update_background_tasks(
+        background_tasks=background_tasks,
+        company_id=company_id,
+        organization_id=user_context.organization_id,
+        body=body,
+        update_event=update_event,
+        event_key=company_id,
+        event_topics=CLIENT_KAFKA_TOPICS,
     )
     return success_response(
         request=request,
@@ -293,8 +398,20 @@ async def update_company(
 
 
 @handle_api_exceptions("delete company")
-@router.delete("/{company_id}", status_code=http_status.HTTP_200_OK)
+@router.delete(
+    "/{company_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Delete a company (soft delete)",
+    responses=COMMON_ERROR_RESPONSES,
+)
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="companies",
+    category="CLIENT",
+)
 async def delete_company(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -303,6 +420,7 @@ async def delete_company(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Soft-delete a company (v2)."""
+    event: dict | None = None
     async with db_connection.transaction():
         user_context = await check_permissions(
             current_user=current_user,
@@ -311,7 +429,18 @@ async def delete_company(
         )
         service = CompaniesServiceV2(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
-        await service.soft_delete_company(company_id=company_id)
+        request.state.audit_table = "companies"
+        request.state.audit_requested_id = company_id
+        request.state.audit_description = f"Deleted company: {company_id}"
+        request.state.audit_risk_level = "high"
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        deleted = await service.soft_delete_company(company_id=company_id)
+        request.state.raw_audit_old_data = deleted.get("old_data")
+        request.state.raw_audit_new_data = deleted.get("new_data")
         event = await event_service.create_lifecycle_event(
             event_type=ClientEventType.DELETED.value,
             aggregate_id=company_id,
@@ -321,13 +450,17 @@ async def delete_company(
             topics=CLIENT_KAFKA_TOPICS,
         )
 
+    if event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=event,
+            key=company_id,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
     background_tasks.add_task(
-        EventService.publish_event_background,
-        event=event,
-        key=company_id,
-        topics=CLIENT_KAFKA_TOPICS,
+        delete_company_background,
+        company_id
     )
-    background_tasks.add_task(delete_company_background, company_id)
     return success_response(
         request=request,
         message_key="clients.success.client_deleted",

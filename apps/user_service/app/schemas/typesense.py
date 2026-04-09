@@ -18,6 +18,8 @@ Design rules:
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -245,12 +247,11 @@ class TypesenseCompanyDocumentV2(BaseModel):
     name: str
 
     industry: str | None = None
-    primary_contact_first_name: str | None = None
-    primary_contact_last_name: str | None = None
-    primary_contact_full_name: str | None = None
-    primary_contact_title: str | None = None
-    email: str | None = None
-    phone_numbers: list[str] | None = None
+    contacts: list[dict[str, Any]] | None = None
+    contact_full_names: list[str] | None = None
+    contact_titles: list[str] | None = None
+    contact_emails: list[str] | None = None
+    contact_phone_numbers: list[str] | None = None
     tags: list[str] | None = None
 
     description: str | None = None
