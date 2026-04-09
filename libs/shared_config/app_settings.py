@@ -107,6 +107,14 @@ class TypesenseSettings(BaseSettings):
         default=0.1,
     )
     clients_collection_name: str = config("TYPESENSE_CLIENTS_COLLECTION_NAME")
+    contacts_collection_name: str = config(
+        "TYPESENSE_CONTACTS_COLLECTION_NAME",
+        default="contacts",
+    )
+    companies_collection_name: str = config(
+        "TYPESENSE_COMPANIES_COLLECTION_NAME",
+        default="companies",
+    )
 
 
 class SharedAppSettings(BaseSettings):

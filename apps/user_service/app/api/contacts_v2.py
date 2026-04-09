@@ -345,15 +345,14 @@ async def search_contacts(
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
     service = ContactsServiceV2(db_connection=db_connection, user_context=user_context)
-    raw = await service.search_contacts(
+    result = await service.search_contacts(
         query=query,
         page=page,
         page_size=page_size,
         status=status.value if status else None,
     )
-    # Return raw Typesense hits until the v2 list DTO mapping is finalized.
-    items = raw["hits"]
-    total = raw["total"]
+    items = result["items"]
+    total = result["total"]
     if not items:
         return list_response(
             request=request,

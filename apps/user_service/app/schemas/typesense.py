@@ -21,6 +21,18 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class TypesensePhoneEntry(BaseModel):
+    """Stored phone item for Typesense contact docs (v2)."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    id: str | None = None
+    phone_number: str | None = None
+    phone_isd_code: str | None = None
+    label: str | None = None
+    is_primary: bool | None = None
+
+
 class TypesenseClientDocument(BaseModel):
     """Document shape for the Typesense `clients` collection.
 
@@ -185,3 +197,73 @@ class TypesenseClientDocument(BaseModel):
         default=None,
         description="Client profile image URL (stored for display-only responses).",
     )
+
+
+class TypesenseContactDocumentV2(BaseModel):
+    """Document shape for *contact/person* docs indexed by v2 services.
+
+    This is intentionally narrower than `TypesenseClientDocument` so v2 contact
+    indexing stays clean and avoids accidentally coupling to company-only fields.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    id: str
+    organization_id: str
+    status: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    full_name: str
+    title: str | None = None
+
+    email: str | None = None
+    phone_numbers: list[str] | None = None
+    phones_display: list[TypesensePhoneEntry] | None = None
+    tags: list[str] | None = None
+
+    company_ids: list[str] | None = None
+    company_names: list[str] | None = None
+
+    custom_field_keys: list[str] | None = None
+    custom_field_values: list[str] | None = None
+
+    enrichment_done: bool | None = None
+    created_at: int
+    updated_at: int
+
+    profile_photo_url: str | None = None
+
+
+class TypesenseCompanyDocumentV2(BaseModel):
+    """Document shape for *company* docs indexed by v2 services."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    id: str
+    organization_id: str
+    status: str | None = None
+    name: str
+
+    industry: str | None = None
+    primary_contact_first_name: str | None = None
+    primary_contact_last_name: str | None = None
+    primary_contact_full_name: str | None = None
+    primary_contact_title: str | None = None
+    email: str | None = None
+    phone_numbers: list[str] | None = None
+    tags: list[str] | None = None
+
+    description: str | None = None
+    target_market_segments: list[str] | None = None
+    current_tech_stack: list[str] | None = None
+    preferred_communication_channels: list[str] | None = None
+    industry_specific_terminologies: list[str] | None = None
+
+    custom_field_keys: list[str] | None = None
+    custom_field_values: list[str] | None = None
+
+    enrichment_done: bool | None = None
+    created_at: int
+    updated_at: int
+
+    profile_photo_url: str | None = None

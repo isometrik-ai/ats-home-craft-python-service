@@ -16,7 +16,7 @@ Design goals:
 from __future__ import annotations
 import uuid
 from typing import Any
-from collections.abc import Iterable
+from datetime import datetime, timezone
 
 import asyncpg
 from supabase import AsyncClient
@@ -31,13 +31,14 @@ from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.schemas.contacts_v2 import (
     CreateContactRequest,
     ContactCompaniesUpdate,
+    ContactSummaryResponse,
     UpdateContactRequest,
 )
 from apps.user_service.app.schemas.enums import ClientStatus, EntityType, IsometrikRole
-from apps.user_service.app.search.client_typesense_schema import (
-    EMAIL_SEARCH_PARAMS,
-    PHONE_SEARCH_PARAMS,
-    SEARCH_PARAMS,
+from apps.user_service.app.search.contact_typesense_schema import (
+    CONTACT_EMAIL_SEARCH_PARAMS,
+    CONTACT_PHONE_SEARCH_PARAMS,
+    CONTACT_SEARCH_PARAMS,
 )
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.typesense_index_service_v2 import index_contacts_background
@@ -95,7 +96,7 @@ class ContactsServiceV2:
         """Lazily create and return the Typesense client for contacts."""
         if self._typesense is None:
             self._typesense = TypesenseService.from_settings(
-                collection_name=app_settings.shared_settings.typesense.contacts_collection_name
+                collection_name=app_settings.shared_settings.typesense.contacts_collection_name,
             )
         return self._typesense
 
@@ -830,8 +831,6 @@ class ContactsServiceV2:
         pool = await get_pool()
         async with AcquireConnection(pool) as conn:
             # A minimal user_context is sufficient for get_contact_details scoping.
-            from apps.user_service.app.utils.common_utils import UserContext
-
             service = ContactsServiceV2(
                 db_connection=conn,
                 user_context=UserContext(
@@ -930,9 +929,6 @@ class ContactsServiceV2:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # Normalize asyncpg return types for API response validation:
-        # - UUID columns may arrive as UUID objects
-        # - JSON/JSONB may arrive as strings depending on driver configuration
         for key in ("id", "organization_id", "user_id"):
             if details.get(key) is not None and not isinstance(details.get(key), str):
                 details[key] = str(details[key])
@@ -1027,7 +1023,7 @@ class ContactsServiceV2:
         Uses the same hybrid keyword + vector strategy as v1.
         """
         org_id = self.user_context.organization_id
-        filters = [f"organization_id:={org_id}", "client_type:=person"]
+        filters = [f"organization_id:={org_id}"]
         if status:
             filters.append(f"status:={status}")
         filter_by = " && ".join(filters)
@@ -1041,11 +1037,11 @@ class ContactsServiceV2:
             "exclude_fields": "embedding",
         }
         if "@" in query:
-            params.update(EMAIL_SEARCH_PARAMS)
+            params.update(CONTACT_EMAIL_SEARCH_PARAMS)
         elif sum(c.isdigit() for c in query) >= 5:
-            params.update(PHONE_SEARCH_PARAMS)
+            params.update(CONTACT_PHONE_SEARCH_PARAMS)
         else:
-            params.update(SEARCH_PARAMS)
+            params.update(CONTACT_SEARCH_PARAMS)
 
         embedding = await self.typesense.embed_query_text(query)
         if embedding is not None:
@@ -1063,16 +1059,47 @@ class ContactsServiceV2:
                 params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
 
         raw = await self.typesense.search(params)
-        return {"hits": raw.get("hits") or [], "total": raw.get("found", 0)}
+        hits = raw.get("hits") or []
+        return {
+            "items": self.typesense_hits_to_contact_summaries(hits),
+            "total": raw.get("found", 0),
+        }
 
-    async def index_contacts_in_typesense(self, *, contact_refs: Iterable[tuple[str, str]]) -> None:
-        """Best-effort Typesense indexing for contacts v2.
+    @staticmethod
+    def typesense_hits_to_contact_summaries(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Convert raw Typesense hits into list API summary items."""
+        items: list[dict[str, Any]] = []
+        for hit in hits:
+            doc = hit.get("document") if isinstance(hit, dict) else None
+            if not isinstance(doc, dict):
+                continue
 
-        This method is intentionally a thin wrapper so the API layer can schedule it
-        via BackgroundTasks after committing the transaction.
-        """
-        # NOTE: Full v2 document builder will be added once the v2 Typesense schema
-        # and denormalization rules are finalized. For now, v2 writes rely on separate
-        # indexing job (or manual reindex) while search remains supported.
-        _ = list(contact_refs)
-        return None
+            created_at = doc.get("created_at")
+            updated_at = doc.get("updated_at")
+            created_at_iso = (
+                datetime.fromtimestamp(int(created_at), tz=timezone.utc).isoformat()
+                if isinstance(created_at, int) and created_at > 0
+                else ""
+            )
+            updated_at_iso = (
+                datetime.fromtimestamp(int(updated_at), tz=timezone.utc).isoformat()
+                if isinstance(updated_at, int) and updated_at > 0
+                else ""
+            )
+
+            row = {
+                "id": doc.get("id"),
+                "organization_id": doc.get("organization_id"),
+                "status": doc.get("status"),
+                "first_name": doc.get("first_name"),
+                "last_name": doc.get("last_name"),
+                "title": doc.get("title"),
+                "email": doc.get("email"),
+                "profile_photo_url": doc.get("profile_photo_url"),
+                "phones": doc.get("phones_display") or [],
+                "company_names": doc.get("company_names") or [],
+                "created_at": created_at_iso,
+                "updated_at": updated_at_iso,
+            }
+            items.append(ContactSummaryResponse.model_validate(row).model_dump(exclude_none=True))
+        return items
