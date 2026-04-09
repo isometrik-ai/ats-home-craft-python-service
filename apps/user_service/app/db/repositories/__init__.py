@@ -13,6 +13,11 @@ Usage:
 """
 
 from apps.user_service.app.db.repositories.client_repository import ClientRepository
+from apps.user_service.app.db.repositories.companies_repository import CompaniesRepository
+from apps.user_service.app.db.repositories.contact_companies_repository import (
+    ContactCompaniesRepository,
+)
+from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
 from apps.user_service.app.db.repositories.events_repository import EventsRepository
 from apps.user_service.app.db.repositories.invite_repository import InviteRepository
 from apps.user_service.app.db.repositories.lead_repository import LeadRepository
@@ -49,6 +54,9 @@ from apps.user_service.app.db.repositories.verification_code_repository import (
 
 __all__ = [
     "ClientRepository",
+    "ContactsRepository",
+    "CompaniesRepository",
+    "ContactCompaniesRepository",
     "TeamRepository",
     "UserEventRepository",
     "PermissionsRepository",
