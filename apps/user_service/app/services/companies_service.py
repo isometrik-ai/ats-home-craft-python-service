@@ -1,4 +1,4 @@
-"""Companies v2 service.
+"""Companies service.
 
 Implements the operations defined in ADR `clients_operations.md` against:
 - `companies`
@@ -30,12 +30,12 @@ from apps.user_service.app.db.repositories import (
 from apps.user_service.app.db.repositories.companies_repository import (
     COMPANY_JSONB_COLUMNS,
 )
-from apps.user_service.app.schemas.companies_v2 import (
+from apps.user_service.app.schemas.companies import (
     CompanyContactsUpdate,
     CreateCompanyRequest,
     UpdateCompanyRequest,
 )
-from apps.user_service.app.schemas.contacts_v2 import CreateContactRequest
+from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import ClientStatus, EntityType
 from apps.user_service.app.search.company_typesense_schema import (
     COMPANY_EMAIL_SEARCH_PARAMS,
@@ -45,10 +45,10 @@ from apps.user_service.app.search.company_typesense_schema import (
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
-from apps.user_service.app.services.contacts_service_v2 import ContactsServiceV2
+from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.event_service import EventService
-from apps.user_service.app.services.typesense_index_service_v2 import (
+from apps.user_service.app.services.typesense_index_service import (
     index_companies_background,
     index_contacts_background,
 )
@@ -68,7 +68,7 @@ from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.typesense_service import TypesenseService
 
-logger = get_logger("companies_service_v2")
+logger = get_logger("companies_service")
 
 _COMPANY_DETAIL_UUID_KEYS = (
     "id",
@@ -141,8 +141,8 @@ def _normalize_company_detail_timestamps(details: dict[str, Any]) -> None:
     details["last_enriched_at"] = format_iso_datetime(details.get("last_enriched_at"))
 
 
-class CompaniesServiceV2:
-    """Business logic for v2 companies."""
+class CompaniesService:
+    """Business logic for companies."""
 
     def __init__(
         self,
@@ -223,7 +223,7 @@ class CompaniesServiceV2:
         created_cid = meta.get("created_contact_id")
         if created_cid:
             background_tasks.add_task(
-                ContactsServiceV2.trigger_enrichment_background,
+                ContactsService.trigger_enrichment_background,
                 str(created_cid),
                 organization_id,
             )
@@ -290,22 +290,22 @@ class CompaniesServiceV2:
         event_topics: list[Any],
         related_lifecycle_events: list[tuple[dict[str, Any], str]] | None = None,
     ) -> None:
-        """Schedule background tasks after a company update (parity with contacts_v2)."""
-        CompaniesServiceV2._schedule_company_event_tasks(
+        """Schedule background tasks after a company update (parity with contacts)."""
+        CompaniesService._schedule_company_event_tasks(
             background_tasks=background_tasks,
             update_event=update_event,
             related_lifecycle_events=related_lifecycle_events,
             event_key=event_key,
             event_topics=event_topics,
         )
-        CompaniesServiceV2._schedule_company_and_contact_index_tasks(
+        CompaniesService._schedule_company_and_contact_index_tasks(
             background_tasks=background_tasks,
             company_id=company_id,
             organization_id=organization_id,
             body=body,
             update_result=update_result,
         )
-        CompaniesServiceV2._schedule_company_enrichment_task(
+        CompaniesService._schedule_company_enrichment_task(
             background_tasks=background_tasks,
             company_id=company_id,
             organization_id=organization_id,
@@ -763,9 +763,9 @@ class CompaniesServiceV2:
         except Exception as send_error:
             logger.error("Failed to send contact creation email: %s", str(send_error))
 
-    def _contacts_service(self) -> ContactsServiceV2:
-        """Reuse the existing portal-identity provisioning logic from ContactsServiceV2."""
-        return ContactsServiceV2(
+    def _contacts_service(self) -> ContactsService:
+        """Reuse the existing portal-identity provisioning logic from ContactsService."""
+        return ContactsService(
             db_connection=self.db_connection,
             user_context=self.user_context,
             supabase_client=self.supabase_client,
@@ -1186,7 +1186,7 @@ class CompaniesServiceV2:
     ) -> None:
         """Apply JSONB list operations: add, update, and/or remove.
 
-        Mirrors `ContactsServiceV2._apply_jsonb_list_changes` so JSON list fields behave
+        Mirrors `ContactsService._apply_jsonb_list_changes` so JSON list fields behave
         identically across contacts and companies.
         """
         current_list = parse_json_field(current.get(field_name)) or []

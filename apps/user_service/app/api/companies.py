@@ -1,4 +1,4 @@
-"""Companies v2 API.
+"""Companies API.
 
 Resource-specific endpoints targeting the split tables (`companies`, `contacts`,
 `contact_companies`, `company_addresses`) with the operations defined in
@@ -16,7 +16,7 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.supabase import supabase_service
-from apps.user_service.app.schemas.companies_v2 import (
+from apps.user_service.app.schemas.companies import (
     CompanyDetailsResponse,
     CompanySummaryResponse,
     CreateCompanyRequest,
@@ -30,9 +30,9 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
-from apps.user_service.app.services.companies_service_v2 import CompaniesServiceV2
+from apps.user_service.app.services.companies_service import CompaniesService
 from apps.user_service.app.services.event_service import EventService
-from apps.user_service.app.services.typesense_index_service_v2 import (
+from apps.user_service.app.services.typesense_index_service import (
     delete_company_background,
     index_companies_background,
     index_contacts_background,
@@ -51,7 +51,7 @@ from libs.shared_utils.common_query import (
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
-router = APIRouter(prefix="/companies", tags=["Companies v2"])
+router = APIRouter(prefix="/companies", tags=["Companies"])
 
 CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
@@ -71,7 +71,7 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     status_code=http_status.HTTP_201_CREATED,
     summary="Create a company",
     description=(
-        "Creates a company in the v2 split-table model. Depending on the payload, this can also "
+        "Creates a company in the split-table model. Depending on the payload, this can also "
         "link a contact (existing or created inline) and optionally set it as primary."
         "Side effects:"
         "- Emits lifecycle events (Kafka topic: CRM events)"
@@ -101,7 +101,7 @@ async def create_company(
     sb_client: AsyncClient = Depends(supabase_service),
     body: CreateCompanyRequest = Body(...),
 ):
-    """Create a company (v2).
+    """Create a company.
 
     May link or create a contact, emit lifecycle events, index Typesense, and queue enrichment.
 
@@ -132,7 +132,7 @@ async def create_company(
             "user_email": user_context.email,
             "organization_id": user_context.organization_id,
         }
-        service = CompaniesServiceV2(
+        service = CompaniesService(
             db_connection=db_connection,
             user_context=user_context,
             supabase_client=sb_client,
@@ -154,7 +154,7 @@ async def create_company(
                 aggregate_id=str(entity_id),
                 organization_id=user_context.organization_id,
                 actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-                payload={"module": "companies_v2", "action": entity.get("action") or "create"},
+                payload={"module": "companies", "action": entity.get("action") or "create"},
                 topics=CLIENT_KAFKA_TOPICS,
             )
             if lifecycle_event is not None:
@@ -219,7 +219,7 @@ async def list_companies(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    """List companies from PostgreSQL with pagination (v2).
+    """List companies from PostgreSQL with pagination.
 
     Args:
         request: FastAPI request.
@@ -238,7 +238,7 @@ async def list_companies(
         db_connection=db_connection,
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
-    service = CompaniesServiceV2(db_connection=db_connection, user_context=user_context)
+    service = CompaniesService(db_connection=db_connection, user_context=user_context)
     result = await service.list_companies(
         search=search,
         status=status.value if status else None,
@@ -293,7 +293,7 @@ async def search_companies(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    """Search companies via Typesense (companies collection) (v2).
+    """Search companies via Typesense (companies collection).
 
     Args:
         request: FastAPI request.
@@ -312,7 +312,7 @@ async def search_companies(
         db_connection=db_connection,
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
-    service = CompaniesServiceV2(db_connection=db_connection, user_context=user_context)
+    service = CompaniesService(db_connection=db_connection, user_context=user_context)
     result = await service.search_companies(
         query=query,
         page=page,
@@ -364,7 +364,7 @@ async def get_company_details(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Get company details including linked contacts and addresses (v2).
+    """Get company details including linked contacts and addresses.
 
     Args:
         request: FastAPI request.
@@ -380,7 +380,7 @@ async def get_company_details(
         db_connection=db_connection,
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
-    service = CompaniesServiceV2(db_connection=db_connection, user_context=user_context)
+    service = CompaniesService(db_connection=db_connection, user_context=user_context)
     details = await service.get_company_details(company_id=company_id)
     details = CompanyDetailsResponse.model_validate(details).model_dump(exclude_none=True)
     return success_response(
@@ -400,7 +400,7 @@ async def get_company_details(
     description=(
         "Updates company fields and related nested data (e.g., addresses). "
         "May also apply contact association changes when `contacts_update` is provided "
-        "(same batch shape as `companies_update` on PATCH /contacts v2). "
+        "(same batch shape as `companies_update` on PATCH /contacts). "
         "Side effects:\n"
         "- Emits lifecycle events for the company and each contact touched by `contacts_update`\n"
         "- Schedules Typesense re-indexing for the company and those contacts"
@@ -423,7 +423,7 @@ async def update_company(
     current_user: dict = Depends(get_user_from_auth),
     body: UpdateCompanyRequest = Body(...),
 ):
-    """Patch company fields, nested data, and optional contact associations (v2).
+    """Patch company fields, nested data, and optional contact associations.
 
     Args:
         request: FastAPI request (audit context).
@@ -444,7 +444,7 @@ async def update_company(
             db_connection=db_connection,
             permission_codes=CLIENTS_MANAGEMENT_EDIT,
         )
-        service = CompaniesServiceV2(db_connection=db_connection, user_context=user_context)
+        service = CompaniesService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
         request.state.audit_table = "companies"
         request.state.audit_requested_id = company_id
@@ -465,7 +465,7 @@ async def update_company(
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
             payload={
-                "module": "companies_v2",
+                "module": "companies",
                 "action": "update",
                 "changed_fields": changed_fields,
             },
@@ -491,7 +491,7 @@ async def update_company(
                     "organization_id": org_id,
                     "actor_user_id": actor,
                     "payload": {
-                        "module": "companies_v2",
+                        "module": "companies",
                         "action": (
                             "contact_created_with_company"
                             if created_cid_s is not None and cid_s == created_cid_s
@@ -510,7 +510,7 @@ async def update_company(
                 (event_payload, event_payload["aggregate_id"]) for event_payload in contact_events
             )
 
-    CompaniesServiceV2.schedule_company_update_background_tasks(
+    CompaniesService.schedule_company_update_background_tasks(
         background_tasks=background_tasks,
         company_id=company_id,
         organization_id=user_context.organization_id,
@@ -551,7 +551,7 @@ async def delete_company(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Soft-delete a company (v2).
+    """Soft-delete a company.
 
     Args:
         request: FastAPI request (audit context).
@@ -570,7 +570,7 @@ async def delete_company(
             db_connection=db_connection,
             permission_codes=CLIENTS_MANAGEMENT_DELETE,
         )
-        service = CompaniesServiceV2(db_connection=db_connection, user_context=user_context)
+        service = CompaniesService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
         request.state.audit_table = "companies"
         request.state.audit_requested_id = company_id
@@ -589,7 +589,7 @@ async def delete_company(
             aggregate_id=company_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-            payload={"module": "companies_v2", "action": "delete"},
+            payload={"module": "companies", "action": "delete"},
             topics=CLIENT_KAFKA_TOPICS,
         )
 

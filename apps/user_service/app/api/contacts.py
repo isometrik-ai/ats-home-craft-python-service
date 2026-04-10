@@ -1,4 +1,4 @@
-"""Contacts v2 API.
+"""Contacts API.
 
 Resource-specific endpoints targeting the split tables (`contacts`, `companies`,
 `contact_companies`, `contact_addresses`) with the operations defined in
@@ -16,7 +16,7 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.supabase import supabase_service
-from apps.user_service.app.schemas.contacts_v2 import (
+from apps.user_service.app.schemas.contacts import (
     ContactDetailsResponse,
     ContactSummaryResponse,
     CreateContactRequest,
@@ -30,9 +30,9 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
-from apps.user_service.app.services.contacts_service_v2 import ContactsServiceV2
+from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.event_service import EventService
-from apps.user_service.app.services.typesense_index_service_v2 import (
+from apps.user_service.app.services.typesense_index_service import (
     delete_contact_background,
     index_companies_background,
     index_contacts_background,
@@ -51,7 +51,7 @@ from libs.shared_utils.common_query import (
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
-router = APIRouter(prefix="/contacts", tags=["Contacts v2"])
+router = APIRouter(prefix="/contacts", tags=["Contacts"])
 
 CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
@@ -83,7 +83,7 @@ async def _create_lifecycle_events_for_created_entities(
             aggregate_id=str(entity_id),
             organization_id=organization_id,
             actor_user_id=actor_user_id,
-            payload={"module": "contacts_v2", "action": entity.get("action") or "create"},
+            payload={"module": "contacts", "action": entity.get("action") or "create"},
             topics=CLIENT_KAFKA_TOPICS,
         )
         if lifecycle_event is not None:
@@ -153,7 +153,7 @@ def _schedule_enrichment(
     status_code=http_status.HTTP_201_CREATED,
     summary="Create a contact",
     description=(
-        "Creates a contact in the v2 split-table model. Depending on the payload, this can also "
+        "Creates a contact in the split-table model. Depending on the payload, this can also "
         "link the contact to an existing company or create a new company by name and associate it."
         "Side effects:"
         "- Emits lifecycle events (Kafka topic: CRM events)"
@@ -190,7 +190,7 @@ async def create_contact(
         ),
     ),
 ):
-    """Create a contact (v2).
+    """Create a contact.
 
     This endpoint is the primary “create” entry-point for contacts in the split-table model.
     It can optionally create/link a company association in the same request.
@@ -231,7 +231,7 @@ async def create_contact(
             "user_email": user_context.email,
             "organization_id": user_context.organization_id,
         }
-        service = ContactsServiceV2(
+        service = ContactsService(
             db_connection=db_connection,
             user_context=user_context,
             supabase_client=sb_client,
@@ -312,7 +312,7 @@ async def list_contacts(
         description="Number of items per page (max 100).",
     ),
 ):
-    """List contacts from PostgreSQL with pagination (v2).
+    """List contacts from PostgreSQL with pagination.
 
     Args:
         request: FastAPI request.
@@ -331,7 +331,7 @@ async def list_contacts(
         db_connection=db_connection,
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
-    service = ContactsServiceV2(db_connection=db_connection, user_context=user_context)
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
     result = await service.list_contacts(
         search=search,
         status=status.value if status else None,
@@ -403,7 +403,7 @@ async def search_contacts(
         description="Number of hits per page (max 100).",
     ),
 ):
-    """Search contacts using Typesense (v2).
+    """Search contacts using Typesense.
 
     Args:
         request: FastAPI request.
@@ -425,7 +425,7 @@ async def search_contacts(
         db_connection=db_connection,
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
-    service = ContactsServiceV2(db_connection=db_connection, user_context=user_context)
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
     result = await service.search_contacts(
         query=query,
         page=page,
@@ -461,7 +461,7 @@ async def search_contacts(
 @router.get(
     "/{contact_id}",
     summary="Get contact details",
-    description="Returns a single contact, including linked companies and addresses (v2).",
+    description="Returns a single contact, including linked companies and addresses.",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
@@ -474,7 +474,7 @@ async def get_contact_details(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Get a single contact including addresses and linked companies (v2).
+    """Get a single contact including addresses and linked companies.
 
     Args:
         request: FastAPI request.
@@ -490,7 +490,7 @@ async def get_contact_details(
         db_connection=db_connection,
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
-    service = ContactsServiceV2(db_connection=db_connection, user_context=user_context)
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
     details = await service.get_contact_details(contact_id=contact_id)
     details = ContactDetailsResponse.model_validate(details).model_dump(exclude_none=True)
     return success_response(
@@ -543,7 +543,7 @@ async def update_contact(
         description="Partial update payload. Only provided fields are updated.",
     ),
 ):
-    """Update a contact (fields + addresses + optional company association change) (v2).
+    """Update a contact (fields + addresses + optional company association change).
 
     Args:
         request: FastAPI request (used for audit log context).
@@ -569,7 +569,7 @@ async def update_contact(
             db_connection=db_connection,
             permission_codes=CLIENTS_MANAGEMENT_EDIT,
         )
-        service = ContactsServiceV2(db_connection=db_connection, user_context=user_context)
+        service = ContactsService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
         request.state.audit_table = "contacts"
         request.state.audit_requested_id = contact_id
@@ -589,7 +589,7 @@ async def update_contact(
             aggregate_id=contact_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-            payload={"module": "contacts_v2", "action": "update", "changed_fields": changed_fields},
+            payload={"module": "contacts", "action": "update", "changed_fields": changed_fields},
             topics=CLIENT_KAFKA_TOPICS,
         )
 
@@ -612,7 +612,7 @@ async def update_contact(
                     "organization_id": org_id,
                     "actor_user_id": actor,
                     "payload": {
-                        "module": "contacts_v2",
+                        "module": "contacts",
                         "action": (
                             "company_created_with_contact"
                             if created_cid_s is not None and cid_s == created_cid_s
@@ -631,7 +631,7 @@ async def update_contact(
                 (event_payload, event_payload["aggregate_id"]) for event_payload in company_events
             )
 
-    ContactsServiceV2.schedule_contact_update_background_tasks(
+    ContactsService.schedule_contact_update_background_tasks(
         background_tasks=background_tasks,
         contact_id=contact_id,
         organization_id=user_context.organization_id,
@@ -657,7 +657,7 @@ async def update_contact(
     summary="Trigger contact enrichment",
     description=(
         "Triggers enrichment for a contact using the latest persisted data. "
-        "This mirrors the legacy client enrichment trigger flow but is scoped to v2 contacts."
+        "This mirrors the legacy client enrichment trigger flow but is scoped to contacts."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -676,7 +676,7 @@ async def enrich_contact(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Trigger enrichment for a v2 contact (best-effort async).
+    """Trigger enrichment for a contact (best-effort async).
 
     Args:
         request: FastAPI request (audit context).
@@ -703,7 +703,7 @@ async def enrich_contact(
         "organization_id": user_context.organization_id,
     }
     background_tasks.add_task(
-        ContactsServiceV2.trigger_enrichment_background,
+        ContactsService.trigger_enrichment_background,
         contact_id,
         user_context.organization_id,
     )
@@ -751,7 +751,7 @@ async def delete_contact(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Soft-delete a contact (v2).
+    """Soft-delete a contact.
 
     Args:
         request: FastAPI request (used for audit log context).
@@ -774,7 +774,7 @@ async def delete_contact(
             db_connection=db_connection,
             permission_codes=CLIENTS_MANAGEMENT_DELETE,
         )
-        service = ContactsServiceV2(db_connection=db_connection, user_context=user_context)
+        service = ContactsService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
         request.state.audit_table = "contacts"
         request.state.audit_requested_id = contact_id
@@ -793,7 +793,7 @@ async def delete_contact(
             aggregate_id=contact_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-            payload={"module": "contacts_v2", "action": "delete"},
+            payload={"module": "contacts", "action": "delete"},
             topics=CLIENT_KAFKA_TOPICS,
         )
 

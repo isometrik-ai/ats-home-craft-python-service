@@ -1,4 +1,4 @@
-"""Companies v2 schemas.
+"""Companies schemas.
 
 These DTOs match the split schema:
 - `companies` is the company record
@@ -22,7 +22,7 @@ from apps.user_service.app.schemas.clients import (
     Website,
     WebsitesUpdate,
 )
-from apps.user_service.app.schemas.contacts_v2 import CreateContactRequest
+from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import ClientStatus
 
 
@@ -110,7 +110,7 @@ class CompanyContactAssociationCreate(BaseModel):
 
     contact: CreateContactRequest = Field(
         ...,
-        description="New contact payload (same shape as POST /contacts v2).",
+        description="New contact payload (same shape as POST /contacts).",
     )
     is_primary: bool = Field(
         default=False,

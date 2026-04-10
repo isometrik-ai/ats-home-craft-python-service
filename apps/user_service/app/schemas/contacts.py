@@ -1,4 +1,4 @@
-"""Contacts v2 schemas.
+"""Contacts schemas.
 
 These DTOs match the split schema:
 - `contacts` is the person record (auth identity + person fields)

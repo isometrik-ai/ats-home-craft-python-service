@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class TypesensePhoneEntry(BaseModel):
-    """Stored phone item for Typesense contact docs (v2)."""
+    """Stored phone item for Typesense contact docs."""
 
     model_config = ConfigDict(extra="ignore", strict=True)
 
@@ -201,10 +201,10 @@ class TypesenseClientDocument(BaseModel):
     )
 
 
-class TypesenseContactDocumentV2(BaseModel):
-    """Document shape for *contact/person* docs indexed by v2 services.
+class TypesenseContactDocument(BaseModel):
+    """Document shape for *contact/person* docs indexed by contacts services.
 
-    This is intentionally narrower than `TypesenseClientDocument` so v2 contact
+    This is intentionally narrower than `TypesenseClientDocument` so contact
     indexing stays clean and avoids accidentally coupling to company-only fields.
     """
 
@@ -236,8 +236,8 @@ class TypesenseContactDocumentV2(BaseModel):
     profile_photo_url: str | None = None
 
 
-class TypesenseCompanyDocumentV2(BaseModel):
-    """Document shape for *company* docs indexed by v2 services."""
+class TypesenseCompanyDocument(BaseModel):
+    """Document shape for *company* docs indexed by companies services."""
 
     model_config = ConfigDict(extra="ignore", strict=True)
 

@@ -1,4 +1,4 @@
-"""Typesense indexing helpers for split Contacts/Companies (v2).
+"""Typesense indexing helpers for split Contacts/Companies.
 
 This module mirrors the v1 behavior (best-effort, background-safe, low round-trips),
 but reads from the split tables:
@@ -20,11 +20,8 @@ from apps.user_service.app.db.repositories import (
     CompaniesRepository,
     ContactsRepository,
 )
+from apps.user_service.app.schemas import typesense as typesense_schemas
 from apps.user_service.app.schemas.enums import EntityType
-from apps.user_service.app.schemas.typesense import (
-    TypesenseCompanyDocumentV2,
-    TypesenseContactDocumentV2,
-)
 from apps.user_service.app.search.client_typesense_schema import (
     build_document_from_schema,
 )
@@ -40,7 +37,7 @@ from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.typesense_service import TypesenseService
 
-logger = get_logger("typesense_index_service_v2")
+logger = get_logger("typesense_index_service")
 
 
 def _dedupe_string_list_fields(document: dict[str, Any]) -> None:
@@ -318,9 +315,9 @@ async def _build_contact_document(
         "profile_photo_url": details.get("profile_photo_url") or "",
     }
     _dedupe_string_list_fields(document)
-    validated_document = TypesenseContactDocumentV2.model_validate(document).model_dump(
-        exclude_none=True
-    )
+    validated_document = typesense_schemas.TypesenseContactDocument.model_validate(
+        document
+    ).model_dump(exclude_none=True)
     return build_document_from_schema(
         schema=CONTACTS_COLLECTION_SCHEMA,
         raw_document=validated_document,
@@ -383,9 +380,9 @@ async def _build_company_document(
         "profile_photo_url": details.get("profile_photo_url") or "",
     }
     _dedupe_string_list_fields(document)
-    validated_document = TypesenseCompanyDocumentV2.model_validate(document).model_dump(
-        exclude_none=True
-    )
+    validated_document = typesense_schemas.TypesenseCompanyDocument.model_validate(
+        document
+    ).model_dump(exclude_none=True)
     return build_document_from_schema(
         schema=COMPANIES_COLLECTION_SCHEMA,
         raw_document=validated_document,

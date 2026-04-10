@@ -1,4 +1,4 @@
-"""Contacts v2 service.
+"""Contacts service.
 
 Implements the operations defined in ADR `clients_operations.md` against:
 - `contacts`
@@ -10,7 +10,7 @@ Implements the operations defined in ADR `clients_operations.md` against:
 Design goals:
 - Keep DB round-trips low by doing association changes in single transactions.
 - Reuse existing custom-field merge/resolve behavior (same CustomFieldService).
-- Keep enrichment and Typesense behavior consistent, but targeted to v2 tables/collections.
+- Keep enrichment and Typesense behavior consistent, but targeted to split tables/collections.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
-from apps.user_service.app.schemas.contacts_v2 import (
+from apps.user_service.app.schemas.contacts import (
     ContactCompaniesUpdate,
     ContactSummaryResponse,
     CreateContactRequest,
@@ -53,7 +53,7 @@ from apps.user_service.app.services.client_enrichment_service import (
 )
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.event_service import EventService
-from apps.user_service.app.services.typesense_index_service_v2 import (
+from apps.user_service.app.services.typesense_index_service import (
     index_companies_background,
     index_contacts_background,
 )
@@ -81,11 +81,11 @@ from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.typesense_service import TypesenseService
 
-logger = get_logger("contacts_service_v2")
+logger = get_logger("contacts_service")
 
 
-class ContactsServiceV2:
-    """Business logic for v2 contacts."""
+class ContactsService:
+    """Business logic for contacts."""
 
     def __init__(
         self,
@@ -565,7 +565,7 @@ class ContactsServiceV2:
         """Generic helper to apply JSONB list operations: add, update, and/or remove.
 
         This mirrors `ClientService._apply_jsonb_list_changes` behavior so JSON list
-        fields behave identically across v1 and v2.
+        fields behave identically across table models.
         """
         current_list = parse_json_field(current.get(field_name)) or []
         if not isinstance(current_list, list):
@@ -883,7 +883,7 @@ class ContactsServiceV2:
         organization_id: str,
         conn: asyncpg.Connection | None = None,
     ) -> None:
-        """Trigger enrichment for an existing v2 contact using current persisted data.
+        """Trigger enrichment for an existing contact using current persisted data.
 
         Mirrors `ClientService.trigger_enrichment`: rebuilds the minimal enrichment payload
         from latest contact details and calls `ClientEnrichmentService.run_client_enrichment`.
@@ -937,7 +937,7 @@ class ContactsServiceV2:
         pool = await get_pool()
         async with AcquireConnection(pool) as conn:
             # A minimal user_context is sufficient for get_contact_details scoping.
-            service = ContactsServiceV2(
+            service = ContactsService(
                 db_connection=conn,
                 user_context=UserContext(
                     user_id="system",
@@ -1014,7 +1014,7 @@ class ContactsServiceV2:
         )
         if enrichment_inputs_changed:
             background_tasks.add_task(
-                ContactsServiceV2.trigger_enrichment_background,
+                ContactsService.trigger_enrichment_background,
                 contact_id,
                 organization_id,
             )
