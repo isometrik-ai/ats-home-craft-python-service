@@ -344,6 +344,82 @@ class ContactCompaniesRepository:
         )
         return str(created_id) if created_id else None
 
+    async def apply_contacts_update_delta(
+        self,
+        *,
+        organization_id: str,
+        company_id: str,
+        remove_contact_ids: list[str],
+        add_contact_ids: list[str],
+        set_primary_contact_id: str | None,
+        unset_primary_contact_ids: list[str],
+    ) -> None:
+        """Apply batch add/remove + primary changes for one company in a single round trip.
+
+        Mirrors ``apply_companies_update_delta`` with company/contact roles swapped.
+
+        - Unsets primary when the company's current primary is listed in ``unset_primary_contact_ids``.
+        - Removes memberships; clears ``companies.primary_contact_id`` when it points at a removed contact.
+        - Adds memberships (deduped).
+        - Sets ``primary_contact_id`` to ``set_primary_contact_id`` when not null (caller ensures membership).
+        """
+        remove_ids = remove_contact_ids or []
+        add_ids = add_contact_ids or []
+        unset_ids = unset_primary_contact_ids or []
+
+        await self.db_connection.execute(
+            """
+            WITH unset_primary AS (
+              UPDATE companies
+              SET primary_contact_id = NULL,
+                  updated_at = NOW()
+              WHERE organization_id = $1::uuid
+                AND id = $2::uuid
+                AND primary_contact_id = ANY($6::uuid[])
+              RETURNING id
+            ),
+            removed AS (
+              DELETE FROM contact_companies
+              WHERE organization_id = $1::uuid
+                AND company_id = $2::uuid
+                AND contact_id = ANY($3::uuid[])
+              RETURNING contact_id
+            ),
+            cleared AS (
+              UPDATE companies
+              SET primary_contact_id = NULL,
+                  updated_at = NOW()
+              WHERE organization_id = $1::uuid
+                AND id = $2::uuid
+                AND primary_contact_id = ANY($3::uuid[])
+              RETURNING id
+            ),
+            added AS (
+              INSERT INTO contact_companies (organization_id, contact_id, company_id)
+              SELECT $1::uuid, cid, $2::uuid
+              FROM unnest($4::uuid[]) AS t(cid)
+              ON CONFLICT (contact_id, company_id) DO NOTHING
+              RETURNING 1
+            ),
+            primary_set AS (
+              UPDATE companies
+              SET primary_contact_id = $5::uuid,
+                  updated_at = NOW()
+              WHERE organization_id = $1::uuid
+                AND id = $2::uuid
+                AND $5::uuid IS NOT NULL
+              RETURNING 1
+            )
+            SELECT 1
+            """,
+            organization_id,
+            company_id,
+            remove_ids,
+            add_ids,
+            set_primary_contact_id,
+            unset_ids,
+        )
+
     async def is_contact_member_of_company(
         self,
         *,

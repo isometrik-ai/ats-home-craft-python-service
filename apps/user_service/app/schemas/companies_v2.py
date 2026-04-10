@@ -90,8 +90,114 @@ class CreateCompanyRequest(BaseModel):
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
 
 
+class CompanyContactAssociationAdd(BaseModel):
+    """Add an existing contact membership for a company."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: str = Field(..., description="Existing contact id to link")
+    is_primary: bool = Field(
+        default=False,
+        description="If true, set this contact as the company's primary contact.",
+    )
+
+
+class CompanyContactAssociationCreate(BaseModel):
+    """Create exactly one new contact and link it to the company."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact: CreateContactRequest = Field(..., description="New contact payload (same shape as POST /contacts v2)")
+    is_primary: bool = Field(
+        default=False,
+        description="If true, set the new contact as the company's primary contact.",
+    )
+
+
+class CompanyContactAssociationUpdate(BaseModel):
+    """Update primary status for a contact on this company (membership unchanged)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: str = Field(..., description="Contact id to update relationship for")
+    is_primary: bool = Field(
+        ...,
+        description=(
+            "If true, set this contact as the company's primary contact. "
+            "If false, clear primary when this contact is currently primary (keeps membership)."
+        ),
+    )
+
+
+class CompanyContactsUpdate(BaseModel):
+    """Batch contact association changes for a company (mirrors `ContactCompaniesUpdate` on PATCH /contacts).
+
+    In one request:
+    - remove membership for N contacts
+    - add membership for N existing contacts (optional primary per contact; only one may be primary)
+    - update primary flag per contact without unlinking
+    - create exactly one new contact and link (optional primary)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    remove_associations: list[str] = Field(
+        default_factory=list,
+        description="Contact ids to unlink from the company",
+    )
+    add_associations: list[CompanyContactAssociationAdd] = Field(
+        default_factory=list,
+        description="Associate existing contacts with this company (by id)",
+    )
+    update_associations: list[CompanyContactAssociationUpdate] = Field(
+        default_factory=list,
+        description="Update primary status per contact without unlinking",
+    )
+    create_and_associate: CompanyContactAssociationCreate | None = Field(
+        default=None,
+        description="Create exactly one new contact and associate it to the company",
+    )
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "CompanyContactsUpdate":
+        remove_ids = [
+            c.strip() for c in (self.remove_associations or []) if (c or "").strip()
+        ]
+        self.remove_associations = remove_ids
+
+        normalized_add: list[CompanyContactAssociationAdd] = []
+        for item in self.add_associations or []:
+            cid = (item.contact_id or "").strip()
+            if not cid:
+                raise ValueError("add_associations.contact_id is required.")
+            normalized_add.append(
+                CompanyContactAssociationAdd(contact_id=cid, is_primary=bool(item.is_primary))
+            )
+        self.add_associations = normalized_add
+
+        normalized_update: list[CompanyContactAssociationUpdate] = []
+        for item in self.update_associations or []:
+            cid = (item.contact_id or "").strip()
+            if not cid:
+                raise ValueError("update_associations.contact_id is required.")
+            normalized_update.append(
+                CompanyContactAssociationUpdate(contact_id=cid, is_primary=bool(item.is_primary))
+            )
+        self.update_associations = normalized_update
+
+        if (
+            not self.remove_associations
+            and not self.add_associations
+            and not self.update_associations
+            and self.create_and_associate is None
+        ):
+            raise ValueError("Provide at least one operation in contacts_update.")
+
+        return self
+
+
 class UpdateCompanyRequest(BaseModel):
-    """Patch a company (companies table) and/or manage primary contact."""
+    """Patch a company (companies table) and/or manage contact associations."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -116,40 +222,21 @@ class UpdateCompanyRequest(BaseModel):
     custom_fields: list[dict[str, Any]] | None = None
     additional_data: dict[str, Any] | None = None
 
-    # optional primary-contact change (ADR section 4)
-    primary_contact: CompanyPrimaryContactChange | None = None
+    contacts_update: CompanyContactsUpdate | None = None
 
 
-class CompanyPrimaryContactChange(BaseModel):
-    """Update company.primary_contact_id per ADR."""
+class CompanySummaryContactItem(BaseModel):
+    """Basic contact row on company list (members via contact_companies)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
-    # set to an existing contact (must already be member)
-    contact_id: str | None = None
-
-    # create a new contact and set as primary
-    contact: CreateContactRequest | None = Field(
-        default=None
-    )
-
-    # unset primary
-    unset: bool = False
-
-    @model_validator(mode="after")
-    def validate_primary_change(self) -> "CompanyPrimaryContactChange":
-        supplied = sum(
-            1
-            for v in (
-                bool(self.contact_id),
-                bool(self.contact),
-                bool(self.unset),
-            )
-            if v
-        )
-        if supplied != 1:
-            raise ValueError("Provide exactly one of contact_id, contact, or unset=true.")
-        return self
+    id: str
+    first_name: str | None = None
+    last_name: str | None = None
+    title: str | None = None
+    email: str | None = None
+    phones: list[dict[str, Any]] = Field(default_factory=list)
+    is_primary: bool = False
 
 
 class CompanySummaryResponse(BaseModel):
@@ -163,9 +250,10 @@ class CompanySummaryResponse(BaseModel):
     name: str
     industry: str | None = None
     profile_photo_url: str | None = None
-    primary_contact_id: str | None = None
-    primary_contact_name: str | None = None
-    primary_contact_email: str | None = None
+    contacts: list[CompanySummaryContactItem] = Field(
+        default_factory=list,
+        description="Contacts linked to this company (basic fields)",
+    )
     created_at: str
     updated_at: str
 
@@ -184,10 +272,9 @@ class CompanyDetailsResponse(BaseModel):
     portal_access: bool = False
 
     primary_contact_id: str | None = None
-    primary_contact: dict[str, Any] | None = None
-    contacts: list[dict[str, Any]] = Field(
+    contacts: list[CompanySummaryContactItem] = Field(
         default_factory=list,
-        description="All contacts in company"
+        description="Contacts linked to this company (same shape as list endpoint)",
     )
 
     tags: list[str] = Field(default_factory=list)

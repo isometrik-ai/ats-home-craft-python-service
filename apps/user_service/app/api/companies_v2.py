@@ -6,6 +6,8 @@ Resource-specific endpoints targeting the split tables (`companies`, `contacts`,
 """
 
 import asyncpg
+from typing import Any
+
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 from supabase import AsyncClient
@@ -61,10 +63,10 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     summary="Create a company",
     description=(
         "Creates a company in the v2 split-table model. Depending on the payload, this can also "
-        "link a contact (existing or created inline) and optionally set it as primary.\n\n"
-        "Side effects:\n"
-        "- Emits lifecycle events (Kafka topic: CRM events)\n"
-        "- Schedules Typesense indexing for the company (and for a contact if one was created inline)\n"
+        "link a contact (existing or created inline) and optionally set it as primary."
+        "Side effects:"
+        "- Emits lifecycle events (Kafka topic: CRM events)"
+        "- Schedules Typesense indexing for the company"
         "- Schedules enrichment for the created/affected entities (if configured)"
     ),
     responses=COMMON_ERROR_RESPONSES,
@@ -207,7 +209,12 @@ async def list_companies(
         page=page,
         page_size=page_size,
     )
-    items = [CompanySummaryResponse.model_validate(r).model_dump(exclude_none=True) for r in result["items"]]
+    items = [
+        CompanySummaryResponse.model_validate(r).model_dump(
+            exclude_none=True,
+            mode="json",
+        ) for r in result["items"]
+    ]
     total = int(result["total"])
     if not items:
         return list_response(
@@ -256,14 +263,20 @@ async def search_companies(
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
     service = CompaniesServiceV2(db_connection=db_connection, user_context=user_context)
-    raw = await service.search_companies(
+    result = await service.search_companies(
         query=query,
         page=page,
         page_size=page_size,
         status=status.value if status else None,
     )
-    items = raw["hits"]
-    total = raw["total"]
+    items = [
+        CompanySummaryResponse.model_validate(r).model_dump(
+            exclude_none=True,
+            mode="json",
+        )
+        for r in result["items"]
+    ]
+    total = result["total"]
     if not items:
         return list_response(
             request=request,
@@ -301,7 +314,7 @@ async def get_company_details(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Get company details including primary contact, member contacts and addresses (v2)."""
+    """Get company details including linked contacts (same shape as list) and addresses (v2)."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -326,9 +339,11 @@ async def get_company_details(
     summary="Update a company",
     description=(
         "Updates company fields and related nested data (e.g., addresses). "
+        "May also apply contact association changes when `contacts_update` is provided "
+        "(same batch shape as `companies_update` on PATCH /contacts v2). "
         "Side effects:\n"
-        "- Emits an UPDATED lifecycle event\n"
-        "- Schedules Typesense re-indexing for the company"
+        "- Emits lifecycle events for the company and each contact touched by `contacts_update`\n"
+        "- Schedules Typesense re-indexing for the company and those contacts"
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -350,6 +365,7 @@ async def update_company(
 ):
     """Patch company fields (v2)."""
     update_event: dict | None = None
+    related_lifecycle_events: list[tuple[dict[str, Any], str]] = []
     async with db_connection.transaction():
         user_context = await check_permissions(
             current_user=current_user,
@@ -376,18 +392,60 @@ async def update_company(
             aggregate_id=company_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-            payload={"module": "companies_v2", "action": "update", "changed_fields": changed_fields},
+            payload={
+                "module": "companies_v2",
+                "action": "update",
+                "changed_fields": changed_fields,
+            },
             topics=CLIENT_KAFKA_TOPICS,
         )
+
+        contacts_delta = (result.get("contacts_delta") or {}) if isinstance(result, dict) else {}
+        raw_affected = contacts_delta.get("affected_contact_ids") or []
+        affected_contact_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
+        created_cid = contacts_delta.get("created_contact_id")
+        created_cid_s = str(created_cid) if created_cid else None
+        if affected_contact_ids:
+            actor = str(user_context.user_id) if user_context.user_id else None
+            org_id = user_context.organization_id
+            contact_event_items = [
+                {
+                    "event_type": (
+                        ClientEventType.CREATED.value
+                        if created_cid_s is not None and cid_s == created_cid_s
+                        else ClientEventType.UPDATED.value
+                    ),
+                    "aggregate_id": cid_s,
+                    "organization_id": org_id,
+                    "actor_user_id": actor,
+                    "payload": {
+                        "module": "companies_v2",
+                        "action": (
+                            "contact_created_with_company"
+                            if created_cid_s is not None and cid_s == created_cid_s
+                            else "contact_association_changed"
+                        ),
+                        "company_id": company_id,
+                    },
+                }
+                for cid_s in affected_contact_ids
+            ]
+            contact_events = await event_service.create_lifecycle_events(
+                items=contact_event_items,
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            related_lifecycle_events.extend((ev, ev["aggregate_id"]) for ev in contact_events)
 
     CompaniesServiceV2.schedule_company_update_background_tasks(
         background_tasks=background_tasks,
         company_id=company_id,
         organization_id=user_context.organization_id,
         body=body,
+        update_result=result if isinstance(result, dict) else None,
         update_event=update_event,
         event_key=company_id,
         event_topics=CLIENT_KAFKA_TOPICS,
+        related_lifecycle_events=related_lifecycle_events,
     )
     return success_response(
         request=request,
@@ -467,4 +525,3 @@ async def delete_company(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
-

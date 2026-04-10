@@ -211,6 +211,26 @@ class ContactsRepository(BaseRepository):
             "contact": dict(contact_row) if isinstance(contact_row, dict) else contact_row,
         }
 
+    async def filter_contact_ids_in_organization(
+        self, *, organization_id: str, contact_ids: list[str]
+    ) -> set[str]:
+        """Return the subset of contact ids that exist and are not deleted in the organization."""
+        if not contact_ids:
+            return set()
+        rows = await self.db_connection.fetch(
+            """
+            SELECT id::text AS id
+            FROM contacts
+            WHERE organization_id = $1::uuid
+              AND id = ANY($2::uuid[])
+              AND status <> $3
+            """,
+            organization_id,
+            contact_ids,
+            ClientStatus.DELETED.value,
+        )
+        return {str(r["id"]) for r in rows}
+
     async def get_contact_for_update(self, *, contact_id: str, organization_id: str) -> dict | None:
         """Get a contact for update."""
         row = await self.db_connection.fetchrow(

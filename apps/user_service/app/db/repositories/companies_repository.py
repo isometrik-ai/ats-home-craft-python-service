@@ -9,8 +9,6 @@ import asyncpg
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.enums import ClientStatus
-from libs.shared_utils.http_exceptions import NotFoundException
-from libs.shared_utils.status_codes import CustomStatusCode
 
 COMPANY_JSONB_COLUMNS: frozenset[str] = frozenset(
     {
@@ -360,25 +358,6 @@ class CompaniesRepository(BaseRepository):
             touch_updated_at=True,
         )
 
-    async def soft_delete_company(self, *, company_id: str, organization_id: str) -> dict[str, Any]:
-        row = await self.db_connection.fetchrow(
-            """
-            UPDATE companies
-            SET status = $3, updated_at = NOW()
-            WHERE id = $1::uuid AND organization_id = $2::uuid AND status != $3
-            RETURNING *
-            """,
-            company_id,
-            organization_id,
-            ClientStatus.DELETED.value,
-        )
-        if not row:
-            raise NotFoundException(
-                message_key="clients.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        return dict(row)
-
     async def create_company_addresses(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         required = ["company_id"]
         optional = [
@@ -448,31 +427,14 @@ class CompaniesRepository(BaseRepository):
         company_id: str,
         organization_id: str,
     ) -> dict[str, Any] | None:
-        """Get a company + primary contact + member contacts + addresses in one round trip."""
+        """Get a company + member contacts (same shape as list) + addresses in one round trip."""
         row = await self.db_connection.fetchrow(
             """
             SELECT
               co.*,
-              COALESCE(primary_contact.primary_contact, NULL) AS primary_contact,
               COALESCE(contacts.contacts, '[]'::jsonb) AS contacts,
               COALESCE(addresses.addresses, '[]'::jsonb) AS addresses
             FROM companies co
-            LEFT JOIN LATERAL (
-              SELECT jsonb_build_object(
-                'id',         ct.id::text,
-                'first_name', ct.first_name,
-                'last_name',  ct.last_name,
-                'title',      ct.title,
-                'email',      NULLIF(au.email::text, ''),
-                'phones',     ct.phones
-              ) AS primary_contact
-              FROM contacts ct
-              LEFT JOIN auth.users au
-                ON au.id = ct.user_id
-              WHERE ct.id = co.primary_contact_id
-                AND ct.organization_id = co.organization_id
-                AND ct.status != 'deleted'
-            ) primary_contact ON TRUE
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
                 jsonb_build_object(
@@ -481,10 +443,13 @@ class CompaniesRepository(BaseRepository):
                   'last_name',  ct.last_name,
                   'title',      ct.title,
                   'email',      NULLIF(au.email::text, ''),
-                  'phones',     ct.phones,
-                  'is_primary', (co.primary_contact_id = ct.id)
+                  'phones',     COALESCE(ct.phones, '[]'::jsonb),
+                  'is_primary', (co.primary_contact_id IS NOT NULL
+                                 AND co.primary_contact_id = ct.id)
                 )
-                ORDER BY ct.created_at ASC
+                ORDER BY (co.primary_contact_id IS NOT NULL
+                          AND co.primary_contact_id = ct.id) DESC,
+                         ct.created_at ASC
               ) FILTER (WHERE ct.id IS NOT NULL) AS contacts
               FROM contact_companies cc
               INNER JOIN contacts ct
@@ -519,12 +484,6 @@ class CompaniesRepository(BaseRepository):
                     result[key] = json.loads(val)
                 except Exception:
                     result[key] = []
-        # primary_contact can be jsonb or already a dict
-        if isinstance(result.get("primary_contact"), str):
-            try:
-                result["primary_contact"] = json.loads(result["primary_contact"])
-            except Exception:
-                result["primary_contact"] = None
         return result
 
     async def list_companies(
@@ -539,19 +498,19 @@ class CompaniesRepository(BaseRepository):
         """List companies with pagination and optional search by name."""
         offset = (page - 1) * page_size
         args: list[Any] = [organization_id, ClientStatus.DELETED.value]
-        where = ["organization_id = $1::uuid", "status != $2"]
+        where = ["co.organization_id = $1::uuid", "co.status != $2"]
         idx = 3
         if status:
-            where.append(f"status = ${idx}")
+            where.append(f"co.status = ${idx}")
             args.append(status)
             idx += 1
         if search:
-            where.append(f"COALESCE(name,'') ILIKE ${idx}")
+            where.append(f"COALESCE(co.name,'') ILIKE ${idx}")
             args.append(f"%{search.strip()}%")
             idx += 1
         where_sql = " AND ".join(where)
         total = await self.db_connection.fetchval(
-            f"SELECT COUNT(1) FROM companies WHERE {where_sql}",
+            f"SELECT COUNT(1) FROM companies co WHERE {where_sql}",
             *args,
         )
         rows = await self.db_connection.fetch(
@@ -563,18 +522,36 @@ class CompaniesRepository(BaseRepository):
               co.name,
               co.industry,
               co.profile_photo_url,
-              co.primary_contact_id::text AS primary_contact_id,
-              (ct.first_name || ' ' || ct.last_name) AS primary_contact_name,
-              NULLIF(au.email::text, '') AS primary_contact_email,
+              COALESCE(member_contacts.contacts, '[]'::jsonb) AS contacts,
               co.created_at,
               co.updated_at
             FROM companies co
-            LEFT JOIN contacts ct
-              ON ct.id = co.primary_contact_id
-             AND ct.organization_id = co.organization_id
-             AND ct.status != 'deleted'
-            LEFT JOIN auth.users au
-              ON au.id = ct.user_id
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'id',         ct.id::text,
+                  'first_name', ct.first_name,
+                  'last_name',  ct.last_name,
+                  'title',      ct.title,
+                  'email',      NULLIF(au.email::text, ''),
+                  'phones',     COALESCE(ct.phones, '[]'::jsonb),
+                  'is_primary', (co.primary_contact_id IS NOT NULL
+                                 AND co.primary_contact_id = ct.id)
+                )
+                ORDER BY (co.primary_contact_id IS NOT NULL
+                          AND co.primary_contact_id = ct.id) DESC,
+                         ct.created_at ASC
+              ) FILTER (WHERE ct.id IS NOT NULL) AS contacts
+              FROM contact_companies cc
+              INNER JOIN contacts ct
+                ON ct.id = cc.contact_id
+               AND ct.organization_id = co.organization_id
+               AND ct.status != 'deleted'
+              LEFT JOIN auth.users au
+                ON au.id = ct.user_id
+              WHERE cc.organization_id = co.organization_id
+                AND cc.company_id = co.id
+            ) member_contacts ON TRUE
             WHERE {where_sql}
             ORDER BY co.created_at DESC
             OFFSET ${idx} LIMIT ${idx + 1}
@@ -582,4 +559,3 @@ class CompaniesRepository(BaseRepository):
             *(args + [offset, page_size]),
         )
         return [dict(r) for r in rows], int(total or 0)
-

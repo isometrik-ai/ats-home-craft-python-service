@@ -17,6 +17,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 from datetime import datetime, timezone
+from fastapi import BackgroundTasks
 
 import asyncpg
 from supabase import AsyncClient
@@ -41,7 +42,10 @@ from apps.user_service.app.search.contact_typesense_schema import (
     CONTACT_SEARCH_PARAMS,
 )
 from apps.user_service.app.services.custom_field_service import CustomFieldService
-from apps.user_service.app.services.typesense_index_service_v2 import index_contacts_background
+from apps.user_service.app.services.typesense_index_service_v2 import (
+    index_companies_background,
+    index_contacts_background,
+)
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -65,9 +69,8 @@ from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
     get_isometrik_data_from_settings,
 )
-from apps.user_service.app.db.repositories.contacts_repository import CONTACT_JSONB_COLUMNS
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
-from fastapi import BackgroundTasks
+from apps.user_service.app.db.repositories.contacts_repository import CONTACT_JSONB_COLUMNS
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 
@@ -760,18 +763,26 @@ class ContactsServiceV2:
             contact_id=contact_id, addresses=body.addresses,
         )
         created_company_id: str | None = None
+        companies_delta: dict[str, Any] | None = None
         if body.companies_update is not None:
             delta_result = await self.apply_companies_update_delta(
                 contact_id=contact_id,
                 delta=body.companies_update,
             )
             created_company_id = delta_result.get("created_company_id")
-        return {
+            companies_delta = {
+                "affected_company_ids": delta_result.get("affected_company_ids") or [],
+                "created_company_id": created_company_id,
+            }
+        out: dict[str, Any] = {
             "ok": True,
             "old_data": current,
             "new_data": updated_row or current,
             "created_company_id": created_company_id,
         }
+        if companies_delta is not None:
+            out["companies_delta"] = companies_delta
+        return out
 
     async def apply_companies_update_delta(
         self,
@@ -833,7 +844,16 @@ class ContactsServiceV2:
             create_company_name=created_name,
             create_is_primary=created_primary,
         )
-        return {"ok": True, "created_company_id": created_company_id}
+        affected_company_ids: set[str] = set(remove_ids)
+        affected_company_ids.update(c.company_id for c in (delta.add_associations or []))
+        affected_company_ids.update(u.company_id for u in (delta.update_associations or []))
+        if created_company_id:
+            affected_company_ids.add(str(created_company_id))
+        return {
+            "ok": True,
+            "created_company_id": created_company_id,
+            "affected_company_ids": list(affected_company_ids),
+        }
 
     async def trigger_enrichment(
         self,
@@ -921,6 +941,7 @@ class ContactsServiceV2:
         update_event: dict[str, Any] | None,
         event_key: str,
         event_topics: list[Any],
+        related_lifecycle_events: list[tuple[dict[str, Any], str]] | None = None,
     ) -> None:
         """Schedule background tasks after a contact update.
 
@@ -934,10 +955,27 @@ class ContactsServiceV2:
                 topics=event_topics,
             )
 
+        for rel_ev, rel_key in related_lifecycle_events or ():
+            background_tasks.add_task(
+                EventService.publish_event_background,
+                event=rel_ev,
+                key=rel_key,
+                topics=event_topics,
+            )
+
         background_tasks.add_task(
             index_contacts_background,
             [(contact_id, organization_id)],
         )
+
+        if body.companies_update is not None:
+            meta = (update_result or {}).get("companies_delta") or {}
+            affected_companies = meta.get("affected_company_ids") or []
+            if affected_companies:
+                background_tasks.add_task(
+                    index_companies_background,
+                    [(str(cid), organization_id) for cid in affected_companies],
+                )
 
         # Trigger contact enrichment only when enrichment-relevant inputs changed.
         enrichment_input_fields = (

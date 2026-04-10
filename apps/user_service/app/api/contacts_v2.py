@@ -6,6 +6,8 @@ Resource-specific endpoints targeting the split tables (`contacts`, `companies`,
 """
 
 import asyncpg
+from typing import Any
+
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 from supabase import AsyncClient
@@ -443,8 +445,8 @@ async def get_contact_details(
         "Updates contact fields and related nested data (e.g., addresses). "
         "May also apply company association changes when `companies_update` is provided."
         "Side effects:"
-        "- Emits an UPDATED lifecycle event"
-        "- Schedules Typesense re-indexing for the contact"
+        "- Emits lifecycle events for the contact and each company touched by `companies_update`"
+        "- Schedules Typesense re-indexing for the contact and those companies"
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -489,10 +491,12 @@ async def update_contact(
         Success response envelope containing the service result payload.
 
     Side effects:
-        - Emits an UPDATED lifecycle event (best-effort publish via BackgroundTasks).
-        - Schedules Typesense re-indexing for the contact (BackgroundTasks).
+        - Emits lifecycle events for the contact and any companies touched by `companies_update`
+          (best-effort publish via BackgroundTasks).
+        - Schedules Typesense re-indexing for the contact and those companies (BackgroundTasks).
     """
     update_event: dict | None = None
+    related_lifecycle_events: list[tuple[dict[str, Any], str]] = []
     async with db_connection.transaction():
         user_context = await check_permissions(
             current_user=current_user,
@@ -523,6 +527,42 @@ async def update_contact(
             topics=CLIENT_KAFKA_TOPICS,
         )
 
+        companies_delta = (result.get("companies_delta") or {}) if isinstance(result, dict) else {}
+        raw_affected = companies_delta.get("affected_company_ids") or []
+        affected_company_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
+        created_cid = companies_delta.get("created_company_id")
+        created_cid_s = str(created_cid) if created_cid else None
+        if affected_company_ids:
+            actor = str(user_context.user_id) if user_context.user_id else None
+            org_id = user_context.organization_id
+            company_event_items = [
+                {
+                    "event_type": (
+                        ClientEventType.CREATED.value
+                        if created_cid_s is not None and cid_s == created_cid_s
+                        else ClientEventType.UPDATED.value
+                    ),
+                    "aggregate_id": cid_s,
+                    "organization_id": org_id,
+                    "actor_user_id": actor,
+                    "payload": {
+                        "module": "contacts_v2",
+                        "action": (
+                            "company_created_with_contact"
+                            if created_cid_s is not None and cid_s == created_cid_s
+                            else "company_association_changed"
+                        ),
+                        "contact_id": contact_id,
+                    },
+                }
+                for cid_s in affected_company_ids
+            ]
+            company_events = await event_service.create_lifecycle_events(
+                items=company_event_items,
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            related_lifecycle_events.extend((ev, ev["aggregate_id"]) for ev in company_events)
+
     ContactsServiceV2.schedule_contact_update_background_tasks(
         background_tasks=background_tasks,
         contact_id=contact_id,
@@ -532,6 +572,7 @@ async def update_contact(
         update_event=update_event,
         event_key=contact_id,
         event_topics=CLIENT_KAFKA_TOPICS,
+        related_lifecycle_events=related_lifecycle_events,
     )
     return success_response(
         request=request,

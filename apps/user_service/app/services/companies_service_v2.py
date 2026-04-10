@@ -13,7 +13,9 @@ Key rule (service enforced):
 
 from __future__ import annotations
 
+import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
@@ -27,7 +29,7 @@ from apps.user_service.app.db.repositories import (
     ContactsRepository,
 )
 from apps.user_service.app.schemas.companies_v2 import (
-    CompanyPrimaryContactChange,
+    CompanyContactsUpdate,
     CreateCompanyRequest,
     UpdateCompanyRequest,
 )
@@ -42,9 +44,13 @@ from apps.user_service.app.services.custom_field_service import CustomFieldServi
 from apps.user_service.app.services.client_enrichment_service import ClientEnrichmentService
 from apps.user_service.app.services.contacts_service_v2 import ContactsServiceV2
 from apps.user_service.app.services.event_service import EventService
-from apps.user_service.app.services.typesense_index_service_v2 import index_companies_background
+from apps.user_service.app.services.typesense_index_service_v2 import (
+    index_companies_background,
+    index_contacts_background,
+)
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    coerce_json_list,
     format_iso_datetime,
     parse_json_field,
     serialize_jsonb_param,
@@ -61,6 +67,70 @@ from libs.shared_utils.typesense_service import TypesenseService
 
 
 logger = get_logger("companies_service_v2")
+
+_COMPANY_DETAIL_UUID_KEYS = (
+    "id",
+    "organization_id",
+    "primary_contact_id",
+    "enrichment_request_id",
+)
+_COMPANY_DETAIL_JSON_LIST_KEYS = (
+    "tags",
+    "websites",
+    "social_pages",
+    "custom_fields",
+    "target_market_segments",
+    "current_tech_stack",
+    "preferred_communication_channels",
+    "industry_specific_terminologies",
+    "contacts",
+    "addresses",
+)
+
+
+def _stringify_company_detail_uuids(details: dict[str, Any]) -> None:
+    for key in _COMPANY_DETAIL_UUID_KEYS:
+        val = details.get(key)
+        if val is not None and not isinstance(val, str):
+            details[key] = str(val)
+
+
+def _coerce_company_detail_json_lists(details: dict[str, Any]) -> None:
+    for key in _COMPANY_DETAIL_JSON_LIST_KEYS:
+        details[key] = coerce_json_list(details.get(key))
+
+
+def _normalize_company_billing_preferences(details: dict[str, Any]) -> None:
+    bp = details.get("billing_preferences")
+    if isinstance(bp, str):
+        parsed_bp = parse_json_field(bp)
+        details["billing_preferences"] = parsed_bp if isinstance(parsed_bp, dict) else {}
+    elif bp is None:
+        details["billing_preferences"] = None
+
+
+def _normalize_company_additional_data(details: dict[str, Any]) -> None:
+    ad = details.get("additional_data")
+    if isinstance(ad, str):
+        details["additional_data"] = parse_json_field(ad) or {}
+    elif ad is None:
+        details["additional_data"] = {}
+
+
+def _normalize_company_detail_contacts(details: dict[str, Any]) -> None:
+    for contact in details.get("contacts") or []:
+        if not isinstance(contact, dict):
+            continue
+        cid = contact.get("id")
+        if cid is not None and not isinstance(cid, str):
+            contact["id"] = str(cid)
+        contact["phones"] = coerce_json_list(contact.get("phones"))
+
+
+def _normalize_company_detail_timestamps(details: dict[str, Any]) -> None:
+    details["created_at"] = format_iso_datetime(details.get("created_at")) or ""
+    details["updated_at"] = format_iso_datetime(details.get("updated_at")) or ""
+    details["last_enriched_at"] = format_iso_datetime(details.get("last_enriched_at"))
 
 
 class CompaniesServiceV2:
@@ -96,9 +166,11 @@ class CompaniesServiceV2:
         company_id: str,
         organization_id: str,
         body: UpdateCompanyRequest,
+        update_result: dict[str, Any] | None,
         update_event: dict[str, Any] | None,
         event_key: str,
         event_topics: list[Any],
+        related_lifecycle_events: list[tuple[dict[str, Any], str]] | None = None,
     ) -> None:
         """Schedule background tasks after a company update (parity with contacts_v2)."""
         if update_event is not None:
@@ -109,10 +181,34 @@ class CompaniesServiceV2:
                 topics=event_topics,
             )
 
+        for rel_ev, rel_key in related_lifecycle_events or ():
+            background_tasks.add_task(
+                EventService.publish_event_background,
+                event=rel_ev,
+                key=rel_key,
+                topics=event_topics,
+            )
+
         background_tasks.add_task(
             index_companies_background,
             [(company_id, organization_id)],
         )
+
+        if body.contacts_update is not None:
+            meta = (update_result or {}).get("contacts_delta") or {}
+            affected = meta.get("affected_contact_ids") or []
+            if affected:
+                background_tasks.add_task(
+                    index_contacts_background,
+                    [(str(cid), organization_id) for cid in affected],
+                )
+            created_cid = meta.get("created_contact_id")
+            if created_cid:
+                background_tasks.add_task(
+                    ContactsServiceV2.trigger_enrichment_background,
+                    str(created_cid),
+                    organization_id,
+                )
 
         enrichment_input_fields = (
             "name",
@@ -268,6 +364,7 @@ class CompaniesServiceV2:
     def _build_create_company_list_payloads(
         self, *, body: CreateCompanyRequest
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        """Build list payloads for company creation."""
         create_contact_for_payloads = (
             body.contact.contact if (body.contact is not None and body.contact.contact is not None) else None
         )
@@ -302,6 +399,7 @@ class CompaniesServiceV2:
         social_pages_payload: list[dict[str, Any]],
         validated_company_custom_fields: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        """Serialize company JSONB parameters."""
         jsonb_inputs: dict[str, Any] = {
             "websites": websites_payload,
             "billing_preferences": body.billing_preferences.model_dump(mode="json")
@@ -323,6 +421,7 @@ class CompaniesServiceV2:
         contact_phones_payload: list[dict[str, Any]],
         contact_social_pages_payload: list[dict[str, Any]],
     ) -> tuple[str | None, dict[str, Any] | None, list[dict[str, Any]] | None, bool, str | None]:
+        """Prepare optional company contact association."""
         created_contact_password: str | None = None
 
         contact_id: str | None = None
@@ -374,6 +473,7 @@ class CompaniesServiceV2:
         return contact_id, contact_data, contact_addresses, set_primary, created_contact_password
 
     def _company_addresses_rows(self, *, body: CreateCompanyRequest) -> list[dict[str, Any]]:
+        """Build company addresses rows."""
         return [a.model_dump(exclude_none=True) for a in body.addresses] if body.addresses else []
 
     def _extract_created_contact(
@@ -381,6 +481,7 @@ class CompaniesServiceV2:
         *,
         created: dict[str, Any],
     ) -> tuple[dict[str, Any] | None, str | None]:
+        """Extract created contact from creation result."""
         if created.get("contact") is None:
             return None, None
 
@@ -405,6 +506,7 @@ class CompaniesServiceV2:
         created_contact_row: dict[str, Any] | None,
         created: dict[str, Any],
     ) -> None:
+        """Raise NotFoundException if contact link outcome is not found."""
         if not requested_contact_id:
             return
         if created_contact_row is None and not bool(created.get("contact_found")):
@@ -420,6 +522,7 @@ class CompaniesServiceV2:
         created_contact_row: dict[str, Any] | None,
         created_contact_id: str | None,
     ) -> str | None:
+        """Normalize created contact id for response."""
         if not requested_contact_id:
             return created_contact_id
         return created_contact_id if created_contact_row is not None else None
@@ -435,6 +538,7 @@ class CompaniesServiceV2:
         created_contact_row: dict[str, Any] | None,
         created_contact_id: str | None,
     ) -> list[dict[str, Any]]:
+        """Build enrichment targets for company creation."""
         enrichment_targets: list[dict[str, Any]] = []
         addresses_payload = [{"country": a.country} for a in (body.addresses or []) if a.country]
         enrichment_targets.append(
@@ -579,7 +683,10 @@ class CompaniesServiceV2:
             )
 
         if create_contact.custom_fields:
-            cfs = CustomFieldService(db_connection=self.db_connection, user_context=self.user_context)
+            cfs = CustomFieldService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
             validated_custom_fields = await cfs.validate_for_create(
                 create_contact.custom_fields,
                 EntityType.CONTACT,
@@ -645,7 +752,7 @@ class CompaniesServiceV2:
         return contact_id, dict(contact_row)
 
     async def get_company_details(self, *, company_id: str) -> dict[str, Any]:
-        """Return company details with primary contact, member contacts, and addresses."""
+        """Return company details with member contacts (list shape) and addresses."""
         org_id = self.user_context.organization_id
         details = await self.companies_repo.get_company_details(
             company_id=company_id,
@@ -654,9 +761,12 @@ class CompaniesServiceV2:
         if not details:
             raise NotFoundException(message_key="clients.errors.not_found", custom_code=CustomStatusCode.NOT_FOUND)
 
-        details["created_at"] = format_iso_datetime(details.get("created_at")) or ""
-        details["updated_at"] = format_iso_datetime(details.get("updated_at")) or ""
-        details["last_enriched_at"] = format_iso_datetime(details.get("last_enriched_at"))
+        _stringify_company_detail_uuids(details)
+        _coerce_company_detail_json_lists(details)
+        _normalize_company_billing_preferences(details)
+        _normalize_company_additional_data(details)
+        _normalize_company_detail_contacts(details)
+        _normalize_company_detail_timestamps(details)
         return details
 
     async def list_companies(
@@ -676,13 +786,20 @@ class CompaniesServiceV2:
             page=page,
             page_size=page_size,
         )
-        for r in rows:
-            r["created_at"] = format_iso_datetime(r.get("created_at")) or ""
-            r["updated_at"] = format_iso_datetime(r.get("updated_at")) or ""
+        for row in rows:
+            row["created_at"] = format_iso_datetime(row.get("created_at")) or ""
+            row["updated_at"] = format_iso_datetime(row.get("updated_at")) or ""
+            raw_contacts = row.get("contacts")
+            if isinstance(raw_contacts, str):
+                row["contacts"] = parse_json_field(raw_contacts) or []
+            elif raw_contacts is None:
+                row["contacts"] = []
+            elif not isinstance(raw_contacts, list):
+                row["contacts"] = []
         return {"items": rows, "total": total}
 
     async def soft_delete_company(self, *, company_id: str) -> dict[str, Any]:
-        """Soft-delete a company (sets status='deleted') and return old/new snapshots."""
+        """Soft-delete a company (sets status='deleted') via the same DB update path as PATCH."""
         org_id = self.user_context.organization_id
         current = await self.companies_repo.get_company_for_update(
             company_id=company_id,
@@ -693,11 +810,17 @@ class CompaniesServiceV2:
                 message_key="clients.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        updated = await self.companies_repo.soft_delete_company(
+        updated = await self.companies_repo.update_company(
             company_id=company_id,
             organization_id=org_id,
+            update_data={"status": ClientStatus.DELETED.value},
         )
-        return {"old_data": current, "new_data": updated}
+        if not updated:
+            raise NotFoundException(
+                message_key="clients.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return {"ok": True, "old_data": current, "new_data": updated}
 
     async def update_company(self, *, company_id: str, body: UpdateCompanyRequest) -> dict[str, Any]:
         """Patch a company (scalar fields + JSONB lists + addresses table).
@@ -783,14 +906,20 @@ class CompaniesServiceV2:
                 addresses=body.addresses,
             )
 
-        # optional: primary contact change (ADR section 4)
-        if body.primary_contact is not None:
-            await self.change_primary_contact(company_id=company_id, body=body.primary_contact)
-        return {
+        contacts_delta: dict[str, Any] | None = None
+        if body.contacts_update is not None:
+            contacts_delta = await self.apply_contacts_update_delta(
+                company_id=company_id,
+                delta=body.contacts_update,
+            )
+        out: dict[str, Any] = {
             "ok": True,
             "old_data": current,
             "new_data": updated_row or current,
         }
+        if contacts_delta is not None:
+            out["contacts_delta"] = contacts_delta
+        return out
 
     async def _apply_company_addresses_delta(self, *, company_id: str, addresses: Any) -> None:
         """Apply AddressesUpdate to `company_addresses` table."""
@@ -873,61 +1002,183 @@ class CompaniesServiceV2:
         payload[field_name] = updated
         current[field_name] = updated
 
-    async def change_primary_contact(
+    @staticmethod
+    def _merge_primary_contact_id(
+        current: str | None,
+        candidate: str,
+    ) -> str:
+        """At most one distinct primary contact per delta; raises if another id was already chosen."""
+        if current is None or current == candidate:
+            return candidate
+        raise ValidationException(
+            message_key="clients.errors.bad_request",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
+    @staticmethod
+    def _parse_company_contacts_update_delta(
+        delta: CompanyContactsUpdate,
+    ) -> tuple[list[str], list[str], list[str], str | None]:
+        """Split payload into remove/add/unset-primary lists and a single primary id (if any)."""
+        remove_ids = list(dict.fromkeys(delta.remove_associations or []))
+        add_contact_ids: list[str] = []
+        unset_primary_ids: list[str] = []
+        primary_wants: list[str] = []
+
+        for item in delta.add_associations or []:
+            add_contact_ids.append(item.contact_id)
+            if item.is_primary:
+                primary_wants.append(item.contact_id)
+
+        for item in delta.update_associations or []:
+            if item.is_primary:
+                primary_wants.append(item.contact_id)
+            else:
+                unset_primary_ids.append(item.contact_id)
+
+        unset_primary_ids = list(dict.fromkeys(unset_primary_ids))
+        unique_primary = list(dict.fromkeys(primary_wants))
+        if len(unique_primary) > 1:
+            raise ValidationException(
+                message_key="clients.errors.bad_request",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        set_primary = unique_primary[0] if unique_primary else None
+        return remove_ids, add_contact_ids, unset_primary_ids, set_primary
+
+    async def apply_contacts_update_delta(
         self,
         *,
         company_id: str,
-        body: CompanyPrimaryContactChange,
+        delta: CompanyContactsUpdate,
     ) -> dict[str, Any]:
-        """Apply ADR section 4 primary-contact operations for a company."""
+        """Apply batch contact association changes (add/remove/create/primary) for a company."""
         org_id = self.user_context.organization_id
-        current = await self.companies_repo.get_company_for_update(company_id=company_id, organization_id=org_id)
-        if not current:
-            raise NotFoundException(message_key="clients.errors.not_found", custom_code=CustomStatusCode.NOT_FOUND)
-
-        if body.unset:
-            await self.companies_repo.update_company(
-                company_id=company_id,
-                organization_id=org_id,
-                update_data={"primary_contact_id": None},
-            )
-            return {"ok": True}
-
-        contact_id = body.contact_id
-        if body.contact:
-            contact_id, _created_row = await self._create_contact_for_company_association(
-                create_contact=body.contact
-            )
-            await self.cc_repo.link_contact_to_company(
-                organization_id=org_id,
-                contact_id=contact_id,
-                company_id=company_id,
-            )
-
-        if not contact_id:
-            raise ValidationException(
-                message_key="clients.errors.bad_request",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
-        # Enforce membership rule (service-layer).
-        is_member = await self.cc_repo.is_contact_member_of_company(
-            organization_id=org_id,
-            contact_id=contact_id,
-            company_id=company_id,
+        remove_ids, add_contact_ids, unset_primary_ids, set_primary_contact_id = (
+            self._parse_company_contacts_update_delta(delta)
         )
-        if not is_member:
-            raise ValidationException(
-                message_key="clients.errors.bad_request",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
+        create_block = delta.create_and_associate
+
+        validate_ids = (
+            set(remove_ids)
+            | {c.contact_id for c in (delta.add_associations or [])}
+            | {u.contact_id for u in (delta.update_associations or [])}
+            | set(unset_primary_ids)
+        )
+        if validate_ids:
+            found = await self.contacts_repo.filter_contact_ids_in_organization(
+                organization_id=org_id,
+                contact_ids=list(validate_ids),
+            )
+            missing = validate_ids - found
+            if missing:
+                raise NotFoundException(
+                    message_key="clients.errors.not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+
+        created_contact_id: str | None = None
+        if create_block is not None:
+            created_contact_id, _ = await self._create_contact_for_company_association(
+                create_contact=create_block.contact,
+            )
+            add_contact_ids.append(created_contact_id)
+            if create_block.is_primary:
+                set_primary_contact_id = self._merge_primary_contact_id(
+                    set_primary_contact_id,
+                    created_contact_id,
+                )
+
+        if set_primary_contact_id:
+            add_contact_ids.append(set_primary_contact_id)
+
+        add_contact_ids = list(dict.fromkeys(add_contact_ids))
+
+        await self.cc_repo.apply_contacts_update_delta(
+            organization_id=org_id,
+            company_id=company_id,
+            remove_contact_ids=remove_ids,
+            add_contact_ids=add_contact_ids,
+            set_primary_contact_id=set_primary_contact_id,
+            unset_primary_contact_ids=unset_primary_ids,
+        )
+
+        affected: set[str] = set(remove_ids)
+        affected.update(c.contact_id for c in (delta.add_associations or []))
+        affected.update(u.contact_id for u in (delta.update_associations or []))
+        affected.update(unset_primary_ids)
+        if created_contact_id:
+            affected.add(created_contact_id)
+        if set_primary_contact_id:
+            affected.add(set_primary_contact_id)
+
+        return {
+            "ok": True,
+            "affected_contact_ids": list(affected),
+            "created_contact_id": created_contact_id,
+        }
+
+    @staticmethod
+    def typesense_hits_to_company_summary_rows(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Map raw Typesense hits to the same row shape as ``list_companies`` (before Pydantic)."""
+        rows: list[dict[str, Any]] = []
+        for hit in hits:
+            doc = hit.get("document") if isinstance(hit, dict) else None
+            if not isinstance(doc, dict):
+                continue
+            cid = doc.get("id")
+            if not cid:
+                continue
+
+            created_at = doc.get("created_at")
+            updated_at = doc.get("updated_at")
+            created_at_iso = (
+                datetime.fromtimestamp(int(created_at), tz=timezone.utc).isoformat()
+                if isinstance(created_at, int) and created_at > 0
+                else ""
+            )
+            updated_at_iso = (
+                datetime.fromtimestamp(int(updated_at), tz=timezone.utc).isoformat()
+                if isinstance(updated_at, int) and updated_at > 0
+                else ""
             )
 
-        await self.companies_repo.update_company(
-            company_id=company_id,
-            organization_id=org_id,
-            update_data={"primary_contact_id": contact_id},
-        )
-        return {"ok": True, "primary_contact_id": contact_id}
+            contacts_out: list[dict[str, Any]] = []
+            for contact in doc.get("contacts") or []:
+                if not isinstance(contact, dict):
+                    continue
+                contact_id = (contact.get("id") or "").strip()
+                if not contact_id:
+                    continue
+                phones = contact.get("phones_display") or contact.get("phones") or []
+                if not isinstance(phones, list):
+                    phones = []
+                contacts_out.append(
+                    {
+                        "id": contact_id,
+                        "first_name": contact.get("first_name"),
+                        "last_name": contact.get("last_name"),
+                        "title": contact.get("title"),
+                        "email": contact.get("email"),
+                        "phones": phones,
+                        "is_primary": bool(contact.get("is_primary")),
+                    }
+                )
+
+            rows.append(
+                {
+                    "id": str(cid),
+                    "organization_id": str(doc.get("organization_id") or ""),
+                    "status": doc.get("status"),
+                    "name": doc.get("name") or "",
+                    "industry": doc.get("industry"),
+                    "profile_photo_url": doc.get("profile_photo_url") or None,
+                    "contacts": contacts_out,
+                    "created_at": created_at_iso,
+                    "updated_at": updated_at_iso,
+                }
+            )
+        return rows
 
     async def search_companies(
         self,
@@ -944,25 +1195,29 @@ class CompaniesServiceV2:
             filters.append(f"status:={status}")
         filter_by = " && ".join(filters)
 
-        q = query.strip()
+        query_text = query.strip()
         params: dict[str, Any] = {
-            "q": q,
+            "q": query_text,
             "per_page": page_size,
             "page": page,
             "filter_by": filter_by,
             "exclude_fields": "embedding",
         }
-        if "@" in q:
+        if "@" in query_text:
             params.update(COMPANY_EMAIL_SEARCH_PARAMS)
-        elif sum(c.isdigit() for c in q) >= 5:
+        elif sum(char.isdigit() for char in query_text) >= 5:
             params.update(COMPANY_PHONE_SEARCH_PARAMS)
         else:
             params.update(COMPANY_SEARCH_PARAMS)
 
-        embedding = await self.typesense.embed_query_text(q)
+        embedding = await self.typesense.embed_query_text(query_text)
         if embedding is not None:
             vector = ",".join(map(str, embedding))
-            distance_threshold = getattr(shared_settings.typesense, "vector_distance_threshold", None)
+            distance_threshold = getattr(
+                shared_settings.typesense,
+                "vector_distance_threshold",
+                None,
+            )
             if distance_threshold is not None and float(distance_threshold) > 0:
                 params["vector_query"] = (
                     f"embedding:([{vector}], alpha:0.7, distance_threshold:{distance_threshold})"
@@ -971,5 +1226,6 @@ class CompaniesServiceV2:
                 params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
 
         raw = await self.typesense.search(params)
-        return {"hits": raw.get("hits") or [], "total": raw.get("found", 0)}
-
+        hits = raw.get("hits") or []
+        rows = self.typesense_hits_to_company_summary_rows(hits)
+        return {"items": rows, "total": raw.get("found", 0)}
