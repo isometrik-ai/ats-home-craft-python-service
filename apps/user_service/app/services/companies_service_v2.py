@@ -13,7 +13,6 @@ Key rule (service enforced):
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +27,9 @@ from apps.user_service.app.db.repositories import (
     ContactCompaniesRepository,
     ContactsRepository,
 )
+from apps.user_service.app.db.repositories.companies_repository import (
+    COMPANY_JSONB_COLUMNS,
+)
 from apps.user_service.app.schemas.companies_v2 import (
     CompanyContactsUpdate,
     CreateCompanyRequest,
@@ -40,9 +42,11 @@ from apps.user_service.app.search.company_typesense_schema import (
     COMPANY_PHONE_SEARCH_PARAMS,
     COMPANY_SEARCH_PARAMS,
 )
-from apps.user_service.app.services.custom_field_service import CustomFieldService
-from apps.user_service.app.services.client_enrichment_service import ClientEnrichmentService
+from apps.user_service.app.services.client_enrichment_service import (
+    ClientEnrichmentService,
+)
 from apps.user_service.app.services.contacts_service_v2 import ContactsServiceV2
+from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service_v2 import (
     index_companies_background,
@@ -55,7 +59,6 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_field,
     serialize_jsonb_param,
 )
-from apps.user_service.app.db.repositories.companies_repository import COMPANY_JSONB_COLUMNS
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 from libs.shared_utils.http_exceptions import (
     NotFoundException,
@@ -64,7 +67,6 @@ from libs.shared_utils.http_exceptions import (
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.typesense_service import TypesenseService
-
 
 logger = get_logger("companies_service_v2")
 
@@ -89,45 +91,51 @@ _COMPANY_DETAIL_JSON_LIST_KEYS = (
 
 
 def _stringify_company_detail_uuids(details: dict[str, Any]) -> None:
-    for key in _COMPANY_DETAIL_UUID_KEYS:
-        val = details.get(key)
-        if val is not None and not isinstance(val, str):
-            details[key] = str(val)
+    """Normalize UUID columns on a company detail dict to strings for JSON responses."""
+    for field_name in _COMPANY_DETAIL_UUID_KEYS:
+        raw_value = details.get(field_name)
+        if raw_value is not None and not isinstance(raw_value, str):
+            details[field_name] = str(raw_value)
 
 
 def _coerce_company_detail_json_lists(details: dict[str, Any]) -> None:
-    for key in _COMPANY_DETAIL_JSON_LIST_KEYS:
-        details[key] = coerce_json_list(details.get(key))
+    """Coerce JSON-backed list fields on company details to Python lists."""
+    for field_name in _COMPANY_DETAIL_JSON_LIST_KEYS:
+        details[field_name] = coerce_json_list(details.get(field_name))
 
 
 def _normalize_company_billing_preferences(details: dict[str, Any]) -> None:
-    bp = details.get("billing_preferences")
-    if isinstance(bp, str):
-        parsed_bp = parse_json_field(bp)
-        details["billing_preferences"] = parsed_bp if isinstance(parsed_bp, dict) else {}
-    elif bp is None:
+    """Parse billing preferences when asyncpg returns JSONB as a string."""
+    billing_prefs = details.get("billing_preferences")
+    if isinstance(billing_prefs, str):
+        parsed_billing = parse_json_field(billing_prefs)
+        details["billing_preferences"] = parsed_billing if isinstance(parsed_billing, dict) else {}
+    elif billing_prefs is None:
         details["billing_preferences"] = None
 
 
 def _normalize_company_additional_data(details: dict[str, Any]) -> None:
-    ad = details.get("additional_data")
-    if isinstance(ad, str):
-        details["additional_data"] = parse_json_field(ad) or {}
-    elif ad is None:
+    """Ensure ``additional_data`` is a dict after optional string JSON parsing."""
+    extra_data = details.get("additional_data")
+    if isinstance(extra_data, str):
+        details["additional_data"] = parse_json_field(extra_data) or {}
+    elif extra_data is None:
         details["additional_data"] = {}
 
 
 def _normalize_company_detail_contacts(details: dict[str, Any]) -> None:
+    """Normalize nested contact rows embedded in company detail payloads."""
     for contact in details.get("contacts") or []:
         if not isinstance(contact, dict):
             continue
-        cid = contact.get("id")
-        if cid is not None and not isinstance(cid, str):
-            contact["id"] = str(cid)
+        contact_identifier = contact.get("id")
+        if contact_identifier is not None and not isinstance(contact_identifier, str):
+            contact["id"] = str(contact_identifier)
         contact["phones"] = coerce_json_list(contact.get("phones"))
 
 
 def _normalize_company_detail_timestamps(details: dict[str, Any]) -> None:
+    """Format timestamp columns on company details as ISO strings."""
     details["created_at"] = format_iso_datetime(details.get("created_at")) or ""
     details["updated_at"] = format_iso_datetime(details.get("updated_at")) or ""
     details["last_enriched_at"] = format_iso_datetime(details.get("last_enriched_at"))
@@ -143,6 +151,7 @@ class CompaniesServiceV2:
         user_context: UserContext,
         supabase_client: AsyncClient | None = None,
     ) -> None:
+        """Initialize the service with DB access and the authenticated user context."""
         self.db_connection = db_connection
         self.user_context = user_context
         self.supabase_client = supabase_client
@@ -153,11 +162,120 @@ class CompaniesServiceV2:
 
     @property
     def typesense(self) -> TypesenseService:
+        """Lazily construct the Typesense client for the companies collection."""
         if self._typesense is None:
             self._typesense = TypesenseService.from_settings(
                 collection_name=app_settings.shared_settings.typesense.companies_collection_name
             )
         return self._typesense
+
+    @staticmethod
+    def _schedule_company_event_tasks(
+        *,
+        background_tasks: BackgroundTasks,
+        update_event: dict[str, Any] | None,
+        related_lifecycle_events: list[tuple[dict[str, Any], str]] | None,
+        event_key: str,
+        event_topics: list[Any],
+    ) -> None:
+        """Schedule lifecycle event publishes."""
+        if update_event is not None:
+            background_tasks.add_task(
+                EventService.publish_event_background,
+                event=update_event,
+                key=event_key,
+                topics=event_topics,
+            )
+
+        for related_event, related_event_key in related_lifecycle_events or ():
+            background_tasks.add_task(
+                EventService.publish_event_background,
+                event=related_event,
+                key=related_event_key,
+                topics=event_topics,
+            )
+
+    @staticmethod
+    def _schedule_company_and_contact_index_tasks(
+        *,
+        background_tasks: BackgroundTasks,
+        company_id: str,
+        organization_id: str,
+        body: UpdateCompanyRequest,
+        update_result: dict[str, Any] | None,
+    ) -> None:
+        """Schedule Typesense indexing for company and affected contacts."""
+        background_tasks.add_task(
+            index_companies_background,
+            [(company_id, organization_id)],
+        )
+
+        if body.contacts_update is None:
+            return
+
+        meta = (update_result or {}).get("contacts_delta") or {}
+        affected = meta.get("affected_contact_ids") or []
+        if affected:
+            background_tasks.add_task(
+                index_contacts_background,
+                [(str(contact_identifier), organization_id) for contact_identifier in affected],
+            )
+        created_cid = meta.get("created_contact_id")
+        if created_cid:
+            background_tasks.add_task(
+                ContactsServiceV2.trigger_enrichment_background,
+                str(created_cid),
+                organization_id,
+            )
+
+    @staticmethod
+    def _schedule_company_enrichment_task(
+        *,
+        background_tasks: BackgroundTasks,
+        company_id: str,
+        organization_id: str,
+        body: UpdateCompanyRequest,
+    ) -> None:
+        """Schedule enrichment for a company if relevant inputs have changed."""
+        enrichment_input_fields = (
+            "name",
+            "industry",
+            "websites",
+            "social_pages",
+            "addresses",
+            "description",
+        )
+        enrichment_inputs_changed = any(
+            getattr(body, field_name) is not None for field_name in enrichment_input_fields
+        )
+        if not enrichment_inputs_changed:
+            return
+
+        enrichment_service = ClientEnrichmentService.from_settings()
+        payload_data: dict[str, Any] = {}
+        if body.name is not None:
+            payload_data["name"] = body.name
+        if body.industry is not None:
+            payload_data["industry"] = body.industry
+        if body.description is not None:
+            payload_data["description"] = body.description
+
+        # Keep request payloads developer-friendly; enrichment is best-effort.
+        if body.websites is not None:
+            payload_data["websites"] = body.websites.model_dump(exclude_none=True)
+        if body.social_pages is not None:
+            payload_data["social_pages"] = body.social_pages.model_dump(exclude_none=True)
+        if body.addresses is not None:
+            payload_data["addresses"] = body.addresses.model_dump(exclude_none=True)
+
+        background_tasks.add_task(
+            enrichment_service.run_client_enrichment,
+            client_id=str(company_id),
+            organization_id=str(organization_id),
+            client_type="company",
+            payload_data=payload_data,
+            entity_table="companies",
+        )
 
     @staticmethod
     def schedule_company_update_background_tasks(
@@ -173,78 +291,26 @@ class CompaniesServiceV2:
         related_lifecycle_events: list[tuple[dict[str, Any], str]] | None = None,
     ) -> None:
         """Schedule background tasks after a company update (parity with contacts_v2)."""
-        if update_event is not None:
-            background_tasks.add_task(
-                EventService.publish_event_background,
-                event=update_event,
-                key=event_key,
-                topics=event_topics,
-            )
-
-        for rel_ev, rel_key in related_lifecycle_events or ():
-            background_tasks.add_task(
-                EventService.publish_event_background,
-                event=rel_ev,
-                key=rel_key,
-                topics=event_topics,
-            )
-
-        background_tasks.add_task(
-            index_companies_background,
-            [(company_id, organization_id)],
+        CompaniesServiceV2._schedule_company_event_tasks(
+            background_tasks=background_tasks,
+            update_event=update_event,
+            related_lifecycle_events=related_lifecycle_events,
+            event_key=event_key,
+            event_topics=event_topics,
         )
-
-        if body.contacts_update is not None:
-            meta = (update_result or {}).get("contacts_delta") or {}
-            affected = meta.get("affected_contact_ids") or []
-            if affected:
-                background_tasks.add_task(
-                    index_contacts_background,
-                    [(str(cid), organization_id) for cid in affected],
-                )
-            created_cid = meta.get("created_contact_id")
-            if created_cid:
-                background_tasks.add_task(
-                    ContactsServiceV2.trigger_enrichment_background,
-                    str(created_cid),
-                    organization_id,
-                )
-
-        enrichment_input_fields = (
-            "name",
-            "industry",
-            "websites",
-            "social_pages",
-            "addresses",
-            "description",
+        CompaniesServiceV2._schedule_company_and_contact_index_tasks(
+            background_tasks=background_tasks,
+            company_id=company_id,
+            organization_id=organization_id,
+            body=body,
+            update_result=update_result,
         )
-        enrichment_inputs_changed = any(getattr(body, f) is not None for f in enrichment_input_fields)
-        if enrichment_inputs_changed:
-            enrichment_service = ClientEnrichmentService.from_settings()
-            payload_data: dict[str, Any] = {}
-            if body.name is not None:
-                payload_data["name"] = body.name
-            if body.industry is not None:
-                payload_data["industry"] = body.industry
-            if body.description is not None:
-                payload_data["description"] = body.description
-
-            # Keep request payloads developer-friendly; enrichment is best-effort.
-            if body.websites is not None:
-                payload_data["websites"] = body.websites.model_dump(exclude_none=True)
-            if body.social_pages is not None:
-                payload_data["social_pages"] = body.social_pages.model_dump(exclude_none=True)
-            if body.addresses is not None:
-                payload_data["addresses"] = body.addresses.model_dump(exclude_none=True)
-
-            background_tasks.add_task(
-                enrichment_service.run_client_enrichment,
-                client_id=str(company_id),
-                organization_id=str(organization_id),
-                client_type="company",
-                payload_data=payload_data,
-                entity_table="companies",
-            )
+        CompaniesServiceV2._schedule_company_enrichment_task(
+            background_tasks=background_tasks,
+            company_id=company_id,
+            organization_id=organization_id,
+            body=body,
+        )
 
     async def create_company(self, body: CreateCompanyRequest) -> dict[str, Any]:
         """Create a company (ADR section 2).
@@ -261,9 +327,12 @@ class CompaniesServiceV2:
             entity_type=EntityType.COMPANY,
         )
 
-        websites_payload, social_pages_payload, contact_phones_payload, contact_social_pages_payload = (
-            self._build_create_company_list_payloads(body=body)
-        )
+        (
+            websites_payload,
+            social_pages_payload,
+            contact_phones_payload,
+            contact_social_pages_payload,
+        ) = self._build_create_company_list_payloads(body=body)
         jsonb_params = self._serialize_company_jsonb_params(
             body=body,
             websites_payload=websites_payload,
@@ -271,12 +340,16 @@ class CompaniesServiceV2:
             validated_company_custom_fields=validated_company_custom_fields,
         )
 
-        contact_id, contact_data, contact_addresses, set_primary, created_contact_password = (
-            await self._prepare_optional_company_contact_association(
-                body=body,
-                contact_phones_payload=contact_phones_payload,
-                contact_social_pages_payload=contact_social_pages_payload,
-            )
+        (
+            contact_id,
+            contact_data,
+            contact_addresses,
+            set_primary,
+            created_contact_password,
+        ) = await self._prepare_optional_company_contact_association(
+            body=body,
+            contact_phones_payload=contact_phones_payload,
+            contact_social_pages_payload=contact_social_pages_payload,
         )
 
         addresses_rows = self._company_addresses_rows(body=body)
@@ -356,29 +429,50 @@ class CompaniesServiceV2:
         custom_fields: list[dict[str, Any]] | None,
         entity_type: EntityType,
     ) -> list[dict[str, Any]]:
+        """Validate custom fields for the given entity type before insert."""
         if not custom_fields:
             return []
-        cfs = CustomFieldService(db_connection=self.db_connection, user_context=self.user_context)
-        return await cfs.validate_for_create(custom_fields, entity_type)
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        return await custom_field_service.validate_for_create(custom_fields, entity_type)
 
     def _build_create_company_list_payloads(
         self, *, body: CreateCompanyRequest
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+    ]:
         """Build list payloads for company creation."""
         create_contact_for_payloads = (
-            body.contact.contact if (body.contact is not None and body.contact.contact is not None) else None
+            body.contact.contact
+            if (body.contact is not None and body.contact.contact is not None)
+            else None
         )
         list_payloads = self._build_list_payloads(
             inputs={
-                "company_websites": [w.model_dump(mode="json", exclude_none=True) for w in body.websites],
-                "company_social_pages": [p.model_dump(mode="json", exclude_none=True) for p in body.social_pages],
+                "company_websites": [
+                    website.model_dump(mode="json", exclude_none=True) for website in body.websites
+                ],
+                "company_social_pages": [
+                    page.model_dump(mode="json", exclude_none=True) for page in body.social_pages
+                ],
                 "contact_phones": (
-                    [p.model_dump(mode="json", exclude_none=True) for p in create_contact_for_payloads.phones]
+                    [
+                        phone.model_dump(mode="json", exclude_none=True)
+                        for phone in create_contact_for_payloads.phones
+                    ]
                     if create_contact_for_payloads is not None
                     else []
                 ),
                 "contact_social_pages": (
-                    [p.model_dump(mode="json", exclude_none=True) for p in create_contact_for_payloads.social_pages]
+                    [
+                        page.model_dump(mode="json", exclude_none=True)
+                        for page in create_contact_for_payloads.social_pages
+                    ]
                     if create_contact_for_payloads is not None
                     else []
                 ),
@@ -420,7 +514,13 @@ class CompaniesServiceV2:
         body: CreateCompanyRequest,
         contact_phones_payload: list[dict[str, Any]],
         contact_social_pages_payload: list[dict[str, Any]],
-    ) -> tuple[str | None, dict[str, Any] | None, list[dict[str, Any]] | None, bool, str | None]:
+    ) -> tuple[
+        str | None,
+        dict[str, Any] | None,
+        list[dict[str, Any]] | None,
+        bool,
+        str | None,
+    ]:
         """Prepare optional company contact association."""
         created_contact_password: str | None = None
 
@@ -430,13 +530,25 @@ class CompaniesServiceV2:
         set_primary = False
 
         if body.contact is None:
-            return contact_id, contact_data, contact_addresses, set_primary, created_contact_password
+            return (
+                contact_id,
+                contact_data,
+                contact_addresses,
+                set_primary,
+                created_contact_password,
+            )
 
         set_primary = bool(body.contact.is_primary)
         contact_id = body.contact.contact_id
 
         if body.contact.contact is None:
-            return contact_id, contact_data, contact_addresses, set_primary, created_contact_password
+            return (
+                contact_id,
+                contact_data,
+                contact_addresses,
+                set_primary,
+                created_contact_password,
+            )
 
         create_contact = body.contact.contact
         validated_contact_custom_fields = await self._validate_custom_fields_for_create(
@@ -444,7 +556,12 @@ class CompaniesServiceV2:
             entity_type=EntityType.CONTACT,
         )
 
-        email_norm, user_id, isometrik_user_id, created_contact_password = await self._maybe_provision_portal_identity(
+        (
+            email_norm,
+            user_id,
+            isometrik_user_id,
+            created_contact_password,
+        ) = await self._maybe_provision_portal_identity(
             portal_access=bool(body.portal_access),
             create_contact=create_contact,
         )
@@ -468,7 +585,9 @@ class CompaniesServiceV2:
             "social_pages": contact_social_pages_payload,
         }
         contact_addresses = (
-            [a.model_dump(exclude_none=True) for a in create_contact.addresses] if create_contact.addresses else []
+            [address.model_dump(exclude_none=True) for address in create_contact.addresses]
+            if create_contact.addresses
+            else []
         )
         return contact_id, contact_data, contact_addresses, set_primary, created_contact_password
 
@@ -540,7 +659,11 @@ class CompaniesServiceV2:
     ) -> list[dict[str, Any]]:
         """Build enrichment targets for company creation."""
         enrichment_targets: list[dict[str, Any]] = []
-        addresses_payload = [{"country": a.country} for a in (body.addresses or []) if a.country]
+        addresses_payload = [
+            {"country": address_input.country}
+            for address_input in (body.addresses or [])
+            if address_input.country
+        ]
         enrichment_targets.append(
             {
                 "entity_table": "companies",
@@ -565,7 +688,11 @@ class CompaniesServiceV2:
         phones = created_contact_row.get("phones") or []
         if isinstance(phones, list) and phones:
             primary_phone = next(
-                (p for p in phones if isinstance(p, dict) and p.get("is_primary") is True),
+                (
+                    phone_entry
+                    for phone_entry in phones
+                    if isinstance(phone_entry, dict) and phone_entry.get("is_primary") is True
+                ),
                 phones[0],
             )
         person_payload: dict[str, Any] = {
@@ -633,8 +760,8 @@ class CompaniesServiceV2:
                 organization_name=str(shared_settings.company_name or ""),
                 password=created_contact_password,
             )
-        except Exception as exc:
-            logger.error("Failed to send contact creation email: %s", str(exc))
+        except Exception as send_error:
+            logger.error("Failed to send contact creation email: %s", str(send_error))
 
     def _contacts_service(self) -> ContactsServiceV2:
         """Reuse the existing portal-identity provisioning logic from ContactsServiceV2."""
@@ -652,7 +779,12 @@ class CompaniesServiceV2:
     ) -> tuple[str | None, str | None, str | None, str | None]:
         """Normalize email and provision identity only when portal access is enabled."""
         email_norm = (create_contact.email or "").strip() or None
-        user_id, isometrik_user_id, created_password = await self._contacts_service()._provision_identity_if_needed(
+        contacts_service = self._contacts_service()
+        (
+            user_id,
+            isometrik_user_id,
+            created_password,
+        ) = await contacts_service._provision_identity_if_needed(
             email=email_norm,
             portal_access=portal_access,
             first_name=create_contact.first_name,
@@ -665,7 +797,10 @@ class CompaniesServiceV2:
         self, *, inputs: dict[str, list[dict[str, Any]]]
     ) -> dict[str, list[dict[str, Any]]]:
         """Convert list inputs into JSON-ready payloads with stable ids."""
-        return {k: self._ensure_list_item_ids(v) for k, v in inputs.items()}
+        return {
+            list_key: self._ensure_list_item_ids(list_items)
+            for list_key, list_items in inputs.items()
+        }
 
     async def _create_contact_for_company_association(
         self, *, create_contact: CreateContactRequest
@@ -683,11 +818,11 @@ class CompaniesServiceV2:
             )
 
         if create_contact.custom_fields:
-            cfs = CustomFieldService(
+            custom_field_service = CustomFieldService(
                 db_connection=self.db_connection,
                 user_context=self.user_context,
             )
-            validated_custom_fields = await cfs.validate_for_create(
+            validated_custom_fields = await custom_field_service.validate_for_create(
                 create_contact.custom_fields,
                 EntityType.CONTACT,
             )
@@ -697,22 +832,26 @@ class CompaniesServiceV2:
         contact_list_payloads = self._build_list_payloads(
             inputs={
                 "phones": [
-                    p.model_dump(mode="json", exclude_none=True) for p in create_contact.phones
+                    phone.model_dump(mode="json", exclude_none=True)
+                    for phone in create_contact.phones
                 ],
                 "social_pages": [
-                    p.model_dump(mode="json", exclude_none=True)
-                    for p in create_contact.social_pages
+                    page.model_dump(mode="json", exclude_none=True)
+                    for page in create_contact.social_pages
                 ],
             }
         )
         phones_payload = contact_list_payloads["phones"]
         social_pages_payload = contact_list_payloads["social_pages"]
 
-        email_norm, user_id, isometrik_user_id, _created_password = (
-            await self._maybe_provision_portal_identity(
-                portal_access=bool(create_contact.portal_access),
-                create_contact=create_contact,
-            )
+        (
+            email_norm,
+            user_id,
+            isometrik_user_id,
+            _,
+        ) = await self._maybe_provision_portal_identity(
+            portal_access=bool(create_contact.portal_access),
+            create_contact=create_contact,
         )
 
         rows = await self.contacts_repo.create_contacts(
@@ -746,9 +885,11 @@ class CompaniesServiceV2:
         contact_row = rows[0]
         contact_id = str(contact_row["id"])
         if create_contact.addresses:
-            await self.contacts_repo.create_contact_addresses(
-                [{"contact_id": contact_id, **a.model_dump(exclude_none=True)} for a in create_contact.addresses]
-            )
+            address_rows = [
+                {"contact_id": contact_id, **addr.model_dump(exclude_none=True)}
+                for addr in create_contact.addresses
+            ]
+            await self.contacts_repo.create_contact_addresses(address_rows)
         return contact_id, dict(contact_row)
 
     async def get_company_details(self, *, company_id: str) -> dict[str, Any]:
@@ -759,7 +900,10 @@ class CompaniesServiceV2:
             organization_id=org_id,
         )
         if not details:
-            raise NotFoundException(message_key="clients.errors.not_found", custom_code=CustomStatusCode.NOT_FOUND)
+            raise NotFoundException(
+                message_key="clients.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
 
         _stringify_company_detail_uuids(details)
         _coerce_company_detail_json_lists(details)
@@ -786,16 +930,16 @@ class CompaniesServiceV2:
             page=page,
             page_size=page_size,
         )
-        for row in rows:
-            row["created_at"] = format_iso_datetime(row.get("created_at")) or ""
-            row["updated_at"] = format_iso_datetime(row.get("updated_at")) or ""
-            raw_contacts = row.get("contacts")
+        for list_row in rows:
+            list_row["created_at"] = format_iso_datetime(list_row.get("created_at")) or ""
+            list_row["updated_at"] = format_iso_datetime(list_row.get("updated_at")) or ""
+            raw_contacts = list_row.get("contacts")
             if isinstance(raw_contacts, str):
-                row["contacts"] = parse_json_field(raw_contacts) or []
+                list_row["contacts"] = parse_json_field(raw_contacts) or []
             elif raw_contacts is None:
-                row["contacts"] = []
+                list_row["contacts"] = []
             elif not isinstance(raw_contacts, list):
-                row["contacts"] = []
+                list_row["contacts"] = []
         return {"items": rows, "total": total}
 
     async def soft_delete_company(self, *, company_id: str) -> dict[str, Any]:
@@ -822,7 +966,12 @@ class CompaniesServiceV2:
             )
         return {"ok": True, "old_data": current, "new_data": updated}
 
-    async def update_company(self, *, company_id: str, body: UpdateCompanyRequest) -> dict[str, Any]:
+    async def update_company(
+        self,
+        *,
+        company_id: str,
+        body: UpdateCompanyRequest,
+    ) -> dict[str, Any]:
         """Patch a company (scalar fields + JSONB lists + addresses table).
 
         Notes:
@@ -832,10 +981,39 @@ class CompaniesServiceV2:
         - `addresses` are stored in `company_addresses` table, updated via delta ops.
         """
         org_id = self.user_context.organization_id
-        current = await self.companies_repo.get_company_for_update(company_id=company_id, organization_id=org_id)
+        current = await self.companies_repo.get_company_for_update(
+            company_id=company_id,
+            organization_id=org_id,
+        )
         if not current:
-            raise NotFoundException(message_key="clients.errors.not_found", custom_code=CustomStatusCode.NOT_FOUND)
+            raise NotFoundException(
+                message_key="clients.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
 
+        update_data = await self._build_company_update_data(current=current, body=body)
+        updated_row = await self._persist_company_update_if_needed(
+            company_id=company_id,
+            organization_id=org_id,
+            update_data=update_data,
+        )
+        await self._apply_company_side_effect_deltas(company_id=company_id, body=body)
+        contacts_delta = await self._maybe_apply_contacts_update_delta(
+            company_id=company_id, body=body
+        )
+        return self._build_company_update_response(
+            current=current,
+            updated_row=updated_row,
+            contacts_delta=contacts_delta,
+        )
+
+    async def _build_company_update_data(
+        self,
+        *,
+        current: dict[str, Any],
+        body: UpdateCompanyRequest,
+    ) -> dict[str, Any]:
+        """Build a dictionary of update data for a company."""
         update_data: dict[str, Any] = {}
         scalar_fields = (
             ("status", "status"),
@@ -850,10 +1028,10 @@ class CompaniesServiceV2:
             ("industry_specific_terminologies", "industry_specific_terminologies"),
             ("description", "description"),
         )
-        for body_attr, col in scalar_fields:
+        for body_attr, column_name in scalar_fields:
             value = getattr(body, body_attr, None)
             if value is not None:
-                update_data[col] = value
+                update_data[column_name] = value
 
         if body.additional_data is not None:
             update_data["additional_data"] = body.additional_data
@@ -884,42 +1062,80 @@ class CompaniesServiceV2:
             )
 
         if body.custom_fields is not None:
-            cfs = CustomFieldService(db_connection=self.db_connection, user_context=self.user_context)
+            custom_field_service = CustomFieldService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
             # merge_for_update expects existing roots list
             existing_cf = parse_json_field(current.get("custom_fields"))
             merged = existing_cf if isinstance(existing_cf, list) else []
-            merged = await cfs.merge_for_update(body.custom_fields, merged, EntityType.COMPANY)
+            merged = await custom_field_service.merge_for_update(
+                body.custom_fields, merged, EntityType.COMPANY
+            )
             update_data["custom_fields"] = merged
 
-        updated_row: dict[str, Any] | None = None
-        if update_data:
-            updated_row = await self.companies_repo.update_company(
-                company_id=company_id,
-                organization_id=org_id,
-                update_data=update_data,
-            )
+        return update_data
 
-        # Addresses delta support can be added similarly to v1 once address delta semantics are confirmed.
+    async def _persist_company_update_if_needed(
+        self,
+        *,
+        company_id: str,
+        organization_id: str,
+        update_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Update a company if there are changes to persist."""
+        if not update_data:
+            return None
+        return await self.companies_repo.update_company(
+            company_id=company_id,
+            organization_id=organization_id,
+            update_data=update_data,
+        )
+
+    async def _apply_company_side_effect_deltas(
+        self,
+        *,
+        company_id: str,
+        body: UpdateCompanyRequest,
+    ) -> None:
+        """Apply side effect deltas for a company update."""
+        # Addresses delta: parity with v1 can follow once delta semantics are fixed upstream.
         if body.addresses is not None:
             await self._apply_company_addresses_delta(
                 company_id=company_id,
                 addresses=body.addresses,
             )
 
-        contacts_delta: dict[str, Any] | None = None
-        if body.contacts_update is not None:
-            contacts_delta = await self.apply_contacts_update_delta(
-                company_id=company_id,
-                delta=body.contacts_update,
-            )
-        out: dict[str, Any] = {
+    async def _maybe_apply_contacts_update_delta(
+        self,
+        *,
+        company_id: str,
+        body: UpdateCompanyRequest,
+    ) -> dict[str, Any] | None:
+        """Apply contacts update delta if present."""
+        if body.contacts_update is None:
+            return None
+        return await self.apply_contacts_update_delta(
+            company_id=company_id,
+            delta=body.contacts_update,
+        )
+
+    @staticmethod
+    def _build_company_update_response(
+        *,
+        current: dict[str, Any],
+        updated_row: dict[str, Any] | None,
+        contacts_delta: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Build a response for a company update."""
+        update_response: dict[str, Any] = {
             "ok": True,
             "old_data": current,
             "new_data": updated_row or current,
         }
         if contacts_delta is not None:
-            out["contacts_delta"] = contacts_delta
-        return out
+            update_response["contacts_delta"] = contacts_delta
+        return update_response
 
     async def _apply_company_addresses_delta(self, *, company_id: str, addresses: Any) -> None:
         """Apply AddressesUpdate to `company_addresses` table."""
@@ -927,7 +1143,10 @@ class CompaniesServiceV2:
             return
         # remove
         if addresses.remove:
-            await self.companies_repo.delete_company_addresses(company_id=company_id, address_ids=addresses.remove)
+            await self.companies_repo.delete_company_addresses(
+                company_id=company_id,
+                address_ids=addresses.remove,
+            )
         # update
         if addresses.update:
             for item in addresses.update:
@@ -939,7 +1158,10 @@ class CompaniesServiceV2:
         # add
         if addresses.add:
             await self.companies_repo.create_company_addresses(
-                [{"company_id": company_id, **a.model_dump(exclude_none=True)} for a in addresses.add]
+                [
+                    {"company_id": company_id, **addr.model_dump(exclude_none=True)}
+                    for addr in addresses.add
+                ]
             )
 
     @staticmethod
@@ -947,10 +1169,10 @@ class CompaniesServiceV2:
         """Return a copy of list items with an id set on each (generated if missing)."""
         result: list[dict[str, Any]] = []
         for item in items:
-            row = dict(item)
-            if not row.get("id"):
-                row["id"] = str(uuid.uuid4())
-            result.append(row)
+            item_copy = dict(item)
+            if not item_copy.get("id"):
+                item_copy["id"] = str(uuid.uuid4())
+            result.append(item_copy)
         return result
 
     async def _apply_jsonb_list_changes(
@@ -981,9 +1203,9 @@ class CompaniesServiceV2:
             for item in update_obj.update:
                 data = item.model_dump(exclude_none=True, exclude={"id"})
                 found = False
-                for i, existing_item in enumerate(updated):
+                for list_index, existing_item in enumerate(updated):
                     if str(existing_item.get("id")) == item.id:
-                        updated[i] = {**existing_item, **data}
+                        updated[list_index] = {**existing_item, **data}
                         found = True
                         break
                 if not found:
@@ -1007,7 +1229,7 @@ class CompaniesServiceV2:
         current: str | None,
         candidate: str,
     ) -> str:
-        """At most one distinct primary contact per delta; raises if another id was already chosen."""
+        """Enforce a single primary contact id when merging association updates."""
         if current is None or current == candidate:
             return candidate
         raise ValidationException(
@@ -1061,8 +1283,8 @@ class CompaniesServiceV2:
 
         validate_ids = (
             set(remove_ids)
-            | {c.contact_id for c in (delta.add_associations or [])}
-            | {u.contact_id for u in (delta.update_associations or [])}
+            | {add_item.contact_id for add_item in (delta.add_associations or [])}
+            | {update_item.contact_id for update_item in (delta.update_associations or [])}
             | set(unset_primary_ids)
         )
         if validate_ids:
@@ -1104,8 +1326,8 @@ class CompaniesServiceV2:
         )
 
         affected: set[str] = set(remove_ids)
-        affected.update(c.contact_id for c in (delta.add_associations or []))
-        affected.update(u.contact_id for u in (delta.update_associations or []))
+        affected.update(add_item.contact_id for add_item in (delta.add_associations or []))
+        affected.update(update_item.contact_id for update_item in (delta.update_associations or []))
         affected.update(unset_primary_ids)
         if created_contact_id:
             affected.add(created_contact_id)
@@ -1123,15 +1345,15 @@ class CompaniesServiceV2:
         """Map raw Typesense hits to the same row shape as ``list_companies`` (before Pydantic)."""
         rows: list[dict[str, Any]] = []
         for hit in hits:
-            doc = hit.get("document") if isinstance(hit, dict) else None
-            if not isinstance(doc, dict):
+            hit_document = hit.get("document") if isinstance(hit, dict) else None
+            if not isinstance(hit_document, dict):
                 continue
-            cid = doc.get("id")
-            if not cid:
+            company_identifier = hit_document.get("id")
+            if not company_identifier:
                 continue
 
-            created_at = doc.get("created_at")
-            updated_at = doc.get("updated_at")
+            created_at = hit_document.get("created_at")
+            updated_at = hit_document.get("updated_at")
             created_at_iso = (
                 datetime.fromtimestamp(int(created_at), tz=timezone.utc).isoformat()
                 if isinstance(created_at, int) and created_at > 0
@@ -1144,7 +1366,7 @@ class CompaniesServiceV2:
             )
 
             contacts_out: list[dict[str, Any]] = []
-            for contact in doc.get("contacts") or []:
+            for contact in hit_document.get("contacts") or []:
                 if not isinstance(contact, dict):
                     continue
                 contact_id = (contact.get("id") or "").strip()
@@ -1167,12 +1389,12 @@ class CompaniesServiceV2:
 
             rows.append(
                 {
-                    "id": str(cid),
-                    "organization_id": str(doc.get("organization_id") or ""),
-                    "status": doc.get("status"),
-                    "name": doc.get("name") or "",
-                    "industry": doc.get("industry"),
-                    "profile_photo_url": doc.get("profile_photo_url") or None,
+                    "id": str(company_identifier),
+                    "organization_id": str(hit_document.get("organization_id") or ""),
+                    "status": hit_document.get("status"),
+                    "name": hit_document.get("name") or "",
+                    "industry": hit_document.get("industry"),
+                    "profile_photo_url": hit_document.get("profile_photo_url") or None,
                     "contacts": contacts_out,
                     "created_at": created_at_iso,
                     "updated_at": updated_at_iso,
@@ -1225,7 +1447,7 @@ class CompaniesServiceV2:
             else:
                 params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
 
-        raw = await self.typesense.search(params)
-        hits = raw.get("hits") or []
+        search_response = await self.typesense.search(params)
+        hits = search_response.get("hits") or []
         rows = self.typesense_hits_to_company_summary_rows(hits)
-        return {"items": rows, "total": raw.get("found", 0)}
+        return {"items": rows, "total": search_response.get("found", 0)}

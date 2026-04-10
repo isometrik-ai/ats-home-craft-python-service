@@ -2,7 +2,6 @@
 
 from typing import Any
 
-
 COMPANIES_COLLECTION_SCHEMA: dict[str, Any] = {
     "enable_nested_fields": True,
     "token_separators": ["+", "-", "@", ".", "(", ")"],
@@ -25,7 +24,12 @@ COMPANIES_COLLECTION_SCHEMA: dict[str, Any] = {
         {"name": "target_market_segments", "type": "string[]", "optional": True},
         {"name": "current_tech_stack", "type": "string[]", "optional": True},
         {"name": "industry_specific_terminologies", "type": "string[]", "optional": True},
-        {"name": "preferred_communication_channels", "type": "string[]", "facet": True, "optional": True},
+        {
+            "name": "preferred_communication_channels",
+            "type": "string[]",
+            "facet": True,
+            "optional": True,
+        },
         {"name": "key_people_names", "type": "string[]", "optional": True},
         {"name": "product_names", "type": "string[]", "optional": True},
         {"name": "custom_field_values", "type": "string[]", "optional": True},

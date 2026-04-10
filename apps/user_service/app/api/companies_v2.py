@@ -5,9 +5,9 @@ Resource-specific endpoints targeting the split tables (`companies`, `contacts`,
 `ADRs/clients_operations.md`.
 """
 
-import asyncpg
 from typing import Any
 
+import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 from supabase import AsyncClient
@@ -22,16 +22,25 @@ from apps.user_service.app.schemas.companies_v2 import (
     CreateCompanyRequest,
     UpdateCompanyRequest,
 )
-from apps.user_service.app.schemas.enums import ClientEventType, ClientStatus, KafkaTopics
+from apps.user_service.app.schemas.enums import (
+    ClientEventType,
+    ClientStatus,
+    KafkaTopics,
+)
+from apps.user_service.app.services.client_enrichment_service import (
+    ClientEnrichmentService,
+)
 from apps.user_service.app.services.companies_service_v2 import CompaniesServiceV2
-from apps.user_service.app.services.client_enrichment_service import ClientEnrichmentService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service_v2 import (
     delete_company_background,
     index_companies_background,
     index_contacts_background,
 )
-from apps.user_service.app.utils.common_utils import check_permissions, handle_api_exceptions
+from apps.user_service.app.utils.common_utils import (
+    check_permissions,
+    handle_api_exceptions,
+)
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     CLIENTS_MANAGEMENT_CREATE,
@@ -92,7 +101,21 @@ async def create_company(
     sb_client: AsyncClient = Depends(supabase_service),
     body: CreateCompanyRequest = Body(...),
 ):
-    """Create a company (v2); indexes an inline-created contact in Typesense when applicable."""
+    """Create a company (v2).
+
+    May link or create a contact, emit lifecycle events, index Typesense, and queue enrichment.
+
+    Args:
+        request: FastAPI request (audit context).
+        background_tasks: Schedules events, indexing, and enrichment.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims from JWT.
+        sb_client: Supabase client for auth-related operations when needed.
+        body: Company create payload.
+
+    Returns:
+        Created response envelope (201).
+    """
     created_events: list[tuple[dict, str]] = []
     company_id: str | None = None
     async with db_connection.transaction():
@@ -126,7 +149,7 @@ async def create_company(
             entity_id = entity.get("entity_id")
             if not entity_id:
                 continue
-            evt = await event_service.create_lifecycle_event(
+            lifecycle_event = await event_service.create_lifecycle_event(
                 event_type=ClientEventType.CREATED.value,
                 aggregate_id=str(entity_id),
                 organization_id=user_context.organization_id,
@@ -134,14 +157,14 @@ async def create_company(
                 payload={"module": "companies_v2", "action": entity.get("action") or "create"},
                 topics=CLIENT_KAFKA_TOPICS,
             )
-            if evt is not None:
-                created_events.append((evt, str(entity_id)))
+            if lifecycle_event is not None:
+                created_events.append((lifecycle_event, str(entity_id)))
 
-    for evt, key in created_events:
+    for lifecycle_event, event_publish_key in created_events:
         background_tasks.add_task(
             EventService.publish_event_background,
-            event=evt,
-            key=key,
+            event=lifecycle_event,
+            key=event_publish_key,
             topics=CLIENT_KAFKA_TOPICS,
         )
     if company_id is not None:
@@ -196,7 +219,20 @@ async def list_companies(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    """List companies from PostgreSQL with pagination (v2)."""
+    """List companies from PostgreSQL with pagination (v2).
+
+    Args:
+        request: FastAPI request.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims from JWT.
+        search: Optional name search (min 2 characters).
+        status: Optional status filter.
+        page: 1-based page index.
+        page_size: Page size (max 100).
+
+    Returns:
+        Paginated list response with company summaries.
+    """
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -210,10 +246,11 @@ async def list_companies(
         page_size=page_size,
     )
     items = [
-        CompanySummaryResponse.model_validate(r).model_dump(
+        CompanySummaryResponse.model_validate(summary_row).model_dump(
             exclude_none=True,
             mode="json",
-        ) for r in result["items"]
+        )
+        for summary_row in result["items"]
     ]
     total = int(result["total"])
     if not items:
@@ -256,7 +293,20 @@ async def search_companies(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    """Search companies via Typesense (companies collection) (v2)."""
+    """Search companies via Typesense (companies collection) (v2).
+
+    Args:
+        request: FastAPI request.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims from JWT.
+        query: Search text (min 2 characters).
+        status: Optional status filter.
+        page: 1-based page index.
+        page_size: Page size (max 100).
+
+    Returns:
+        Paginated list response with company summaries from Typesense.
+    """
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -270,11 +320,11 @@ async def search_companies(
         status=status.value if status else None,
     )
     items = [
-        CompanySummaryResponse.model_validate(r).model_dump(
+        CompanySummaryResponse.model_validate(summary_row).model_dump(
             exclude_none=True,
             mode="json",
         )
-        for r in result["items"]
+        for summary_row in result["items"]
     ]
     total = result["total"]
     if not items:
@@ -314,7 +364,17 @@ async def get_company_details(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Get company details including linked contacts (same shape as list) and addresses (v2)."""
+    """Get company details including linked contacts and addresses (v2).
+
+    Args:
+        request: FastAPI request.
+        company_id: Company identifier.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims from JWT.
+
+    Returns:
+        Success response with company detail payload.
+    """
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -363,7 +423,19 @@ async def update_company(
     current_user: dict = Depends(get_user_from_auth),
     body: UpdateCompanyRequest = Body(...),
 ):
-    """Patch company fields (v2)."""
+    """Patch company fields, nested data, and optional contact associations (v2).
+
+    Args:
+        request: FastAPI request (audit context).
+        background_tasks: Schedules events and Typesense re-indexing.
+        company_id: Company identifier.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims from JWT.
+        body: Partial update payload.
+
+    Returns:
+        Success response envelope.
+    """
     update_event: dict | None = None
     related_lifecycle_events: list[tuple[dict[str, Any], str]] = []
     async with db_connection.transaction():
@@ -434,7 +506,9 @@ async def update_company(
                 items=contact_event_items,
                 topics=CLIENT_KAFKA_TOPICS,
             )
-            related_lifecycle_events.extend((ev, ev["aggregate_id"]) for ev in contact_events)
+            related_lifecycle_events.extend(
+                (event_payload, event_payload["aggregate_id"]) for event_payload in contact_events
+            )
 
     CompaniesServiceV2.schedule_company_update_background_tasks(
         background_tasks=background_tasks,
@@ -477,7 +551,18 @@ async def delete_company(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Soft-delete a company (v2)."""
+    """Soft-delete a company (v2).
+
+    Args:
+        request: FastAPI request (audit context).
+        background_tasks: Schedules Kafka publish and Typesense de-index.
+        company_id: Company identifier.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims from JWT.
+
+    Returns:
+        Success response envelope.
+    """
     event: dict | None = None
     async with db_connection.transaction():
         user_context = await check_permissions(
@@ -515,10 +600,7 @@ async def delete_company(
             key=company_id,
             topics=CLIENT_KAFKA_TOPICS,
         )
-    background_tasks.add_task(
-        delete_company_background,
-        company_id
-    )
+    background_tasks.add_task(delete_company_background, company_id)
     return success_response(
         request=request,
         message_key="clients.success.client_deleted",

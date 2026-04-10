@@ -28,6 +28,7 @@ CONTACT_ADDRESS_JSONB_COLUMNS: frozenset[str] = frozenset({"address_data"})
 
 class ContactsRepository(BaseRepository):
     """Database operations class for contact management using asyncpg."""
+
     def __init__(self, db_connection: asyncpg.Connection) -> None:
         """Initialize with asyncpg connection."""
         super().__init__(db_connection=db_connection)
@@ -37,7 +38,7 @@ class ContactsRepository(BaseRepository):
         email_norm = (email or "").strip().lower()
         if not email_norm:
             return None
-        row = await self.db_connection.fetchrow(
+        fetched_row = await self.db_connection.fetchrow(
             """
             SELECT ct.id::text AS id
             FROM contacts ct
@@ -52,7 +53,7 @@ class ContactsRepository(BaseRepository):
             ClientStatus.DELETED.value,
             email_norm,
         )
-        return str(row["id"]) if row and row.get("id") else None
+        return str(fetched_row["id"]) if fetched_row and fetched_row.get("id") else None
 
     async def create_contacts(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Create contacts in bulk."""
@@ -110,7 +111,7 @@ class ContactsRepository(BaseRepository):
             - company_id (str | None)
             - contact (dict | None): inserted contact row
         """
-        row = await self.db_connection.fetchrow(
+        fetched_row = await self.db_connection.fetchrow(
             """
             WITH new_company AS (
               INSERT INTO companies (organization_id, name, primary_contact_id)
@@ -202,12 +203,12 @@ class ContactsRepository(BaseRepository):
             contact_data.get("social_pages"),
             bool(make_primary),
         )
-        if not row:
+        if not fetched_row:
             return {"contact_id": None, "company_id": None, "contact": None}
-        contact_row = row.get("contact")
+        contact_row = fetched_row.get("contact")
         return {
-            "contact_id": str(row["contact_id"]),
-            "company_id": row["company_id"],
+            "contact_id": str(fetched_row["contact_id"]),
+            "company_id": fetched_row["company_id"],
             "contact": dict(contact_row) if isinstance(contact_row, dict) else contact_row,
         }
 
@@ -229,11 +230,11 @@ class ContactsRepository(BaseRepository):
             contact_ids,
             ClientStatus.DELETED.value,
         )
-        return {str(r["id"]) for r in rows}
+        return {str(contact_row["id"]) for contact_row in rows}
 
     async def get_contact_for_update(self, *, contact_id: str, organization_id: str) -> dict | None:
         """Get a contact for update."""
-        row = await self.db_connection.fetchrow(
+        fetched_row = await self.db_connection.fetchrow(
             """
             SELECT *
             FROM contacts
@@ -244,7 +245,7 @@ class ContactsRepository(BaseRepository):
             organization_id,
             ClientStatus.DELETED.value,
         )
-        return dict(row) if row else None
+        return dict(fetched_row) if fetched_row else None
 
     async def update_contact(
         self,
@@ -254,10 +255,16 @@ class ContactsRepository(BaseRepository):
         update_data: dict[str, Any],
     ) -> dict | None:
         """Update a contact."""
+        id_param = len(update_data) + 1
+        org_param = len(update_data) + 2
+        status_param = len(update_data) + 3
         return await self.update_returning(
             table="contacts",
-            where_sql="WHERE id = $%d::uuid AND organization_id = $%d::uuid AND status != $%d"
-            % (len(update_data) + 1, len(update_data) + 2, len(update_data) + 3),
+            where_sql=(
+                f"WHERE id = ${id_param}::uuid "
+                f"AND organization_id = ${org_param}::uuid "
+                f"AND status != ${status_param}"
+            ),
             where_params=[contact_id, organization_id, ClientStatus.DELETED.value],
             update_data=update_data,
             jsonb_columns=CONTACT_JSONB_COLUMNS,
@@ -266,7 +273,7 @@ class ContactsRepository(BaseRepository):
 
     async def soft_delete_contact(self, *, contact_id: str, organization_id: str) -> dict[str, Any]:
         """Soft delete a contact and return the updated row."""
-        row = await self.db_connection.fetchrow(
+        fetched_row = await self.db_connection.fetchrow(
             """
             UPDATE contacts
             SET status = $3, updated_at = NOW()
@@ -277,12 +284,12 @@ class ContactsRepository(BaseRepository):
             organization_id,
             ClientStatus.DELETED.value,
         )
-        if not row:
+        if not fetched_row:
             raise NotFoundException(
                 message_key="clients.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return dict(row)
+        return dict(fetched_row)
 
     async def create_contact_addresses(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Create contact addresses in bulk."""
@@ -319,9 +326,14 @@ class ContactsRepository(BaseRepository):
         """Update a single contact address row by id (scoped to contact_id)."""
         if not update_data:
             return None
+        next_id_param = len(update_data) + 1
+        next_contact_param = len(update_data) + 2
+        address_where = (
+            f"WHERE id = ${next_id_param}::uuid AND contact_id = ${next_contact_param}::uuid"
+        )
         return await self.update_returning(
             table="contact_addresses",
-            where_sql=f"WHERE id = ${len(update_data) + 1}::uuid AND contact_id = ${len(update_data) + 2}::uuid",
+            where_sql=address_where,
             where_params=[address_id, contact_id],
             update_data=update_data,
             jsonb_columns=CONTACT_ADDRESS_JSONB_COLUMNS,
@@ -358,7 +370,7 @@ class ContactsRepository(BaseRepository):
             """,
             contact_id,
         )
-        return [dict(r) for r in rows]
+        return [dict(address_row) for address_row in rows]
 
     async def get_contact_details(
         self,
@@ -367,7 +379,7 @@ class ContactsRepository(BaseRepository):
         organization_id: str,
     ) -> dict[str, Any] | None:
         """Get a contact + linked companies + addresses in one round trip."""
-        row = await self.db_connection.fetchrow(
+        fetched_row = await self.db_connection.fetchrow(
             """
             SELECT
               ct.*,
@@ -393,9 +405,11 @@ class ContactsRepository(BaseRepository):
                 AND cc.contact_id = ct.id
             ) companies ON TRUE
             LEFT JOIN LATERAL (
-              SELECT jsonb_agg(to_jsonb(a) ORDER BY a.is_primary DESC, a.created_at ASC) AS addresses
-              FROM contact_addresses a
-              WHERE a.contact_id = ct.id
+              SELECT jsonb_agg(
+                to_jsonb(addr) ORDER BY addr.is_primary DESC, addr.created_at ASC
+              ) AS addresses
+              FROM contact_addresses addr
+              WHERE addr.contact_id = ct.id
             ) addresses ON TRUE
             WHERE ct.id = $1::uuid
               AND ct.organization_id = $2::uuid
@@ -405,17 +419,17 @@ class ContactsRepository(BaseRepository):
             organization_id,
             ClientStatus.DELETED.value,
         )
-        if not row:
+        if not fetched_row:
             return None
-        result = dict(row)
+        result = dict(fetched_row)
         # asyncpg may return jsonb as str in some configurations; normalize defensively.
-        for key in ("companies", "addresses"):
-            val = result.get(key)
-            if isinstance(val, str):
+        for json_field_name in ("companies", "addresses"):
+            raw_json_value = result.get(json_field_name)
+            if isinstance(raw_json_value, str):
                 try:
-                    result[key] = json.loads(val)
-                except Exception:
-                    result[key] = []
+                    result[json_field_name] = json.loads(raw_json_value)
+                except json.JSONDecodeError:
+                    result[json_field_name] = []
         return result
 
     async def list_contacts(
@@ -431,17 +445,20 @@ class ContactsRepository(BaseRepository):
         offset = (page - 1) * page_size
         args: list[Any] = [organization_id, ClientStatus.DELETED.value]
         where = ["organization_id = $1::uuid", "status != $2"]
-        idx = 3
+        next_param_index = 3
         if status:
-            where.append(f"status = ${idx}")
+            where.append(f"status = ${next_param_index}")
             args.append(status)
-            idx += 1
+            next_param_index += 1
         if search:
-            where.append(
-                f"(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'') ILIKE ${idx} OR COALESCE(au.email::text,'') ILIKE ${idx})"
+            name_email_match = (
+                f"(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'') "
+                f"ILIKE ${next_param_index} OR "
+                f"COALESCE(au.email::text,'') ILIKE ${next_param_index})"
             )
+            where.append(name_email_match)
             args.append(f"%{search.strip()}%")
-            idx += 1
+            next_param_index += 1
         where_sql = " AND ".join(where)
         total = await self.db_connection.fetchval(
             f"""
@@ -457,7 +474,8 @@ class ContactsRepository(BaseRepository):
             WITH company_names_by_contact AS (
               SELECT
                 cc.contact_id,
-                jsonb_agg(co.name ORDER BY co.name) FILTER (WHERE co.id IS NOT NULL) AS company_names
+                jsonb_agg(co.name ORDER BY co.name)
+                  FILTER (WHERE co.id IS NOT NULL) AS company_names
               FROM contact_companies cc
               INNER JOIN companies co
                 ON co.id = cc.company_id
@@ -485,8 +503,9 @@ class ContactsRepository(BaseRepository):
               ON cn.contact_id = ct.id
             WHERE {where_sql}
             ORDER BY ct.created_at DESC
-            OFFSET ${idx} LIMIT ${idx + 1}
+            OFFSET ${next_param_index} LIMIT ${next_param_index + 1}
             """,
             *(args + [offset, page_size]),
         )
-        return [dict(r) for r in rows], int(total or 0)
+        contact_rows = [dict(contact_row) for contact_row in rows]
+        return contact_rows, int(total or 0)

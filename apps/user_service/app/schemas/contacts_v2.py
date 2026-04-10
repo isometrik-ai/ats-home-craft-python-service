@@ -15,8 +15,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from apps.user_service.app.schemas.clients import (
-    AddressInput,
     AddressesUpdate,
+    AddressInput,
     PhoneInput,
     PhonesUpdate,
     SocialPage,
@@ -190,9 +190,7 @@ class ContactCompaniesUpdate(BaseModel):
     @model_validator(mode="after")
     def validate_payload(self) -> "ContactCompaniesUpdate":
         """Validate the payload."""
-        remove_ids = [
-            c.strip() for c in (self.remove_associations or []) if (c or "").strip()
-        ]
+        remove_ids = [c.strip() for c in (self.remove_associations or []) if (c or "").strip()]
         self.remove_associations = remove_ids
 
         # validate create.name
@@ -295,4 +293,3 @@ class ContactDetailsResponse(BaseModel):
 
     created_at: str
     updated_at: str
-

@@ -6,237 +6,11 @@ import asyncpg
 
 
 class ContactCompaniesRepository:
+    """Persistence for rows in ``contact_companies`` (contact–company membership)."""
+
     def __init__(self, db_connection: asyncpg.Connection) -> None:
+        """Store the asyncpg connection used for all queries in this repository."""
         self.db_connection = db_connection
-
-    async def link_contact_to_company(
-        self,
-        *,
-        organization_id: str,
-        contact_id: str,
-        company_id: str,
-    ) -> None:
-        """Link a contact to a company."""
-        await self.db_connection.execute(
-            """
-            INSERT INTO contact_companies (organization_id, contact_id, company_id)
-            VALUES ($1::uuid, $2::uuid, $3::uuid)
-            ON CONFLICT (contact_id, company_id) DO NOTHING
-            """,
-            organization_id,
-            contact_id,
-            company_id,
-        )
-
-    async def link_contact_to_company_and_optionally_set_primary(
-        self,
-        *,
-        organization_id: str,
-        contact_id: str,
-        company_id: str,
-        set_as_primary: bool,
-    ) -> None:
-        """Link contact membership and (optionally) set as company primary in one round trip."""
-        await self.db_connection.execute(
-            """
-            WITH membership AS (
-              INSERT INTO contact_companies (organization_id, contact_id, company_id)
-              VALUES ($1::uuid, $2::uuid, $3::uuid)
-              ON CONFLICT (contact_id, company_id) DO NOTHING
-              RETURNING 1
-            )
-            UPDATE companies
-            SET primary_contact_id = $2::uuid,
-                updated_at = NOW()
-            WHERE id = $3::uuid
-              AND organization_id = $1::uuid
-              AND $4::boolean IS TRUE
-            """,
-            organization_id,
-            contact_id,
-            company_id,
-            bool(set_as_primary),
-        )
-
-    async def replace_contact_company_membership_and_optionally_set_primary(
-        self,
-        *,
-        organization_id: str,
-        contact_id: str,
-        old_company_id: str,
-        new_company_id: str,
-        set_as_primary: bool,
-    ) -> None:
-        """Replace membership old->new and (optionally) set new company primary in one round trip.
-
-        Also clears old company's primary_contact_id when it currently points to this contact.
-        """
-        await self.db_connection.execute(
-            """
-            WITH removed AS (
-              DELETE FROM contact_companies
-              WHERE organization_id = $1::uuid
-                AND contact_id = $2::uuid
-                AND company_id = $3::uuid
-              RETURNING 1
-            ),
-            cleared AS (
-              UPDATE companies
-              SET primary_contact_id = NULL,
-                  updated_at = NOW()
-              WHERE id = $3::uuid
-                AND organization_id = $1::uuid
-                AND primary_contact_id = $2::uuid
-              RETURNING 1
-            ),
-            added AS (
-              INSERT INTO contact_companies (organization_id, contact_id, company_id)
-              VALUES ($1::uuid, $2::uuid, $4::uuid)
-              ON CONFLICT (contact_id, company_id) DO NOTHING
-              RETURNING 1
-            )
-            UPDATE companies
-            SET primary_contact_id = $2::uuid,
-                updated_at = NOW()
-            WHERE id = $4::uuid
-              AND organization_id = $1::uuid
-              AND $5::boolean IS TRUE
-            """,
-            organization_id,
-            contact_id,
-            old_company_id,
-            new_company_id,
-            bool(set_as_primary),
-        )
-
-    async def create_company_and_attach_contact_and_optionally_set_primary(
-        self,
-        *,
-        organization_id: str,
-        contact_id: str,
-        company_name: str,
-        set_as_primary: bool,
-    ) -> str:
-        """Create company + attach membership + (optional) set primary in one round trip.
-
-        Returns:
-            str: newly created company_id
-        """
-        company_id = await self.db_connection.fetchval(
-            """
-            WITH co AS (
-              INSERT INTO companies (organization_id, name, primary_contact_id)
-              VALUES ($1::uuid, $3::text, NULL)
-              RETURNING id
-            ),
-            membership AS (
-              INSERT INTO contact_companies (organization_id, contact_id, company_id)
-              SELECT $1::uuid, $2::uuid, co.id
-              FROM co
-              ON CONFLICT (contact_id, company_id) DO NOTHING
-              RETURNING 1
-            ),
-            primary_set AS (
-              UPDATE companies
-              SET primary_contact_id = $2::uuid,
-                  updated_at = NOW()
-              WHERE id = (SELECT id FROM co)
-                AND organization_id = $1::uuid
-                AND $4::boolean IS TRUE
-              RETURNING 1
-            )
-            SELECT (SELECT id FROM co)::text
-            """,
-            organization_id,
-            contact_id,
-            company_name,
-            bool(set_as_primary),
-        )
-        return str(company_id)
-
-    async def replace_with_new_company_name_and_optionally_set_primary(
-        self,
-        *,
-        organization_id: str,
-        contact_id: str,
-        old_company_id: str,
-        new_company_name: str,
-        set_as_primary: bool,
-    ) -> str:
-        """Replace old membership with a newly created company in one round trip.
-
-        Creates company, removes old membership, clears old primary if it matches,
-        links membership to new company, and optionally sets new company primary.
-
-        Returns:
-            str: newly created company_id
-        """
-        company_id = await self.db_connection.fetchval(
-            """
-            WITH co AS (
-              INSERT INTO companies (organization_id, name, primary_contact_id)
-              VALUES ($1::uuid, $4::text, NULL)
-              RETURNING id
-            ),
-            removed AS (
-              DELETE FROM contact_companies
-              WHERE organization_id = $1::uuid
-                AND contact_id = $2::uuid
-                AND company_id = $3::uuid
-              RETURNING 1
-            ),
-            cleared AS (
-              UPDATE companies
-              SET primary_contact_id = NULL,
-                  updated_at = NOW()
-              WHERE id = $3::uuid
-                AND organization_id = $1::uuid
-                AND primary_contact_id = $2::uuid
-              RETURNING 1
-            ),
-            membership AS (
-              INSERT INTO contact_companies (organization_id, contact_id, company_id)
-              SELECT $1::uuid, $2::uuid, co.id
-              FROM co
-              ON CONFLICT (contact_id, company_id) DO NOTHING
-              RETURNING 1
-            ),
-            primary_set AS (
-              UPDATE companies
-              SET primary_contact_id = $2::uuid,
-                  updated_at = NOW()
-              WHERE id = (SELECT id FROM co)
-                AND organization_id = $1::uuid
-                AND $5::boolean IS TRUE
-              RETURNING 1
-            )
-            SELECT (SELECT id FROM co)::text
-            """,
-            organization_id,
-            contact_id,
-            old_company_id,
-            new_company_name,
-            bool(set_as_primary),
-        )
-        return str(company_id)
-
-    async def unlink_contact_from_company(
-        self,
-        *,
-        organization_id: str,
-        contact_id: str,
-        company_id: str,
-    ) -> None:
-        """Unlink a contact from a company."""
-        await self.db_connection.execute(
-            """
-            DELETE FROM contact_companies
-            WHERE organization_id = $1::uuid AND contact_id = $2::uuid AND company_id = $3::uuid
-            """,
-            organization_id,
-            contact_id,
-            company_id,
-        )
 
     async def apply_companies_update_delta(
         self,
@@ -254,7 +28,8 @@ class ContactCompaniesRepository:
 
         Notes:
         - Unlinks requested memberships (if present).
-        - Clears `companies.primary_contact_id` only when it matches this contact and the company is being removed.
+        - Clears ``companies.primary_contact_id`` when it matches this contact and the
+          company row is being removed from membership.
         - Adds requested memberships (deduped) and optionally sets primary for specified companies.
         - When create_company_name is provided, exactly one company is created and linked.
 
@@ -358,10 +133,13 @@ class ContactCompaniesRepository:
 
         Mirrors ``apply_companies_update_delta`` with company/contact roles swapped.
 
-        - Unsets primary when the company's current primary is listed in ``unset_primary_contact_ids``.
-        - Removes memberships; clears ``companies.primary_contact_id`` when it points at a removed contact.
+        - Unsets primary when the company's current primary is listed in
+          ``unset_primary_contact_ids``.
+        - Removes memberships; clears ``companies.primary_contact_id`` when it points
+          at a removed contact.
         - Adds memberships (deduped).
-        - Sets ``primary_contact_id`` to ``set_primary_contact_id`` when not null (caller ensures membership).
+        - Sets ``primary_contact_id`` to ``set_primary_contact_id`` when not null
+          (caller ensures membership exists).
         """
         remove_ids = remove_contact_ids or []
         add_ids = add_contact_ids or []
@@ -396,8 +174,8 @@ class ContactCompaniesRepository:
             ),
             added AS (
               INSERT INTO contact_companies (organization_id, contact_id, company_id)
-              SELECT $1::uuid, cid, $2::uuid
-              FROM unnest($4::uuid[]) AS t(cid)
+              SELECT $1::uuid, contact_uuid, $2::uuid
+              FROM unnest($4::uuid[]) AS unpack(contact_uuid)
               ON CONFLICT (contact_id, company_id) DO NOTHING
               RETURNING 1
             ),
@@ -419,59 +197,3 @@ class ContactCompaniesRepository:
             set_primary_contact_id,
             unset_ids,
         )
-
-    async def is_contact_member_of_company(
-        self,
-        *,
-        organization_id: str,
-        contact_id: str,
-        company_id: str,
-    ) -> bool:
-        """Check if a contact is a member of a company."""
-        val = await self.db_connection.fetchval(
-            """
-            SELECT EXISTS(
-              SELECT 1
-              FROM contact_companies
-              WHERE organization_id = $1::uuid
-                AND contact_id = $2::uuid
-                AND company_id = $3::uuid
-            )
-            """,
-            organization_id,
-            contact_id,
-            company_id,
-        )
-        return bool(val)
-
-    async def list_company_contacts(
-        self,
-        *,
-        organization_id: str,
-        company_id: str,
-    ) -> list[dict]:
-        """List all contacts for a company."""
-        rows = await self.db_connection.fetch(
-            """
-            SELECT
-              ct.id,
-              ct.first_name,
-              ct.last_name,
-              ct.title,
-              NULLIF(au.email::text, '') AS email,
-              (co.primary_contact_id = ct.id) AS is_primary
-            FROM contact_companies cc
-            INNER JOIN contacts ct ON ct.id = cc.contact_id
-            LEFT JOIN auth.users au
-              ON au.id = ct.user_id
-            INNER JOIN companies co ON co.id = cc.company_id
-            WHERE cc.organization_id = $1::uuid
-              AND cc.company_id = $2::uuid
-              AND ct.status != 'deleted'
-              AND co.status != 'deleted'
-            ORDER BY ct.created_at ASC
-            """,
-            organization_id,
-            company_id,
-        )
-        return [dict(r) for r in rows]

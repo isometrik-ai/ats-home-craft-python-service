@@ -13,8 +13,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from apps.user_service.app.schemas.clients import (
-    AddressInput,
     AddressesUpdate,
+    AddressInput,
     BillingPreferences,
     BillingPreferencesUpdate,
     SocialPage,
@@ -22,8 +22,8 @@ from apps.user_service.app.schemas.clients import (
     Website,
     WebsitesUpdate,
 )
-from apps.user_service.app.schemas.enums import ClientStatus
 from apps.user_service.app.schemas.contacts_v2 import CreateContactRequest
+from apps.user_service.app.schemas.enums import ClientStatus
 
 
 class CompanyContactLink(BaseModel):
@@ -49,6 +49,7 @@ class CompanyContactLink(BaseModel):
 
     @model_validator(mode="after")
     def validate_exactly_one(self) -> "CompanyContactLink":
+        """Require exactly one of ``contact_id`` or nested ``contact`` create payload."""
         if bool(self.contact_id) == bool(self.contact):
             raise ValueError("Provide exactly one of contact_id or contact.")
         return self
@@ -107,7 +108,10 @@ class CompanyContactAssociationCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    contact: CreateContactRequest = Field(..., description="New contact payload (same shape as POST /contacts v2)")
+    contact: CreateContactRequest = Field(
+        ...,
+        description="New contact payload (same shape as POST /contacts v2).",
+    )
     is_primary: bool = Field(
         default=False,
         description="If true, set the new contact as the company's primary contact.",
@@ -130,7 +134,9 @@ class CompanyContactAssociationUpdate(BaseModel):
 
 
 class CompanyContactsUpdate(BaseModel):
-    """Batch contact association changes for a company (mirrors `ContactCompaniesUpdate` on PATCH /contacts).
+    """Batch contact association changes for a company.
+
+    Mirrors ``ContactCompaniesUpdate`` on PATCH ``/contacts``.
 
     In one request:
     - remove membership for N contacts
@@ -160,28 +166,35 @@ class CompanyContactsUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_payload(self) -> "CompanyContactsUpdate":
+        """Normalize ids and ensure at least one batch operation is present."""
         remove_ids = [
-            c.strip() for c in (self.remove_associations or []) if (c or "").strip()
+            entry.strip() for entry in (self.remove_associations or []) if (entry or "").strip()
         ]
         self.remove_associations = remove_ids
 
         normalized_add: list[CompanyContactAssociationAdd] = []
         for item in self.add_associations or []:
-            cid = (item.contact_id or "").strip()
-            if not cid:
+            contact_identifier = (item.contact_id or "").strip()
+            if not contact_identifier:
                 raise ValueError("add_associations.contact_id is required.")
             normalized_add.append(
-                CompanyContactAssociationAdd(contact_id=cid, is_primary=bool(item.is_primary))
+                CompanyContactAssociationAdd(
+                    contact_id=contact_identifier,
+                    is_primary=bool(item.is_primary),
+                )
             )
         self.add_associations = normalized_add
 
         normalized_update: list[CompanyContactAssociationUpdate] = []
         for item in self.update_associations or []:
-            cid = (item.contact_id or "").strip()
-            if not cid:
+            contact_identifier = (item.contact_id or "").strip()
+            if not contact_identifier:
                 raise ValueError("update_associations.contact_id is required.")
             normalized_update.append(
-                CompanyContactAssociationUpdate(contact_id=cid, is_primary=bool(item.is_primary))
+                CompanyContactAssociationUpdate(
+                    contact_id=contact_identifier,
+                    is_primary=bool(item.is_primary),
+                )
             )
         self.update_associations = normalized_update
 
@@ -299,4 +312,3 @@ class CompanyDetailsResponse(BaseModel):
     addresses: list[dict[str, Any]] = Field(default_factory=list)
     created_at: str
     updated_at: str
-

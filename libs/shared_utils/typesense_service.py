@@ -25,9 +25,15 @@ from typing import Any, Final
 import httpx
 from openai import AsyncOpenAI
 
-from apps.user_service.app.search.client_typesense_schema import CLIENT_COLLECTION_SCHEMA
-from apps.user_service.app.search.company_typesense_schema import COMPANIES_COLLECTION_SCHEMA
-from apps.user_service.app.search.contact_typesense_schema import CONTACTS_COLLECTION_SCHEMA
+from apps.user_service.app.search.client_typesense_schema import (
+    CLIENT_COLLECTION_SCHEMA,
+)
+from apps.user_service.app.search.company_typesense_schema import (
+    COMPANIES_COLLECTION_SCHEMA,
+)
+from apps.user_service.app.search.contact_typesense_schema import (
+    CONTACTS_COLLECTION_SCHEMA,
+)
 from libs.shared_config.app_settings import SharedAppSettings, shared_settings
 from libs.shared_utils.logger import get_logger
 
@@ -304,7 +310,8 @@ class TypesenseService:
         schema = (
             dict(collection_schema)
             if collection_schema is not None
-            else dict(_default_schema_for_collection(
+            else dict(
+                _default_schema_for_collection(
                     collection_name=collection_name,
                     settings=self._settings,
                 )
@@ -422,7 +429,8 @@ class TypesenseService:
                     raise
 
                 schema: dict[str, Any] = {
-                    **dict(self._collection_schema), "name": self._collection_name
+                    **dict(self._collection_schema),
+                    "name": self._collection_name,
                 }
                 await self._request("POST", "/collections", json_body=schema)
                 logger.info(

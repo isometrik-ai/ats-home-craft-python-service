@@ -9,22 +9,31 @@ but reads from the split tables:
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Iterable
 from typing import Any
-import ast
 
 import asyncpg
 
 from apps.user_service.app.config.app_settings import app_settings
-from apps.user_service.app.db.repositories import CompaniesRepository, ContactsRepository
+from apps.user_service.app.db.repositories import (
+    CompaniesRepository,
+    ContactsRepository,
+)
 from apps.user_service.app.schemas.enums import EntityType
 from apps.user_service.app.schemas.typesense import (
     TypesenseCompanyDocumentV2,
     TypesenseContactDocumentV2,
 )
-from apps.user_service.app.search.client_typesense_schema import build_document_from_schema
-from apps.user_service.app.search.company_typesense_schema import COMPANIES_COLLECTION_SCHEMA
-from apps.user_service.app.search.contact_typesense_schema import CONTACTS_COLLECTION_SCHEMA
+from apps.user_service.app.search.client_typesense_schema import (
+    build_document_from_schema,
+)
+from apps.user_service.app.search.company_typesense_schema import (
+    COMPANIES_COLLECTION_SCHEMA,
+)
+from apps.user_service.app.search.contact_typesense_schema import (
+    CONTACTS_COLLECTION_SCHEMA,
+)
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import UserContext, parse_json_field
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
@@ -39,7 +48,7 @@ def _dedupe_string_list_fields(document: dict[str, Any]) -> None:
     for key, value in document.items():
         if not isinstance(value, list):
             continue
-       
+
         non_null_items = [i for i in value if i is not None]
         if any(isinstance(i, (dict, list)) for i in non_null_items):
             continue
@@ -72,6 +81,190 @@ def _normalize_phone_entry(value: Any) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _build_contact_full_name(details: dict[str, Any]) -> str:
+    """Build a full name from contact details."""
+    first_name = details.get("first_name") or ""
+    last_name = details.get("last_name") or ""
+    full_name_parts = (
+        details.get("prefix"),
+        first_name,
+        details.get("middle_name"),
+        last_name,
+    )
+    return " ".join(part for part in full_name_parts if part)
+
+
+def _extract_phone_numbers_and_display(
+    details: dict[str, Any],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Extract phone numbers and display from contact details."""
+    phones = parse_json_field(details.get("phones")) or []
+    phone_numbers: list[str] = []
+    phones_display: list[dict[str, Any]] = []
+    if not isinstance(phones, list):
+        return phone_numbers, phones_display
+
+    for phone_entry in phones:
+        normalized = _normalize_phone_entry(phone_entry)
+        if normalized is None:
+            continue
+        phones_display.append(normalized)
+        number = (normalized.get("phone_number") or "").strip()
+        isd_code = (normalized.get("phone_isd_code") or "").strip()
+        if not number:
+            continue
+        phone_numbers.append(f"{isd_code}{number}" if isd_code else number)
+    return phone_numbers, phones_display
+
+
+def _extract_contact_company_linkage(
+    details: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Extract company linkage from contact details."""
+    companies = details.get("companies") or []
+    company_ids: list[str] = []
+    company_names: list[str] = []
+    if not isinstance(companies, list) or not companies:
+        return company_ids, company_names
+
+    for company_entry in companies:
+        if not isinstance(company_entry, dict):
+            continue
+        linked_company_id = (company_entry.get("company_id") or "").strip()
+        linked_company_name = (company_entry.get("name") or "").strip()
+        if linked_company_id:
+            company_ids.append(linked_company_id)
+        if linked_company_name:
+            company_names.append(linked_company_name)
+    return company_ids, company_names
+
+
+async def _extract_contact_custom_field_facets(
+    *,
+    conn: asyncpg.Connection,
+    organization_id: str,
+    details: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Extract custom field facets from contact details."""
+    custom_field_keys: list[str] = []
+    custom_field_values: list[str] = []
+    root_cells = details.get("custom_fields") or []
+    if not isinstance(root_cells, list) or not root_cells:
+        return custom_field_keys, custom_field_values
+
+    # Use a minimal user context so custom-field reads are org-scoped.
+    user_context = UserContext(user_id="", email="", organization_id=organization_id)
+    custom_field_service = CustomFieldService(db_connection=conn, user_context=user_context)
+    definitions, _ = await custom_field_service.get_custom_fields_list(
+        EntityType.CONTACT,
+        organization_id=organization_id,
+    )
+    id_to_def = {str(d.id): d for d in definitions}
+    return CustomFieldService.field_cells_typesense_facets(
+        root_cells,
+        id_to_def,
+    )
+
+
+def _extract_created_updated(details: dict[str, Any]) -> tuple[int, int]:
+    """Extract created and updated timestamps from contact details."""
+    created_at_dt = details.get("created_at_dt") or details.get("created_at")
+    updated_at_dt = details.get("updated_at_dt") or details.get("updated_at")
+    created_at = int(created_at_dt.timestamp()) if hasattr(created_at_dt, "timestamp") else 0
+    updated_at = int(updated_at_dt.timestamp()) if hasattr(updated_at_dt, "timestamp") else 0
+    return created_at, updated_at
+
+
+def _extract_company_contacts_fields(
+    details: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str], list[str], list[str], list[str]]:
+    """Extract company contacts fields from company details."""
+    contacts_raw = details.get("contacts") or []
+    contacts: list[dict[str, Any]] = []
+    contact_full_names: list[str] = []
+    contact_titles: list[str] = []
+    contact_emails: list[str] = []
+    contact_phone_numbers: list[str] = []
+
+    if not isinstance(contacts_raw, list) or not contacts_raw:
+        return (
+            contacts,
+            contact_full_names,
+            contact_titles,
+            contact_emails,
+            contact_phone_numbers,
+        )
+
+    for contact in contacts_raw:
+        if not isinstance(contact, dict):
+            continue
+        first_name = (contact.get("first_name") or "").strip()
+        last_name = (contact.get("last_name") or "").strip()
+        full_name = " ".join(part for part in (first_name, last_name) if part).strip()
+        title = (contact.get("title") or "").strip()
+        email = (contact.get("email") or "").strip().lower()
+        is_primary = bool(contact.get("is_primary"))
+
+        phone_numbers, phones_display = _extract_phone_numbers_and_display(contact)
+
+        contact_doc = {
+            "id": (contact.get("id") or "").strip(),
+            "first_name": first_name or None,
+            "last_name": last_name or None,
+            "full_name": full_name or "",
+            "title": title or None,
+            "email": email or None,
+            "is_primary": is_primary,
+            "phones_display": phones_display or None,
+            "phone_numbers": phone_numbers or None,
+        }
+        contacts.append({k: v for k, v in contact_doc.items() if v is not None and v != ""})
+
+        if full_name:
+            contact_full_names.append(full_name)
+        if title:
+            contact_titles.append(title)
+        if email:
+            contact_emails.append(email)
+        if phone_numbers:
+            contact_phone_numbers.extend(phone_numbers)
+
+    return (
+        contacts,
+        contact_full_names,
+        contact_titles,
+        contact_emails,
+        contact_phone_numbers,
+    )
+
+
+async def _extract_company_custom_field_facets(
+    *,
+    conn: asyncpg.Connection,
+    organization_id: str,
+    details: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Extract custom field facets from company details."""
+    custom_field_keys: list[str] = []
+    custom_field_values: list[str] = []
+    root_cells = details.get("custom_fields") or []
+    if not isinstance(root_cells, list) or not root_cells:
+        return custom_field_keys, custom_field_values
+
+    # Use a minimal user context so custom-field reads are org-scoped.
+    user_context = UserContext(user_id="", email="", organization_id=organization_id)
+    custom_field_service = CustomFieldService(db_connection=conn, user_context=user_context)
+    definitions, _ = await custom_field_service.get_custom_fields_list(
+        EntityType.COMPANY,
+        organization_id=organization_id,
+    )
+    id_to_def = {str(d.id): d for d in definitions}
+    return CustomFieldService.field_cells_typesense_facets(
+        root_cells,
+        id_to_def,
+    )
+
+
 async def _build_contact_document(
     *,
     conn: asyncpg.Connection,
@@ -87,76 +280,29 @@ async def _build_contact_document(
     if not details:
         return None
 
-    first_name = details.get("first_name") or ""
-    last_name = details.get("last_name") or ""
-    full_name_parts = (
-        details.get("prefix"),
-        first_name,
-        details.get("middle_name"),
-        last_name,
+    full_name = _build_contact_full_name(details)
+    phone_numbers, phones_display = _extract_phone_numbers_and_display(details)
+    company_ids, company_names = _extract_contact_company_linkage(details)
+    custom_field_keys, custom_field_values = await _extract_contact_custom_field_facets(
+        conn=conn,
+        organization_id=organization_id,
+        details=details,
     )
-    full_name = " ".join(part for part in full_name_parts if part)
-
-    phones = parse_json_field(details.get("phones")) or []
-    phone_numbers: list[str] = []
-    phones_display: list[dict[str, Any]] = []
-    if isinstance(phones, list):
-        for phone_entry in phones:
-            normalized = _normalize_phone_entry(phone_entry)
-            if normalized is None:
-                continue
-            phones_display.append(normalized)
-            number = (normalized.get("phone_number") or "").strip()
-            isd_code = (normalized.get("phone_isd_code") or "").strip()
-            if not number:
-                continue
-            phone_numbers.append(f"{isd_code}{number}" if isd_code else number)
-
-    # Company linkage (multi) - align with list API expectations (company_names[])
-    companies = details.get("companies") or []
-    company_ids: list[str] = []
-    company_names: list[str] = []
-    if isinstance(companies, list) and companies:
-        for company_entry in companies:
-            if not isinstance(company_entry, dict):
-                continue
-            linked_company_id = (company_entry.get("company_id") or "").strip()
-            linked_company_name = (company_entry.get("name") or "").strip()
-            if linked_company_id:
-                company_ids.append(linked_company_id)
-            if linked_company_name:
-                company_names.append(linked_company_name)
-
-    # Custom field facets.
-    custom_field_keys: list[str] = []
-    custom_field_values: list[str] = []
-    root_cells = details.get("custom_fields") or []
-    if isinstance(root_cells, list) and root_cells:
-        # Use a minimal user context so custom-field reads are org-scoped.
-        user_context = UserContext(user_id="", email="", organization_id=organization_id)
-        custom_field_service = CustomFieldService(db_connection=conn, user_context=user_context)
-        definitions, _ = await custom_field_service.get_custom_fields_list(
-            EntityType.CONTACT,
-            organization_id=organization_id,
-        )
-        id_to_def = {str(d.id): d for d in definitions}
-        custom_field_keys, custom_field_values = CustomFieldService.field_cells_typesense_facets(
-            root_cells,
-            id_to_def,
-        )
-
-    created_at_dt = details.get("created_at_dt") or details.get("created_at")
-    updated_at_dt = details.get("updated_at_dt") or details.get("updated_at")
-    created_at = int(created_at_dt.timestamp()) if hasattr(created_at_dt, "timestamp") else 0
-    updated_at = int(updated_at_dt.timestamp()) if hasattr(updated_at_dt, "timestamp") else 0
+    created_at, updated_at = _extract_created_updated(details)
 
     document: dict[str, Any] = {
         "id": str(details["id"]),
         "organization_id": str(details["organization_id"]),
         "status": details.get("status"),
-        "first_name": first_name or None,
-        "last_name": last_name or None,
-        "full_name": full_name or " ".join(part for part in (first_name, last_name) if part) or "",
+        "first_name": (details.get("first_name") or "") or None,
+        "last_name": (details.get("last_name") or "") or None,
+        "full_name": full_name
+        or " ".join(
+            part
+            for part in ((details.get("first_name") or ""), (details.get("last_name") or ""))
+            if part
+        )
+        or "",
         "title": details.get("title") or None,
         "email": (details.get("email") or "").lower() or None,
         "phone_numbers": phone_numbers or None,
@@ -196,83 +342,21 @@ async def _build_company_document(
     if not details:
         return None
 
-    # Store all contacts (not just primary) and also flatten into string[] fields
-    # so Typesense full-text search can match against contact attributes.
-    contacts_raw = details.get("contacts") or []
-    contacts: list[dict[str, Any]] = []
-    contact_full_names: list[str] = []
-    contact_titles: list[str] = []
-    contact_emails: list[str] = []
-    contact_phone_numbers: list[str] = []
-    if isinstance(contacts_raw, list) and contacts_raw:
-        for c in contacts_raw:
-            if not isinstance(c, dict):
-                continue
-            first_name = (c.get("first_name") or "").strip()
-            last_name = (c.get("last_name") or "").strip()
-            full_name = " ".join(part for part in (first_name, last_name) if part).strip()
-            title = (c.get("title") or "").strip()
-            email = (c.get("email") or "").strip().lower()
-            is_primary = bool(c.get("is_primary"))
+    (
+        contacts,
+        contact_full_names,
+        contact_titles,
+        contact_emails,
+        contact_phone_numbers,
+    ) = _extract_company_contacts_fields(details)
 
-            phones = parse_json_field(c.get("phones")) or []
-            phones_display: list[dict[str, Any]] = []
-            phone_numbers: list[str] = []
-            if isinstance(phones, list):
-                for phone_entry in phones:
-                    normalized = _normalize_phone_entry(phone_entry)
-                    if normalized is None:
-                        continue
-                    phones_display.append(normalized)
-                    number = (normalized.get("phone_number") or "").strip()
-                    isd_code = (normalized.get("phone_isd_code") or "").strip()
-                    if not number:
-                        continue
-                    phone_numbers.append(f"{isd_code}{number}" if isd_code else number)
+    custom_field_keys, custom_field_values = await _extract_company_custom_field_facets(
+        conn=conn,
+        organization_id=organization_id,
+        details=details,
+    )
 
-            contact_doc = {
-                "id": (c.get("id") or "").strip(),
-                "first_name": first_name or None,
-                "last_name": last_name or None,
-                "full_name": full_name or "",
-                "title": title or None,
-                "email": email or None,
-                "is_primary": is_primary,
-                "phones_display": phones_display or None,
-                "phone_numbers": phone_numbers or None,
-            }
-            contacts.append({k: v for k, v in contact_doc.items() if v is not None and v != ""})
-
-            if full_name:
-                contact_full_names.append(full_name)
-            if title:
-                contact_titles.append(title)
-            if email:
-                contact_emails.append(email)
-            if phone_numbers:
-                contact_phone_numbers.extend(phone_numbers)
-
-    # Custom field facets.
-    custom_field_keys: list[str] = []
-    custom_field_values: list[str] = []
-    root_cells = details.get("custom_fields") or []
-    if isinstance(root_cells, list) and root_cells:
-        user_context = UserContext(user_id="", email="", organization_id=organization_id)
-        custom_field_service = CustomFieldService(db_connection=conn, user_context=user_context)
-        definitions, _ = await custom_field_service.get_custom_fields_list(
-            EntityType.COMPANY,
-            organization_id=organization_id,
-        )
-        id_to_def = {str(d.id): d for d in definitions}
-        custom_field_keys, custom_field_values = CustomFieldService.field_cells_typesense_facets(
-            root_cells,
-            id_to_def,
-        )
-
-    created_at_dt = details.get("created_at_dt") or details.get("created_at")
-    updated_at_dt = details.get("updated_at_dt") or details.get("updated_at")
-    created_at = int(created_at_dt.timestamp()) if hasattr(created_at_dt, "timestamp") else 0
-    updated_at = int(updated_at_dt.timestamp()) if hasattr(updated_at_dt, "timestamp") else 0
+    created_at, updated_at = _extract_created_updated(details)
 
     document: dict[str, Any] = {
         "id": str(details["id"]),

@@ -6,7 +6,6 @@ does not reuse the shared "client" naming (e.g. primary_contact_*, client_type).
 
 from typing import Any
 
-
 CONTACTS_COLLECTION_SCHEMA: dict[str, Any] = {
     "enable_nested_fields": True,
     "token_separators": ["+", "-", "@", ".", "(", ")"],
@@ -48,9 +47,7 @@ CONTACTS_COLLECTION_SCHEMA: dict[str, Any] = {
 
 
 CONTACT_SEARCH_PARAMS: dict[str, Any] = {
-    "query_by": (
-        "full_name,email,phone_numbers,company_names,title,tags,custom_field_values"
-    ),
+    "query_by": ("full_name,email,phone_numbers,company_names,title,tags,custom_field_values"),
     "query_by_weights": "15,12,10,10,6,5,1",
     "num_typos": 2,
     "typo_tokens_threshold": 1,
@@ -75,4 +72,3 @@ CONTACT_PHONE_SEARCH_PARAMS: dict[str, Any] = {
     "num_typos": 0,
     "prefix": False,
 }
-

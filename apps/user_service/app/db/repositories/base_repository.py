@@ -64,7 +64,11 @@ class BaseRepository:
             for col in columns:
                 values_flat.append(serialize_jsonb_param(col, row.get(col), jsonb_columns))
 
-        query = f"INSERT INTO {table} ({', '.join(columns)}) VALUES {', '.join(placeholders)} RETURNING *"
+        query = (
+            f"INSERT INTO {table} ({', '.join(columns)}) "
+            f"VALUES {', '.join(placeholders)} "
+            "RETURNING *"
+        )
         records = await self.db_connection.fetch(query, *values_flat)
         return [dict(r) for r in records]
 

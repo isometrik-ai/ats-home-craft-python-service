@@ -28,7 +28,10 @@ COMPANY_ADDRESS_JSONB_COLUMNS: frozenset[str] = frozenset({"address_data"})
 
 
 class CompaniesRepository(BaseRepository):
+    """Persistence for ``companies`` and ``company_addresses`` rows."""
+
     def __init__(self, db_connection: asyncpg.Connection) -> None:
+        """Initialize with the request-scoped asyncpg connection."""
         super().__init__(db_connection=db_connection)
 
     async def create_company_with_optional_contact_link(
@@ -42,7 +45,7 @@ class CompaniesRepository(BaseRepository):
         contact_addresses: list[dict[str, Any]] | None = None,
         set_primary: bool,
     ) -> dict[str, Any]:
-        """Create company + optional addresses + optional contact (existing or created) + optional primary in one trip.
+        """Create company plus optional addresses and optional contact in one round trip.
 
         Returns:
             dict with keys:
@@ -56,12 +59,14 @@ class CompaniesRepository(BaseRepository):
         # company_id is available only after company insert, so we inject it in SQL.
         addresses_json = json.dumps(addresses_payload) if addresses_payload else None
         contact_addresses_payload = contact_addresses or []
-        contact_addresses_json = json.dumps(contact_addresses_payload) if contact_addresses_payload else None
+        contact_addresses_json = (
+            json.dumps(contact_addresses_payload) if contact_addresses_payload else None
+        )
 
         if contact_id is not None and contact_data is not None:
             raise ValueError("Provide only one of contact_id or contact_data.")
 
-        row = await self.db_connection.fetchrow(
+        fetched_row = await self.db_connection.fetchrow(
             """
             WITH contact_exists AS (
               SELECT ct.id
@@ -280,7 +285,11 @@ class CompaniesRepository(BaseRepository):
             )
             SELECT
               (SELECT id::text FROM company) AS company_id,
-              (SELECT to_jsonb(co) FROM companies AS co WHERE co.id = (SELECT id FROM company)) AS company,
+              (
+                SELECT to_jsonb(co)
+                FROM companies AS co
+                WHERE co.id = (SELECT id FROM company)
+              ) AS company,
               (SELECT id::text FROM contact) AS contact_id,
               (SELECT to_jsonb(new_contact) FROM new_contact) AS contact,
               (SELECT EXISTS(SELECT 1 FROM contact_exists)) AS contact_found
@@ -309,7 +318,7 @@ class CompaniesRepository(BaseRepository):
             contact_addresses_json,
             bool(set_primary),
         )
-        if not row:
+        if not fetched_row:
             return {
                 "company_id": None,
                 "company": None,
@@ -317,18 +326,19 @@ class CompaniesRepository(BaseRepository):
                 "contact": None,
                 "contact_found": False,
             }
-        company_row = row.get("company")
-        contact_row = row.get("contact")
+        company_row = fetched_row.get("company")
+        contact_row = fetched_row.get("contact")
         return {
-            "company_id": str(row["company_id"]),
+            "company_id": str(fetched_row["company_id"]),
             "company": dict(company_row) if isinstance(company_row, dict) else company_row,
-            "contact_id": row.get("contact_id"),
+            "contact_id": fetched_row.get("contact_id"),
             "contact": dict(contact_row) if isinstance(contact_row, dict) else contact_row,
-            "contact_found": bool(row.get("contact_found")),
+            "contact_found": bool(fetched_row.get("contact_found")),
         }
 
     async def get_company_for_update(self, *, company_id: str, organization_id: str) -> dict | None:
-        row = await self.db_connection.fetchrow(
+        """Load a company row with ``FOR UPDATE`` or return None when missing."""
+        fetched_row = await self.db_connection.fetchrow(
             """
             SELECT *
             FROM companies
@@ -339,7 +349,7 @@ class CompaniesRepository(BaseRepository):
             organization_id,
             ClientStatus.DELETED.value,
         )
-        return dict(row) if row else None
+        return dict(fetched_row) if fetched_row else None
 
     async def update_company(
         self,
@@ -348,10 +358,17 @@ class CompaniesRepository(BaseRepository):
         organization_id: str,
         update_data: dict[str, Any],
     ) -> dict | None:
+        """Update scalar and JSONB columns on a company and return the updated row."""
+        id_param = len(update_data) + 1
+        org_param = len(update_data) + 2
+        status_param = len(update_data) + 3
         return await self.update_returning(
             table="companies",
-            where_sql="WHERE id = $%d::uuid AND organization_id = $%d::uuid AND status != $%d"
-            % (len(update_data) + 1, len(update_data) + 2, len(update_data) + 3),
+            where_sql=(
+                f"WHERE id = ${id_param}::uuid "
+                f"AND organization_id = ${org_param}::uuid "
+                f"AND status != ${status_param}"
+            ),
             where_params=[company_id, organization_id, ClientStatus.DELETED.value],
             update_data=update_data,
             jsonb_columns=COMPANY_JSONB_COLUMNS,
@@ -359,6 +376,7 @@ class CompaniesRepository(BaseRepository):
         )
 
     async def create_company_addresses(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Insert one or more ``company_addresses`` rows and return inserted rows."""
         required = ["company_id"]
         optional = [
             "place_id",
@@ -392,10 +410,11 @@ class CompaniesRepository(BaseRepository):
         """Update a single company address row by id (scoped to company_id)."""
         if not update_data:
             return None
+        id_param = len(update_data) + 1
+        company_param = len(update_data) + 2
         return await self.update_returning(
             table="company_addresses",
-            where_sql="WHERE id = $%d::uuid AND company_id = $%d::uuid"
-            % (len(update_data) + 1, len(update_data) + 2),
+            where_sql=f"WHERE id = ${id_param}::uuid AND company_id = ${company_param}::uuid",
             where_params=[address_id, company_id],
             update_data=update_data,
             jsonb_columns=COMPANY_ADDRESS_JSONB_COLUMNS,
@@ -428,7 +447,7 @@ class CompaniesRepository(BaseRepository):
         organization_id: str,
     ) -> dict[str, Any] | None:
         """Get a company + member contacts (same shape as list) + addresses in one round trip."""
-        row = await self.db_connection.fetchrow(
+        fetched_row = await self.db_connection.fetchrow(
             """
             SELECT
               co.*,
@@ -462,9 +481,11 @@ class CompaniesRepository(BaseRepository):
                 AND cc.company_id = co.id
             ) contacts ON TRUE
             LEFT JOIN LATERAL (
-              SELECT jsonb_agg(to_jsonb(a) ORDER BY a.is_primary DESC, a.created_at ASC) AS addresses
-              FROM company_addresses a
-              WHERE a.company_id = co.id
+              SELECT jsonb_agg(
+                to_jsonb(addr) ORDER BY addr.is_primary DESC, addr.created_at ASC
+              ) AS addresses
+              FROM company_addresses addr
+              WHERE addr.company_id = co.id
             ) addresses ON TRUE
             WHERE co.id = $1::uuid
               AND co.organization_id = $2::uuid
@@ -474,16 +495,16 @@ class CompaniesRepository(BaseRepository):
             organization_id,
             ClientStatus.DELETED.value,
         )
-        if not row:
+        if not fetched_row:
             return None
-        result = dict(row)
-        for key in ("contacts", "addresses"):
-            val = result.get(key)
-            if isinstance(val, str):
+        result = dict(fetched_row)
+        for json_field_name in ("contacts", "addresses"):
+            raw_json_value = result.get(json_field_name)
+            if isinstance(raw_json_value, str):
                 try:
-                    result[key] = json.loads(val)
-                except Exception:
-                    result[key] = []
+                    result[json_field_name] = json.loads(raw_json_value)
+                except json.JSONDecodeError:
+                    result[json_field_name] = []
         return result
 
     async def list_companies(
@@ -499,15 +520,15 @@ class CompaniesRepository(BaseRepository):
         offset = (page - 1) * page_size
         args: list[Any] = [organization_id, ClientStatus.DELETED.value]
         where = ["co.organization_id = $1::uuid", "co.status != $2"]
-        idx = 3
+        next_param_index = 3
         if status:
-            where.append(f"co.status = ${idx}")
+            where.append(f"co.status = ${next_param_index}")
             args.append(status)
-            idx += 1
+            next_param_index += 1
         if search:
-            where.append(f"COALESCE(co.name,'') ILIKE ${idx}")
+            where.append(f"COALESCE(co.name,'') ILIKE ${next_param_index}")
             args.append(f"%{search.strip()}%")
-            idx += 1
+            next_param_index += 1
         where_sql = " AND ".join(where)
         total = await self.db_connection.fetchval(
             f"SELECT COUNT(1) FROM companies co WHERE {where_sql}",
@@ -554,8 +575,9 @@ class CompaniesRepository(BaseRepository):
             ) member_contacts ON TRUE
             WHERE {where_sql}
             ORDER BY co.created_at DESC
-            OFFSET ${idx} LIMIT ${idx + 1}
+            OFFSET ${next_param_index} LIMIT ${next_param_index + 1}
             """,
             *(args + [offset, page_size]),
         )
-        return [dict(r) for r in rows], int(total or 0)
+        company_rows = [dict(company_row) for company_row in rows]
+        return company_rows, int(total or 0)

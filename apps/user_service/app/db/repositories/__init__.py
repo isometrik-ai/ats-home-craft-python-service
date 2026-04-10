@@ -13,7 +13,9 @@ Usage:
 """
 
 from apps.user_service.app.db.repositories.client_repository import ClientRepository
-from apps.user_service.app.db.repositories.companies_repository import CompaniesRepository
+from apps.user_service.app.db.repositories.companies_repository import (
+    CompaniesRepository,
+)
 from apps.user_service.app.db.repositories.contact_companies_repository import (
     ContactCompaniesRepository,
 )

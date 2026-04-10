@@ -14,25 +14,32 @@ Design goals:
 """
 
 from __future__ import annotations
+
 import uuid
-from typing import Any
 from datetime import datetime, timezone
-from fastapi import BackgroundTasks
+from typing import Any
 
 import asyncpg
+from fastapi import BackgroundTasks
 from supabase import AsyncClient
 
+from apps.user_service.app.config.app_settings import app_settings, shared_settings
 from apps.user_service.app.db.repositories import (
     CompaniesRepository,
     ContactCompaniesRepository,
     ContactsRepository,
 )
-from apps.user_service.app.db.repositories.organization_repository import OrganizationRepository
+from apps.user_service.app.db.repositories.contacts_repository import (
+    CONTACT_JSONB_COLUMNS,
+)
+from apps.user_service.app.db.repositories.organization_repository import (
+    OrganizationRepository,
+)
 from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.schemas.contacts_v2 import (
-    CreateContactRequest,
     ContactCompaniesUpdate,
     ContactSummaryResponse,
+    CreateContactRequest,
     UpdateContactRequest,
 )
 from apps.user_service.app.schemas.enums import ClientStatus, EntityType, IsometrikRole
@@ -41,7 +48,11 @@ from apps.user_service.app.search.contact_typesense_schema import (
     CONTACT_PHONE_SEARCH_PARAMS,
     CONTACT_SEARCH_PARAMS,
 )
+from apps.user_service.app.services.client_enrichment_service import (
+    ClientEnrichmentService,
+)
 from apps.user_service.app.services.custom_field_service import CustomFieldService
+from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service_v2 import (
     index_companies_background,
     index_contacts_background,
@@ -53,8 +64,8 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_field,
     serialize_jsonb_param,
 )
-from apps.user_service.app.config.app_settings import app_settings, shared_settings
-from apps.user_service.app.services.client_enrichment_service import ClientEnrichmentService
+from apps.user_service.app.utils.email_utils import send_client_creation_email
+from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.supabase_db.auth_repository import create_user
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -62,17 +73,13 @@ from libs.shared_utils.http_exceptions import (
     ServiceUnavailableException,
     ValidationException,
 )
-from libs.shared_utils.logger import get_logger
-from libs.shared_utils.status_codes import CustomStatusCode
-from libs.shared_utils.typesense_service import TypesenseService
 from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
     get_isometrik_data_from_settings,
 )
-from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
-from apps.user_service.app.db.repositories.contacts_repository import CONTACT_JSONB_COLUMNS
-from apps.user_service.app.services.event_service import EventService
-from apps.user_service.app.utils.email_utils import send_client_creation_email
+from libs.shared_utils.logger import get_logger
+from libs.shared_utils.status_codes import CustomStatusCode
+from libs.shared_utils.typesense_service import TypesenseService
 
 logger = get_logger("contacts_service_v2")
 
@@ -87,7 +94,7 @@ class ContactsServiceV2:
         user_context: UserContext,
         supabase_client: AsyncClient | None = None,
     ) -> None:
-        """Initialize service with DB connection and request user context."""
+        """Initialize the service with a DB connection and the caller user context."""
         self.db_connection = db_connection
         self.user_context = user_context
         self.supabase_client = supabase_client
@@ -232,11 +239,11 @@ class ContactsServiceV2:
         if not custom_fields_payload:
             return []
 
-        cfs = CustomFieldService(
+        custom_field_service = CustomFieldService(
             db_connection=self.db_connection,
             user_context=self.user_context,
         )
-        return await cfs.validate_for_create(
+        return await custom_field_service.validate_for_create(
             custom_fields_payload,
             EntityType.CONTACT,
         )
@@ -253,7 +260,8 @@ class ContactsServiceV2:
         """Provision auth identity only when an email is provided.
 
         Returns:
-            (user_id, isometrik_user_id, password_if_created) when created/reused, otherwise (None, None, None).
+            ``(user_id, isometrik_user_id, password_if_created)`` when created or reused,
+            otherwise ``(None, None, None)``.
         """
         if not (portal_access and email):
             return None, None, None
@@ -272,6 +280,7 @@ class ContactsServiceV2:
         organization_name: str,
         password: str | None,
     ) -> None:
+        """Send portal welcome email when portal access and email are both set."""
         if not (portal_access and email):
             return
         try:
@@ -280,8 +289,8 @@ class ContactsServiceV2:
                 organization_name=organization_name,
                 password=password,
             )
-        except Exception as exc:
-            logger.error("Failed to send contact creation email: %s", str(exc))
+        except Exception as send_error:
+            logger.error("Failed to send contact creation email: %s", str(send_error))
 
     async def _create_addresses_if_any(
         self,
@@ -293,7 +302,10 @@ class ContactsServiceV2:
         if not addresses:
             return
         await self.contacts_repo.create_contact_addresses(
-            [{"contact_id": contact_id, **a.model_dump(exclude_none=True)} for a in addresses]
+            [
+                {"contact_id": contact_id, **address_input.model_dump(exclude_none=True)}
+                for address_input in addresses
+            ]
         )
 
     @staticmethod
@@ -302,7 +314,7 @@ class ContactsServiceV2:
         if not phones:
             return None
         return next(
-            (p for p in phones if getattr(p, "is_primary", False)),
+            (phone_item for phone_item in phones if getattr(phone_item, "is_primary", False)),
             phones[0],
         )
 
@@ -314,7 +326,9 @@ class ContactsServiceV2:
     ) -> dict[str, Any]:
         """Build the enrichment payload for a person contact (contacts entity)."""
         addresses_payload = [
-            {"country": a.country} for a in (body.addresses or []) if getattr(a, "country", None)
+            {"country": address_input.country}
+            for address_input in (body.addresses or [])
+            if getattr(address_input, "country", None)
         ]
         primary_phone = self._select_primary_phone(body.phones)
 
@@ -427,8 +441,10 @@ class ContactsServiceV2:
         )
 
         list_payload_inputs: dict[str, list[dict[str, Any]]] = {
-            "phones": [p.model_dump(mode="json", exclude_none=True) for p in body.phones],
-            "social_pages": [p.model_dump(mode="json", exclude_none=True) for p in body.social_pages],
+            "phones": [phone.model_dump(mode="json", exclude_none=True) for phone in body.phones],
+            "social_pages": [
+                page.model_dump(mode="json", exclude_none=True) for page in body.social_pages
+            ],
         }
         list_payloads: dict[str, list[dict[str, Any]]] = {}
         for field_name, items in list_payload_inputs.items():
@@ -437,7 +453,7 @@ class ContactsServiceV2:
         phones_payload = list_payloads["phones"]
         social_pages_payload = list_payloads["social_pages"]
 
-        # Prepare JSONB params once at the service layer (avoid repeating this logic in repositories).
+        # Prepare JSONB params once at the service layer
         jsonb_inputs: dict[str, Any] = {
             "phones": phones_payload,
             "custom_fields": validated_custom_fields,
@@ -445,8 +461,12 @@ class ContactsServiceV2:
             "social_pages": social_pages_payload,
         }
         jsonb_params: dict[str, Any] = {}
-        for field_name, value in jsonb_inputs.items():
-            jsonb_params[field_name] = serialize_jsonb_param(field_name, value, CONTACT_JSONB_COLUMNS)
+        for field_name, field_value in jsonb_inputs.items():
+            jsonb_params[field_name] = serialize_jsonb_param(
+                field_name,
+                field_value,
+                CONTACT_JSONB_COLUMNS,
+            )
 
         phones_jsonb = jsonb_params["phones"]
         custom_fields_jsonb = jsonb_params["custom_fields"]
@@ -527,10 +547,10 @@ class ContactsServiceV2:
         """Return a copy of list items with an id set on each (generated if missing)."""
         result: list[dict[str, Any]] = []
         for item in items:
-            row = dict(item)
-            if not row.get("id"):
-                row["id"] = str(uuid.uuid4())
-            result.append(row)
+            item_copy = dict(item)
+            if not item_copy.get("id"):
+                item_copy["id"] = str(uuid.uuid4())
+            result.append(item_copy)
         return result
 
     async def _apply_jsonb_list_changes(
@@ -561,9 +581,9 @@ class ContactsServiceV2:
             for item in update_obj.update:
                 data = item.model_dump(exclude_none=True, exclude={"id"})
                 found = False
-                for i, existing_item in enumerate(updated):
+                for list_index, existing_item in enumerate(updated):
                     if str(existing_item.get("id")) == item.id:
-                        updated[i] = {**existing_item, **data}
+                        updated[list_index] = {**existing_item, **data}
                         found = True
                         break
                 if not found:
@@ -582,17 +602,6 @@ class ContactsServiceV2:
         payload[field_name] = updated
         current[field_name] = updated
 
-    @staticmethod
-    def _validate_single_primary(items: list[dict[str, Any]], *, field_name: str) -> None:
-        """Validate that there is only one primary item in the list."""
-        if sum(
-            1 for item in items if isinstance(item, dict) and item.get("is_primary") is True
-        ) > 1:
-            raise ValidationException(
-                message_key=field_name,
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
     async def _apply_contact_addresses_delta(self, *, contact_id: str, addresses: Any) -> None:
         """Apply AddressesUpdate to `contact_addresses` table."""
         if addresses is None:
@@ -600,8 +609,7 @@ class ContactsServiceV2:
         # remove
         if addresses.remove:
             await self.contacts_repo.delete_contact_addresses(
-                contact_id=contact_id,
-                address_ids=addresses.remove
+                contact_id=contact_id, address_ids=addresses.remove
             )
         # update
         if addresses.update:
@@ -614,8 +622,12 @@ class ContactsServiceV2:
         # add
         if addresses.add:
             await self.contacts_repo.create_contact_addresses(
-                [{"contact_id": contact_id,
-                 **address.model_dump(exclude_none=True)} for address in addresses.add
+                [
+                    {
+                        "contact_id": contact_id,
+                        **address.model_dump(exclude_none=True),
+                    }
+                    for address in addresses.add
                 ]
             )
 
@@ -634,10 +646,10 @@ class ContactsServiceV2:
             ("profile_photo_url", "profile_photo_url"),
             ("tags", "tags"),
         )
-        for body_attr, col in scalar_fields:
+        for body_attr, column_name in scalar_fields:
             value = getattr(body, body_attr, None)
             if value is not None:
-                update_data[col] = value
+                update_data[column_name] = value
 
         if body.additional_data is not None:
             update_data["additional_data"] = body.additional_data
@@ -663,10 +675,12 @@ class ContactsServiceV2:
             not_found_message_key="clients.errors.phone_not_found",
         )
         phones_items = update_data.get("phones") or []
-        if (
-            sum(1 for i in phones_items if isinstance(i, dict) and i.get("is_primary") is True)
-            > 1
-        ):
+        primary_phone_count = sum(
+            1
+            for phone_item in phones_items
+            if isinstance(phone_item, dict) and phone_item.get("is_primary") is True
+        )
+        if primary_phone_count > 1:
             raise ValidationException(
                 message_key="clients.errors.only_one_primary_phone",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -702,13 +716,15 @@ class ContactsServiceV2:
         if body.custom_fields is None:
             return
 
-        cfs = CustomFieldService(
+        custom_field_service = CustomFieldService(
             db_connection=self.db_connection,
             user_context=self.user_context,
         )
         existing_cf = parse_json_field(current.get("custom_fields"))
         merged = existing_cf if isinstance(existing_cf, list) else []
-        merged = await cfs.merge_for_update(body.custom_fields, merged, EntityType.CONTACT)
+        merged = await custom_field_service.merge_for_update(
+            body.custom_fields, merged, EntityType.CONTACT
+        )
         update_data["custom_fields"] = merged
 
     async def update_contact(
@@ -760,7 +776,8 @@ class ContactsServiceV2:
             )
 
         await self._apply_contact_addresses_delta(
-            contact_id=contact_id, addresses=body.addresses,
+            contact_id=contact_id,
+            addresses=body.addresses,
         )
         created_company_id: str | None = None
         companies_delta: dict[str, Any] | None = None
@@ -774,15 +791,15 @@ class ContactsServiceV2:
                 "affected_company_ids": delta_result.get("affected_company_ids") or [],
                 "created_company_id": created_company_id,
             }
-        out: dict[str, Any] = {
+        update_response: dict[str, Any] = {
             "ok": True,
             "old_data": current,
             "new_data": updated_row or current,
             "created_company_id": created_company_id,
         }
         if companies_delta is not None:
-            out["companies_delta"] = companies_delta
-        return out
+            update_response["companies_delta"] = companies_delta
+        return update_response
 
     async def apply_companies_update_delta(
         self,
@@ -808,12 +825,12 @@ class ContactsServiceV2:
         add_company_ids: list[str] = []
         set_primary_ids: list[str] = []
         unset_primary_ids: list[str] = []
-        for item in (delta.add_associations or []):
+        for item in delta.add_associations or []:
             add_company_ids.append(item.company_id)
             if item.is_primary:
                 set_primary_ids.append(item.company_id)
 
-        for item in (delta.update_associations or []):
+        for item in delta.update_associations or []:
             if item.is_primary:
                 set_primary_ids.append(item.company_id)
             else:
@@ -845,8 +862,12 @@ class ContactsServiceV2:
             create_is_primary=created_primary,
         )
         affected_company_ids: set[str] = set(remove_ids)
-        affected_company_ids.update(c.company_id for c in (delta.add_associations or []))
-        affected_company_ids.update(u.company_id for u in (delta.update_associations or []))
+        affected_company_ids.update(
+            add_item.company_id for add_item in (delta.add_associations or [])
+        )
+        affected_company_ids.update(
+            update_item.company_id for update_item in (delta.update_associations or [])
+        )
         if created_company_id:
             affected_company_ids.add(str(created_company_id))
         return {
@@ -882,9 +903,9 @@ class ContactsServiceV2:
         phones = details.get("phones") or []
         primary_phone: dict[str, Any] | None = None
         if isinstance(phones, list):
-            for p in phones:
-                if isinstance(p, dict) and p.get("is_primary") is True:
-                    primary_phone = p
+            for phone_entry in phones:
+                if isinstance(phone_entry, dict) and phone_entry.get("is_primary") is True:
+                    primary_phone = phone_entry
                     break
             if primary_phone is None and phones and isinstance(phones[0], dict):
                 primary_phone = phones[0]
@@ -955,11 +976,11 @@ class ContactsServiceV2:
                 topics=event_topics,
             )
 
-        for rel_ev, rel_key in related_lifecycle_events or ():
+        for related_event, related_event_key in related_lifecycle_events or ():
             background_tasks.add_task(
                 EventService.publish_event_background,
-                event=rel_ev,
-                key=rel_key,
+                event=related_event,
+                key=related_event_key,
                 topics=event_topics,
             )
 
@@ -974,7 +995,10 @@ class ContactsServiceV2:
             if affected_companies:
                 background_tasks.add_task(
                     index_companies_background,
-                    [(str(cid), organization_id) for cid in affected_companies],
+                    [
+                        (str(company_identifier), organization_id)
+                        for company_identifier in affected_companies
+                    ],
                 )
 
         # Trigger contact enrichment only when enrichment-relevant inputs changed.
@@ -985,7 +1009,9 @@ class ContactsServiceV2:
             "phones",
             "addresses",
         )
-        enrichment_inputs_changed = any(getattr(body, f) is not None for f in enrichment_input_fields)
+        enrichment_inputs_changed = any(
+            getattr(body, field_name) is not None for field_name in enrichment_input_fields
+        )
         if enrichment_inputs_changed:
             background_tasks.add_task(
                 ContactsServiceV2.trigger_enrichment_background,
@@ -1024,7 +1050,8 @@ class ContactsServiceV2:
         org_id = self.user_context.organization_id
 
         details = await self.contacts_repo.get_contact_details(
-            contact_id=contact_id, organization_id=org_id,
+            contact_id=contact_id,
+            organization_id=org_id,
         )
         if not details:
             raise NotFoundException(
@@ -1032,9 +1059,10 @@ class ContactsServiceV2:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        for key in ("id", "organization_id", "user_id"):
-            if details.get(key) is not None and not isinstance(details.get(key), str):
-                details[key] = str(details[key])
+        for uuid_field_name in ("id", "organization_id", "user_id"):
+            field_value = details.get(uuid_field_name)
+            if field_value is not None and not isinstance(field_value, str):
+                details[uuid_field_name] = str(field_value)
 
         json_list_fields = (
             "phones",
@@ -1043,17 +1071,17 @@ class ContactsServiceV2:
             "work_history",
             "educational_history",
         )
-        for key in json_list_fields:
-            val = details.get(key)
-            if isinstance(val, str):
-                details[key] = parse_json_field(val) or []
-            elif val is None:
-                details[key] = []
+        for field_name in json_list_fields:
+            raw_field_value = details.get(field_name)
+            if isinstance(raw_field_value, str):
+                details[field_name] = parse_json_field(raw_field_value) or []
+            elif raw_field_value is None:
+                details[field_name] = []
 
-        val = details.get("additional_data")
-        if isinstance(val, str):
-            details["additional_data"] = parse_json_field(val) or {}
-        elif val is None:
+        additional_raw = details.get("additional_data")
+        if isinstance(additional_raw, str):
+            details["additional_data"] = parse_json_field(additional_raw) or {}
+        elif additional_raw is None:
             details["additional_data"] = {}
 
         details["created_at"] = format_iso_datetime(details.get("created_at")) or ""
@@ -1081,35 +1109,34 @@ class ContactsServiceV2:
             page=page,
             page_size=page_size,
         )
-        for row in rows:
-            row["created_at"] = format_iso_datetime(row.get("created_at")) or ""
-            row["updated_at"] = format_iso_datetime(row.get("updated_at")) or ""
-            company_names = row.get("company_names")
+        for list_row in rows:
+            list_row["created_at"] = format_iso_datetime(list_row.get("created_at")) or ""
+            list_row["updated_at"] = format_iso_datetime(list_row.get("updated_at")) or ""
+            company_names = list_row.get("company_names")
             if isinstance(company_names, str):
-                row["company_names"] = parse_json_field(company_names) or []
+                list_row["company_names"] = parse_json_field(company_names) or []
             elif company_names is None:
-                row["company_names"] = []
-            phones = row.get("phones")
+                list_row["company_names"] = []
+            phones = list_row.get("phones")
             if isinstance(phones, str):
-                row["phones"] = parse_json_field(phones) or []
+                list_row["phones"] = parse_json_field(phones) or []
             elif phones is None:
-                row["phones"] = []
+                list_row["phones"] = []
         return {"items": rows, "total": total}
 
     async def soft_delete_contact(self, *, contact_id: str) -> dict[str, Any]:
         """Soft-delete a contact (sets status='deleted') and return old/new snapshots."""
         org_id = self.user_context.organization_id
         current = await self.contacts_repo.get_contact_for_update(
-            contact_id=contact_id, organization_id=org_id,
+            contact_id=contact_id,
+            organization_id=org_id,
         )
         if not current:
             raise NotFoundException(
-                message_key="clients.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND
+                message_key="clients.errors.not_found", custom_code=CustomStatusCode.NOT_FOUND
             )
         updated = await self.contacts_repo.soft_delete_contact(
-            contact_id=contact_id,
-            organization_id=org_id
+            contact_id=contact_id, organization_id=org_id
         )
         return {"old_data": current, "new_data": updated}
 
@@ -1150,9 +1177,7 @@ class ContactsServiceV2:
         if embedding is not None:
             vector = ",".join(map(str, embedding))
             distance_threshold = getattr(
-                shared_settings.typesense,
-                "vector_distance_threshold",
-                None
+                shared_settings.typesense, "vector_distance_threshold", None
             )
             if distance_threshold is not None and float(distance_threshold) > 0:
                 params["vector_query"] = (
@@ -1161,11 +1186,11 @@ class ContactsServiceV2:
             else:
                 params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
 
-        raw = await self.typesense.search(params)
-        hits = raw.get("hits") or []
+        search_response = await self.typesense.search(params)
+        hits = search_response.get("hits") or []
         return {
             "items": self.typesense_hits_to_contact_summaries(hits),
-            "total": raw.get("found", 0),
+            "total": search_response.get("found", 0),
         }
 
     @staticmethod
@@ -1173,12 +1198,12 @@ class ContactsServiceV2:
         """Convert raw Typesense hits into list API summary items."""
         items: list[dict[str, Any]] = []
         for hit in hits:
-            doc = hit.get("document") if isinstance(hit, dict) else None
-            if not isinstance(doc, dict):
+            hit_document = hit.get("document") if isinstance(hit, dict) else None
+            if not isinstance(hit_document, dict):
                 continue
 
-            created_at = doc.get("created_at")
-            updated_at = doc.get("updated_at")
+            created_at = hit_document.get("created_at")
+            updated_at = hit_document.get("updated_at")
             created_at_iso = (
                 datetime.fromtimestamp(int(created_at), tz=timezone.utc).isoformat()
                 if isinstance(created_at, int) and created_at > 0
@@ -1190,19 +1215,21 @@ class ContactsServiceV2:
                 else ""
             )
 
-            row = {
-                "id": doc.get("id"),
-                "organization_id": doc.get("organization_id"),
-                "status": doc.get("status"),
-                "first_name": doc.get("first_name"),
-                "last_name": doc.get("last_name"),
-                "title": doc.get("title"),
-                "email": doc.get("email"),
-                "profile_photo_url": doc.get("profile_photo_url"),
-                "phones": doc.get("phones_display") or [],
-                "company_names": doc.get("company_names") or [],
+            summary_row = {
+                "id": hit_document.get("id"),
+                "organization_id": hit_document.get("organization_id"),
+                "status": hit_document.get("status"),
+                "first_name": hit_document.get("first_name"),
+                "last_name": hit_document.get("last_name"),
+                "title": hit_document.get("title"),
+                "email": hit_document.get("email"),
+                "profile_photo_url": hit_document.get("profile_photo_url"),
+                "phones": hit_document.get("phones_display") or [],
+                "company_names": hit_document.get("company_names") or [],
                 "created_at": created_at_iso,
                 "updated_at": updated_at_iso,
             }
-            items.append(ContactSummaryResponse.model_validate(row).model_dump(exclude_none=True))
+            items.append(
+                ContactSummaryResponse.model_validate(summary_row).model_dump(exclude_none=True)
+            )
         return items

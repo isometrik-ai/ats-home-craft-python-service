@@ -50,6 +50,7 @@ router.include_router(webhooks_router)
 router.include_router(contacts_v2_router)
 router.include_router(companies_v2_router)
 
+
 @router.get("/status")
 async def api_status():
     """API status endpoint to verify all routes are working"""
