@@ -576,6 +576,21 @@ def parse_json_field(field_value: str | dict[str, Any] | None) -> dict[str, Any]
     return {}
 
 
+def coerce_json_list(value: Any) -> list[Any]:
+    """Normalize a DB/API value to a list (JSON string, list, or None)."""
+    if isinstance(value, list):
+        return value
+    if value is None:
+        return []
+    if isinstance(value, str):
+        try:
+            parsed = parse_json_field(value)
+        except Exception:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
 def safe_str(value: Any) -> str:
     """Convert a value into a stable string (ids/labels)."""
     return "" if value is None else str(value)

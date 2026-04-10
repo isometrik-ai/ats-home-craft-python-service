@@ -28,6 +28,12 @@ from openai import AsyncOpenAI
 from apps.user_service.app.search.client_typesense_schema import (
     CLIENT_COLLECTION_SCHEMA,
 )
+from apps.user_service.app.search.company_typesense_schema import (
+    COMPANIES_COLLECTION_SCHEMA,
+)
+from apps.user_service.app.search.contact_typesense_schema import (
+    CONTACTS_COLLECTION_SCHEMA,
+)
 from libs.shared_config.app_settings import SharedAppSettings, shared_settings
 from libs.shared_utils.logger import get_logger
 
@@ -42,6 +48,25 @@ _EMBEDDING_FIELD_NAME: Final[str] = "embedding"
 _SCOPED_KEY_TTL_SECONDS: Final[int] = 3_600  # 1 hour
 
 logger = get_logger("typesense_service")
+
+
+def _default_schema_for_collection(
+    *,
+    collection_name: str,
+    settings: SharedAppSettings,
+) -> Mapping[str, Any]:
+    """Return the dedicated schema for a known collection name.
+
+    Falls back to the legacy/shared client schema for backwards compatibility.
+    """
+    typesense_settings = settings.typesense
+    contacts_name = getattr(typesense_settings, "contacts_collection_name", None)
+    companies_name = getattr(typesense_settings, "companies_collection_name", None)
+    if contacts_name and collection_name == contacts_name:
+        return CONTACTS_COLLECTION_SCHEMA
+    if companies_name and collection_name == companies_name:
+        return COMPANIES_COLLECTION_SCHEMA
+    return CLIENT_COLLECTION_SCHEMA
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +189,13 @@ def _build_embedding_text(document: Mapping[str, Any]) -> str:
                 if isinstance(item, str) and item.strip():
                     text_parts.append(item.strip())
 
-    # Keep in sync with primary query fields from ``client_typesense_schema``.
+    # Keep in sync with primary query fields across dedicated schemas.
     for key in (
+        # Dedicated contacts collection (v2)
+        "full_name",
+        "title",
+        "company_names",
+        # Legacy/shared client schema fields
         "name",
         "primary_contact_full_name",
         "email",
@@ -262,6 +292,7 @@ class TypesenseService:
     __slots__ = (
         "_settings",
         "_collection_name",
+        "_collection_schema",
         "_ensure_lock",
         "_ensured",
     )
@@ -270,10 +301,23 @@ class TypesenseService:
         self,
         *,
         collection_name: str,
+        collection_schema: Mapping[str, Any] | None = None,
         settings: SharedAppSettings | None = None,
     ) -> None:
         self._settings = settings or shared_settings
         self._collection_name = collection_name
+        # Prefer dedicated schema inferred from collection name; allow explicit override.
+        schema = (
+            dict(collection_schema)
+            if collection_schema is not None
+            else dict(
+                _default_schema_for_collection(
+                    collection_name=collection_name,
+                    settings=self._settings,
+                )
+            )
+        )
+        self._collection_schema = schema
         self._ensure_lock = asyncio.Lock()
         self._ensured = False
 
@@ -282,6 +326,7 @@ class TypesenseService:
         cls,
         *,
         collection_name: str,
+        collection_schema: Mapping[str, Any] | None = None,
         settings: SharedAppSettings | None = None,
     ) -> "TypesenseService":
         """Convenience constructor to mirror existing call sites.
@@ -289,7 +334,11 @@ class TypesenseService:
         Keeps the public API explicit while allowing legacy code to migrate to this
         httpx-based implementation without behavioural changes.
         """
-        return cls(collection_name=collection_name, settings=settings)
+        return cls(
+            collection_name=collection_name,
+            collection_schema=collection_schema,
+            settings=settings,
+        )
 
     # Internal HTTP primitive
 
@@ -379,7 +428,10 @@ class TypesenseService:
                 if exc.response.status_code != 404:
                     raise
 
-                schema: dict[str, Any] = {**CLIENT_COLLECTION_SCHEMA, "name": self._collection_name}
+                schema: dict[str, Any] = {
+                    **dict(self._collection_schema),
+                    "name": self._collection_name,
+                }
                 await self._request("POST", "/collections", json_body=schema)
                 logger.info(
                     "typesense_collection_created",

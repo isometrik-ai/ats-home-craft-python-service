@@ -5,6 +5,8 @@ from fastapi import APIRouter
 from apps.user_service.app.api.audit_logs import router as audit_logs_router
 from apps.user_service.app.api.auth import router as auth_router
 from apps.user_service.app.api.clients import router as clients_router
+from apps.user_service.app.api.companies import router as companies_router
+from apps.user_service.app.api.contacts import router as contacts_router
 from apps.user_service.app.api.custom_fields import router as custom_fields_router
 from apps.user_service.app.api.external_clients import router as external_clients_router
 from apps.user_service.app.api.external_leads import router as external_leads_router
@@ -45,6 +47,8 @@ router.include_router(custom_fields_router)
 router.include_router(lead_stages_router)
 router.include_router(leads_router)
 router.include_router(webhooks_router)
+router.include_router(contacts_router)
+router.include_router(companies_router)
 
 
 @router.get("/status")

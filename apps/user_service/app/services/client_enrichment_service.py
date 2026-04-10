@@ -377,6 +377,55 @@ class ClientEnrichmentService:
             {"sales_intelligence": sales_data},
         )
 
+    @staticmethod
+    async def _persist_enrichment_status(
+        *,
+        db_conn: asyncpg.Connection,
+        entity_table: str,
+        entity_id: str,
+        organization_id: str,
+        update_data: dict[str, Any],
+    ) -> None:
+        """Persist enrichment status fields to the given entity table.
+
+        Supports legacy `clients` and v2 `contacts`/`companies`.
+        """
+        if entity_table == "clients":
+            repo = ClientRepository(db_conn)
+            await repo.update_client(entity_id, organization_id, update_data)
+            return
+
+        if entity_table == "contacts":
+            from apps.user_service.app.db.repositories import ContactsRepository
+
+            repo = ContactsRepository(db_conn)
+            await repo.update_contact(
+                contact_id=entity_id,
+                organization_id=organization_id,
+                update_data=update_data,
+            )
+            return
+
+        if entity_table == "companies":
+            from apps.user_service.app.db.repositories import CompaniesRepository
+
+            repo = CompaniesRepository(db_conn)
+            await repo.update_company(
+                company_id=entity_id,
+                organization_id=organization_id,
+                update_data=update_data,
+            )
+            return
+
+        logger.error(
+            "Unsupported entity_table for enrichment status update; skipping",
+            extra={
+                "entity_table": entity_table,
+                "entity_id": entity_id,
+                "organization_id": organization_id,
+            },
+        )
+
     async def run_client_enrichment(
         self,
         client_id: str,
@@ -384,6 +433,8 @@ class ClientEnrichmentService:
         client_type: str,
         payload_data: dict[str, Any],
         conn: asyncpg.Connection | None = None,
+        *,
+        entity_table: str = "clients",
     ) -> None:
         """Run enrichment after client creation: call API, then update client with
         request_id and status. Handles exceptions internally to prevent resource leaks.
@@ -432,6 +483,7 @@ class ClientEnrichmentService:
                 request_id=request_id,
                 status=ClientEnrichmentStatus.REQUESTED.value,
                 conn=conn,
+                entity_table=entity_table,
             )
             logger.info(
                 "Client enrichment requested and record updated",
@@ -454,6 +506,8 @@ class ClientEnrichmentService:
         request_id: str,
         status: str,
         conn: asyncpg.Connection | None = None,
+        *,
+        entity_table: str = "clients",
     ) -> None:
         """Update client enrichment request id and status.
 
@@ -466,14 +520,24 @@ class ClientEnrichmentService:
         }
 
         if conn is not None:
-            repo = ClientRepository(conn)
-            await repo.update_client(client_id, organization_id, update_data)
+            await ClientEnrichmentService._persist_enrichment_status(
+                db_conn=conn,
+                entity_table=entity_table,
+                entity_id=client_id,
+                organization_id=organization_id,
+                update_data=update_data,
+            )
             return
 
         pool = await get_pool()
         async with AcquireConnection(pool) as acquired_conn:
-            repo = ClientRepository(acquired_conn)
-            await repo.update_client(client_id, organization_id, update_data)
+            await ClientEnrichmentService._persist_enrichment_status(
+                db_conn=acquired_conn,
+                entity_table=entity_table,
+                entity_id=client_id,
+                organization_id=organization_id,
+                update_data=update_data,
+            )
 
     async def run_bulk_client_enrichment(
         self,

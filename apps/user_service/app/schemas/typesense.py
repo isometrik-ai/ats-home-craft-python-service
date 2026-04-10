@@ -18,7 +18,21 @@ Design rules:
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class TypesensePhoneEntry(BaseModel):
+    """Stored phone item for Typesense contact docs."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    id: str | None = None
+    phone_number: str | None = None
+    phone_isd_code: str | None = None
+    label: str | None = None
+    is_primary: bool | None = None
 
 
 class TypesenseClientDocument(BaseModel):
@@ -185,3 +199,72 @@ class TypesenseClientDocument(BaseModel):
         default=None,
         description="Client profile image URL (stored for display-only responses).",
     )
+
+
+class TypesenseContactDocument(BaseModel):
+    """Document shape for *contact/person* docs indexed by contacts services.
+
+    This is intentionally narrower than `TypesenseClientDocument` so contact
+    indexing stays clean and avoids accidentally coupling to company-only fields.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    id: str
+    organization_id: str
+    status: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    full_name: str
+    title: str | None = None
+
+    email: str | None = None
+    phone_numbers: list[str] | None = None
+    phones_display: list[TypesensePhoneEntry] | None = None
+    tags: list[str] | None = None
+
+    company_ids: list[str] | None = None
+    company_names: list[str] | None = None
+
+    custom_field_keys: list[str] | None = None
+    custom_field_values: list[str] | None = None
+
+    enrichment_done: bool | None = None
+    created_at: int
+    updated_at: int
+
+    profile_photo_url: str | None = None
+
+
+class TypesenseCompanyDocument(BaseModel):
+    """Document shape for *company* docs indexed by companies services."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    id: str
+    organization_id: str
+    status: str | None = None
+    name: str
+
+    industry: str | None = None
+    contacts: list[dict[str, Any]] | None = None
+    contact_full_names: list[str] | None = None
+    contact_titles: list[str] | None = None
+    contact_emails: list[str] | None = None
+    contact_phone_numbers: list[str] | None = None
+    tags: list[str] | None = None
+
+    description: str | None = None
+    target_market_segments: list[str] | None = None
+    current_tech_stack: list[str] | None = None
+    preferred_communication_channels: list[str] | None = None
+    industry_specific_terminologies: list[str] | None = None
+
+    custom_field_keys: list[str] | None = None
+    custom_field_values: list[str] | None = None
+
+    enrichment_done: bool | None = None
+    created_at: int
+    updated_at: int
+
+    profile_photo_url: str | None = None
