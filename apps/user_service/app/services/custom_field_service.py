@@ -852,7 +852,7 @@ class CustomFieldService:
         for patch_index, patch_dict in enumerate(patches):
             if not isinstance(patch_dict, dict):
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_invalid_type",
+                    message_key="custom_fields.errors.custom_field_invalid_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={
                         "field_key": f"custom_fields[{patch_index}]",
@@ -867,7 +867,7 @@ class CustomFieldService:
                 shortcuts.append(patch_dict)
             else:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_patch_root_or_instance_required",
+                    message_key="custom_fields.errors.custom_field_patch_root_or_instance_required",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
         return normal, shortcuts
@@ -904,13 +904,13 @@ class CustomFieldService:
         matches = self._find_field_cells_by_instance_id(working_roots, str(iid))
         if not matches:
             raise ValidationException(
-                message_key="clients.errors.custom_field_instance_not_found",
+                message_key="custom_fields.errors.custom_field_instance_not_found",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"instance_id": str(iid)},
             )
         if len(matches) > 1:
             raise ValidationException(
-                message_key="clients.errors.custom_field_instance_ambiguous",
+                message_key="custom_fields.errors.custom_field_instance_ambiguous",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"instance_id": str(iid)},
             )
@@ -919,14 +919,14 @@ class CustomFieldService:
         pfid = patch.get("field_id")
         if pfid is not None and str(pfid) != fid_cell:
             raise ValidationException(
-                message_key="clients.errors.custom_field_instance_field_mismatch",
+                message_key="custom_fields.errors.custom_field_instance_field_mismatch",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"instance_id": str(iid), "field_id": str(pfid)},
             )
         field_def = flat_defs.get(fid_cell)
         if field_def is None:
             raise ValidationException(
-                message_key="clients.errors.custom_field_not_defined",
+                message_key="custom_fields.errors.custom_field_not_defined",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_id": fid_cell},
             )
@@ -966,7 +966,7 @@ class CustomFieldService:
         ]
         if len(present) != 1:
             raise ValidationException(
-                message_key="clients.errors.custom_field_discriminator",
+                message_key="custom_fields.errors.custom_field_discriminator",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key},
             )
@@ -978,13 +978,13 @@ class CustomFieldService:
             return
         if "type" in cell:
             raise ValidationException(
-                message_key="clients.errors.custom_field_forbidden_payload_key",
+                message_key="custom_fields.errors.custom_field_forbidden_payload_key",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key, "forbidden_key": "type"},
             )
         if "instance_id" in cell:
             raise ValidationException(
-                message_key="clients.errors.custom_field_forbidden_payload_key",
+                message_key="custom_fields.errors.custom_field_forbidden_payload_key",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key, "forbidden_key": "instance_id"},
             )
@@ -995,7 +995,7 @@ class CustomFieldService:
             subs = cell.get("sub_fields")
             if not isinstance(subs, list):
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_invalid_type",
+                    message_key="custom_fields.errors.custom_field_invalid_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": path_key, "expected_type": "array (sub_fields)"},
                 )
@@ -1007,7 +1007,7 @@ class CustomFieldService:
         items = cell.get("items")
         if not isinstance(items, list):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key, "expected_type": "array (items)"},
             )
@@ -1020,7 +1020,7 @@ class CustomFieldService:
             return
         if "type" in cell:
             raise ValidationException(
-                message_key="clients.errors.custom_field_forbidden_payload_key",
+                message_key="custom_fields.errors.custom_field_forbidden_payload_key",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key, "forbidden_key": "type"},
             )
@@ -1047,7 +1047,7 @@ class CustomFieldService:
             return []
         if not isinstance(custom_fields, list):
             raise ValidationException(
-                message_key="clients.errors.invalid_custom_fields_type",
+                message_key="custom_fields.errors.invalid_custom_fields_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"expected_type": "array"},
             )
@@ -1063,7 +1063,7 @@ class CustomFieldService:
             return []
         if not isinstance(payload, list):
             raise ValidationException(
-                message_key="clients.errors.invalid_custom_fields_type",
+                message_key="custom_fields.errors.invalid_custom_fields_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"expected_type": "array"},
             )
@@ -1097,14 +1097,14 @@ class CustomFieldService:
         for item in roots:
             if not isinstance(item, dict):
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_invalid_type",
+                    message_key="custom_fields.errors.custom_field_invalid_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": "custom_fields", "expected_type": "FieldCell object"},
                 )
             fid = item.get("field_id")
             if fid is None:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_invalid_type",
+                    message_key="custom_fields.errors.custom_field_invalid_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={
                         "field_key": "custom_fields",
@@ -1114,7 +1114,7 @@ class CustomFieldService:
             sid = str(fid)
             if sid in out:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_duplicate_root",
+                    message_key="custom_fields.errors.custom_field_duplicate_root",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_id": sid},
                 )
@@ -1151,7 +1151,7 @@ class CustomFieldService:
         for cell_index, item in enumerate(cells):
             if not isinstance(item, dict):
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_invalid_type",
+                    message_key="custom_fields.errors.custom_field_invalid_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={
                         "field_key": f"{path_key}[{cell_index}]",
@@ -1161,7 +1161,7 @@ class CustomFieldService:
             fid = item.get("field_id")
             if fid is None:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_invalid_type",
+                    message_key="custom_fields.errors.custom_field_invalid_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={
                         "field_key": f"{path_key}[{cell_index}]",
@@ -1171,7 +1171,7 @@ class CustomFieldService:
             sid = str(fid)
             if sid in out:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_duplicate_root",
+                    message_key="custom_fields.errors.custom_field_duplicate_root",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_id": sid},
                 )
@@ -1184,7 +1184,7 @@ class CustomFieldService:
         """Require an instance ID if stored."""
         if stored and not patch.get("instance_id"):
             raise ValidationException(
-                message_key="clients.errors.custom_field_patch_instance_id_required",
+                message_key="custom_fields.errors.custom_field_patch_instance_id_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key},
             )
@@ -1210,7 +1210,7 @@ class CustomFieldService:
         unknown = set(patch_map) - set(sub_id_to_def)
         if unknown:
             raise ValidationException(
-                message_key="clients.errors.custom_field_unknown_keys",
+                message_key="custom_fields.errors.custom_field_unknown_keys",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key, "unknown_keys": sorted(unknown)},
             )
@@ -1231,7 +1231,7 @@ class CustomFieldService:
                 ):
                     if sub_def.is_required:
                         raise ValidationException(
-                            message_key="clients.errors.custom_field_required",
+                            message_key="custom_fields.errors.custom_field_required",
                             custom_code=CustomStatusCode.VALIDATION_ERROR,
                             params={"field_key": sub_def.field_key},
                         )
@@ -1269,7 +1269,7 @@ class CustomFieldService:
         for row_index, patch_row in enumerate(p_rows):
             if not isinstance(patch_row, dict):
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_invalid_type",
+                    message_key="custom_fields.errors.custom_field_invalid_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={
                         "field_key": f"{path_key}[{row_index}]",
@@ -1318,7 +1318,7 @@ class CustomFieldService:
         if which == "sub_fields":
             if child_field_type != FieldType.OBJECT:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_discriminator",
+                    message_key="custom_fields.errors.custom_field_discriminator",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": path_key},
                 )
@@ -1331,7 +1331,7 @@ class CustomFieldService:
             return row
         if child_field_type != FieldType.LIST:
             raise ValidationException(
-                message_key="clients.errors.custom_field_discriminator",
+                message_key="custom_fields.errors.custom_field_discriminator",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key},
             )
@@ -1355,7 +1355,7 @@ class CustomFieldService:
         """Merge the child cell for scalar part."""
         if which != "value":
             raise ValidationException(
-                message_key="clients.errors.custom_field_discriminator",
+                message_key="custom_fields.errors.custom_field_discriminator",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key},
             )
@@ -1378,7 +1378,7 @@ class CustomFieldService:
         """Merge the child cell for object part."""
         if which in {"value", "items"}:
             raise ValidationException(
-                message_key="clients.errors.custom_field_discriminator",
+                message_key="custom_fields.errors.custom_field_discriminator",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key},
             )
@@ -1406,7 +1406,7 @@ class CustomFieldService:
         """Merge the child cell for list part."""
         if which != "items":
             raise ValidationException(
-                message_key="clients.errors.custom_field_discriminator",
+                message_key="custom_fields.errors.custom_field_discriminator",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key},
             )
@@ -1431,7 +1431,7 @@ class CustomFieldService:
         """Merge the child cell."""
         if not isinstance(patch, dict):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key, "expected_type": "object (FieldCell)"},
             )
@@ -1480,7 +1480,7 @@ class CustomFieldService:
         """Merge the child cell for scalar part."""
         if which != "value":
             raise ValidationException(
-                message_key="clients.errors.custom_field_discriminator",
+                message_key="custom_fields.errors.custom_field_discriminator",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_def.field_key},
             )
@@ -1501,7 +1501,7 @@ class CustomFieldService:
         """Merge the root cell for object part."""
         if which in {"value", "items"}:
             raise ValidationException(
-                message_key="clients.errors.custom_field_discriminator",
+                message_key="custom_fields.errors.custom_field_discriminator",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_def.field_key},
             )
@@ -1524,7 +1524,7 @@ class CustomFieldService:
         """Merge the root cell for list part."""
         if which != "items":
             raise ValidationException(
-                message_key="clients.errors.custom_field_discriminator",
+                message_key="custom_fields.errors.custom_field_discriminator",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_def.field_key},
             )
@@ -1576,7 +1576,7 @@ class CustomFieldService:
             if effective_reconcile and not field_def.is_required:
                 return self._nulled_cell_for_optional_reconcile({}, field_def)
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": path_key, "expected_type": "object (FieldCell)"},
             )
@@ -1592,7 +1592,7 @@ class CustomFieldService:
             "object_child": f"object child FieldCell with field_id={field_def.id}",
         }
         raise ValidationException(
-            message_key="clients.errors.custom_field_invalid_type",
+            message_key="custom_fields.errors.custom_field_invalid_type",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
             params={
                 "field_key": path_key,
@@ -1609,7 +1609,7 @@ class CustomFieldService:
     ) -> dict[str, Any]:
         """Reconcile or raise discriminator."""
         exc = ValidationException(
-            message_key="clients.errors.custom_field_discriminator",
+            message_key="custom_fields.errors.custom_field_discriminator",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
             params={"field_key": path_key},
         )
@@ -1631,7 +1631,7 @@ class CustomFieldService:
     ) -> dict[str, Any]:
         """Reconcile or raise invalid type."""
         exc = ValidationException(
-            message_key="clients.errors.custom_field_invalid_type",
+            message_key="custom_fields.errors.custom_field_invalid_type",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
             params={"field_key": path_key, "expected_type": expected_type},
         )
@@ -1692,7 +1692,7 @@ class CustomFieldService:
         if sid_key not in work_map:
             if sub_def.is_required:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_required",
+                    message_key="custom_fields.errors.custom_field_required",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": sub_def.field_key},
                 )
@@ -1701,7 +1701,7 @@ class CustomFieldService:
         if child_cell is None:
             if sub_def.is_required:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_required",
+                    message_key="custom_fields.errors.custom_field_required",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": sub_def.field_key},
                 )
@@ -1762,7 +1762,7 @@ class CustomFieldService:
             unknown = set(work_map) - set(sub_id_to_def)
             if unknown:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_unknown_keys",
+                    message_key="custom_fields.errors.custom_field_unknown_keys",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": path_key, "unknown_keys": sorted(unknown)},
                 )
@@ -1881,7 +1881,7 @@ class CustomFieldService:
                 row_instance_id = validated_row["instance_id"]
                 if row_instance_id in seen_iids:
                     raise ValidationException(
-                        message_key="clients.errors.custom_field_duplicate_instance_id",
+                        message_key="custom_fields.errors.custom_field_duplicate_instance_id",
                         custom_code=CustomStatusCode.VALIDATION_ERROR,
                         params={"field_key": path_key, "instance_id": row_instance_id},
                     )
@@ -2030,7 +2030,7 @@ class CustomFieldService:
         if not id_to_def:
             if roots:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_definitions_not_found",
+                    message_key="custom_fields.errors.custom_field_definitions_not_found",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"entity_type": entity_type.value},
                 )
@@ -2040,7 +2040,7 @@ class CustomFieldService:
         if unknown:
             first_unknown_field_id = sorted(unknown)[0]
             raise ValidationException(
-                message_key="clients.errors.custom_field_not_defined",
+                message_key="custom_fields.errors.custom_field_not_defined",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_id": first_unknown_field_id},
             )
@@ -2050,14 +2050,14 @@ class CustomFieldService:
             if field_def.is_required:
                 if sid not in payload_by_id:
                     raise ValidationException(
-                        message_key="clients.errors.custom_field_required",
+                        message_key="custom_fields.errors.custom_field_required",
                         custom_code=CustomStatusCode.VALIDATION_ERROR,
                         params={"field_key": field_def.field_key},
                     )
                 cell = payload_by_id[sid]
                 if self._cell_explicit_null(cell):
                     raise ValidationException(
-                        message_key="clients.errors.custom_field_cannot_be_null",
+                        message_key="custom_fields.errors.custom_field_cannot_be_null",
                         custom_code=CustomStatusCode.VALIDATION_ERROR,
                         params={"field_key": field_def.field_key},
                     )
@@ -2141,7 +2141,7 @@ class CustomFieldService:
         if field_def.is_required:
             if not stored_cell:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_required",
+                    message_key="custom_fields.errors.custom_field_required",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": field_def.field_key},
                 )
@@ -2158,7 +2158,7 @@ class CustomFieldService:
                 )
             except ValidationException:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_invalid_type",
+                    message_key="custom_fields.errors.custom_field_invalid_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={
                         "field_key": field_def.field_key,
@@ -2231,7 +2231,7 @@ class CustomFieldService:
             if unknown:
                 first_unknown_field_id = sorted(unknown)[0]
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_not_defined",
+                    message_key="custom_fields.errors.custom_field_not_defined",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_id": first_unknown_field_id},
                 )
@@ -2262,7 +2262,7 @@ class CustomFieldService:
 
             if field_def.is_required and self._cell_explicit_null(patch_cell):
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_cannot_be_null",
+                    message_key="custom_fields.errors.custom_field_cannot_be_null",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": field_def.field_key},
                 )
@@ -2483,7 +2483,7 @@ class CustomFieldService:
         """Validate a string field value."""
         if not isinstance(field_value, str):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key, "expected_type": "string"},
             )
@@ -2494,7 +2494,7 @@ class CustomFieldService:
         """Coerce only JSON number primitives (int/float). Reject str, bool, etc."""
         if isinstance(field_value, bool):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key, "expected_type": "number"},
             )
@@ -2503,7 +2503,7 @@ class CustomFieldService:
         if isinstance(field_value, float):
             return field_value
         raise ValidationException(
-            message_key="clients.errors.custom_field_invalid_type",
+            message_key="custom_fields.errors.custom_field_invalid_type",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
             params={"field_key": field_key, "expected_type": "number"},
         )
@@ -2520,7 +2520,7 @@ class CustomFieldService:
             if isinstance(field_value, int):
                 return bool(field_value)
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key, "expected_type": "boolean"},
             )
@@ -2530,13 +2530,13 @@ class CustomFieldService:
         """Validate a URL field value."""
         if not isinstance(field_value, str):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key, "expected_type": "string"},
             )
         if not (field_value.startswith("http://") or field_value.startswith("https://")):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_url",
+                message_key="custom_fields.errors.custom_field_invalid_url",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key},
             )
@@ -2546,7 +2546,7 @@ class CustomFieldService:
         """Validate a dropdown field value."""
         if not isinstance(field_value, str):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key, "expected_type": "string"},
             )
@@ -2554,7 +2554,7 @@ class CustomFieldService:
         options = type_config.get("options", [])
         if options and field_value not in options:
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_option",
+                message_key="custom_fields.errors.custom_field_invalid_option",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key, "value": field_value},
             )
@@ -2570,7 +2570,7 @@ class CustomFieldService:
         max_val = type_config.get("max", 100)
         if not min_val <= field_value <= max_val:
             raise ValidationException(
-                message_key="clients.errors.custom_field_out_of_range",
+                message_key="custom_fields.errors.custom_field_out_of_range",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={
                     "field_key": field_key,
@@ -2587,7 +2587,7 @@ class CustomFieldService:
         """Validate a currency field value."""
         if not isinstance(field_value, dict):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_currency_format",
+                message_key="custom_fields.errors.custom_field_invalid_currency_format",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key},
             )
@@ -2595,7 +2595,7 @@ class CustomFieldService:
         currency_code = field_value.get("currency_code")
         if amount is None or currency_code is None:
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_currency_format",
+                message_key="custom_fields.errors.custom_field_invalid_currency_format",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key},
             )
@@ -2603,7 +2603,7 @@ class CustomFieldService:
         allowed_currencies = type_config.get("allowed_currencies", [])
         if allowed_currencies and currency_code not in allowed_currencies:
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_currency",
+                message_key="custom_fields.errors.custom_field_invalid_currency",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key, "currency": currency_code},
             )
@@ -2623,13 +2623,13 @@ class CustomFieldService:
         if allow_multiple:
             if not isinstance(field_value, list):
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_invalid_type",
+                    message_key="custom_fields.errors.custom_field_invalid_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": field_key, "expected_type": "array"},
                 )
             if len(field_value) > max_files:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_too_many_files",
+                    message_key="custom_fields.errors.custom_field_too_many_files",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": field_key, "max": max_files},
                 )
@@ -2638,7 +2638,7 @@ class CustomFieldService:
         if isinstance(field_value, list):
             if len(field_value) > 1:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_too_many_files",
+                    message_key="custom_fields.errors.custom_field_too_many_files",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": field_key, "max": 1},
                 )
@@ -2651,7 +2651,7 @@ class CustomFieldService:
         """Validate an address field value."""
         if not isinstance(field_value, dict):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key, "expected_type": "object"},
             )
@@ -2685,7 +2685,7 @@ class CustomFieldService:
         if field_value is None:
             if field_def.is_required:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_required",
+                    message_key="custom_fields.errors.custom_field_required",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": field_key},
                 )
@@ -2693,7 +2693,7 @@ class CustomFieldService:
 
         if field_type in (FieldType.OBJECT, FieldType.LIST):
             raise ValidationException(
-                message_key="clients.errors.custom_field_invalid_type",
+                message_key="custom_fields.errors.custom_field_invalid_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"field_key": field_key, "expected_type": "scalar"},
             )
@@ -2734,7 +2734,7 @@ class CustomFieldService:
 
         # Unknown field type - not allowed
         raise ValidationException(
-            message_key="clients.errors.custom_field_invalid_type",
+            message_key="custom_fields.errors.custom_field_invalid_type",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
             params={"field_key": field_key, "expected_type": "supported field type"},
         )
@@ -2748,7 +2748,7 @@ class CustomFieldService:
         for field_id, field_def in id_to_def.items():
             if field_def.is_required and field_id not in presence:
                 raise ValidationException(
-                    message_key="clients.errors.custom_field_required",
+                    message_key="custom_fields.errors.custom_field_required",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"field_key": field_def.field_key},
                 )

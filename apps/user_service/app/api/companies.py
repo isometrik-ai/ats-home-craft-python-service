@@ -196,7 +196,7 @@ async def create_company(
 
     return success_response(
         request=request,
-        message_key="clients.success.client_created",
+        message_key="companies.success.company_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
     )
@@ -270,7 +270,7 @@ async def list_companies(
         total=total,
         page=page,
         page_size=page_size,
-        message_key="clients.success.clients_retrieved",
+        message_key="companies.success.companies_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
@@ -344,7 +344,7 @@ async def search_companies(
         total=total,
         page=page,
         page_size=page_size,
-        message_key="clients.success.clients_retrieved",
+        message_key="companies.success.companies_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
@@ -385,7 +385,7 @@ async def get_company_details(
     details = CompanyDetailsResponse.model_validate(details).model_dump(exclude_none=True)
     return success_response(
         request=request,
-        message_key="clients.success.client_retrieved",
+        message_key="companies.success.company_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=details,
@@ -523,7 +523,7 @@ async def update_company(
     )
     return success_response(
         request=request,
-        message_key="clients.success.client_updated",
+        message_key="companies.success.company_updated",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
@@ -603,7 +603,7 @@ async def delete_company(
     background_tasks.add_task(delete_company_background, company_id)
     return success_response(
         request=request,
-        message_key="clients.success.client_deleted",
+        message_key="companies.success.company_deleted",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )

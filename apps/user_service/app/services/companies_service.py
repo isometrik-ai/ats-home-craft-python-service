@@ -630,7 +630,7 @@ class CompaniesService:
             return
         if created_contact_row is None and not bool(created.get("contact_found")):
             raise NotFoundException(
-                message_key="clients.errors.not_found",
+                message_key="companies.errors.contact_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
@@ -879,7 +879,7 @@ class CompaniesService:
         )
         if not rows:
             raise ValidationException(
-                message_key="clients.errors.creation_failed",
+                message_key="companies.errors.contact_creation_failed",
                 custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
             )
         contact_row = rows[0]
@@ -901,7 +901,7 @@ class CompaniesService:
         )
         if not details:
             raise NotFoundException(
-                message_key="clients.errors.not_found",
+                message_key="companies.errors.company_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
@@ -951,7 +951,7 @@ class CompaniesService:
         )
         if not current:
             raise NotFoundException(
-                message_key="clients.errors.not_found",
+                message_key="companies.errors.company_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         updated = await self.companies_repo.update_company(
@@ -961,7 +961,7 @@ class CompaniesService:
         )
         if not updated:
             raise NotFoundException(
-                message_key="clients.errors.not_found",
+                message_key="companies.errors.company_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return {"ok": True, "old_data": current, "new_data": updated}
@@ -987,7 +987,7 @@ class CompaniesService:
         )
         if not current:
             raise NotFoundException(
-                message_key="clients.errors.not_found",
+                message_key="companies.errors.company_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
@@ -1049,7 +1049,7 @@ class CompaniesService:
                 current=current,
                 payload=update_data,
                 field_name="websites",
-                not_found_message_key="clients.errors.website_not_found",
+                not_found_message_key="companies.errors.website_not_found",
             )
 
         if body.social_pages is not None:
@@ -1058,7 +1058,7 @@ class CompaniesService:
                 current=current,
                 payload=update_data,
                 field_name="social_pages",
-                not_found_message_key="clients.errors.social_page_not_found",
+                not_found_message_key="companies.errors.social_page_not_found",
             )
 
         if body.custom_fields is not None:
@@ -1233,7 +1233,7 @@ class CompaniesService:
         if current is None or current == candidate:
             return candidate
         raise ValidationException(
-            message_key="clients.errors.bad_request",
+            message_key="companies.errors.multiple_primary_contacts",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
         )
 
@@ -1262,7 +1262,7 @@ class CompaniesService:
         unique_primary = list(dict.fromkeys(primary_wants))
         if len(unique_primary) > 1:
             raise ValidationException(
-                message_key="clients.errors.bad_request",
+                message_key="companies.errors.multiple_primary_contacts",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         set_primary = unique_primary[0] if unique_primary else None
@@ -1295,7 +1295,7 @@ class CompaniesService:
             missing = validate_ids - found
             if missing:
                 raise NotFoundException(
-                    message_key="clients.errors.not_found",
+                    message_key="companies.errors.contact_not_found",
                     custom_code=CustomStatusCode.NOT_FOUND,
                 )
 

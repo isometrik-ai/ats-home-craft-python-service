@@ -267,7 +267,7 @@ async def create_contact(
 
     return success_response(
         request=request,
-        message_key="clients.success.client_created",
+        message_key="contacts.success.contact_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
     )
@@ -360,7 +360,7 @@ async def list_contacts(
         total=total,
         page=page,
         page_size=page_size,
-        message_key="clients.success.clients_retrieved",
+        message_key="contacts.success.contacts_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
@@ -451,7 +451,7 @@ async def search_contacts(
         total=total,
         page=page,
         page_size=page_size,
-        message_key="clients.success.clients_retrieved",
+        message_key="contacts.success.contacts_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
@@ -495,7 +495,7 @@ async def get_contact_details(
     details = ContactDetailsResponse.model_validate(details).model_dump(exclude_none=True)
     return success_response(
         request=request,
-        message_key="clients.success.client_retrieved",
+        message_key="contacts.success.contact_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=details,
@@ -644,7 +644,7 @@ async def update_contact(
     )
     return success_response(
         request=request,
-        message_key="clients.success.client_updated",
+        message_key="contacts.success.contact_updated",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
@@ -709,7 +709,7 @@ async def enrich_contact(
     )
     return success_response(
         request=request,
-        message_key="clients.success.client_updated",
+        message_key="contacts.success.contact_enrichment_requested",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
@@ -807,7 +807,7 @@ async def delete_contact(
     background_tasks.add_task(delete_contact_background, contact_id)
     return success_response(
         request=request,
-        message_key="clients.success.client_deleted",
+        message_key="contacts.success.contact_deleted",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )

@@ -128,7 +128,7 @@ class ContactsService:
         """
         if not self.supabase_client:
             raise ServiceUnavailableException(
-                message_key="clients.errors.auth_user_creation_failed",
+                message_key="contacts.errors.auth_user_creation_failed",
                 custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
             )
 
@@ -168,7 +168,7 @@ class ContactsService:
             )
             if not auth_user or not auth_user.get("id"):
                 raise ServiceUnavailableException(
-                    message_key="clients.errors.auth_user_creation_failed",
+                    message_key="contacts.errors.auth_user_creation_failed",
                     custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
                 )
             user_id = str(auth_user["id"])
@@ -190,7 +190,7 @@ class ContactsService:
         )
         if not isometrik_response or not isometrik_response.get("userId"):
             raise ServiceUnavailableException(
-                message_key="clients.errors.isometrik_user_creation_failed",
+                message_key="contacts.errors.isometrik_user_creation_failed",
                 custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
             )
         return user_id, str(isometrik_response["userId"]), created_password
@@ -226,7 +226,7 @@ class ContactsService:
         )
         if existing_contact_id:
             raise ConflictException(
-                message_key="clients.errors.email_already_exists",
+                message_key="contacts.errors.email_already_exists",
                 custom_code=CustomStatusCode.CONFLICT,
                 params={"client_id": existing_contact_id},
             )
@@ -502,7 +502,7 @@ class ContactsService:
         contact_row = created.get("contact")
         if not contact_id:
             raise ValidationException(
-                message_key="clients.errors.creation_failed",
+                message_key="contacts.errors.contact_creation_failed",
                 custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
             )
 
@@ -672,7 +672,7 @@ class ContactsService:
             current=current,
             payload=update_data,
             field_name="phones",
-            not_found_message_key="clients.errors.phone_not_found",
+            not_found_message_key="contacts.errors.phone_not_found",
         )
         phones_items = update_data.get("phones") or []
         primary_phone_count = sum(
@@ -682,7 +682,7 @@ class ContactsService:
         )
         if primary_phone_count > 1:
             raise ValidationException(
-                message_key="clients.errors.only_one_primary_phone",
+                message_key="contacts.errors.only_one_primary_phone",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
@@ -702,7 +702,7 @@ class ContactsService:
             current=current,
             payload=update_data,
             field_name="social_pages",
-            not_found_message_key="clients.errors.social_page_not_found",
+            not_found_message_key="contacts.errors.social_page_not_found",
         )
 
     async def _merge_contact_custom_fields(
@@ -746,7 +746,7 @@ class ContactsService:
         )
         if not current:
             raise NotFoundException(
-                message_key="clients.errors.not_found",
+                message_key="contacts.errors.contact_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
@@ -817,7 +817,7 @@ class ContactsService:
         )
         if not current:
             raise NotFoundException(
-                message_key="clients.errors.not_found",
+                message_key="contacts.errors.contact_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
@@ -891,7 +891,7 @@ class ContactsService:
         details = await self.get_contact_details(contact_id=contact_id)
         if str(details.get("organization_id")) != str(organization_id):
             raise NotFoundException(
-                message_key="clients.errors.not_found",
+                message_key="contacts.errors.contact_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
@@ -1055,7 +1055,7 @@ class ContactsService:
         )
         if not details:
             raise NotFoundException(
-                message_key="clients.errors.not_found",
+                message_key="contacts.errors.contact_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
@@ -1133,7 +1133,8 @@ class ContactsService:
         )
         if not current:
             raise NotFoundException(
-                message_key="clients.errors.not_found", custom_code=CustomStatusCode.NOT_FOUND
+                message_key="contacts.errors.contact_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
         updated = await self.contacts_repo.soft_delete_contact(
             contact_id=contact_id, organization_id=org_id

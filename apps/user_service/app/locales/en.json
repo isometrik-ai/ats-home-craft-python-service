@@ -181,31 +181,7 @@
       "person_fields_not_allowed_for_company": "Individual-specific fields cannot be updated for company clients",
       "work_history_item_not_found": "Work history item not found",
       "educational_history_item_not_found": "Educational history item not found",
-      "linked_page_not_found": "Linked page not found",
-      "custom_field_not_defined": "Custom field id '{field_id}' is not defined for this entity type.",
-      "custom_field_unknown_keys": "Custom field '{field_key}' contains unknown sub-field ids: {unknown_keys}.",
-      "custom_field_required": "Custom field '{field_key}' is required.",
-      "custom_field_cannot_be_null": "Custom field '{field_key}' cannot be null.",
-      "custom_field_invalid_type": "Custom field '{field_key}' has invalid type. Expected: {expected_type}.",
-      "custom_field_invalid_url": "Custom field '{field_key}' must be a valid URL starting with http:// or https://.",
-      "custom_field_invalid_option": "Custom field '{field_key}' has invalid value '{value}'. Value must be one of the allowed options.",
-      "custom_field_out_of_range": "Custom field '{field_key}' value {value} is out of range. Allowed range: {min} to {max}.",
-      "custom_field_invalid_currency_format": "Custom field '{field_key}' must be an object with 'amount' and 'currency_code' properties.",
-      "custom_field_invalid_currency": "Custom field '{field_key}' has invalid currency '{currency}'. Currency must be one of the allowed currencies.",
-      "custom_field_too_many_files": "Custom field '{field_key}' exceeds the maximum number of files allowed ({max}).",
-      "custom_field_definitions_not_found": "No custom field definitions found for entity type '{entity_type}'. Cannot store custom fields without definitions.",
-      "invalid_custom_fields_type": "custom_fields must be a JSON array of root FieldCells (expected {expected_type}).",
-      "custom_field_duplicate_root": "Duplicate root FieldCell for field_id '{field_id}'.",
-      "custom_field_duplicate_instance_id": "Duplicate instance_id '{instance_id}' among siblings in list field '{field_key}'.",
-      "custom_field_forbidden_payload_key": "Custom field '{field_key}' must not include '{forbidden_key}' in write payloads (server-owned).",
-      "custom_field_discriminator": "Custom field '{field_key}' must include exactly one of: value, sub_fields, items.",
-      "custom_field_patch_instance_id_required": "Custom field '{field_key}' must include instance_id when updating an existing stored value.",
-      "custom_field_list_item_invalid_shape": "Custom field list item at '{field_key}' must be one object with exactly one key: the list item field id '{child_field_id}'.",
-      "custom_field_list_item_invalid_key": "Custom field list item at '{field_key}' must use only the list item field id '{expected_child_id}'. Got keys: {actual_keys}.",
-      "custom_field_patch_root_or_instance_required": "Each custom_fields entry must include field_id (root patch) or instance_id (nested patch by instance).",
-      "custom_field_instance_not_found": "No stored custom field cell matches instance_id '{instance_id}'.",
-      "custom_field_instance_ambiguous": "Multiple stored custom field cells match instance_id '{instance_id}'. Data is inconsistent; use a root FieldCell patch instead.",
-      "custom_field_instance_field_mismatch": "instance_id '{instance_id}' does not belong to field_id '{field_id}'."
+      "linked_page_not_found": "Linked page not found"
     },
     "success": {
       "client_created": "Client created successfully.",
@@ -214,6 +190,44 @@
       "client_updated": "Client updated successfully",
       "client_deleted": "Client deleted successfully",
       "client_enrichment_requested": "Client enrichment requested successfully"
+    }
+  },
+  "companies": {
+    "errors": {
+      "company_not_found": "Company does not exist or has been deleted.",
+      "contact_not_found": "One or more contacts do not exist or have been deleted.",
+      "contact_creation_failed": "Contact creation failed. Please try again.",
+      "website_not_found": "Website not found.",
+      "social_page_not_found": "Social page not found.",
+      "multiple_primary_contacts": "Only one primary contact can be set for a company."
+    },
+    "success": {
+      "company_created": "Company created successfully.",
+      "companies_retrieved": "Companies retrieved successfully.",
+      "company_retrieved": "Company details retrieved successfully.",
+      "company_updated": "Company updated successfully.",
+      "company_deleted": "Company deleted successfully."
+    }
+  },
+  "contacts": {
+    "errors": {
+      "contact_not_found": "Contact does not exist or has been deleted.",
+      "company_not_found": "Company does not exist or has been deleted.",
+      "contact_creation_failed": "Contact creation failed. Please try again.",
+      "auth_user_creation_failed": "Failed to create authentication user",
+      "isometrik_user_creation_failed": "Failed to create Isometrik user",
+      "email_already_exists": "A user with this email already exists in our system",
+      "phone_not_found": "Phone number not found",
+      "social_page_not_found": "Social page not found",
+      "only_one_primary_phone": "Only one phone number can be marked as primary"
+    },
+    "success": {
+      "contact_created": "Contact created successfully.",
+      "contacts_retrieved": "Contacts retrieved successfully.",
+      "contact_retrieved": "Contact details retrieved successfully.",
+      "contact_updated": "Contact updated successfully.",
+      "contact_deleted": "Contact deleted successfully.",
+      "contact_enrichment_requested": "Contact enrichment requested successfully."
     }
   },
   "audit_logs": {
@@ -283,7 +297,31 @@
       "max_nesting_depth_exceeded": "Maximum nesting depth exceeded. Custom fields cannot be nested beyond the allowed depth.",
       "field_type_required_for_type_config": "Field type is required when type configuration is provided.",
       "type_config_required_for_field_type": "Type configuration is required for this field type.",
-      "parent_id_required_for_add": "Parent ID is required when adding sub-fields to an existing field."
+      "parent_id_required_for_add": "Parent ID is required when adding sub-fields to an existing field.",
+      "custom_field_not_defined": "Custom field id '{field_id}' is not defined for this entity type.",
+      "custom_field_unknown_keys": "Custom field '{field_key}' contains unknown sub-field ids: {unknown_keys}.",
+      "custom_field_required": "Custom field '{field_key}' is required.",
+      "custom_field_cannot_be_null": "Custom field '{field_key}' cannot be null.",
+      "custom_field_invalid_type": "Custom field '{field_key}' has invalid type. Expected: {expected_type}.",
+      "custom_field_invalid_url": "Custom field '{field_key}' must be a valid URL starting with http:// or https://.",
+      "custom_field_invalid_option": "Custom field '{field_key}' has invalid value '{value}'. Value must be one of the allowed options.",
+      "custom_field_out_of_range": "Custom field '{field_key}' value {value} is out of range. Allowed range: {min} to {max}.",
+      "custom_field_invalid_currency_format": "Custom field '{field_key}' must be an object with 'amount' and 'currency_code' properties.",
+      "custom_field_invalid_currency": "Custom field '{field_key}' has invalid currency '{currency}'. Currency must be one of the allowed currencies.",
+      "custom_field_too_many_files": "Custom field '{field_key}' exceeds the maximum number of files allowed ({max}).",
+      "custom_field_definitions_not_found": "No custom field definitions found for entity type '{entity_type}'. Cannot store custom fields without definitions.",
+      "invalid_custom_fields_type": "custom_fields must be a JSON array of root FieldCells (expected {expected_type}).",
+      "custom_field_duplicate_root": "Duplicate root FieldCell for field_id '{field_id}'.",
+      "custom_field_duplicate_instance_id": "Duplicate instance_id '{instance_id}' among siblings in list field '{field_key}'.",
+      "custom_field_forbidden_payload_key": "Custom field '{field_key}' must not include '{forbidden_key}' in write payloads (server-owned).",
+      "custom_field_discriminator": "Custom field '{field_key}' must include exactly one of: value, sub_fields, items.",
+      "custom_field_patch_instance_id_required": "Custom field '{field_key}' must include instance_id when updating an existing stored value.",
+      "custom_field_list_item_invalid_shape": "Custom field list item at '{field_key}' must be one object with exactly one key: the list item field id '{child_field_id}'.",
+      "custom_field_list_item_invalid_key": "Custom field list item at '{field_key}' must use only the list item field id '{expected_child_id}'. Got keys: {actual_keys}.",
+      "custom_field_patch_root_or_instance_required": "Each custom_fields entry must include field_id (root patch) or instance_id (nested patch by instance).",
+      "custom_field_instance_not_found": "No stored custom field cell matches instance_id '{instance_id}'.",
+      "custom_field_instance_ambiguous": "Multiple stored custom field cells match instance_id '{instance_id}'. Data is inconsistent; use a root FieldCell patch instead.",
+      "custom_field_instance_field_mismatch": "instance_id '{instance_id}' does not belong to field_id '{field_id}'."
     },
     "success": {
       "field_created": "Custom field created successfully.",
