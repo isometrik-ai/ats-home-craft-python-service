@@ -53,6 +53,7 @@ class _AuditRow:
     changed_fields: list[str] | None
     stage_names: _OldNewPair
     company_names: _OldNewPair
+    contact_names: _OldNewPair
     owner_names: _OldNewPair
 
 
@@ -120,6 +121,43 @@ class ActivityService:
 
         return [i.model_dump(mode="json", exclude_none=True) for i in flattened], total
 
+    @staticmethod
+    def _format_association_names(
+        values_blob: dict[str, Any] | None,
+        *,
+        list_key: str,
+        name_key: str,
+        label_key: str | None = None,
+        max_names: int = 3,
+    ) -> str | None:
+        """Format association names from audit JSON snapshots (no DB lookups)."""
+        if not isinstance(values_blob, dict):
+            return None
+        data = values_blob.get("data")
+        if not isinstance(data, dict):
+            return None
+        items = data.get(list_key)
+        if not isinstance(items, list) or not items:
+            return None
+
+        names: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = (item.get(name_key) or "").strip()
+            if name:
+                if label_key:
+                    label = (item.get(label_key) or "").strip()
+                    names.append(f"{name} ({label})" if label else name)
+                else:
+                    names.append(name)
+
+        if not names:
+            return None
+        head = names[:max_names]
+        suffix = f" +{len(names) - max_names} more" if len(names) > max_names else ""
+        return ", ".join(head) + suffix
+
     def _to_audit_row(self, row: dict[str, Any]) -> _AuditRow:
         """Normalize repository rows into a strongly-typed internal structure."""
         old_values = parse_json_any(row.get("old_values"), None)
@@ -129,6 +167,9 @@ class ActivityService:
         changed_fields: list[str] | None = None
         if isinstance(changed_fields_raw, list):
             changed_fields = [str(x) for x in changed_fields_raw if x is not None]
+
+        old_values_blob = old_values if isinstance(old_values, dict) else None
+        new_values_blob = new_values if isinstance(new_values, dict) else None
 
         return _AuditRow(
             id=safe_str(row.get("id")),
@@ -147,8 +188,26 @@ class ActivityService:
                 new=row.get("new_stage_name"),
             ),
             company_names=_OldNewPair(
-                old=row.get("old_company_name"),
-                new=row.get("new_company_name"),
+                old=self._format_association_names(
+                    old_values_blob, list_key="companies", name_key="company_name"
+                ),
+                new=self._format_association_names(
+                    new_values_blob, list_key="companies", name_key="company_name"
+                ),
+            ),
+            contact_names=_OldNewPair(
+                old=self._format_association_names(
+                    old_values_blob,
+                    list_key="contacts",
+                    name_key="contact_name",
+                    label_key="label",
+                ),
+                new=self._format_association_names(
+                    new_values_blob,
+                    list_key="contacts",
+                    name_key="contact_name",
+                    label_key="label",
+                ),
             ),
             owner_names=_OldNewPair(
                 old=row.get("old_owner_name"),
@@ -187,12 +246,6 @@ class ActivityService:
 
         deny = {"updated_at", "created_at", "stage_name"}
         changed_fields = [f for f in changed_fields if f.split(".")[-1] not in deny]
-
-        # De-dupe confusing pairs for UI: prefer the semantic / enriched field where possible.
-        # Example: if company linkage changed, the free-text `company_name` often changes too.
-        leafs = {f.split(".")[-1] for f in changed_fields}
-        if "client_company_id" in leafs and "company_name" in leafs:
-            changed_fields = [f for f in changed_fields if f.split(".")[-1] != "company_name"]
 
         # CREATE/DELETE may not have changed_fields meaningful; emit a single item.
         if audit_row.action_type in {"CREATE", "DELETE"} or not changed_fields:
@@ -253,15 +306,40 @@ class ActivityService:
             new_name = (audit_row.stage_names.new or "").strip() or None
             return old_name, new_name
 
-        if field_key == "client_company_id":
+        if field_key == "companies":
             old_name = (audit_row.company_names.old or "").strip() or None
             new_name = (audit_row.company_names.new or "").strip() or None
+            if old_name is None or new_name is None:
+                old_values_blob = _coerce_audit_values_blob(audit_row.old_values)
+                new_values_blob = _coerce_audit_values_blob(audit_row.new_values)
+                old_name = old_name or self._format_association_names(
+                    old_values_blob, list_key="companies", name_key="company_name"
+                )
+                new_name = new_name or self._format_association_names(
+                    new_values_blob, list_key="companies", name_key="company_name"
+                )
             return old_name, new_name
 
-        # Denormalized company label from lead detail;
-        if field_key == "company_name":
-            old_name = (audit_row.company_names.old or "").strip() or None
-            new_name = (audit_row.company_names.new or "").strip() or None
+        if field_key == "contacts":
+            old_name = (audit_row.contact_names.old or "").strip() or None
+            new_name = (audit_row.contact_names.new or "").strip() or None
+            # Unit tests may construct `_AuditRow` without computed contact_names;
+            # fall back to formatting from the embedded audit snapshot.
+            if old_name is None or new_name is None:
+                old_values_blob = _coerce_audit_values_blob(audit_row.old_values)
+                new_values_blob = _coerce_audit_values_blob(audit_row.new_values)
+                old_name = old_name or self._format_association_names(
+                    old_values_blob,
+                    list_key="contacts",
+                    name_key="contact_name",
+                    label_key="label",
+                )
+                new_name = new_name or self._format_association_names(
+                    new_values_blob,
+                    list_key="contacts",
+                    name_key="contact_name",
+                    label_key="label",
+                )
             return old_name, new_name
 
         if field_key == "owner_id":

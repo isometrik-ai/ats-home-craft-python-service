@@ -1,8 +1,10 @@
 """Leads Schemas Module.
 
 Pydantic models for lead create, update, list, detail, and query operations.
-Aligned with ``public.leads`` v2 and ``public.lead_contacts``.
+Aligned with ``public.leads``, ``public.lead_contacts``, and ``public.lead_companies``.
 """
+
+from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
@@ -47,11 +49,11 @@ class LeadNoteItem(BaseModel):
 
 
 class LeadContactCreate(BaseModel):
-    """Person client linked to a lead (``lead_contacts``)."""
+    """Contact linked to a lead (``lead_contacts``)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    contact_client_id: str = Field(..., description="Person client UUID")
+    contact_id: str = Field(..., description="Contact UUID")
     label: str | None = Field(
         default=None,
         max_length=255,
@@ -70,8 +72,240 @@ class LeadContactCreate(BaseModel):
         return value
 
 
+class LeadCompanyCreate(BaseModel):
+    """Company linked to a lead (``lead_companies``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    company_id: str = Field(..., description="Company UUID")
+    label: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional role or tag for this association",
+    )
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        """Strip whitespace; blank becomes ``None``."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class LeadContactAssociationUpdate(BaseModel):
+    """Update per-contact attributes for a lead relationship (currently label only)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: str = Field(..., description="Existing contact id to update relationship for")
+    label: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional role or tag for this association (null clears label)",
+    )
+
+    @field_validator("contact_id", mode="before")
+    @classmethod
+    def normalize_contact_id(cls, value: Any) -> Any:
+        """Strip whitespace from contact id when provided as a string."""
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: Any) -> Any:
+        """Strip whitespace; treat blank strings as unset (``None``)."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class LeadContactsUpdate(BaseModel):
+    """Batch contact association changes for a lead (delta updates).
+
+    Supports in one request:
+    - remove association with N contacts
+    - add association with N existing contacts (optionally setting label per contact)
+    - update label for N existing contact relationships without unlinking
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    remove_associations: list[str] = Field(
+        default_factory=list,
+        description="Contact ids to unlink from the lead",
+    )
+    add_associations: list[LeadContactCreate] = Field(
+        default_factory=list,
+        description="Associate the lead with existing contacts (by id)",
+    )
+    update_associations: list[LeadContactAssociationUpdate] = Field(
+        default_factory=list,
+        description="Update label per contact without unlinking",
+    )
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "LeadContactsUpdate":
+        """Normalize ids and validate at least one delta operation is provided."""
+        remove_ids = [c.strip() for c in (self.remove_associations or []) if (c or "").strip()]
+        self.remove_associations = remove_ids
+
+        normalized_add: list[LeadContactCreate] = []
+        for item in self.add_associations or []:
+            cid = (getattr(item, "contact_id", None) or "").strip()
+            if not cid:
+                raise ValueError("add_associations.contact_id is required.")
+            normalized_add.append(
+                LeadContactCreate(contact_id=cid, label=getattr(item, "label", None))
+            )
+        self.add_associations = normalized_add
+
+        normalized_update: list[LeadContactAssociationUpdate] = []
+        for item in self.update_associations or []:
+            cid = (getattr(item, "contact_id", None) or "").strip()
+            if not cid:
+                raise ValueError("update_associations.contact_id is required.")
+            normalized_update.append(
+                LeadContactAssociationUpdate(contact_id=cid, label=getattr(item, "label", None))
+            )
+        self.update_associations = normalized_update
+
+        if (
+            not self.remove_associations
+            and not self.add_associations
+            and not self.update_associations
+        ):
+            raise ValueError("Provide at least one operation in contacts_update.")
+
+        return self
+
+
+class LeadCompanyAssociationUpdate(BaseModel):
+    """Update per-company attributes for a lead relationship (currently label only)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    company_id: str = Field(..., description="Existing company id to update relationship for")
+    label: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional role or tag for this association (null clears label)",
+    )
+
+    @field_validator("company_id", mode="before")
+    @classmethod
+    def normalize_company_id(cls, value: Any) -> Any:
+        """Strip whitespace from company id when provided as a string."""
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: Any) -> Any:
+        """Strip whitespace; treat blank strings as unset (``None``)."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class LeadCompaniesUpdate(BaseModel):
+    """Batch company association changes for a lead (delta updates).
+
+    Supports in one request:
+    - remove association with N companies
+    - add association with N existing companies (optionally setting label per company)
+    - update label for N existing company relationships without unlinking
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    remove_associations: list[str] = Field(
+        default_factory=list,
+        description="Company ids to unlink from the lead",
+    )
+    add_associations: list[LeadCompanyCreate] = Field(
+        default_factory=list,
+        description="Associate the lead with existing companies (by id)",
+    )
+    update_associations: list[LeadCompanyAssociationUpdate] = Field(
+        default_factory=list,
+        description="Update label per company without unlinking",
+    )
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "LeadCompaniesUpdate":
+        """Normalize ids and validate at least one delta operation is provided."""
+        remove_ids = [c.strip() for c in (self.remove_associations or []) if (c or "").strip()]
+        self.remove_associations = remove_ids
+
+        normalized_add: list[LeadCompanyCreate] = []
+        for item in self.add_associations or []:
+            cid = (getattr(item, "company_id", None) or "").strip()
+            if not cid:
+                raise ValueError("add_associations.company_id is required.")
+            normalized_add.append(
+                LeadCompanyCreate(company_id=cid, label=getattr(item, "label", None))
+            )
+        self.add_associations = normalized_add
+
+        normalized_update: list[LeadCompanyAssociationUpdate] = []
+        for item in self.update_associations or []:
+            cid = (getattr(item, "company_id", None) or "").strip()
+            if not cid:
+                raise ValueError("update_associations.company_id is required.")
+            normalized_update.append(
+                LeadCompanyAssociationUpdate(company_id=cid, label=getattr(item, "label", None))
+            )
+        self.update_associations = normalized_update
+
+        if (
+            not self.remove_associations
+            and not self.add_associations
+            and not self.update_associations
+        ):
+            raise ValueError("Provide at least one operation in companies_update.")
+
+        return self
+
+
+class CreateLeadCompany(BaseModel):
+    """Optional single company on ``POST /leads`` (at most one ``lead_companies`` row)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    company_id: str | None = Field(default=None, description="Company UUID")
+    label: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional label for the company association on create",
+    )
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        """Strip whitespace; blank becomes ``None``."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
 class CreateLeadRequest(BaseModel):
-    """Request body for ``POST /leads`` (v2 ``public.leads``)."""
+    """Request body for ``POST /leads`` (``public.leads`` + junctions)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -101,13 +335,13 @@ class CreateLeadRequest(BaseModel):
         default=None,
         description="Owning user; defaults to creator when omitted (service layer)",
     )
-    client_company_id: str | None = Field(
+    company: CreateLeadCompany | None = Field(
         default=None,
-        description="Optional company client UUID (must be client_type=company)",
+        description="Optional single company (``lead_companies``; at most one on create)",
     )
     contacts: list[LeadContactCreate] | None = Field(
         default=None,
-        description="Person clients on the lead; optional labels per association",
+        description="Contacts on the lead; optional labels per association",
     )
     deal_type: DealType | None = Field(
         default=None,
@@ -175,21 +409,24 @@ class UpdateLeadRequest(BaseModel):
         default=UNSET,
         description="Owner user UUID; null unassigns",
     )
-    client_company_id: str | None | Unset = Field(
-        default=UNSET,
-        description="Company client UUID; null clears association",
-    )
     deal_type: DealType | None | Unset = Field(default=UNSET, description="Deal type; null clears")
     priority: Priority | None | Unset = Field(default=UNSET, description="Priority; null clears")
     notes: list[LeadNoteItem] | None | Unset = Field(
         default=UNSET,
         description="Replace entire notes array when set",
     )
-    contacts: list[LeadContactCreate] | None | Unset = Field(
-        default=UNSET,
+    contacts_update: LeadContactsUpdate | None = Field(
+        default=None,
         description=(
-            "Replace entire lead_contacts array when set; omit key leaves contacts unchanged; "
-            "null or empty list clears all contacts."
+            "Delta operations for lead_contacts (add/remove/update labels). "
+            "Omit to leave contacts unchanged."
+        ),
+    )
+    companies_update: LeadCompaniesUpdate | None = Field(
+        default=None,
+        description=(
+            "Delta operations for lead_companies (add/remove/update labels). "
+            "Omit to leave companies unchanged."
         ),
     )
     custom_fields: list[dict[str, Any]] | Unset = Field(
@@ -223,6 +460,11 @@ class UpdateLeadRequest(BaseModel):
     @model_validator(mode="after")
     def require_at_least_one_field(self) -> "UpdateLeadRequest":
         """Raise ValidationException if no fields are set."""
+        if "contacts_update" in self.model_fields_set and self.contacts_update is None:
+            raise ValueError("contacts_update must be an object when provided.")
+        if "companies_update" in self.model_fields_set and self.companies_update is None:
+            raise ValueError("companies_update must be an object when provided.")
+
         if not self.model_fields_set:
             raise ValidationException(
                 message_key="leads.errors.empty_update_payload",
@@ -262,14 +504,30 @@ class LeadsListQueryParams(BaseModel):
         return stripped or None
 
 
+class LeadCompanyListItem(BaseModel):
+    """Company row on a lead (list/detail)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    company_id: str = Field(..., description="Company UUID")
+    label: str | None = Field(None, description="Optional role or tag for this link")
+    company_name: str = Field("", description="Resolved company display name")
+
+
 class LeadListItem(BaseModel):
     """One lead row for list responses and kanban lead arrays."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: str = Field(..., description="Lead UUID")
-    client_company_id: str | None = Field(None, description="Linked company client UUID")
-    company_name: str = Field("", description="Resolved company display name")
+    companies: list[LeadCompanyListItem] = Field(
+        default_factory=list,
+        description="Companies linked via lead_companies",
+    )
+    contacts: list[LeadContactDetail] = Field(
+        default_factory=list,
+        description="Contacts linked via lead_contacts",
+    )
     name: str | None = Field(None, description="Lead title")
     stage_id: str | None = Field(None, description="Current stage UUID")
     stage_name: str | None = Field(None, description="Resolved stage display name")
@@ -308,7 +566,7 @@ class LeadContactDetail(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    contact_client_id: str = Field(..., description="Person client UUID")
+    contact_id: str = Field(..., description="Contact UUID")
     label: str | None = Field(None, description="Optional role or tag for this link")
     contact_name: str | None = Field(None, description="Resolved person display name")
     email: str | None = Field(None, description="Email address")
@@ -316,13 +574,15 @@ class LeadContactDetail(BaseModel):
 
 
 class LeadDetail(BaseModel):
-    """Full lead payload for ``GET /leads/{lead_id}`` (v2)."""
+    """Full lead payload for ``GET /leads/{lead_id}``."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: str = Field(..., description="Lead UUID")
-    client_company_id: str | None = Field(None, description="Linked company client UUID")
-    company_name: str = Field("", description="Resolved company display name")
+    companies: list[LeadCompanyListItem] = Field(
+        default_factory=list,
+        description="Companies linked via lead_companies",
+    )
     name: str | None = Field(None, description="Lead title")
     stage_id: str | None = Field(None, description="Current stage UUID")
     stage_name: str | None = Field(None, description="Resolved stage display name")
@@ -342,7 +602,7 @@ class LeadDetail(BaseModel):
     )
     contacts: list[LeadContactDetail] = Field(
         default_factory=list,
-        description="Person clients linked via lead_contacts",
+        description="Contacts linked via lead_contacts",
     )
     custom_fields: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -357,6 +617,7 @@ class LeadDetail(BaseModel):
 
 __all__ = [
     "LeadsListMode",
+    "CreateLeadCompany",
     "CreateLeadRequest",
     "UpdateLeadRequest",
     "LeadsListQueryParams",
@@ -365,5 +626,9 @@ __all__ = [
     "LeadDetail",
     "LeadNoteItem",
     "LeadContactCreate",
+    "LeadCompanyCreate",
+    "LeadContactsUpdate",
+    "LeadCompaniesUpdate",
+    "LeadCompanyListItem",
     "LeadContactDetail",
 ]

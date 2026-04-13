@@ -291,8 +291,6 @@ class AuditLogRepository:
                 om.last_name AS actor_last_name,
                 old_ls.stage_name AS old_stage_name,
                 new_ls.stage_name AS new_stage_name,
-                old_c.name AS old_company_name,
-                new_c.name AS new_company_name,
                 NULLIF(
                     TRIM(
                         CONCAT_WS(
@@ -327,12 +325,6 @@ class AuditLogRepository:
             LEFT JOIN lead_stages new_ls
                 ON new_ls.organization_id = al.organization_id
                AND new_ls.id = NULLIF(al.new_values->'data'->>'stage_id', '')::uuid
-            LEFT JOIN clients old_c
-                ON old_c.organization_id = al.organization_id
-               AND old_c.id = NULLIF(al.old_values->'data'->>'client_company_id', '')::uuid
-            LEFT JOIN clients new_c
-                ON new_c.organization_id = al.organization_id
-               AND new_c.id = NULLIF(al.new_values->'data'->>'client_company_id', '')::uuid
             LEFT JOIN auth.users old_u
                 ON old_u.id = NULLIF(al.old_values->'data'->>'owner_id', '')::uuid
             LEFT JOIN auth.users new_u

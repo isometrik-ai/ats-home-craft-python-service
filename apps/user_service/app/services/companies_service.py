@@ -13,6 +13,7 @@ Key rule (service enforced):
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -429,8 +430,11 @@ class CompaniesService:
         custom_fields: list[dict[str, Any]] | None,
         entity_type: EntityType,
     ) -> list[dict[str, Any]]:
-        """Validate custom fields for the given entity type before insert."""
-        if not custom_fields:
+        """Validate custom fields before insert.
+
+        Uses the same rules as `ClientService._apply_custom_fields_if_needed`.
+        """
+        if not (self.user_context and self.user_context.organization_id):
             return []
         custom_field_service = CustomFieldService(
             db_connection=self.db_connection,
@@ -817,17 +821,10 @@ class CompaniesService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-        if create_contact.custom_fields:
-            custom_field_service = CustomFieldService(
-                db_connection=self.db_connection,
-                user_context=self.user_context,
-            )
-            validated_custom_fields = await custom_field_service.validate_for_create(
-                create_contact.custom_fields,
-                EntityType.CONTACT,
-            )
-        else:
-            validated_custom_fields = []
+        validated_custom_fields = await self._validate_custom_fields_for_create(
+            custom_fields=create_contact.custom_fields,
+            entity_type=EntityType.CONTACT,
+        )
 
         contact_list_payloads = self._build_list_payloads(
             inputs={
@@ -1061,20 +1058,42 @@ class CompaniesService:
                 not_found_message_key="companies.errors.social_page_not_found",
             )
 
-        if body.custom_fields is not None:
-            custom_field_service = CustomFieldService(
-                db_connection=self.db_connection,
-                user_context=self.user_context,
-            )
-            # merge_for_update expects existing roots list
-            existing_cf = parse_json_field(current.get("custom_fields"))
-            merged = existing_cf if isinstance(existing_cf, list) else []
-            merged = await custom_field_service.merge_for_update(
-                body.custom_fields, merged, EntityType.COMPANY
-            )
-            update_data["custom_fields"] = merged
+        await self._merge_company_custom_fields_into_update_data(
+            body=body,
+            current=current,
+            update_data=update_data,
+        )
 
         return update_data
+
+    async def _merge_company_custom_fields_into_update_data(
+        self,
+        *,
+        body: UpdateCompanyRequest,
+        current: dict[str, Any],
+        update_data: dict[str, Any],
+    ) -> None:
+        """Merge body.custom_fields with current, validate, and set on payload (same as clients)."""
+        if not (self.user_context and self.user_context.organization_id):
+            return
+
+        existing = parse_json_field(current.get("custom_fields"))
+        merged_existing = existing if isinstance(existing, list) else []
+
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        patch = body.custom_fields if body.custom_fields is not None else None
+        merged = await custom_field_service.merge_for_update(
+            patch, merged_existing, EntityType.COMPANY
+        )
+        if json.dumps(merged, sort_keys=True, default=str) != json.dumps(
+            merged_existing,
+            sort_keys=True,
+            default=str,
+        ):
+            update_data["custom_fields"] = merged
 
     async def _persist_company_update_if_needed(
         self,

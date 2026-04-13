@@ -214,6 +214,25 @@ async def external_create_lead(
         service = LeadService(user_context=user_context, db_connection=db_connection)
         event_service = EventService(db_connection=db_connection)
         created = await service.create_lead(body, external=True)
+        created_id = str(created.get("id", "")) if isinstance(created, dict) else ""
+
+        request.state.audit_table = "leads"
+        # Ensure CREATE audit logs can be linked back to this lead in the activity feed.
+        request.state.audit_requested_id = created_id
+        request.state.audit_description = f"Created lead: {body.name!r}"
+        request.state.audit_risk_level = "medium"
+        request.state.audit_user_context = {
+            "user_id": "00000000-0000-0000-0000-000000000000",
+            "user_email": actor_email,
+            "organization_id": organization_id,
+        }
+        # Normalize audit snapshot so association keys are always present.
+        request.state.raw_audit_new_data = (
+            LeadService._normalize_lead_audit_snapshot(created)
+            if isinstance(created, dict)
+            else created
+        )
+
         if isinstance(created, dict) and created.get("id") is not None:
             create_event = await event_service.create_lifecycle_event(
                 event_type=LeadEventType.CREATED.value,
@@ -224,19 +243,6 @@ async def external_create_lead(
                 topics=LEAD_KAFKA_TOPICS,
             )
             event_key = str(created["id"])
-
-    request.state.audit_table = "leads"
-    request.state.audit_requested_id = (
-        str(created.get("id", "")) if isinstance(created, dict) else ""
-    )
-    request.state.audit_description = f"Created external lead for client: {body.client_company_id}"
-    request.state.audit_risk_level = "medium"
-    request.state.audit_user_context = {
-        "user_id": "00000000-0000-0000-0000-000000000000",
-        "user_email": actor_email,
-        "organization_id": organization_id,
-    }
-    request.state.raw_audit_new_data = created
 
     if create_event is not None and event_key is not None:
         background_tasks.add_task(
@@ -314,6 +320,28 @@ async def external_update_lead(
             if isinstance(updated, dict) and updated.get("id") is not None
             else str(lead_id)
         )
+
+        request.state.audit_table = "leads"
+        request.state.audit_requested_id = lead_id
+        request.state.audit_description = f"Updated lead: {lead_id}"
+        request.state.audit_risk_level = "medium"
+        request.state.audit_user_context = {
+            "user_id": "00000000-0000-0000-0000-000000000000",
+            "user_email": actor_email,
+            "organization_id": organization_id,
+        }
+        # Normalize audit snapshots so association keys are always present and stable.
+        request.state.raw_audit_old_data = (
+            LeadService._normalize_lead_audit_snapshot(previous)
+            if isinstance(previous, dict)
+            else previous
+        )
+        request.state.raw_audit_new_data = (
+            LeadService._normalize_lead_audit_snapshot(updated)
+            if isinstance(updated, dict)
+            else updated
+        )
+
         update_event = await event_service.create_lifecycle_event(
             event_type=LeadEventType.UPDATED.value,
             aggregate_id=lead_id,
@@ -322,18 +350,6 @@ async def external_update_lead(
             payload={"module": "leads", "action": "update"},
             topics=LEAD_KAFKA_TOPICS,
         )
-
-    request.state.audit_table = "leads"
-    request.state.audit_requested_id = lead_id
-    request.state.audit_description = f"Updated external lead: {lead_id}"
-    request.state.audit_risk_level = "medium"
-    request.state.audit_user_context = {
-        "user_id": "00000000-0000-0000-0000-000000000000",
-        "user_email": actor_email,
-        "organization_id": organization_id,
-    }
-    request.state.raw_audit_old_data = previous
-    request.state.raw_audit_new_data = updated
 
     if update_event is not None:
         background_tasks.add_task(
@@ -400,6 +416,23 @@ async def external_delete_lead(
         service = LeadService(user_context=user_context, db_connection=db_connection)
         event_service = EventService(db_connection=db_connection)
         deleted = await service.delete_lead(lead_id)
+
+        request.state.audit_table = "leads"
+        request.state.audit_requested_id = lead_id
+        request.state.audit_description = f"Deleted lead: {lead_id}"
+        request.state.audit_risk_level = "high"
+        request.state.audit_user_context = {
+            "user_id": "00000000-0000-0000-0000-000000000000",
+            "user_email": actor_email,
+            "organization_id": organization_id,
+        }
+        # Normalize audit snapshot so association keys are always present.
+        request.state.raw_audit_old_data = (
+            LeadService._normalize_lead_audit_snapshot(deleted)
+            if isinstance(deleted, dict)
+            else deleted
+        )
+
         delete_event = await event_service.create_lifecycle_event(
             event_type=LeadEventType.DELETED.value,
             aggregate_id=lead_id,
@@ -408,17 +441,6 @@ async def external_delete_lead(
             payload={"module": "leads", "action": "delete"},
             topics=LEAD_KAFKA_TOPICS,
         )
-
-    request.state.audit_table = "leads"
-    request.state.audit_requested_id = lead_id
-    request.state.audit_description = f"Deleted external lead: {lead_id}"
-    request.state.audit_risk_level = "high"
-    request.state.audit_user_context = {
-        "user_id": "00000000-0000-0000-0000-000000000000",
-        "user_email": actor_email,
-        "organization_id": organization_id,
-    }
-    request.state.raw_audit_old_data = deleted
 
     if delete_event is not None:
         background_tasks.add_task(

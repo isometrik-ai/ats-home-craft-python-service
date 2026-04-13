@@ -15,6 +15,7 @@ Design goals:
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -235,8 +236,8 @@ class ContactsService:
         self,
         custom_fields_payload: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
-        """Validate and normalize custom fields for contact creation."""
-        if not custom_fields_payload:
+        """Validate and normalize custom fields for contact creation (same rules as clients)."""
+        if not (self.user_context and self.user_context.organization_id):
             return []
 
         custom_field_service = CustomFieldService(
@@ -712,20 +713,27 @@ class ContactsService:
         current: dict[str, Any],
         update_data: dict[str, Any],
     ) -> None:
-        """Merge custom fields for contact update."""
-        if body.custom_fields is None:
+        """Merge body.custom_fields with current, validate, and set on payload (same as clients)."""
+        if not (self.user_context and self.user_context.organization_id):
             return
+
+        existing = parse_json_field(current.get("custom_fields"))
+        merged_existing = existing if isinstance(existing, list) else []
 
         custom_field_service = CustomFieldService(
             db_connection=self.db_connection,
             user_context=self.user_context,
         )
-        existing_cf = parse_json_field(current.get("custom_fields"))
-        merged = existing_cf if isinstance(existing_cf, list) else []
+        patch = body.custom_fields if body.custom_fields is not None else None
         merged = await custom_field_service.merge_for_update(
-            body.custom_fields, merged, EntityType.CONTACT
+            patch, merged_existing, EntityType.CONTACT
         )
-        update_data["custom_fields"] = merged
+        if json.dumps(merged, sort_keys=True, default=str) != json.dumps(
+            merged_existing,
+            sort_keys=True,
+            default=str,
+        ):
+            update_data["custom_fields"] = merged
 
     async def update_contact(
         self,

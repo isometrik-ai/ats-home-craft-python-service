@@ -654,6 +654,15 @@ def serialize_jsonb_param(column_name: str, value: Any, jsonb_columns: frozenset
     return value
 
 
+def json_dumps_or_none(value: Any) -> str | None:
+    """Serialize a JSON payload to string, preserving None.
+
+    - None -> None (meaning "no change" for optional payloads)
+    - [] / {} -> "[]" / "{}" (meaning "clear" vs "set empty")
+    """
+    return None if value is None else json.dumps(value)
+
+
 def serialize_pydantic_models(value: Any) -> Any:
     """Recursively convert Pydantic models and other
     non-serializable objects to JSON-serializable primitives.

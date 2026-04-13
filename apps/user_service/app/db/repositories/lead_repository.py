@@ -1,35 +1,56 @@
-"""Lead persistence (public.leads, public.lead_contacts) — asyncpg."""
+"""Lead persistence (public.leads, public.lead_contacts, public.lead_companies) — asyncpg."""
+
+from __future__ import annotations
 
 from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.schemas.enums import ClientStatus
 from apps.user_service.app.utils.common_utils import (
+    json_dumps_or_none,
     parse_json_field,
     serialize_jsonb_param,
 )
 
-# Optional search: lead name, linked company name, or any linked contact person name (EXISTS only).
-_LEADS_SEARCH_PREDICATE = """
+_CONTACT_DISPLAY_NAME_SQL = """
+NULLIF(
+    TRIM(
+        CONCAT_WS(
+            ' ',
+            NULLIF(TRIM(COALESCE(ct.first_name, '')), ''),
+            NULLIF(TRIM(COALESCE(ct.middle_name, '')), ''),
+            NULLIF(TRIM(COALESCE(ct.last_name, '')), '')
+        )
+    ),
+    ''
+)
+"""
+
+# Optional search: lead name, linked company name, or any linked contact name (EXISTS only).
+_LEADS_SEARCH_PREDICATE = f"""
       AND (
           $3::text IS NULL
           OR l.name ILIKE $3
           OR EXISTS (
               SELECT 1
-              FROM clients cc
-              WHERE cc.id = l.client_company_id
-                AND cc.organization_id = l.organization_id
-                AND cc.name ILIKE $3
+              FROM lead_companies lco
+              INNER JOIN companies co
+                  ON co.id = lco.company_id
+                 AND co.organization_id = lco.organization_id
+              WHERE lco.lead_id = l.id
+                AND lco.organization_id = l.organization_id
+                AND co.name ILIKE $3
           )
           OR EXISTS (
               SELECT 1
-              FROM lead_contacts lc
-              INNER JOIN clients poc
-                  ON poc.id = lc.contact_client_id
-                 AND poc.organization_id = lc.organization_id
-              WHERE lc.lead_id = l.id
-                AND lc.organization_id = l.organization_id
-                AND poc.name ILIKE $3
+              FROM lead_contacts lct
+              INNER JOIN contacts ct
+                  ON ct.id = lct.contact_id
+                 AND ct.organization_id = lct.organization_id
+              WHERE lct.lead_id = l.id
+                AND lct.organization_id = l.organization_id
+                AND ({_CONTACT_DISPLAY_NAME_SQL.strip()}) ILIKE $3
           )
       )
 """
@@ -43,11 +64,52 @@ _LEADS_FILTER_WHERE = f"""
 
 _LEADS_LIST_ORDER_BY = "ORDER BY l.updated_at DESC NULLS LAST, l.created_at DESC"
 
-# Join company, pipeline stage, and owner display name (list/kanban) in one round trip.
+_LEAD_COMPANIES_AGG_SQL = """
+COALESCE(
+    (
+        SELECT json_agg(
+            json_build_object(
+                'company_id', lc.company_id::text,
+                'label', lc.label,
+                'company_name', COALESCE(co.name, '')
+            )
+            ORDER BY lc.created_at ASC
+        )
+        FROM lead_companies lc
+        INNER JOIN companies co
+            ON co.id = lc.company_id
+           AND co.organization_id = lc.organization_id
+        WHERE lc.lead_id = l.id
+          AND lc.organization_id = l.organization_id
+    ),
+    '[]'::json
+) AS companies
+"""
+
+_LEAD_CONTACTS_AGG_SQL = f"""
+COALESCE(
+    (
+        SELECT json_agg(
+            json_build_object(
+                'contact_id', lc.contact_id::text,
+                'label', lc.label,
+                'contact_name', ({_CONTACT_DISPLAY_NAME_SQL.strip()})
+            )
+            ORDER BY lc.created_at ASC
+        )
+        FROM lead_contacts lc
+        LEFT JOIN contacts ct
+            ON ct.id = lc.contact_id
+           AND ct.organization_id = lc.organization_id
+        WHERE lc.lead_id = l.id
+          AND lc.organization_id = l.organization_id
+    ),
+    '[]'::json
+) AS contacts
+"""
+
+# Join pipeline stage and owner display name (list/kanban) in one round trip.
 _LEADS_JOIN_DISPLAY = """
-LEFT JOIN clients comp
-    ON comp.id = l.client_company_id
-   AND comp.organization_id = l.organization_id
 LEFT JOIN lead_stages ls
     ON ls.id = l.stage_id
    AND ls.organization_id = l.organization_id
@@ -75,7 +137,6 @@ END
 _SQL_LEADS_LIST = f"""
     SELECT
         l.id,
-        l.client_company_id,
         l.name,
         l.stage_id,
         l.deal_type,
@@ -86,7 +147,8 @@ _SQL_LEADS_LIST = f"""
         l.owner_id,
         l.created_at,
         l.updated_at,
-        COALESCE(comp.name, '') AS company_name,
+        {_LEAD_COMPANIES_AGG_SQL.strip()},
+        {_LEAD_CONTACTS_AGG_SQL.strip()},
         ls.stage_name AS stage_name,
         ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name
     FROM leads l
@@ -97,7 +159,6 @@ _SQL_LEADS_LIST = f"""
 _SQL_LEADS_LIST_WITH_TOTAL = f"""
     SELECT
         l.id,
-        l.client_company_id,
         l.name,
         l.stage_id,
         l.deal_type,
@@ -108,7 +169,8 @@ _SQL_LEADS_LIST_WITH_TOTAL = f"""
         l.owner_id,
         l.created_at,
         l.updated_at,
-        COALESCE(comp.name, '') AS company_name,
+        {_LEAD_COMPANIES_AGG_SQL.strip()},
+        {_LEAD_CONTACTS_AGG_SQL.strip()},
         ls.stage_name           AS stage_name,
         ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name,
         COUNT(*) OVER()         AS total_count
@@ -126,7 +188,6 @@ _SQL_LEAD_DETAIL_BY_ID = f"""
     SELECT
         l.id,
         l.organization_id,
-        l.client_company_id,
         l.name,
         l.stage_id,
         l.lead_source,
@@ -142,7 +203,8 @@ _SQL_LEAD_DETAIL_BY_ID = f"""
         l.custom_fields,
         l.created_at,
         l.updated_at,
-        COALESCE(comp.name, '') AS company_name,
+        {_LEAD_COMPANIES_AGG_SQL.strip()},
+        {_LEAD_CONTACTS_AGG_SQL.strip()},
         ls.stage_name AS stage_name,
         ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name
     FROM leads l
@@ -156,7 +218,6 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
     SELECT
         l.id,
         l.organization_id,
-        l.client_company_id,
         l.name,
         l.stage_id,
         l.lead_source,
@@ -172,28 +233,20 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
         l.custom_fields,
         l.created_at,
         l.updated_at,
-        COALESCE(comp.name, '') AS company_name,
+        {_LEAD_COMPANIES_AGG_SQL.strip()},
         ls.stage_name AS stage_name,
         ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name,
-        lc.contact_client_id AS contact_client_id,
+        lc.contact_id AS contact_id,
         lc.label AS label,
-        c.name AS contact_name,
-        au.email AS contact_email,
-        COALESCE(cu.phones, '[]'::jsonb) AS contact_phones
+        ({_CONTACT_DISPLAY_NAME_SQL.strip()}) AS contact_name
     FROM leads l
     {_LEADS_JOIN_DISPLAY.strip()}
     LEFT JOIN lead_contacts lc
         ON lc.lead_id = l.id
        AND lc.organization_id = l.organization_id
-    LEFT JOIN clients c
-        ON c.id = lc.contact_client_id
-       AND c.organization_id = lc.organization_id
-    LEFT JOIN client_users cu
-        ON cu.client_id = c.id
-       AND cu.organization_id = c.organization_id
-       AND cu.status != 'deleted'
-    LEFT JOIN auth.users au
-        ON au.id = cu.user_id
+    LEFT JOIN contacts ct
+        ON ct.id = lc.contact_id
+       AND ct.organization_id = lc.organization_id
     WHERE l.organization_id = $1
       AND l.id = $2::uuid
     ORDER BY lc.created_at ASC
@@ -203,7 +256,6 @@ CREATE_LEAD_COLUMNS: tuple[str, ...] = (
     "organization_id",
     "name",
     "stage_id",
-    "client_company_id",
     "lead_source",
     "referral_source",
     "lead_score",
@@ -229,7 +281,6 @@ LEAD_UPDATABLE_FIELDS: frozenset[str] = frozenset(
         "amount",
         "description",
         "owner_id",
-        "client_company_id",
         "deal_type",
         "priority",
         "notes",
@@ -244,7 +295,7 @@ def _ilike_pattern(search: str | None) -> str | None:
 
 
 class LeadRepository:
-    """CRUD helpers for the ``leads`` and ``lead_contacts`` tables."""
+    """CRUD helpers for ``leads``, ``lead_contacts``, and ``lead_companies``."""
 
     TABLE_NAME = "leads"
     JSONB_COLUMNS = frozenset({"custom_fields", "notes"})
@@ -253,43 +304,23 @@ class LeadRepository:
     def __init__(self, db_connection: asyncpg.Connection) -> None:
         self.db_connection = db_connection
 
-    async def fetch_company_names(
-        self,
-        organization_id: str,
-        company_ids: list[str],
-    ) -> dict[str, str]:
-        """Map client id -> display name (used when a row lacks joined ``company_name``)."""
-        if not company_ids:
-            return {}
-        rows = await self.db_connection.fetch(
-            """
-            SELECT id, name
-            FROM clients
-            WHERE organization_id = $1
-              AND id = ANY($2::uuid[])
-            """,
-            organization_id,
-            company_ids,
-        )
-        return {str(r["id"]): (r["name"] or "") for r in rows}
-
     async def fetch_lead_reference_validation(
         self,
         organization_id: str,
-        client_ids: list[str],
         *,
         stage_id: str | None = None,
-    ) -> tuple[bool | None, dict[str, str]]:
-        """Single round trip: optional pipeline stage check + ``client_id -> client_type`` map.
+        contact_ids: list[str] | None = None,
+        company_ids: list[str] | None = None,
+    ) -> tuple[bool | None, set[str], set[str]]:
+        """Pipeline stage check plus which contact/company ids exist in the org (not deleted).
 
-        When ``stage_id`` is ``None``, the stage is not checked and the first tuple value is
-        ``None``. When ``client_ids`` is empty and ``stage_id`` is also ``None``, returns
-        ``(None, {})`` without hitting the database.
-
-        Omitted clients (wrong org or unknown id) are absent from the map, same as before.
+        When there is nothing to validate (no stage and no ids), skips the DB and returns
+        ``(None, set(), set())``.
         """
-        if not client_ids and stage_id is None:
-            return None, {}
+        cids = contact_ids or []
+        gids = company_ids or []
+        if stage_id is None and not cids and not gids:
+            return None, set(), set()
 
         row = await self.db_connection.fetchrow(
             """
@@ -303,43 +334,47 @@ class LeadRepository:
                 END AS stage_exists,
                 COALESCE(
                     (
-                        SELECT jsonb_object_agg(c.id::text, to_jsonb(c.client_type::text))
-                        FROM clients c
+                        SELECT array_agg(c.id::text)
+                        FROM contacts c
                         WHERE c.organization_id = $1::uuid
                           AND c.id = ANY($3::uuid[])
+                          AND c.status != $5::text
                     ),
-                    '{}'::jsonb
-                ) AS client_types
+                    ARRAY[]::text[]
+                ) AS found_contacts,
+                COALESCE(
+                    (
+                        SELECT array_agg(g.id::text)
+                        FROM companies g
+                        WHERE g.organization_id = $1::uuid
+                          AND g.id = ANY($4::uuid[])
+                          AND g.status != $5::text
+                    ),
+                    ARRAY[]::text[]
+                ) AS found_companies
             """,
             organization_id,
             stage_id,
-            client_ids if client_ids else [],
+            cids if cids else [],
+            gids if gids else [],
+            ClientStatus.DELETED.value,
         )
         if row is None:
-            return None, {}
+            return None, set(), set()
         raw_stage = row["stage_exists"]
         stage_ok: bool | None = None if raw_stage is None else bool(raw_stage)
-        raw_types = row["client_types"]
-        parsed = parse_json_field(raw_types)
-        if isinstance(parsed, dict):
-            types_map = {str(k): str(v) for k, v in parsed.items()}
-        else:
-            types_map = {}
-        return stage_ok, types_map
+        found_contacts = row["found_contacts"] or []
+        found_companies = row["found_companies"] or []
+        return stage_ok, {str(x) for x in found_contacts}, {str(x) for x in found_companies}
 
     async def create_lead(
         self,
         row: dict[str, Any],
         contacts: list[tuple[str, str | None]] | None = None,
+        company: tuple[str, str | None] | None = None,
     ) -> dict[str, Any]:
-        """Insert a lead row; with contacts, insert ``lead_contacts`` in the same statement.
-
-        Unknown keys in ``row`` should not be passed (service-layer allowlist).
-        ``contacts`` is ``(contact_client_id, label)`` pairs; omit or pass
-        ``[]`` when there are no person links (uses a plain ``INSERT`` so empty
-        arrays are never bound as ``uuid[]``/``text[]``, which asyncpg/Postgres
-        often reject).
-        """
+        """Insert a lead; optional ``lead_companies``
+        (at most one on create) and ``lead_contacts``."""
         pairs = contacts or []
 
         values: list[Any] = []
@@ -352,67 +387,48 @@ class LeadRepository:
         cols_sql = ", ".join(CREATE_LEAD_COLUMNS)
         ph_sql = ", ".join(placeholders)
 
+        insert_lead_sql = f"""
+            INSERT INTO {self.TABLE_NAME} ({cols_sql})
+            VALUES ({ph_sql})
+            RETURNING *
+        """
+        created = await self.db_connection.fetchrow(insert_lead_sql, *values)
+        if created is None:
+            return {}
+        lead_id = created["id"]
+        org_id = created["organization_id"]
+
+        if company is not None:
+            cid, lab = company
+            await self.db_connection.execute(
+                """
+                INSERT INTO lead_companies (lead_id, organization_id, company_id, label)
+                VALUES ($1::uuid, $2::uuid, $3::uuid, $4::text)
+                """,
+                lead_id,
+                org_id,
+                cid,
+                lab,
+            )
+
         if not pairs:
-            # Avoid ``unnest($n::uuid[], ...)`` with empty Python lists: drivers often
-            # cannot infer ``uuid[]`` / ``text[]`` for ``{}``, which breaks binding.
-            query = f"""
-                INSERT INTO {self.TABLE_NAME} ({cols_sql})
-                VALUES ({ph_sql})
-                RETURNING *
-            """
-            created = await self.db_connection.fetchrow(query, *values)
             return dict(created)
 
         contact_ids = [cid for cid, _ in pairs]
         labels = [lab for _, lab in pairs]
-        num_columns = len(CREATE_LEAD_COLUMNS)
-        p_ids = num_columns + 1
-        p_labels = num_columns + 2
-        query = f"""
-            WITH new_lead AS (
-                INSERT INTO {self.TABLE_NAME} ({cols_sql})
-                VALUES ({ph_sql})
-                RETURNING *
-            ),
-            _ins_contacts AS (
-                INSERT INTO lead_contacts (lead_id, organization_id, contact_client_id, label)
-                SELECT nl.id, nl.organization_id, u.contact_client_id, u.label
-                FROM new_lead nl
-                CROSS JOIN LATERAL unnest(${p_ids}::uuid[], ${p_labels}::text[])
-                    AS u(contact_client_id, label)
-                RETURNING 1
-            )
-            SELECT nl.*
-            FROM new_lead nl
-            WHERE (SELECT count(*)::int FROM _ins_contacts) >= 0
-        """
-        created = await self.db_connection.fetchrow(query, *values, contact_ids, labels)
-        return dict(created)
-
-    async def list_lead_contacts_for_lead(
-        self,
-        organization_id: str,
-        lead_id: str,
-    ) -> list[dict[str, Any]]:
-        """Person contacts for a lead with resolved display names."""
-        rows = await self.db_connection.fetch(
+        await self.db_connection.execute(
             """
-            SELECT
-                lc.contact_client_id,
-                lc.label,
-                c.name AS contact_name
-            FROM lead_contacts lc
-            INNER JOIN clients c
-                ON c.id = lc.contact_client_id
-               AND c.organization_id = lc.organization_id
-            WHERE lc.lead_id = $1::uuid
-              AND lc.organization_id = $2::uuid
-            ORDER BY lc.created_at ASC
+            INSERT INTO lead_contacts (lead_id, organization_id, contact_id, label)
+            SELECT $1::uuid, $2::uuid, u.contact_id, u.label
+            FROM unnest($3::uuid[], $4::text[])
+                AS u(contact_id, label)
             """,
             lead_id,
-            organization_id,
+            org_id,
+            contact_ids,
+            labels,
         )
-        return [dict(r) for r in rows]
+        return dict(created)
 
     async def list_leads_page_with_total(
         self,
@@ -423,7 +439,7 @@ class LeadRepository:
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Paginated leads (list mode) with company, stage, and owner display columns."""
+        """Paginated leads (list mode) with companies, stage, and owner display columns."""
         rows = await self.db_connection.fetch(
             _SQL_LEADS_LIST_WITH_TOTAL,
             organization_id,
@@ -443,7 +459,7 @@ class LeadRepository:
         stage_id: str | None = None,
         search: str | None = None,
     ) -> list[dict[str, Any]]:
-        """All matching leads (kanban) with company, stage, and owner display columns."""
+        """All matching leads (kanban) with companies, stage, and owner display columns."""
         rows = await self.db_connection.fetch(
             _SQL_LEADS_LIST_ORDERED,
             organization_id,
@@ -457,7 +473,7 @@ class LeadRepository:
         organization_id: str,
         lead_id: str,
     ) -> dict[str, Any] | None:
-        """Single lead scoped to organization with company, stage, and owner display columns."""
+        """Single lead scoped to organization with companies, stage, and owner display columns."""
         row = await self.db_connection.fetchrow(
             _SQL_LEAD_DETAIL_BY_ID,
             organization_id,
@@ -470,7 +486,7 @@ class LeadRepository:
         organization_id: str,
         lead_id: str,
     ) -> dict[str, Any] | None:
-        """Lead row (company, stage, owner display) plus contacts.
+        """Lead row (companies, stage, owner display) plus contacts.
 
         Uses a single indexed query (lead scoped by org + id). It returns one row
         per contact, then aggregates contacts in Python.
@@ -484,9 +500,7 @@ class LeadRepository:
             return None
 
         payload = dict(rows[0])
-        # Remove flattened contact columns so the response stays consistent with
-        # the service-layer expectation: `row["contacts"]` only.
-        payload.pop("contact_client_id", None)
+        payload.pop("contact_id", None)
         payload.pop("label", None)
         payload.pop("contact_name", None)
         payload.pop("contact_email", None)
@@ -494,12 +508,12 @@ class LeadRepository:
 
         contacts: list[dict[str, Any]] = []
         for row in rows:
-            contact_client_id = row["contact_client_id"]
-            if contact_client_id is None:
+            contact_id = row["contact_id"]
+            if contact_id is None:
                 continue
             contacts.append(
                 {
-                    "contact_client_id": contact_client_id,
+                    "contact_id": contact_id,
                     "label": row["label"],
                     "contact_name": row["contact_name"],
                     "email": row.get("contact_email"),
@@ -529,167 +543,270 @@ class LeadRepository:
         return dict(row) if row else None
 
     async def delete_leads_by_client_id(self, client_id: str) -> bool:
-        """Remove lead links for a deleted client: contacts and company association."""
-        await self.db_connection.execute(
-            """
-            DELETE FROM lead_contacts
-            WHERE contact_client_id = $1::uuid
-            """,
-            client_id,
-        )
-        await self.db_connection.execute(
-            """
-            DELETE FROM leads
-            WHERE client_company_id = $1::uuid
-            """,
-            client_id,
-        )
+        """Deprecated: leads no longer reference ``clients``.
+
+        Kept so older call sites do not break; junction cleanup is tied to contact/company
+        lifecycle elsewhere.
+        """
+        _ = client_id
         return True
 
-    async def _sync_contacts(
-        self,
-        organization_id: str,
-        lead_id: str,
-        contact_ids: list[str],
-        labels: list[str | None],
-    ) -> None:
-        """Reconcile ``lead_contacts`` to the desired contact ids and labels."""
-        if not contact_ids:
-            await self.db_connection.execute(
-                """
-                DELETE FROM lead_contacts
-                WHERE lead_id = $1::uuid
-                  AND organization_id = $2::uuid
-                """,
-                lead_id,
-                organization_id,
-            )
-            return
-
-        await self.db_connection.execute(
-            """
-            WITH desired AS (
-                SELECT
-                    u.contact_client_id::uuid,
-                    u.label::text
-                FROM unnest($3::uuid[], $4::text[])
-                    AS u(contact_client_id, label)
-            ),
-
-            deleted AS (
-                DELETE FROM lead_contacts lc
-                WHERE lc.lead_id = $1::uuid
-                  AND lc.organization_id = $2::uuid
-                  AND NOT EXISTS (
-                      SELECT 1 FROM desired d
-                      WHERE d.contact_client_id = lc.contact_client_id
-                  )
-                RETURNING 1
-            ),
-
-            updated AS (
-                UPDATE lead_contacts lc
-                SET
-                    label = d.label,
-                    updated_at = NOW()
-                FROM desired d
-                WHERE lc.lead_id = $1::uuid
-                  AND lc.organization_id = $2::uuid
-                  AND lc.contact_client_id = d.contact_client_id
-                  AND lc.label IS DISTINCT FROM d.label
-                RETURNING 1
-            )
-
-            INSERT INTO lead_contacts (
-                lead_id,
-                organization_id,
-                contact_client_id,
-                label
-            )
-            SELECT
-                $1::uuid,
-                $2::uuid,
-                d.contact_client_id,
-                d.label
-            FROM desired d
-            WHERE NOT EXISTS (
-                SELECT 1 FROM lead_contacts lc
-                WHERE lc.lead_id = $1::uuid
-                  AND lc.organization_id = $2::uuid
-                  AND lc.contact_client_id = d.contact_client_id
-            )
-              AND (SELECT count(*)::bigint FROM deleted) >= 0
-              AND (SELECT count(*)::bigint FROM updated) >= 0
-            """,
-            lead_id,
-            organization_id,
-            contact_ids,
-            labels,
-        )
-
-    async def update_lead_with_contacts(
+    async def update_lead_with_associations(
         self,
         organization_id: str,
         lead_id: str,
         update_data: dict[str, Any],
         contacts_payload: list[dict[str, Any]] | None,
+        companies_payload: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
-        """Apply scalar updates and/or sync contacts; return detail row or ``None`` if missing."""
+        """Apply scalar updates and/or sync contacts/companies; return detail row or ``None``."""
         filtered: dict[str, Any] = {
             k: v for k, v in update_data.items() if k in self.UPDATABLE_FIELDS
         }
 
-        if filtered:
-            set_clauses: list[str] = []
-            values: list[Any] = [organization_id, lead_id]
-            param_index = 3
-
-            for field, value in filtered.items():
-                serialized = serialize_jsonb_param(field, value, self.JSONB_COLUMNS)
-                set_clauses.append(f"{field} = ${param_index}")
-                values.append(serialized)
-                param_index += 1
-
-            row = await self.db_connection.fetchrow(
-                f"""
-                UPDATE leads
-                SET {", ".join(set_clauses)}, updated_at = NOW()
-                WHERE organization_id = $1
-                  AND id = $2::uuid
-                RETURNING id
-                """,
-                *values,
-            )
-
-        elif contacts_payload is not None:
-            row = await self.db_connection.fetchrow(
-                """
-                SELECT id FROM leads
-                WHERE organization_id = $1
-                  AND id = $2::uuid
-                FOR UPDATE
-                """,
-                organization_id,
-                lead_id,
-            )
-        else:
+        if not filtered and contacts_payload is None and companies_payload is None:
             return await self.get_lead_detail_by_id(organization_id, lead_id)
 
-        if not row:
-            return None
+        return await self.update_lead_and_sync_associations(
+            organization_id=organization_id,
+            lead_id=lead_id,
+            update_data=filtered,
+            contacts_payload=contacts_payload,
+            companies_payload=companies_payload,
+        )
 
-        if contacts_payload is not None:
-            c_ids = [str(c["contact_client_id"]) for c in contacts_payload]
-            lbls = [c.get("label") for c in contacts_payload]
+    async def update_lead_and_sync_associations(
+        self,
+        *,
+        organization_id: str,
+        lead_id: str,
+        update_data: dict[str, Any],
+        contacts_payload: list[dict[str, Any]] | None,
+        companies_payload: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        """Single-query lead update + association sync + final snapshot (Postgres CTE).
 
-            await self._sync_contacts(
-                organization_id,
-                lead_id,
-                c_ids,
-                lbls,
+        This reduces DB round trips by applying:
+        - scalar lead updates
+        - lead_contacts sync (when contacts_payload is not None)
+        - lead_companies sync (when companies_payload is not None)
+        and returning the final lead detail row (with `companies` + `contacts`)
+        in a single `fetchrow`.
+        """
+        filtered: dict[str, Any] = {
+            k: v for k, v in update_data.items() if k in self.UPDATABLE_FIELDS
+        }
+
+        contacts_payload_json = json_dumps_or_none(contacts_payload)
+        companies_payload_json = json_dumps_or_none(companies_payload)
+
+        set_clauses: list[str] = []
+        values: list[Any] = [organization_id, lead_id]
+        param_index = 3
+        for field, value in filtered.items():
+            serialized = serialize_jsonb_param(field, value, self.JSONB_COLUMNS)
+            set_clauses.append(f"{field} = ${param_index}")
+            values.append(serialized)
+            param_index += 1
+
+        contacts_param = f"${param_index}"
+        values.append(contacts_payload_json)
+        param_index += 1
+        companies_param = f"${param_index}"
+        values.append(companies_payload_json)
+
+        scalar_set_sql = ", ".join(set_clauses)
+        scalar_update_sql = (
+            f"UPDATE leads SET {scalar_set_sql}, updated_at = NOW()"
+            if scalar_set_sql
+            else "UPDATE leads SET updated_at = updated_at"
+        )
+
+        query = f"""
+            WITH locked AS (
+                SELECT id
+                FROM leads
+                WHERE organization_id = $1
+                AND id = $2::uuid
+                FOR UPDATE
+            ),
+            input_payloads AS (
+                SELECT
+                    {contacts_param}::jsonb  AS contacts_payload,
+                    {companies_param}::jsonb AS companies_payload
+            ),
+            l AS (
+                {scalar_update_sql}
+                WHERE organization_id = $1
+                AND id = $2::uuid
+                AND EXISTS (SELECT 1 FROM locked)
+                RETURNING *
+            ),
+
+            desired_contacts AS (
+                SELECT
+                    (e.value->>'contact_id')::uuid AS contact_id,
+                    NULLIF(e.value->>'label', '')::text AS label
+                FROM input_payloads p
+                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.contacts_payload, '[]'::jsonb)) AS e(value)
+                WHERE p.contacts_payload IS NOT NULL
+            ),
+            contacts_deleted AS (
+                DELETE FROM lead_contacts lc
+                USING input_payloads p
+                WHERE p.contacts_payload IS NOT NULL
+                AND lc.organization_id = $1
+                AND lc.lead_id = $2::uuid
+                AND NOT EXISTS (
+                    SELECT 1 FROM desired_contacts d WHERE d.contact_id = lc.contact_id
+                )
+                RETURNING 1
+            ),
+            contacts_updated AS (
+                UPDATE lead_contacts lc
+                SET label = d.label, updated_at = NOW()
+                FROM desired_contacts d
+                WHERE lc.organization_id = $1
+                AND lc.lead_id = $2::uuid
+                AND lc.contact_id = d.contact_id
+                AND lc.label IS DISTINCT FROM d.label
+                RETURNING 1
+            ),
+            contacts_inserted AS (
+                INSERT INTO lead_contacts (lead_id, organization_id, contact_id, label)
+                SELECT $2::uuid, $1::uuid, d.contact_id, d.label
+                FROM desired_contacts d
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM lead_contacts lc
+                    WHERE lc.organization_id = $1
+                    AND lc.lead_id = $2::uuid
+                    AND lc.contact_id = d.contact_id
+                )
+                RETURNING 1
+            ),
+
+            desired_companies AS (
+                SELECT
+                    (e.value->>'company_id')::uuid AS company_id,
+                    NULLIF(e.value->>'label', '')::text AS label
+                FROM input_payloads p
+                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(p.companies_payload, '[]'::jsonb)) AS e(value)
+                WHERE p.companies_payload IS NOT NULL
+            ),
+            companies_deleted AS (
+                DELETE FROM lead_companies lc
+                USING input_payloads p
+                WHERE p.companies_payload IS NOT NULL
+                AND lc.organization_id = $1
+                AND lc.lead_id = $2::uuid
+                AND NOT EXISTS (
+                    SELECT 1 FROM desired_companies d WHERE d.company_id = lc.company_id
+                )
+                RETURNING 1
+            ),
+            companies_updated AS (
+                UPDATE lead_companies lc
+                SET label = d.label, updated_at = NOW()
+                FROM desired_companies d
+                WHERE lc.organization_id = $1
+                AND lc.lead_id = $2::uuid
+                AND lc.company_id = d.company_id
+                AND lc.label IS DISTINCT FROM d.label
+                RETURNING 1
+            ),
+            companies_inserted AS (
+                INSERT INTO lead_companies (lead_id, organization_id, company_id, label)
+                SELECT $2::uuid, $1::uuid, d.company_id, d.label
+                FROM desired_companies d
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM lead_companies lc
+                    WHERE lc.organization_id = $1
+                    AND lc.lead_id = $2::uuid
+                    AND lc.company_id = d.company_id
+                )
+                RETURNING 1
+            ),
+            effects AS (
+                SELECT
+                    (SELECT count(*)::bigint FROM contacts_deleted)  AS cd,
+                    (SELECT count(*)::bigint FROM contacts_updated)  AS cu,
+                    (SELECT count(*)::bigint FROM contacts_inserted) AS ci,
+                    (SELECT count(*)::bigint FROM companies_deleted) AS kcd,
+                    (SELECT count(*)::bigint FROM companies_updated) AS kcu,
+                    (SELECT count(*)::bigint FROM companies_inserted) AS kci
             )
 
-        return await self.get_lead_detail_by_id(organization_id, lead_id)
+            SELECT
+                l.id,
+                l.organization_id,
+                l.name,
+                l.stage_id,
+                l.lead_source,
+                l.referral_source,
+                l.lead_score,
+                l.deal_type,
+                l.priority,
+                l.close_date,
+                l.notes,
+                l.amount,
+                l.description,
+                l.owner_id,
+                l.custom_fields,
+                l.created_at,
+                l.updated_at,
+                CASE
+                    WHEN (SELECT companies_payload FROM input_payloads) IS NOT NULL THEN
+                        COALESCE(
+                            (
+                                SELECT json_agg(
+                                    json_build_object(
+                                        'company_id', d.company_id::text,
+                                        'label', d.label,
+                                        'company_name', COALESCE(co.name, '')
+                                    )
+                                    ORDER BY coalesce(d.company_id::text, '') ASC
+                                )
+                                FROM desired_companies d
+                                INNER JOIN companies co
+                                    ON co.id = d.company_id
+                                   AND co.organization_id = $1
+                            ),
+                            '[]'::json
+                        )
+                    ELSE
+                        ({_LEAD_COMPANIES_AGG_SQL.strip().replace(" AS companies", "")})
+                END AS companies,
+                CASE
+                    WHEN (SELECT contacts_payload FROM input_payloads) IS NOT NULL THEN
+                        COALESCE(
+                            (
+                                SELECT json_agg(
+                                    json_build_object(
+                                        'contact_id', d.contact_id::text,
+                                        'label', d.label,
+                                        'contact_name', ({_CONTACT_DISPLAY_NAME_SQL.strip()})
+                                    )
+                                    ORDER BY coalesce(d.contact_id::text, '') ASC
+                                )
+                                FROM desired_contacts d
+                                LEFT JOIN contacts ct
+                                    ON ct.id = d.contact_id
+                                   AND ct.organization_id = $1
+                            ),
+                            '[]'::json
+                        )
+                    ELSE
+                        ({_LEAD_CONTACTS_AGG_SQL.strip().replace(" AS contacts", "")})
+                END AS contacts,
+                ls.stage_name AS stage_name,
+                ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name
+            FROM l
+            {_LEADS_JOIN_DISPLAY.strip()}
+            JOIN effects ON TRUE
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(query, *values)
+        return dict(row) if row else None
 
     async def update_lead(
         self,
@@ -713,8 +830,6 @@ class LeadRepository:
             values.append(serialized)
             param_index += 1
 
-        # Single round trip: update + return the same enriched columns
-        # as `get_lead_detail_by_id()` (company, stage, owner display names).
         query = f"""
             WITH l AS (
                 UPDATE {self.TABLE_NAME}
@@ -726,7 +841,6 @@ class LeadRepository:
             SELECT
                 l.id,
                 l.organization_id,
-                l.client_company_id,
                 l.name,
                 l.stage_id,
                 l.lead_source,
@@ -742,9 +856,10 @@ class LeadRepository:
                 l.custom_fields,
                 l.created_at,
                 l.updated_at,
-                COALESCE(comp.name, '') AS company_name,
+                {_LEAD_COMPANIES_AGG_SQL.replace("FROM leads l", "FROM l").strip()},
+                {_LEAD_CONTACTS_AGG_SQL.strip()},
                 ls.stage_name AS stage_name,
-                ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name
+                ({_LEAD_OWNER_DISPLAY_NAME_SQL.replace("l.", "l.").strip()}) AS owner_name
             FROM l
             {_LEADS_JOIN_DISPLAY.strip()}
             LIMIT 1

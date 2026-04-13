@@ -9,7 +9,10 @@ import pytest
 from apps.user_service.app.schemas.enums import DealType
 from apps.user_service.app.schemas.lead_stages import UNSET
 from apps.user_service.app.schemas.leads import (
+    CreateLeadCompany,
     CreateLeadRequest,
+    LeadCompaniesUpdate,
+    LeadContactsUpdate,
     UpdateLeadRequest,
 )
 from libs.shared_utils.http_exceptions import ValidationException
@@ -30,7 +33,7 @@ def test_create_lead_blank_optional_to_none():
         lead_score="   ",
         description="   ",
         owner_id=OWNER_ID,
-        client_company_id=CLIENT_ID,
+        company=CreateLeadCompany(company_id=CLIENT_ID),
         close_date=date(2026, 1, 1),
     )
 
@@ -75,3 +78,15 @@ def test_update_lead_unset_no_changes():
     """UpdateLeadRequest treats UNSET as no-op when explicitly set."""
     req = UpdateLeadRequest(stage_id=UNSET)
     assert isinstance(req.stage_id, UNSET.__class__)
+
+
+def test_update_lead_allows_contacts_update_only():
+    """UpdateLeadRequest accepts contacts_update without requiring other fields."""
+    req = UpdateLeadRequest(contacts_update=LeadContactsUpdate(remove_associations=[CLIENT_ID]))
+    assert req.contacts_update is not None
+
+
+def test_update_lead_allows_companies_update_only():
+    """UpdateLeadRequest accepts companies_update without requiring other fields."""
+    req = UpdateLeadRequest(companies_update=LeadCompaniesUpdate(remove_associations=[CLIENT_ID]))
+    assert req.companies_update is not None

@@ -51,7 +51,7 @@ class _FakeConn:
 async def test_delete_lead_returns_row():
     """delete_lead issues DELETE scoped by organization and returns the removed row."""
     conn = _FakeConn()
-    conn.fetchrow_result = {"id": "lead-1", "organization_id": "org-1", "client_company_id": None}
+    conn.fetchrow_result = {"id": "lead-1", "organization_id": "org-1"}
     repo = LeadRepository(db_connection=conn)
 
     result = await repo.delete_lead("org-1", "lead-1")
@@ -67,89 +67,102 @@ async def test_delete_lead_returns_row():
 
 
 @pytest.mark.asyncio
-async def test_delete_leads_by_client_id():
-    """delete_leads_by_client_id removes lead_contacts and company-linked leads."""
+async def test_delete_leads_by_client_id_noop():
+    """delete_leads_by_client_id is a compatibility no-op (leads no longer reference clients)."""
     conn = _FakeConn()
     repo = LeadRepository(db_connection=conn)
 
     result = await repo.delete_leads_by_client_id("client-1")
 
     assert result is True
-    assert len(conn.execute_calls) == 2
-    assert "DELETE FROM lead_contacts" in conn.execute_calls[0][0]
-    assert "DELETE FROM leads" in conn.execute_calls[1][0]
-    assert conn.execute_calls[0][1] == ("client-1",)
-    assert conn.execute_calls[1][1] == ("client-1",)
+    assert not conn.execute_calls
 
 
 @pytest.mark.asyncio
 async def test_fetch_lead_reference_validation_with_stage():
-    """fetch_lead_reference_validation uses one fetchrow with stage + client types."""
+    """fetch_lead_reference_validation uses one fetchrow with stage + contact/company sets."""
     conn = _FakeConn()
     conn.fetchrow_result = {
         "stage_exists": True,
-        "client_types": {"c1": "company", "c2": "person"},
+        "found_contacts": ["c1"],
+        "found_companies": ["g1"],
     }
     repo = LeadRepository(db_connection=conn)
 
-    ok, types_map = await repo.fetch_lead_reference_validation(
+    ok, found_contacts, found_companies = await repo.fetch_lead_reference_validation(
         "org-1",
-        ["c1", "c2"],
         stage_id="stage-1",
+        contact_ids=["c1"],
+        company_ids=["g1"],
     )
 
     assert ok is True
-    assert types_map == {"c1": "company", "c2": "person"}
+    assert found_contacts == {"c1"}
+    assert found_companies == {"g1"}
     assert len(conn.fetchrow_calls) == 1
     assert "lead_stages" in conn.fetchrow_calls[0][0]
-    assert "jsonb_object_agg" in conn.fetchrow_calls[0][0]
-    assert conn.fetchrow_calls[0][1] == ("org-1", "stage-1", ["c1", "c2"])
+    assert "contacts" in conn.fetchrow_calls[0][0]
+    assert "companies" in conn.fetchrow_calls[0][0]
 
 
 @pytest.mark.asyncio
-async def test_fetch_create_reference_jsonb_as_string():
-    """Production asyncpg decodes JSONB as a JSON string, not a dict."""
+async def test_fetch_create_reference_arrays_as_strings():
+    """Production asyncpg may return array columns as lists."""
     conn = _FakeConn()
     conn.fetchrow_result = {
         "stage_exists": True,
-        "client_types": '{"c1": "company", "c2": "person"}',
+        "found_contacts": ["c1"],
+        "found_companies": [],
     }
     repo = LeadRepository(db_connection=conn)
 
-    ok, types_map = await repo.fetch_lead_reference_validation(
+    ok, found_contacts, found_companies = await repo.fetch_lead_reference_validation(
         "org-1",
-        ["c1", "c2"],
         stage_id="stage-1",
+        contact_ids=["c1"],
+        company_ids=[],
     )
 
     assert ok is True
-    assert types_map == {"c1": "company", "c2": "person"}
+    assert found_contacts == {"c1"}
+    assert found_companies == set()
 
 
 @pytest.mark.asyncio
-async def test_fetch_lead_validation_empty_client_ids():
-    """Empty client id list still checks stage; client_types coalesce to empty dict."""
+async def test_fetch_lead_validation_empty_ids():
+    """Empty id lists still check stage; coalesce to empty sets."""
     conn = _FakeConn()
-    conn.fetchrow_result = {"stage_exists": False, "client_types": None}
+    conn.fetchrow_result = {"stage_exists": False, "found_contacts": None, "found_companies": None}
     repo = LeadRepository(db_connection=conn)
 
-    ok, types_map = await repo.fetch_lead_reference_validation("o", [], stage_id="s")
+    ok, found_contacts, found_companies = await repo.fetch_lead_reference_validation(
+        "o",
+        stage_id="s",
+        contact_ids=[],
+        company_ids=[],
+    )
 
     assert ok is False
-    assert types_map == {}
-    assert conn.fetchrow_calls[0][1][2] == []
+    assert found_contacts == set()
+    assert found_companies == set()
 
 
 @pytest.mark.asyncio
 async def test_fetch_lead_reference_no_db_empty_types_only():
-    """When no stage and no client ids, skip the database round trip."""
+    """When no stage and no contact/company ids, skip the database round trip."""
     conn = _FakeConn()
     repo = LeadRepository(db_connection=conn)
 
-    ok, types_map = await repo.fetch_lead_reference_validation("o", [], stage_id=None)
+    ok, found_contacts, found_companies = await repo.fetch_lead_reference_validation(
+        "o",
+        stage_id=None,
+        contact_ids=None,
+        company_ids=None,
+    )
 
     assert ok is None
-    assert types_map == {}
+    assert found_contacts == set()
+    assert found_companies == set()
     assert not conn.fetchrow_calls
 
 
@@ -157,14 +170,13 @@ async def test_fetch_lead_reference_no_db_empty_types_only():
 async def test_create_lead_full_column_insert():
     """create_lead with no contacts: single INSERT (no empty uuid[] bind)."""
     conn = _FakeConn()
-    conn.fetchrow_result = {"id": "lead-1", "client_id": "c1"}
+    conn.fetchrow_result = {"id": "lead-1", "organization_id": "org-1"}
     repo = LeadRepository(db_connection=conn)
 
     row = {
         "organization_id": "org-1",
         "name": "L",
         "stage_id": "22222222-2222-2222-2222-222222222222",
-        "client_company_id": None,
         "lead_source": None,
         "referral_source": None,
         "lead_score": None,
@@ -188,20 +200,20 @@ async def test_create_lead_full_column_insert():
     for col in CREATE_LEAD_COLUMNS:
         assert col in query
     assert len(args) == len(CREATE_LEAD_COLUMNS)
+    assert not conn.execute_calls
 
 
 @pytest.mark.asyncio
-async def test_create_lead_with_contacts_one_statement():
-    """create_lead with contacts: CTE lead + lead_contacts via unnest."""
+async def test_create_lead_with_contacts_inserts_after_lead():
+    """create_lead with contacts: INSERT lead then batch INSERT lead_contacts."""
     conn = _FakeConn()
-    conn.fetchrow_result = {"id": "lead-1"}
+    conn.fetchrow_result = {"id": "lead-1", "organization_id": "org-1"}
     repo = LeadRepository(db_connection=conn)
 
     row = {
         "organization_id": "org-1",
         "name": "L",
         "stage_id": "22222222-2222-2222-2222-222222222222",
-        "client_company_id": None,
         "lead_source": None,
         "referral_source": None,
         "lead_score": None,
@@ -219,11 +231,11 @@ async def test_create_lead_with_contacts_one_statement():
     )
 
     assert len(conn.fetchrow_calls) == 1
-    query, args = conn.fetchrow_calls[0]
-    assert "WITH new_lead AS" in query
-    assert "INSERT INTO lead_contacts" in query
-    assert "unnest" in query
-    assert args[-2:] == (
+    assert len(conn.execute_calls) == 1
+    ins_query, ins_args = conn.execute_calls[0]
+    assert "INSERT INTO lead_contacts" in ins_query
+    assert "unnest" in ins_query
+    assert ins_args[-2:] == (
         ["33333333-3333-3333-3333-333333333333"],
         ["decision_maker"],
     )
@@ -258,7 +270,6 @@ async def test_list_with_total_uses_limit_offset_window_count():
     conn.fetch_result = [
         {
             "id": "lead-1",
-            "client_company_id": None,
             "name": "Lead A",
             "total_count": 7,
         }
@@ -309,7 +320,7 @@ async def test_list_with_total_empty_returns_zero_total():
 async def test_list_leads_kanban_fetch():
     """list_leads_for_kanban returns all matching rows and does not apply LIMIT/OFFSET."""
     conn = _FakeConn()
-    conn.fetch_result = [{"id": "lead-1", "client_company_id": None, "name": "Lead A"}]
+    conn.fetch_result = [{"id": "lead-1", "name": "Lead A"}]
     repo = LeadRepository(db_connection=conn)
 
     rows = await repo.list_leads_for_kanban(
@@ -331,11 +342,11 @@ async def test_list_leads_kanban_fetch():
 async def test_get_lead_detail_by_id_returns_row_or_none():
     """get_lead_detail_by_id returns a dict when found and None when missing."""
     conn = _FakeConn()
-    conn.fetchrow_result = {"id": "lead-1", "client_company_id": None}
+    conn.fetchrow_result = {"id": "lead-1", "companies": "[]"}
     repo = LeadRepository(db_connection=conn)
 
     found = await repo.get_lead_detail_by_id("org-1", "lead-1")
-    assert found["client_company_id"] is None
+    assert found is not None
     assert len(conn.fetchrow_calls) == 1
     query, args = conn.fetchrow_calls[0]
     assert "LIMIT 1" in query
@@ -353,8 +364,8 @@ async def test_get_lead_detail_with_contacts_by_id():
     conn.fetch_result = [
         {
             "id": "lead-1",
-            "client_company_id": None,
-            "contact_client_id": "c1",
+            "companies": "[]",
+            "contact_id": "c1",
             "label": "decision_maker",
             "contact_name": "P",
         },
@@ -365,7 +376,7 @@ async def test_get_lead_detail_with_contacts_by_id():
     assert found is not None
     assert found["id"] == "lead-1"
     assert isinstance(found["contacts"], list)
-    assert found["contacts"][0]["contact_client_id"] == "c1"
+    assert found["contacts"][0]["contact_id"] == "c1"
     assert found["contacts"][0]["label"] == "decision_maker"
     assert len(conn.fetchrow_calls) == 0
     assert len(conn.fetch_calls) == 1
@@ -381,7 +392,7 @@ async def test_get_lead_detail_with_contacts_by_id():
 async def test_update_lead_empty_uses_select():
     """update_lead returns existing row via get_lead_detail_by_id when filtered is empty."""
     conn = _FakeConn()
-    conn.fetchrow_result = {"id": "lead-1", "client_company_id": None}
+    conn.fetchrow_result = {"id": "lead-1", "companies": "[]"}
     repo = LeadRepository(db_connection=conn)
 
     result = await repo.update_lead("org-1", "lead-1", {})
@@ -440,7 +451,6 @@ async def test_update_lead_serializes_custom_fields_as_jsonb():
     assert args[0] == "org-1"
     assert args[1] == "lead-1"
     assert args[2] == "New Lead"
-    # JSON serialization is deterministic here; validate structure rather than exact spacing.
     serialized_cf = args[3]
     assert isinstance(serialized_cf, str)
     assert json.loads(serialized_cf) == {"x": "y"}

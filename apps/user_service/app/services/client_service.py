@@ -984,23 +984,15 @@ class ClientService:
             client_id: Client ID
         """
         lead_id: str | None = None
-        # Lead for the primary created client: company → client_company_id only;
-        # person → no client_company_id, link via lead_contacts only.
+        # Optional lead from client onboarding: CRM links use ``contacts`` / ``companies`` ids only.
         if request_data.lead_management and request_data.lead_management.enabled:
             organization_id = self.user_context.organization_id
             lead = request_data.lead_management
-            if request_data.client_type == ClientType.COMPANY:
-                client_company_id = client_id
-                contact_rows: list[tuple[str, str | None]] = []
-            else:
-                client_company_id = None
-                contact_rows = [(client_id, None)]
             owner_id = self.user_context.user_id if self.user_context else None
             lead_row = {
                 "organization_id": organization_id,
                 "name": self._get_client_name_for_create(request_data),
                 "stage_id": lead.stage_id or None,
-                "client_company_id": client_company_id,
                 "lead_source": lead.lead_source,
                 "referral_source": lead.referral_source,
                 "lead_score": lead.lead_score,
@@ -1008,7 +1000,11 @@ class ClientService:
                 "custom_fields": [],
                 "owner_id": owner_id,
             }
-            created_lead = await self.lead_repository.create_lead(lead_row, contacts=contact_rows)
+            created_lead = await self.lead_repository.create_lead(
+                lead_row,
+                contacts=[],
+                company=None,
+            )
             lead_id = (
                 str(created_lead.get("id")) if created_lead and created_lead.get("id") else None
             )

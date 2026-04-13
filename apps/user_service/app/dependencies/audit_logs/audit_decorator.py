@@ -9,10 +9,6 @@ from uuid import uuid4
 from fastapi import Request
 from fastapi import status as http_status
 
-from apps.user_service.app.dependencies.audit_logs.audit_logger import (
-    AuditEventData,
-    audit_logger,
-)
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("audit_logs")
@@ -117,6 +113,12 @@ async def _log_audit_event(
     elif audit_state["raw_old"] is not None:
         request.state.audit_old_values = {"data": audit_state["raw_old"]}
 
+    # Lazy import to avoid importing heavy dependencies at module import time.
+    from apps.user_service.app.dependencies.audit_logs.audit_logger import (
+        AuditEventData,
+        audit_logger,
+    )
+
     audit_event_data = AuditEventData(
         user_context=user_context,
         action_type=action_type,
@@ -198,12 +200,14 @@ def build_changed_data(
     new_delta: dict[str, Any] = {}
     changed_fields: list[str] = []
 
-    common_keys = set(old_data.keys()) & set(new_data.keys())
+    all_keys = set(old_data.keys()) | set(new_data.keys())
 
-    for key in sorted(common_keys):
+    for key in sorted(all_keys):
         full_key = f"{prefix}.{key}" if prefix else key
-        old_val = old_data.get(key)
-        new_val = new_data.get(key)
+        old_has = key in old_data
+        new_has = key in new_data
+        old_val = old_data.get(key) if old_has else None
+        new_val = new_data.get(key) if new_has else None
 
         if isinstance(old_val, dict) and isinstance(new_val, dict):
             nested_old, nested_new, nested_changed = build_changed_data(
@@ -215,6 +219,15 @@ def build_changed_data(
                 old_delta[key] = nested_old
                 new_delta[key] = nested_new
                 changed_fields.extend(nested_changed)
+            continue
+
+        # Keys can be added/removed between snapshots; capture those changes too.
+        if not old_has or not new_has:
+            if _values_are_equal(old_val, new_val):
+                continue
+            old_delta[key] = old_val
+            new_delta[key] = new_val
+            changed_fields.append(full_key)
             continue
 
         if _values_are_equal(old_val, new_val):
@@ -282,6 +295,12 @@ async def maybe_log_audit_on_error(
         }
 
         request.state.audit_description = f"Failed request: {description}"
+
+        # Lazy import to avoid importing heavy dependencies at module import time.
+        from apps.user_service.app.dependencies.audit_logs.audit_logger import (
+            AuditEventData,
+            audit_logger,
+        )
 
         # Create AuditEventData object for error logging
         audit_event_data = AuditEventData(

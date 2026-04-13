@@ -782,9 +782,9 @@ class ClientRepository:
     ) -> dict | None:
         """Get client details with primary contact and linked leads (single round trip).
 
-        Linked leads: company rows use ``leads.client_company_id = c.id``; person rows use
-        ``lead_contacts.contact_client_id = c.id`` (via ``EXISTS``). Branch follows
-        ``c.client_type``, same idea as ``PRIMARY_CONTACT_JOIN_PREDICATE``.
+        Linked leads: CRM leads now use ``lead_companies`` / ``lead_contacts`` (contacts and
+        companies modules). This query does not resolve ``clients`` rows to those UUIDs; the
+        lead join is disabled until a client→contact/company bridge exists in the product.
 
         Args:
             client_id: Client ID
@@ -857,20 +857,9 @@ class ClientRepository:
                 l.updated_at AS lead_updated_at
             FROM clients c
                 {primary_contact_join}
-            LEFT JOIN leads l ON l.organization_id = c.organization_id
-                AND (
-                    (c.client_type = 'company' AND l.client_company_id = c.id)
-                    OR (
-                        c.client_type = 'person'
-                        AND EXISTS (
-                            SELECT 1
-                            FROM lead_contacts lc
-                            WHERE lc.lead_id = l.id
-                              AND lc.organization_id = l.organization_id
-                              AND lc.contact_client_id = c.id
-                        )
-                    )
-                )
+            LEFT JOIN leads l
+                ON l.organization_id = c.organization_id
+               AND FALSE
             LEFT JOIN lead_stages ls
                 ON ls.id = l.stage_id
                AND ls.organization_id = l.organization_id

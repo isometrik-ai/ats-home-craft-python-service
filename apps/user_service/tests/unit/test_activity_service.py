@@ -41,6 +41,7 @@ def _audit_row(**overrides) -> _AuditRow:
         "changed_fields": [],
         "stage_names": _OldNewPair(None, None),
         "company_names": _OldNewPair(None, None),
+        "contact_names": _OldNewPair(None, None),
         "owner_names": _OldNewPair(None, None),
     }
     return _AuditRow(**{**base, **overrides})
@@ -71,9 +72,9 @@ def test_company_change_includes_display_values():
     service = _service()
     row = _audit_row(
         id="audit-2",
-        old_values={"data": {"client_company_id": str(uuid.uuid4())}},
-        new_values={"data": {"client_company_id": str(uuid.uuid4())}},
-        changed_fields=["client_company_id"],
+        old_values={"data": {"companies": []}},
+        new_values={"data": {"companies": []}},
+        changed_fields=["companies"],
         company_names=_OldNewPair("Acme LLC", "Umbrella Corp"),
     )
 
@@ -84,23 +85,36 @@ def test_company_change_includes_display_values():
     assert items[0].new_display_value == "Umbrella Corp"
 
 
-def test_company_name_field_uses_same_resolved():
-    """`company_name` row should get display values from repo join (clients.name)."""
+def test_contacts_change_includes_display_values():
+    """contacts changes should produce display values (names derived from snapshot)."""
     service = _service()
     row = _audit_row(
-        id="audit-2b",
-        old_values={"data": {"company_name": "Stale or raw"}},
-        new_values={"data": {"company_name": "Other"}},
-        changed_fields=["company_name"],
-        company_names=_OldNewPair("Acme LLC", "Umbrella Corp"),
+        id="audit-2c",
+        old_values={
+            "data": {
+                "contacts": [
+                    {"contact_id": "c1", "label": "decision_maker", "contact_name": "Alice"},
+                ]
+            }
+        },
+        new_values={
+            "data": {
+                "contacts": [
+                    {"contact_id": "c1", "label": "decision_maker", "contact_name": "Alice"},
+                    {"contact_id": "c2", "label": None, "contact_name": "Bob"},
+                ]
+            }
+        },
+        changed_fields=["contacts"],
     )
 
     items = service._flatten_lead_audit_row(  # pylint: disable=protected-access
         audit_row=row, record_id="lead-1"
     )
     assert len(items) == 1
-    assert items[0].old_display_value == "Acme LLC"
-    assert items[0].new_display_value == "Umbrella Corp"
+    assert items[0].field == "contacts"
+    assert items[0].old_display_value == "Alice (decision_maker)"
+    assert items[0].new_display_value == "Alice (decision_maker), Bob"
 
 
 def test_owner_change_includes_display_values():
