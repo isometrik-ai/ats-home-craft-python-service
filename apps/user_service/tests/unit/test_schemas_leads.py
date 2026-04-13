@@ -81,10 +81,12 @@ def test_update_lead_unset_no_changes():
 
 
 def test_update_lead_allows_contacts_update_only():
+    """UpdateLeadRequest accepts contacts_update without requiring other fields."""
     req = UpdateLeadRequest(contacts_update=LeadContactsUpdate(remove_associations=[CLIENT_ID]))
     assert req.contacts_update is not None
 
 
 def test_update_lead_allows_companies_update_only():
+    """UpdateLeadRequest accepts companies_update without requiring other fields."""
     req = UpdateLeadRequest(companies_update=LeadCompaniesUpdate(remove_associations=[CLIENT_ID]))
     assert req.companies_update is not None

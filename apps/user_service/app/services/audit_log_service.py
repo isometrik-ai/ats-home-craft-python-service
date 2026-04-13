@@ -201,12 +201,12 @@ class AuditLogService:
             return value
 
         normalized: dict[str, Any] = {}
-        for k, v in value.items():
-            if isinstance(v, str) and isinstance(k, str) and k.endswith("_json"):
-                decoded = AuditLogService._decode_json_candidate(candidate=v.strip(), default=v)
-                normalized[k] = AuditLogService._normalize_embedded_json_strings(decoded)
+        for key, val in value.items():
+            if isinstance(val, str) and isinstance(key, str) and key.endswith("_json"):
+                decoded = AuditLogService._decode_json_candidate(candidate=val.strip(), default=val)
+                normalized[key] = AuditLogService._normalize_embedded_json_strings(decoded)
             else:
-                normalized[k] = AuditLogService._normalize_embedded_json_strings(v)
+                normalized[key] = AuditLogService._normalize_embedded_json_strings(val)
         return normalized
 
     @staticmethod

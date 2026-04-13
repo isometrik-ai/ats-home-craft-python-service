@@ -93,6 +93,7 @@ class LeadCompanyCreate(BaseModel):
         if isinstance(value, str):
             stripped = value.strip()
             return stripped or None
+        return value
 
 
 class LeadContactAssociationUpdate(BaseModel):
@@ -110,6 +111,7 @@ class LeadContactAssociationUpdate(BaseModel):
     @field_validator("contact_id", mode="before")
     @classmethod
     def normalize_contact_id(cls, value: Any) -> Any:
+        """Strip whitespace from contact id when provided as a string."""
         if isinstance(value, str):
             return value.strip()
         return value
@@ -117,6 +119,7 @@ class LeadContactAssociationUpdate(BaseModel):
     @field_validator("label", mode="before")
     @classmethod
     def normalize_label(cls, value: Any) -> Any:
+        """Strip whitespace; treat blank strings as unset (``None``)."""
         if value is None:
             return None
         if isinstance(value, str):
@@ -151,6 +154,7 @@ class LeadContactsUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_payload(self) -> "LeadContactsUpdate":
+        """Normalize ids and validate at least one delta operation is provided."""
         remove_ids = [c.strip() for c in (self.remove_associations or []) if (c or "").strip()]
         self.remove_associations = remove_ids
 
@@ -199,6 +203,7 @@ class LeadCompanyAssociationUpdate(BaseModel):
     @field_validator("company_id", mode="before")
     @classmethod
     def normalize_company_id(cls, value: Any) -> Any:
+        """Strip whitespace from company id when provided as a string."""
         if isinstance(value, str):
             return value.strip()
         return value
@@ -206,6 +211,7 @@ class LeadCompanyAssociationUpdate(BaseModel):
     @field_validator("label", mode="before")
     @classmethod
     def normalize_label(cls, value: Any) -> Any:
+        """Strip whitespace; treat blank strings as unset (``None``)."""
         if value is None:
             return None
         if isinstance(value, str):
@@ -240,6 +246,7 @@ class LeadCompaniesUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_payload(self) -> "LeadCompaniesUpdate":
+        """Normalize ids and validate at least one delta operation is provided."""
         remove_ids = [c.strip() for c in (self.remove_associations or []) if (c or "").strip()]
         self.remove_associations = remove_ids
 
@@ -294,6 +301,7 @@ class CreateLeadCompany(BaseModel):
         if isinstance(value, str):
             stripped = value.strip()
             return stripped or None
+        return value
 
 
 class CreateLeadRequest(BaseModel):

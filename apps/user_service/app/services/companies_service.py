@@ -430,7 +430,10 @@ class CompaniesService:
         custom_fields: list[dict[str, Any]] | None,
         entity_type: EntityType,
     ) -> list[dict[str, Any]]:
-        """Validate custom fields before insert (same rules as ClientService._apply_custom_fields_if_needed)."""
+        """Validate custom fields before insert.
+
+        Uses the same rules as `ClientService._apply_custom_fields_if_needed`.
+        """
         if not (self.user_context and self.user_context.organization_id):
             return []
         custom_field_service = CustomFieldService(

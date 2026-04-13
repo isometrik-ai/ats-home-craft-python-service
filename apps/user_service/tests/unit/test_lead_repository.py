@@ -89,7 +89,7 @@ async def test_fetch_lead_reference_validation_with_stage():
     }
     repo = LeadRepository(db_connection=conn)
 
-    ok, fc, fg = await repo.fetch_lead_reference_validation(
+    ok, found_contacts, found_companies = await repo.fetch_lead_reference_validation(
         "org-1",
         stage_id="stage-1",
         contact_ids=["c1"],
@@ -97,8 +97,8 @@ async def test_fetch_lead_reference_validation_with_stage():
     )
 
     assert ok is True
-    assert fc == {"c1"}
-    assert fg == {"g1"}
+    assert found_contacts == {"c1"}
+    assert found_companies == {"g1"}
     assert len(conn.fetchrow_calls) == 1
     assert "lead_stages" in conn.fetchrow_calls[0][0]
     assert "contacts" in conn.fetchrow_calls[0][0]
@@ -116,7 +116,7 @@ async def test_fetch_create_reference_arrays_as_strings():
     }
     repo = LeadRepository(db_connection=conn)
 
-    ok, fc, fg = await repo.fetch_lead_reference_validation(
+    ok, found_contacts, found_companies = await repo.fetch_lead_reference_validation(
         "org-1",
         stage_id="stage-1",
         contact_ids=["c1"],
@@ -124,8 +124,8 @@ async def test_fetch_create_reference_arrays_as_strings():
     )
 
     assert ok is True
-    assert fc == {"c1"}
-    assert fg == set()
+    assert found_contacts == {"c1"}
+    assert found_companies == set()
 
 
 @pytest.mark.asyncio
@@ -135,7 +135,7 @@ async def test_fetch_lead_validation_empty_ids():
     conn.fetchrow_result = {"stage_exists": False, "found_contacts": None, "found_companies": None}
     repo = LeadRepository(db_connection=conn)
 
-    ok, fc, fg = await repo.fetch_lead_reference_validation(
+    ok, found_contacts, found_companies = await repo.fetch_lead_reference_validation(
         "o",
         stage_id="s",
         contact_ids=[],
@@ -143,8 +143,8 @@ async def test_fetch_lead_validation_empty_ids():
     )
 
     assert ok is False
-    assert fc == set()
-    assert fg == set()
+    assert found_contacts == set()
+    assert found_companies == set()
 
 
 @pytest.mark.asyncio
@@ -153,7 +153,7 @@ async def test_fetch_lead_reference_no_db_empty_types_only():
     conn = _FakeConn()
     repo = LeadRepository(db_connection=conn)
 
-    ok, fc, fg = await repo.fetch_lead_reference_validation(
+    ok, found_contacts, found_companies = await repo.fetch_lead_reference_validation(
         "o",
         stage_id=None,
         contact_ids=None,
@@ -161,8 +161,8 @@ async def test_fetch_lead_reference_no_db_empty_types_only():
     )
 
     assert ok is None
-    assert fc == set()
-    assert fg == set()
+    assert found_contacts == set()
+    assert found_companies == set()
     assert not conn.fetchrow_calls
 
 

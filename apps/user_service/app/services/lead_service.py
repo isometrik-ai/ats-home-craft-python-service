@@ -356,6 +356,38 @@ class LeadService:
         """Parse `companies` list from a repository row."""
         return coerce_json_list(current.get("companies"))
 
+    @staticmethod
+    def _build_ordered_link_map(
+        *,
+        existing: list[dict[str, Any]],
+        id_key: str,
+    ) -> tuple[list[str], dict[str, dict[str, Any]]]:
+        """Build (ordered_ids, by_id) from existing association rows."""
+        ordered_ids: list[str] = []
+        by_id: dict[str, dict[str, Any]] = {}
+        for item in existing:
+            if not isinstance(item, dict):
+                continue
+            raw_id = item.get(id_key)
+            if raw_id is None:
+                continue
+            id_str = str(raw_id)
+            if id_str in by_id:
+                continue
+            ordered_ids.append(id_str)
+            by_id[id_str] = {id_key: id_str, "label": item.get("label")}
+        return ordered_ids, by_id
+
+    @staticmethod
+    def _apply_removals(
+        *, ordered_ids: list[str], by_id: dict[str, dict[str, Any]], ids: list[str]
+    ) -> None:
+        """Remove ids from both the map and the order list."""
+        for remove_id in ids or []:
+            by_id.pop(remove_id, None)
+            if remove_id in ordered_ids:
+                ordered_ids.remove(remove_id)
+
     def _apply_contact_delta(
         self,
         *,
@@ -364,24 +396,12 @@ class LeadService:
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """Apply contact delta to current row and return (sync payload, ids to validate)."""
         existing = self._existing_contact_links(current)
-        ordered_ids: list[str] = []
-        by_id: dict[str, dict[str, Any]] = {}
-        for item in existing:
-            if not isinstance(item, dict):
-                continue
-            cid = item.get("contact_id")
-            if cid is None:
-                continue
-            cid_str = str(cid)
-            if cid_str in by_id:
-                continue
-            ordered_ids.append(cid_str)
-            by_id[cid_str] = {"contact_id": cid_str, "label": item.get("label")}
-
-        for cid in delta.remove_associations or []:
-            by_id.pop(cid, None)
-            if cid in ordered_ids:
-                ordered_ids.remove(cid)
+        ordered_ids, by_id = self._build_ordered_link_map(existing=existing, id_key="contact_id")
+        self._apply_removals(
+            ordered_ids=ordered_ids,
+            by_id=by_id,
+            ids=delta.remove_associations,
+        )
 
         ids_to_validate: set[str] = set()
 
@@ -417,24 +437,12 @@ class LeadService:
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """Apply company delta to current row and return (sync payload, ids to validate)."""
         existing = self._existing_company_links(current)
-        ordered_ids: list[str] = []
-        by_id: dict[str, dict[str, Any]] = {}
-        for item in existing:
-            if not isinstance(item, dict):
-                continue
-            cid = item.get("company_id")
-            if cid is None:
-                continue
-            cid_str = str(cid)
-            if cid_str in by_id:
-                continue
-            ordered_ids.append(cid_str)
-            by_id[cid_str] = {"company_id": cid_str, "label": item.get("label")}
-
-        for cid in delta.remove_associations or []:
-            by_id.pop(cid, None)
-            if cid in ordered_ids:
-                ordered_ids.remove(cid)
+        ordered_ids, by_id = self._build_ordered_link_map(existing=existing, id_key="company_id")
+        self._apply_removals(
+            ordered_ids=ordered_ids,
+            by_id=by_id,
+            ids=delta.remove_associations,
+        )
 
         ids_to_validate: set[str] = set()
 
