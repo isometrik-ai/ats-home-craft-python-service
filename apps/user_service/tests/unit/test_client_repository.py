@@ -319,11 +319,8 @@ async def test_get_client_details_with_primary_contact():
     assert result is None
     query = conn.fetch_calls[0][0]
     assert "LEFT JOIN client_users" in query
-    assert "LEFT JOIN leads l ON l.organization_id = c.organization_id" in query
-    assert "c.client_type = 'company' AND l.client_company_id = c.id" in query
-    assert "c.client_type = 'person'" in query
-    assert "FROM lead_contacts lc" in query
-    assert "lc.contact_client_id = c.id" in query
+    assert "LEFT JOIN leads l" in query
+    assert "AND FALSE" in query
     assert "l.id AS lead_id" in query
     assert "LEFT JOIN lead_stages ls" in query
     assert "l.deal_type AS lead_deal_type" in query

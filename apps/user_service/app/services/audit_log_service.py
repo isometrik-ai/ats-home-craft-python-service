@@ -172,7 +172,7 @@ class AuditLogService:
             return default
 
         if isinstance(value, (dict, list)):
-            return value
+            return AuditLogService._normalize_embedded_json_strings(value)
 
         if not isinstance(value, str):
             return default
@@ -181,7 +181,33 @@ class AuditLogService:
         if not candidate:
             return default
 
-        return AuditLogService._decode_json_candidate(candidate=candidate, default=default)
+        parsed = AuditLogService._decode_json_candidate(candidate=candidate, default=default)
+        return AuditLogService._normalize_embedded_json_strings(parsed)
+
+    @staticmethod
+    def _normalize_embedded_json_strings(value: Any) -> Any:
+        """Recursively decode embedded JSON strings for keys ending in `_json`.
+
+        This prevents "double encoded" payloads such as:
+        `{"data": {"companies_json": "[{...}]"}}` leaking into API responses.
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, list):
+            return [AuditLogService._normalize_embedded_json_strings(v) for v in value]
+
+        if not isinstance(value, dict):
+            return value
+
+        normalized: dict[str, Any] = {}
+        for k, v in value.items():
+            if isinstance(v, str) and isinstance(k, str) and k.endswith("_json"):
+                decoded = AuditLogService._decode_json_candidate(candidate=v.strip(), default=v)
+                normalized[k] = AuditLogService._normalize_embedded_json_strings(decoded)
+            else:
+                normalized[k] = AuditLogService._normalize_embedded_json_strings(v)
+        return normalized
 
     @staticmethod
     def _decode_json_candidate(candidate: str, default: Any = None) -> Any:

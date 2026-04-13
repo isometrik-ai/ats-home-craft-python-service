@@ -50,7 +50,7 @@ LEAD_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 @router.post(
     "",
     status_code=http_status.HTTP_201_CREATED,
-    description="Create a new lead linked to an existing client",
+    description="Create a new lead with optional links to contacts and a single company",
     summary="Create lead",
     responses={
         http_status.HTTP_201_CREATED: {"description": "Lead created successfully"},
@@ -91,7 +91,7 @@ async def create_lead(
         )
 
         request.state.audit_table = "leads"
-        request.state.audit_description = f"Created lead for client: {body.client_company_id}"
+        request.state.audit_description = f"Created lead: {body.name!r}"
         request.state.audit_risk_level = "medium"
         request.state.audit_user_context = {
             "user_id": user_context.user_id,
@@ -116,7 +116,8 @@ async def create_lead(
             topics=LEAD_KAFKA_TOPICS,
         )
         event_key = str(created["id"])
-        request.state.raw_audit_new_data = created
+        # Normalize audit snapshot so association keys are always present.
+        request.state.raw_audit_new_data = LeadService._normalize_lead_audit_snapshot(created)
 
     if create_event is not None and event_key is not None:
         background_tasks.add_task(
@@ -236,7 +237,7 @@ async def list_leads(
     current_user: dict = Depends(get_user_from_auth),
     mode: LeadsListMode = Query(..., description="list or kanban"),
     stage_id: str | None = Query(None, description="Filter by pipeline stage"),
-    search: str | None = Query(None, description="Search by lead name or client name"),
+    search: str | None = Query(None, description="Search by lead name, company, or contact"),
     page: int = Query(1, ge=1, description="Page number (list mode)"),
     limit: int = Query(20, ge=1, le=100, description="Page size (list mode)"),
 ):
@@ -407,8 +408,10 @@ async def update_lead(
             },
             topics=LEAD_KAFKA_TOPICS,
         )
-        request.state.raw_audit_old_data = previous
-        request.state.raw_audit_new_data = updated
+        # Normalize audit snapshots so association keys are always present and stable.
+        # (No extra DB round-trips; we only standardize the payload shape for diffing.)
+        request.state.raw_audit_old_data = LeadService._normalize_lead_audit_snapshot(previous)
+        request.state.raw_audit_new_data = LeadService._normalize_lead_audit_snapshot(updated)
 
     if update_event is not None:
         background_tasks.add_task(
@@ -430,7 +433,7 @@ async def update_lead(
 @router.delete(
     "/{lead_id}",
     status_code=http_status.HTTP_200_OK,
-    description="Hard-delete a lead (client record is not deleted)",
+    description="Hard-delete a lead (linked contact and company records are not deleted)",
     summary="Delete lead",
     responses={
         http_status.HTTP_200_OK: {"description": "Lead deleted successfully"},
@@ -491,7 +494,8 @@ async def delete_lead(
             payload={"module": "leads", "action": "delete"},
             topics=LEAD_KAFKA_TOPICS,
         )
-        request.state.raw_audit_old_data = deleted
+        # Normalize audit snapshot so association keys are always present.
+        request.state.raw_audit_old_data = LeadService._normalize_lead_audit_snapshot(deleted)
 
     if delete_event is not None:
         background_tasks.add_task(

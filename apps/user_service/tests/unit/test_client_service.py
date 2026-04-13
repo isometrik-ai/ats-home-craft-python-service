@@ -202,9 +202,9 @@ class _FakeLeadRepo:
         }
         return True, types_map
 
-    async def create_lead(self, row, contacts=None):
+    async def create_lead(self, row, contacts=None, company=None):
         """Record create (same repository method as API lead create)."""
-        self.calls["create_lead"] = {"row": row, "contacts": contacts}
+        self.calls["create_lead"] = {"row": row, "contacts": contacts, "company": company}
         return {"id": "lead-1", **row}
 
     async def delete_leads_by_client_id(self, client_id):
@@ -1064,11 +1064,11 @@ async def test_create_optional_records_creates_lead(monkeypatch):
     await service._create_optional_records(request_data, "client-1")
     created = fake_lead.calls["create_lead"]
     row = created["row"]
-    assert created["contacts"] == [("client-1", None)]
+    assert created["contacts"] == []
+    assert created["company"] is None
     assert row["organization_id"] == "org-1"
     assert row["name"] == "John Doe"
     assert row["stage_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    assert row["client_company_id"] is None
     assert row["owner_id"] == "u1"
     assert row["custom_fields"] == []
     assert row["notes"] == []
@@ -1076,7 +1076,7 @@ async def test_create_optional_records_creates_lead(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_create_optional_records_lead_for_company(monkeypatch):
-    """Company primary client: lead uses client_company_id, no lead_contacts."""
+    """Company client onboarding creates a lead row without CRM contact/company links."""
     fake_repo = _FakeClientRepo()
     fake_lead = _FakeLeadRepo()
     monkeypatch.setattr(
@@ -1101,7 +1101,7 @@ async def test_create_optional_records_lead_for_company(monkeypatch):
     created = fake_lead.calls["create_lead"]
     row = created["row"]
     assert created["contacts"] == []
-    assert row["client_company_id"] == "co-1"
+    assert created["company"] is None
     assert row["name"] == "Acme Legal"
 
 
