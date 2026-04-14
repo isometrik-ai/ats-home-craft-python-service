@@ -27,8 +27,7 @@ async def test_enrichment_webhook_company_calls_process(client):
             "apps.user_service.app.api.webhooks.ClientEnrichmentService.from_settings",
         ) as mock_from_settings,
         patch(
-            "apps.user_service.app.api.webhooks."
-            "ClientService.index_clients_in_typesense_background",
+            "apps.user_service.app.api.webhooks.index_companies_background",
             new=AsyncMock(),
         ),
     ):
@@ -60,8 +59,7 @@ async def test_enrichment_webhook_profile_calls_process(client):
             "apps.user_service.app.api.webhooks.ClientEnrichmentService.from_settings",
         ) as mock_from_settings,
         patch(
-            "apps.user_service.app.api.webhooks."
-            "ClientService.index_clients_in_typesense_background",
+            "apps.user_service.app.api.webhooks.index_contacts_background",
             new=AsyncMock(),
         ),
     ):
