@@ -460,8 +460,9 @@ class ContactsService:
 
         # Persist intake_stage on the contact when provided (for downstream indexing/filters).
         additional_data_payload = dict(body.additional_data or {})
-        if body.lead is not None and body.lead.intake_stage is not None:
-            intake_stage = (body.lead.intake_stage or "").strip()
+        lead_payload = getattr(body, "lead", None)
+        if lead_payload is not None and getattr(lead_payload, "intake_stage", None) is not None:
+            intake_stage = (getattr(lead_payload, "intake_stage", None) or "").strip()
             if intake_stage:
                 additional_data_payload["intake_stage"] = intake_stage
         if websites_payload:
@@ -523,7 +524,8 @@ class ContactsService:
         await self._create_addresses_if_any(contact_id=contact_id, addresses=body.addresses)
 
         # Optional lead creation + association (contact + optional company).
-        if body.lead is not None:
+        lead_payload = getattr(body, "lead", None)
+        if lead_payload is not None:
             full_name = " ".join(
                 [
                     part
@@ -546,9 +548,9 @@ class ContactsService:
             _ = await lead_service.create_lead(
                 CreateLeadRequest(
                     name=lead_name,
-                    stage_id=body.lead.stage_id,
-                    lead_source=(body.lead.intake_stage or None),
-                    lead_score=(body.lead.lead_score or None),
+                    stage_id=lead_payload.stage_id,
+                    lead_source=(getattr(lead_payload, "intake_stage", None) or None),
+                    lead_score=(getattr(lead_payload, "lead_score", None) or None),
                     company=company_tuple,
                     contacts=contacts_list,
                 )
