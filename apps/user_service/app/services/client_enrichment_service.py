@@ -18,8 +18,16 @@ import asyncpg
 import httpx
 
 from apps.user_service.app.config.app_settings import app_settings
-from apps.user_service.app.db.repositories import ClientRepository
-from apps.user_service.app.db.repositories.client_repository import CLIENT_JSONB_COLUMNS
+from apps.user_service.app.db.repositories import (
+    CompaniesRepository,
+    ContactsRepository,
+)
+from apps.user_service.app.db.repositories.companies_repository import (
+    COMPANY_JSONB_COLUMNS,
+)
+from apps.user_service.app.db.repositories.contacts_repository import (
+    CONTACT_JSONB_COLUMNS,
+)
 from apps.user_service.app.schemas.enums import ClientEnrichmentStatus, ClientType
 from apps.user_service.app.utils.common_utils import parse_json_field, safe_json_loads
 from apps.user_service.app.utils.user_utils import build_full_name
@@ -350,13 +358,14 @@ class ClientEnrichmentService:
             )
             return None
 
-    async def _store_sales_intelligence(
+    async def _store_sales_intelligence_for_company(
         self,
-        repo: ClientRepository,
-        client_id: Any,
+        *,
+        company_id: Any,
         organization_id: Any,
         person_info: dict[str, Any],
         company_info: dict[str, Any],
+        conn: asyncpg.Connection,
     ) -> None:
         """Fetch sales intelligence using the shared API and persist it if available.
 
@@ -371,10 +380,11 @@ class ClientEnrichmentService:
         if not sales_data:
             return
 
-        await repo.update_client(
-            client_id,
-            organization_id,
-            {"sales_intelligence": sales_data},
+        repo = CompaniesRepository(conn)
+        await repo.update_company(
+            company_id=company_id,
+            organization_id=organization_id,
+            update_data={"sales_intelligence": sales_data},
         )
 
     @staticmethod
@@ -388,16 +398,9 @@ class ClientEnrichmentService:
     ) -> None:
         """Persist enrichment status fields to the given entity table.
 
-        Supports legacy `clients` and v2 `contacts`/`companies`.
+        Supports v2 `contacts`/`companies`.
         """
-        if entity_table == "clients":
-            repo = ClientRepository(db_conn)
-            await repo.update_client(entity_id, organization_id, update_data)
-            return
-
         if entity_table == "contacts":
-            from apps.user_service.app.db.repositories import ContactsRepository
-
             repo = ContactsRepository(db_conn)
             await repo.update_contact(
                 contact_id=entity_id,
@@ -407,8 +410,6 @@ class ClientEnrichmentService:
             return
 
         if entity_table == "companies":
-            from apps.user_service.app.db.repositories import CompaniesRepository
-
             repo = CompaniesRepository(db_conn)
             await repo.update_company(
                 company_id=entity_id,
@@ -425,6 +426,117 @@ class ClientEnrichmentService:
                 "organization_id": organization_id,
             },
         )
+
+    @staticmethod
+    def _build_contact_personal_update(enriched_profile: dict[str, Any]) -> dict[str, Any]:
+        """Build update dict for first_name, middle_name, last_name from enriched_profile."""
+        personal = enriched_profile.get("personalInfo") or {}
+        if not isinstance(personal, dict):
+            return {}
+
+        update: dict[str, Any] = {}
+        first = (personal.get("firstName") or "").strip()
+        middle = (personal.get("middleName") or "").strip()
+        last = (personal.get("lastName") or "").strip()
+        if first:
+            update["first_name"] = first
+        if middle:
+            update["middle_name"] = middle
+        if last:
+            update["last_name"] = last
+        return update
+
+    @staticmethod
+    def _build_contact_social_pages_update(enriched_profile: dict[str, Any]) -> dict[str, Any]:
+        """Build update dict for social_pages from enriched_profile."""
+        social = enriched_profile.get("socialProfiles")
+        if social is None:
+            return {}
+        return {"social_pages": ClientEnrichmentService._map_social_profiles(social)}
+
+    @staticmethod
+    def _build_contact_skills_update(enriched_profile: dict[str, Any]) -> dict[str, Any]:
+        """Build update dict for skills from enriched_profile."""
+        skills = enriched_profile.get("skills")
+        if not isinstance(skills, list):
+            return {}
+        return {"skills": ClientEnrichmentService._map_string_list(skills)}
+
+    @staticmethod
+    def _build_contact_work_history_update(enriched_profile: dict[str, Any]) -> dict[str, Any]:
+        """Build update dict for work_history from enriched_profile."""
+        work_history = enriched_profile.get("workHistory")
+        if work_history is None:
+            return {}
+        return {
+            "work_history": ClientEnrichmentService._map_work_history_from_enriched(work_history)
+        }
+
+    @staticmethod
+    def _build_contact_education_update(enriched_profile: dict[str, Any]) -> dict[str, Any]:
+        """Build update dict for educational_history from enriched_profile."""
+        education = enriched_profile.get("education")
+        if education is None:
+            return {}
+        return {
+            "educational_history": ClientEnrichmentService._map_education_from_enriched(education)
+        }
+
+    @staticmethod
+    def _build_contact_additional_data_update(
+        enriched_profile: dict[str, Any],
+        *,
+        existing_additional_data: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Build update dict for additional_data from enriched_profile."""
+        merged_additional = existing_additional_data or {}
+        merged_additional["enriched_profile"] = enriched_profile
+        merged_additional["additional_info"] = (
+            ClientEnrichmentService._build_person_additional_info(enriched_profile)
+        )
+        return {"additional_data": merged_additional}
+
+    @staticmethod
+    def build_contact_enrichment_update(
+        enriched_profile: dict[str, Any],
+        *,
+        existing_contact: dict[str, Any] | None = None,
+        existing_additional_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build contacts-table update from webhook enriched_profile (person).
+
+        Mirrors legacy behavior:
+        - Never overwrite non-empty existing top-level fields with empty enrichment values.
+        - Merge social pages by platform without wiping entries.
+        - Store raw enrichment under additional_data.enriched_profile + additional_info.
+        """
+        if not enriched_profile or not isinstance(enriched_profile, dict):
+            return {}
+
+        update: dict[str, Any] = {}
+
+        update.update(ClientEnrichmentService._build_contact_personal_update(enriched_profile))
+        update.update(ClientEnrichmentService._build_contact_social_pages_update(enriched_profile))
+        update.update(ClientEnrichmentService._build_contact_skills_update(enriched_profile))
+        update.update(ClientEnrichmentService._build_contact_work_history_update(enriched_profile))
+        update.update(ClientEnrichmentService._build_contact_education_update(enriched_profile))
+        update.update(
+            ClientEnrichmentService._build_contact_additional_data_update(
+                enriched_profile,
+                existing_additional_data=existing_additional_data,
+            )
+        )
+        update["enrichment_status"] = ClientEnrichmentStatus.COMPLETED.value
+        update["enrichment_done"] = True
+        update["last_enriched_at"] = datetime.now(timezone.utc)
+
+        merged = _merge_update_without_overwriting_empty(update, existing_contact)
+        if "social_pages" in merged and existing_contact is not None:
+            merged["social_pages"] = _merge_social_pages_by_platform(
+                enriched_social_pages=merged.get("social_pages") or [],
+                existing_social_pages=existing_contact.get("social_pages"),
+            )
+        return merged
 
     async def run_client_enrichment(
         self,
@@ -883,36 +995,44 @@ class ClientEnrichmentService:
         if not enriched_company or not isinstance(enriched_company, dict):
             return None
 
-        repo = ClientRepository(conn)
-        existing = await repo.get_client_for_update(enrichment_request_id=request_id)
+        repo = CompaniesRepository(conn)
+        existing = await repo.get_company_for_update_by_enrichment_request_id(
+            enrichment_request_id=request_id
+        )
         if not existing:
             logger.error(
-                "Enrichment webhook: no client found for request_id",
+                "Enrichment webhook: no company found for request_id",
                 extra={"request_id": request_id},
             )
             return None
-        client_id = existing["id"]
+        company_id = existing["id"]
         organization_id = existing["organization_id"]
         existing_additional_raw = existing.get("additional_data")
         existing_additional = safe_json_loads(existing_additional_raw)
 
         update_data = self.build_company_enrichment_update(
-            enriched_company, existing_client=existing, existing_additional_data=existing_additional
+            enriched_company,
+            existing_client=existing,
+            existing_additional_data=existing_additional,
         )
-        _normalize_webhook_update_payload(update_data, CLIENT_JSONB_COLUMNS)
-        await repo.update_client(client_id, organization_id, update_data)
+        _normalize_webhook_update_payload(update_data, COMPANY_JSONB_COLUMNS)
+        await repo.update_company(
+            company_id=str(company_id),
+            organization_id=str(organization_id),
+            update_data=update_data,
+        )
 
         # Add new addresses from enrichment (do not override existing; only add)
         new_address_rows = ClientEnrichmentService._map_addresses_from_company(enriched_company)
         if new_address_rows:
-            addresses_data = [{"client_id": client_id, **row} for row in new_address_rows]
-            await repo.bulk_create_addresses(addresses_data)
+            addresses_data = [{"company_id": str(company_id), **row} for row in new_address_rows]
+            await repo.create_company_addresses(addresses_data)
 
         logger.info(
-            "Client updated from enrichment webhook",
-            extra={"client_id": client_id, "request_id": request_id},
+            "Company updated from enrichment webhook",
+            extra={"company_id": str(company_id), "request_id": request_id},
         )
-        return (str(client_id), str(organization_id))
+        return (str(company_id), str(organization_id))
 
     # Person enrichment webhook (mapping + processing)
     @staticmethod
@@ -1097,29 +1217,37 @@ class ClientEnrichmentService:
         if not enriched_profile or not isinstance(enriched_profile, dict):
             return None
 
-        repo = ClientRepository(conn)
-        existing = await repo.get_client_for_update(enrichment_request_id=request_id)
+        repo = ContactsRepository(conn)
+        existing = await repo.get_contact_for_update_by_enrichment_request_id(
+            enrichment_request_id=request_id
+        )
         if not existing:
             logger.error(
-                "Enrichment webhook: no client found for request_id",
+                "Enrichment webhook: no contact found for request_id",
                 extra={"request_id": request_id},
             )
             return None
-        client_id = existing["id"]
+        contact_id = existing["id"]
         organization_id = existing["organization_id"]
         existing_additional_raw = existing.get("additional_data")
         existing_additional = safe_json_loads(existing_additional_raw)
-        update_data = self.build_person_enrichment_update(
-            enriched_profile, existing_client=existing, existing_additional_data=existing_additional
+        update_data = self.build_contact_enrichment_update(
+            enriched_profile,
+            existing_contact=existing,
+            existing_additional_data=existing_additional,
         )
-        _normalize_webhook_update_payload(update_data, CLIENT_JSONB_COLUMNS)
-        await repo.update_client(client_id, organization_id, update_data)
+        _normalize_webhook_update_payload(update_data, CONTACT_JSONB_COLUMNS)
+        await repo.update_contact(
+            contact_id=str(contact_id),
+            organization_id=str(organization_id),
+            update_data=update_data,
+        )
 
         logger.info(
-            "Client updated from person enrichment webhook",
-            extra={"client_id": client_id, "request_id": request_id},
+            "Contact updated from enrichment webhook",
+            extra={"contact_id": str(contact_id), "request_id": request_id},
         )
-        return (str(client_id), str(organization_id))
+        return (str(contact_id), str(organization_id))
 
     async def fetch_and_store_sales_intelligence_for_request(
         self,
@@ -1141,38 +1269,36 @@ class ClientEnrichmentService:
         if not request_id or not isinstance(request_id, str):
             return
 
+        # Sales intelligence is stored on companies only.
+        _ = enriched_profile  # kept for webhook signature compatibility
+        if not (isinstance(enriched_company, dict) and enriched_company):
+            return
+
         pool = await get_pool()
         async with AcquireConnection(pool) as conn:
-            repo = ClientRepository(conn)
-            existing = await repo.get_client_for_update(enrichment_request_id=request_id)
+            repo = CompaniesRepository(conn)
+            existing = await repo.get_company_for_update_by_enrichment_request_id(
+                enrichment_request_id=request_id
+            )
             if not existing:
                 logger.error(
-                    "Sales intelligence: no client found for request_id",
+                    "Sales intelligence: no company found for request_id",
                     extra={"request_id": request_id},
                 )
                 return
 
-            client_id = existing["id"]
+            company_id = existing["id"]
             organization_id = existing["organization_id"]
 
-            person_info = {}
-            company_info = {}
-            if isinstance(enriched_company, dict) and enriched_company:
-                company_info = enriched_company
-            elif isinstance(enriched_profile, dict) and enriched_profile:
-                person_info = enriched_profile
-                raw_company = enriched_profile.get("companyInfo")
-                company_info = raw_company if isinstance(raw_company, dict) else {}
-
-            await self._store_sales_intelligence(
-                repo=repo,
-                client_id=client_id,
+            await self._store_sales_intelligence_for_company(
+                company_id=company_id,
                 organization_id=organization_id,
-                person_info=person_info,
-                company_info=company_info,
+                person_info={},
+                company_info=enriched_company,
+                conn=conn,
             )
 
             logger.info(
-                "Sales intelligence stored for client",
-                extra={"client_id": client_id, "request_id": request_id},
+                "Sales intelligence stored for company",
+                extra={"company_id": str(company_id), "request_id": request_id},
             )

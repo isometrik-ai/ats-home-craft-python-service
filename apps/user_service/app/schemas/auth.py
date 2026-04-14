@@ -5,7 +5,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
-from apps.user_service.app.schemas.common import Address, OrganizationBasicDetails
+from apps.user_service.app.schemas.common import (
+    OrganizationAddress,
+    OrganizationBasicDetails,
+)
 from apps.user_service.app.schemas.enums import (
     AuditingFrequency,
     ComplianceStandard,
@@ -342,7 +345,7 @@ class CompanyData(BaseModel):
     company_size: FirmSize | None = None
     description: str | None = None
     logo_url: str | None = None
-    address: Address | None = None
+    address: OrganizationAddress | None = None
     referral_source: str | None = None
     primary_practice_areas: list[PracticeArea] = Field(..., description="Primary practice areas")
     secondary_practice_areas: list[PracticeArea] | None = None

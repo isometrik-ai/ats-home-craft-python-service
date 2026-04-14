@@ -14,15 +14,40 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from apps.user_service.app.schemas.clients import (
+from apps.user_service.app.schemas.common import (
     AddressesUpdate,
     AddressInput,
+    EducationalHistoryUpdate,
     PhoneInput,
     PhonesUpdate,
     SocialPage,
     SocialPagesUpdate,
+    Website,
+    WorkHistoryUpdate,
 )
 from apps.user_service.app.schemas.enums import ClientStatus
+
+
+class ContactLeadAssociation(BaseModel):
+    """Optional lead creation/linking on contact create.
+
+    This creates a new lead (v2 `public.leads`) and associates it with the created contact,
+    and also with the linked/created company when present on the same request.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage_id: str = Field(..., description="Lead pipeline stage id (UUID).")
+    intake_stage: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional intake stage label.",
+    )
+    lead_score: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional lead score label/tier.",
+    )
 
 
 class ContactCompanyLink(BaseModel):
@@ -61,7 +86,7 @@ class CreateContactRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # core identity/person fields
-    email: str | None = Field(None, description="Contact email address (optional).")
+    email: str = Field(..., description="Contact email address (required).")
     portal_access: bool = Field(
         default=False,
         description="If true, provisions a portal user for this contact and sends an invite email.",
@@ -77,6 +102,11 @@ class CreateContactRequest(BaseModel):
     phones: list[PhoneInput] = Field(default_factory=list, max_length=20)
     tags: list[str] = Field(default_factory=list, max_length=50)
     social_pages: list[SocialPage] = Field(default_factory=list, max_length=20)
+    websites: list[Website] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Websites for the contact (stored in additional_data.websites).",
+    )
 
     custom_fields: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -85,6 +115,15 @@ class CreateContactRequest(BaseModel):
     additional_data: dict[str, Any] = Field(
         default_factory=dict,
         description="Free-form JSONB payload stored on the contact.",
+    )
+
+    # optional lead create + association
+    lead: ContactLeadAssociation | None = Field(
+        default=None,
+        description=(
+            "Optional lead creation. When provided, creates a lead and associates it with "
+            "this contact (and the linked company if provided)."
+        ),
     )
 
     # optional company link at create-time
@@ -112,6 +151,12 @@ class UpdateContactRequest(BaseModel):
     social_pages: SocialPagesUpdate | None = None
     custom_fields: list[dict[str, Any]] | None = None
     additional_data: dict[str, Any] | None = None
+    description: str | None = None
+
+    # person enrichment/profile fields (same storage columns as ContactDetailsResponse)
+    work_history: WorkHistoryUpdate | None = None
+    educational_history: EducationalHistoryUpdate | None = None
+    skills: list[str] | None = None
 
     # contact address delta
     addresses: AddressesUpdate | None = None

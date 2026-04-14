@@ -10,7 +10,10 @@ from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
-from apps.user_service.app.services.client_service import ClientService
+from apps.user_service.app.services.typesense_index_service import (
+    index_companies_background,
+    index_contacts_background,
+)
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -64,7 +67,7 @@ async def enrichment_webhook(
             status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
 
-    # Apply enrichment updates to the client; get (client_id, organization_id) from result.
+    # Apply enrichment updates to company or contact; get (entity_id, organization_id) from result.
     async with db_connection.transaction():
         if has_company_payload:
             client_ref = await enrichment_service.process_company_enrichment_webhook(
@@ -75,21 +78,28 @@ async def enrichment_webhook(
                 db_connection, body
             )
 
-    # Single generic background task: pass both payloads when present; service uses the right one.
-    background_tasks.add_task(
-        enrichment_service.fetch_and_store_sales_intelligence_for_request,
-        request_id=request_id,
-        enriched_company=body.get("enriched_company"),
-        enriched_profile=body.get("enriched_profile"),
-    )
-
-    # Schedule Typesense reindex using client ref from enrichment processing (no extra DB call).
-    if client_ref:
-        client_id, organization_id = client_ref
+    # Store sales intelligence only for company enrichment (best-effort).
+    if has_company_payload:
         background_tasks.add_task(
-            ClientService.index_clients_in_typesense_background,
-            [(client_id, organization_id)],
+            enrichment_service.fetch_and_store_sales_intelligence_for_request,
+            request_id=request_id,
+            enriched_company=body.get("enriched_company"),
+            enriched_profile=None,
         )
+
+    # Schedule Typesense reindex using entity ref from enrichment processing (no extra DB call).
+    if client_ref:
+        entity_id, organization_id = client_ref
+        if has_company_payload:
+            background_tasks.add_task(
+                index_companies_background,
+                [(entity_id, organization_id)],
+            )
+        else:
+            background_tasks.add_task(
+                index_contacts_background,
+                [(entity_id, organization_id)],
+            )
 
     return success_response(
         request=request,

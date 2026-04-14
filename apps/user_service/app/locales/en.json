@@ -199,7 +199,10 @@
       "contact_creation_failed": "Contact creation failed. Please try again.",
       "website_not_found": "Website not found.",
       "social_page_not_found": "Social page not found.",
-      "multiple_primary_contacts": "Only one primary contact can be set for a company."
+      "multiple_primary_contacts": "Only one primary contact can be set for a company.",
+      "linked_page_not_found": "Linked page not found",
+      "product_not_found": "Product not found",
+      "key_person_not_found": "Key person not found"
     },
     "success": {
       "company_created": "Company created successfully.",
@@ -219,7 +222,9 @@
       "email_already_exists": "A user with this email already exists in our system",
       "phone_not_found": "Phone number not found",
       "social_page_not_found": "Social page not found",
-      "only_one_primary_phone": "Only one phone number can be marked as primary"
+      "only_one_primary_phone": "Only one phone number can be marked as primary",
+      "work_history_item_not_found": "Work history item not found",
+      "educational_history_item_not_found": "Educational history item not found"
     },
     "success": {
       "contact_created": "Contact created successfully.",

@@ -38,6 +38,11 @@ from apps.user_service.app.schemas.companies import (
 )
 from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import ClientStatus, EntityType
+from apps.user_service.app.schemas.leads import (
+    CreateLeadCompany,
+    CreateLeadRequest,
+    LeadContactCreate,
+)
 from apps.user_service.app.search.company_typesense_schema import (
     COMPANY_EMAIL_SEARCH_PARAMS,
     COMPANY_PHONE_SEARCH_PARAMS,
@@ -49,6 +54,7 @@ from apps.user_service.app.services.client_enrichment_service import (
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.event_service import EventService
+from apps.user_service.app.services.lead_service import LeadService
 from apps.user_service.app.services.typesense_index_service import (
     index_companies_background,
     index_contacts_background,
@@ -373,7 +379,20 @@ class CompaniesService:
                 "industry_specific_terminologies": body.industry_specific_terminologies,
                 "description": body.description,
                 "custom_fields": jsonb_params["custom_fields"],
-                "additional_data": jsonb_params["additional_data"],
+                "additional_data": serialize_jsonb_param(
+                    "additional_data",
+                    {
+                        **(body.additional_data or {}),
+                        **(
+                            {"intake_stage": (body.lead.intake_stage or "").strip()}
+                            if body.lead is not None
+                            and body.lead.intake_stage is not None
+                            and (body.lead.intake_stage or "").strip()
+                            else {}
+                        ),
+                    },
+                    COMPANY_JSONB_COLUMNS,
+                ),
             },
             addresses=addresses_rows,
             contact_id=str(contact_id) if contact_id else None,
@@ -415,6 +434,32 @@ class CompaniesService:
             created_contact_row=created_contact_row,
             created_contact_password=created_contact_password,
         )
+
+        # Optional lead creation + association (company + optional contact).
+        if body.lead is not None:
+            lead_service = LeadService(
+                user_context=self.user_context,
+                db_connection=self.db_connection,
+            )
+            contacts_list = (
+                [LeadContactCreate(contact_id=str(created_contact_id))]
+                if created_contact_id is not None
+                else (
+                    [LeadContactCreate(contact_id=str(contact_id))]
+                    if contact_id is not None
+                    else None
+                )
+            )
+            _ = await lead_service.create_lead(
+                CreateLeadRequest(
+                    name=body.name.strip(),
+                    stage_id=body.lead.stage_id,
+                    lead_source=(body.lead.intake_stage or None),
+                    lead_score=(body.lead.lead_score or None),
+                    company=CreateLeadCompany(company_id=str(company_id)),
+                    contacts=contacts_list,
+                )
+            )
 
         return {
             "company_id": company_id,
@@ -565,10 +610,7 @@ class CompaniesService:
             user_id,
             isometrik_user_id,
             created_contact_password,
-        ) = await self._maybe_provision_portal_identity(
-            portal_access=bool(body.portal_access),
-            create_contact=create_contact,
-        )
+        ) = await self._provision_contact_identity(create_contact=create_contact)
 
         contact_data = {
             "user_id": user_id,
@@ -775,22 +817,22 @@ class CompaniesService:
             supabase_client=self.supabase_client,
         )
 
-    async def _maybe_provision_portal_identity(
+    async def _provision_contact_identity(
         self,
         *,
-        portal_access: bool,
         create_contact: CreateContactRequest,
     ) -> tuple[str | None, str | None, str | None, str | None]:
-        """Normalize email and provision identity only when portal access is enabled."""
+        """Normalize email and provision contact identity (auth + isometrik)."""
         email_norm = (create_contact.email or "").strip() or None
+        if not email_norm:
+            return None, None, None, None
         contacts_service = self._contacts_service()
         (
             user_id,
             isometrik_user_id,
             created_password,
-        ) = await contacts_service._provision_identity_if_needed(
+        ) = await contacts_service._provision_identity(
             email=email_norm,
-            portal_access=portal_access,
             first_name=create_contact.first_name,
             last_name=create_contact.last_name,
             prefix=create_contact.prefix,
@@ -846,10 +888,7 @@ class CompaniesService:
             user_id,
             isometrik_user_id,
             _,
-        ) = await self._maybe_provision_portal_identity(
-            portal_access=bool(create_contact.portal_access),
-            create_contact=create_contact,
-        )
+        ) = await self._provision_contact_identity(create_contact=create_contact)
 
         rows = await self.contacts_repo.create_contacts(
             [
@@ -1033,6 +1072,9 @@ class CompaniesService:
         if body.additional_data is not None:
             update_data["additional_data"] = body.additional_data
 
+        if body.sales_intelligence is not None:
+            update_data["sales_intelligence"] = body.sales_intelligence
+
         if body.billing_preferences is not None:
             existing = parse_json_field(current.get("billing_preferences")) or {}
             update_data["billing_preferences"] = {
@@ -1040,23 +1082,23 @@ class CompaniesService:
                 **body.billing_preferences.model_dump(exclude_none=True),
             }
 
-        if body.websites is not None:
-            await self._apply_jsonb_list_changes(
-                body.websites,
-                current=current,
-                payload=update_data,
-                field_name="websites",
-                not_found_message_key="companies.errors.website_not_found",
-            )
-
-        if body.social_pages is not None:
-            await self._apply_jsonb_list_changes(
-                body.social_pages,
-                current=current,
-                payload=update_data,
-                field_name="social_pages",
-                not_found_message_key="companies.errors.social_page_not_found",
-            )
+        jsonb_list_fields = (
+            ("websites", "companies.errors.website_not_found"),
+            ("social_pages", "companies.errors.social_page_not_found"),
+            ("linked_pages", "companies.errors.linked_page_not_found"),
+            ("products", "companies.errors.product_not_found"),
+            ("key_people", "companies.errors.key_person_not_found"),
+        )
+        for field_name, not_found_message_key in jsonb_list_fields:
+            value = getattr(body, field_name, None)
+            if value is not None:
+                await self._apply_jsonb_list_changes(
+                    value,
+                    current=current,
+                    payload=update_data,
+                    field_name=field_name,
+                    not_found_message_key=not_found_message_key,
+                )
 
         await self._merge_company_custom_fields_into_update_data(
             body=body,

@@ -44,6 +44,11 @@ from apps.user_service.app.schemas.contacts import (
     UpdateContactRequest,
 )
 from apps.user_service.app.schemas.enums import ClientStatus, EntityType, IsometrikRole
+from apps.user_service.app.schemas.leads import (
+    CreateLeadCompany,
+    CreateLeadRequest,
+    LeadContactCreate,
+)
 from apps.user_service.app.search.contact_typesense_schema import (
     CONTACT_EMAIL_SEARCH_PARAMS,
     CONTACT_PHONE_SEARCH_PARAMS,
@@ -54,6 +59,7 @@ from apps.user_service.app.services.client_enrichment_service import (
 )
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.event_service import EventService
+from apps.user_service.app.services.lead_service import LeadService
 from apps.user_service.app.services.typesense_index_service import (
     index_companies_background,
     index_contacts_background,
@@ -249,23 +255,19 @@ class ContactsService:
             EntityType.CONTACT,
         )
 
-    async def _provision_identity_if_needed(
+    async def _provision_identity(
         self,
         *,
-        email: str | None,
-        portal_access: bool,
+        email: str,
         first_name: str | None,
         last_name: str | None,
         prefix: str | None,
-    ) -> tuple[str | None, str | None, str | None]:
-        """Provision auth identity only when an email is provided.
+    ) -> tuple[str, str, str | None]:
+        """Provision (or reuse) auth identity for a contact.
 
         Returns:
-            ``(user_id, isometrik_user_id, password_if_created)`` when created or reused,
-            otherwise ``(None, None, None)``.
+            ``(user_id, isometrik_user_id, password_if_created)``.
         """
-        if not (portal_access and email):
-            return None, None, None
         return await self._provision_contact_auth_identity(
             email=email,
             first_name=first_name,
@@ -417,9 +419,8 @@ class ContactsService:
         )
 
         # Align with legacy behavior: prevent org-level duplicate emails when email is provided.
-        email_norm = (body.email or "").strip() or None
-        if email_norm:
-            await self._assert_contact_email_unique(organization_id=org_id, email=email_norm)
+        email_norm = (body.email or "").strip().lower()
+        await self._assert_contact_email_unique(organization_id=org_id, email=email_norm)
 
         # Custom fields: validate/normalize exactly as existing behavior.
         validated_custom_fields = await self._validate_custom_fields_for_create(body.custom_fields)
@@ -433,9 +434,8 @@ class ContactsService:
             )
         org_name = str(organization.get("name") or shared_settings.company_name or "")
 
-        user_id, isometrik_user_id, created_password = await self._provision_identity_if_needed(
+        user_id, isometrik_user_id, created_password = await self._provision_identity(
             email=email_norm,
-            portal_access=bool(body.portal_access),
             first_name=body.first_name,
             last_name=body.last_name,
             prefix=body.prefix,
@@ -446,6 +446,9 @@ class ContactsService:
             "social_pages": [
                 page.model_dump(mode="json", exclude_none=True) for page in body.social_pages
             ],
+            "websites": [
+                website.model_dump(mode="json", exclude_none=True) for website in body.websites
+            ],
         }
         list_payloads: dict[str, list[dict[str, Any]]] = {}
         for field_name, items in list_payload_inputs.items():
@@ -453,12 +456,22 @@ class ContactsService:
 
         phones_payload = list_payloads["phones"]
         social_pages_payload = list_payloads["social_pages"]
+        websites_payload = list_payloads["websites"]
+
+        # Persist intake_stage on the contact when provided (for downstream indexing/filters).
+        additional_data_payload = dict(body.additional_data or {})
+        if body.lead is not None and body.lead.intake_stage is not None:
+            intake_stage = (body.lead.intake_stage or "").strip()
+            if intake_stage:
+                additional_data_payload["intake_stage"] = intake_stage
+        if websites_payload:
+            additional_data_payload["websites"] = websites_payload
 
         # Prepare JSONB params once at the service layer
         jsonb_inputs: dict[str, Any] = {
             "phones": phones_payload,
             "custom_fields": validated_custom_fields,
-            "additional_data": body.additional_data,
+            "additional_data": additional_data_payload,
             "social_pages": social_pages_payload,
         }
         jsonb_params: dict[str, Any] = {}
@@ -508,6 +521,38 @@ class ContactsService:
             )
 
         await self._create_addresses_if_any(contact_id=contact_id, addresses=body.addresses)
+
+        # Optional lead creation + association (contact + optional company).
+        if body.lead is not None:
+            full_name = " ".join(
+                [
+                    part
+                    for part in [
+                        (body.first_name or "").strip(),
+                        (body.last_name or "").strip(),
+                    ]
+                    if part
+                ]
+            ).strip()
+            lead_name = full_name or (email_norm or "").strip()
+            lead_service = LeadService(
+                user_context=self.user_context,
+                db_connection=self.db_connection,
+            )
+            company_tuple = (
+                CreateLeadCompany(company_id=str(company_id)) if company_id is not None else None
+            )
+            contacts_list = [LeadContactCreate(contact_id=str(contact_id))] if contact_id else None
+            _ = await lead_service.create_lead(
+                CreateLeadRequest(
+                    name=lead_name,
+                    stage_id=body.lead.stage_id,
+                    lead_source=(body.lead.intake_stage or None),
+                    lead_score=(body.lead.lead_score or None),
+                    company=company_tuple,
+                    contacts=contacts_list,
+                )
+            )
 
         self._maybe_send_contact_creation_email(
             portal_access=bool(body.portal_access),
@@ -646,6 +691,7 @@ class ContactsService:
             ("date_of_birth", "date_of_birth"),
             ("profile_photo_url", "profile_photo_url"),
             ("tags", "tags"),
+            ("description", "description"),
         )
         for body_attr, column_name in scalar_fields:
             value = getattr(body, body_attr, None)
@@ -655,56 +701,10 @@ class ContactsService:
         if body.additional_data is not None:
             update_data["additional_data"] = body.additional_data
 
+        if body.skills is not None:
+            update_data["skills"] = body.skills
+
         return update_data
-
-    async def _apply_phones_delta_and_validate(
-        self,
-        *,
-        body: UpdateContactRequest,
-        current: dict[str, Any],
-        update_data: dict[str, Any],
-    ) -> None:
-        """Apply PhonesUpdate to `phones` table and validate that there is only one primary phone"""
-        if body.phones is None:
-            return
-
-        await self._apply_jsonb_list_changes(
-            body.phones,
-            current=current,
-            payload=update_data,
-            field_name="phones",
-            not_found_message_key="contacts.errors.phone_not_found",
-        )
-        phones_items = update_data.get("phones") or []
-        primary_phone_count = sum(
-            1
-            for phone_item in phones_items
-            if isinstance(phone_item, dict) and phone_item.get("is_primary") is True
-        )
-        if primary_phone_count > 1:
-            raise ValidationException(
-                message_key="contacts.errors.only_one_primary_phone",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
-    async def _apply_social_pages_delta(
-        self,
-        *,
-        body: UpdateContactRequest,
-        current: dict[str, Any],
-        update_data: dict[str, Any],
-    ) -> None:
-        """Apply SocialPagesUpdate to `social_pages` table."""
-        if body.social_pages is None:
-            return
-
-        await self._apply_jsonb_list_changes(
-            body.social_pages,
-            current=current,
-            payload=update_data,
-            field_name="social_pages",
-            not_found_message_key="contacts.errors.social_page_not_found",
-        )
 
     async def _merge_contact_custom_fields(
         self,
@@ -759,16 +759,34 @@ class ContactsService:
             )
 
         update_data = self._build_contact_scalar_update_data(body=body)
-        await self._apply_phones_delta_and_validate(
-            body=body,
-            current=current,
-            update_data=update_data,
+        jsonb_list_fields = (
+            ("phones", "contacts.errors.phone_not_found"),
+            ("social_pages", "contacts.errors.social_page_not_found"),
+            ("work_history", "contacts.errors.work_history_item_not_found"),
+            ("educational_history", "contacts.errors.educational_history_item_not_found"),
         )
-        await self._apply_social_pages_delta(
-            body=body,
-            current=current,
-            update_data=update_data,
-        )
+        for field_name, not_found_message_key in jsonb_list_fields:
+            value = getattr(body, field_name, None)
+            if value is not None:
+                await self._apply_jsonb_list_changes(
+                    value,
+                    current=current,
+                    payload=update_data,
+                    field_name=field_name,
+                    not_found_message_key=not_found_message_key,
+                )
+                if field_name == "phones":
+                    phones_items = update_data.get("phones") or []
+                    primary_phone_count = sum(
+                        1
+                        for phone_item in phones_items
+                        if isinstance(phone_item, dict) and phone_item.get("is_primary") is True
+                    )
+                    if primary_phone_count > 1:
+                        raise ValidationException(
+                            message_key="contacts.errors.only_one_primary_phone",
+                            custom_code=CustomStatusCode.VALIDATION_ERROR,
+                        )
         await self._merge_contact_custom_fields(
             body=body,
             current=current,

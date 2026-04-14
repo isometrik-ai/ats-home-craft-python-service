@@ -8,20 +8,22 @@ from datetime import date
 import pytest
 
 from apps.user_service.app.schemas.clients import (
+    CreateClientFromUserRequest,
+    CreateClientRequest,
+    LeadManagement,
+    LeadManagementUpdate,
+    UpdateClientRequest,
+)
+from apps.user_service.app.schemas.common import (
     Address,
     AddressesUpdate,
     AddressInput,
     AddressUpdateItem,
     BillingPreferencesUpdate,
-    CreateClientFromUserRequest,
-    CreateClientRequest,
-    LeadManagement,
-    LeadManagementUpdate,
     PhoneInput,
     SocialPageInput,
     SocialPagesUpdate,
     SocialPageUpdateItem,
-    UpdateClientRequest,
     Website,
     WebsiteInput,
     WebsitesUpdate,
