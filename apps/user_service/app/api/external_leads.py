@@ -35,7 +35,9 @@ from apps.user_service.app.schemas.leads import (
     LeadsListQueryParams,
     UpdateLeadRequest,
 )
-from apps.user_service.app.services.client_enrichment_service import ClientEnrichmentService
+from apps.user_service.app.services.client_enrichment_service import (
+    ClientEnrichmentService,
+)
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.external_leads_service import ExternalLeadsService
 from apps.user_service.app.services.lead_service import LeadService
@@ -70,7 +72,7 @@ class ExternalCreateLeadRequest(BaseModel):
     lead: CreateLeadRequest = Field(..., description="Lead create payload")
     contact: CreateContactRequestStandalone | None = Field(
         default=None,
-        description="Optional contact create payload (when provided, a new contact is created first).",
+        description="Optional contact create payload.",
     )
     lead_contact_label: str | None = Field(
         default=None,
@@ -282,7 +284,9 @@ async def external_create_lead(
         # Ensure CREATE audit logs can be linked back to this lead in the activity feed.
         request.state.audit_requested_id = created_id
         request.state.audit_description = (
-            f"Created lead: {lead_payload.name!r}" if lead_payload is not None else "Created lead"
+            f"Created lead: {lead_payload.name!r}"
+            if lead_payload is not None
+            else "Created lead"
             if created_contact_id is None
             else (
                 f"Created lead with new contact: {lead_payload.name!r}"
@@ -350,9 +354,9 @@ async def external_create_lead(
                 entity_table=item.get("entity_table") or "clients",
             )
 
-    response_data: dict[str, Any] = {
-        "id": str(created.get("id"))
-    } if isinstance(created, dict) else {}
+    response_data: dict[str, Any] = (
+        {"id": str(created.get("id"))} if isinstance(created, dict) else {}
+    )
 
     if created_contact_id is not None:
         response_data["contact_id"] = created_contact_id
