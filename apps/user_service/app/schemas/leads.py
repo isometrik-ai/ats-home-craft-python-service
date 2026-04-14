@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from apps.user_service.app.schemas.clients import Phone
+from apps.user_service.app.schemas.common import Phone
 from apps.user_service.app.schemas.enums import DealType, LeadsListMode, Priority
 from apps.user_service.app.schemas.lead_stages import UNSET, Unset
 from libs.shared_utils.http_exceptions import ValidationException

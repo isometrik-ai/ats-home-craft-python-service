@@ -351,6 +351,30 @@ class CompaniesRepository(BaseRepository):
         )
         return dict(fetched_row) if fetched_row else None
 
+    async def get_company_for_update_by_enrichment_request_id(
+        self,
+        *,
+        enrichment_request_id: str,
+    ) -> dict | None:
+        """Load a company row by enrichment_request_id with ``FOR UPDATE``.
+
+        Used by the enrichment webhook handler to apply updates idempotently.
+        """
+        if not enrichment_request_id:
+            return None
+        fetched_row = await self.db_connection.fetchrow(
+            """
+            SELECT *
+            FROM companies
+            WHERE enrichment_request_id = $1
+              AND status != $2
+            FOR UPDATE
+            """,
+            enrichment_request_id,
+            ClientStatus.DELETED.value,
+        )
+        return dict(fetched_row) if fetched_row else None
+
     async def update_company(
         self,
         *,

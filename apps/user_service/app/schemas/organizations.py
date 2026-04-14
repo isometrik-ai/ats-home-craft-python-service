@@ -19,7 +19,7 @@ from apps.user_service.app.schemas.auth import (
     TeamSetup,
     User,
 )
-from apps.user_service.app.schemas.common import Address, Subscription
+from apps.user_service.app.schemas.common import OrganizationAddress, Subscription
 from apps.user_service.app.schemas.enums import (
     DeleteRequestStatus,
     OrganizationStatus,
@@ -63,7 +63,7 @@ class OrganizationInfo(BaseModel):
         None, description="ISO timestamp when organization was last updated"
     )
     member_count: int = Field(default=0, description="Number of active members in the organization")
-    address: Address | None = Field(None, description="Organization's address")
+    address: OrganizationAddress | None = Field(None, description="Organization's address")
     primary_practice_areas: list[PracticeArea] | None = Field(
         None, description="Organization's primary practice areas"
     )
@@ -390,7 +390,7 @@ class OrganizationUpdate(BaseModel):
         max_length=100,
         description="How the organization first heard about the platform",
     )
-    address: Address | None = Field(None, description="Organization's address")
+    address: OrganizationAddress | None = Field(None, description="Organization's address")
     primary_practice_areas: list[PracticeArea] | None = Field(
         None, description="Organization's primary practice areas"
     )

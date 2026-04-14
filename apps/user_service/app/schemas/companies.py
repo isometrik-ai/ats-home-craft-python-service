@@ -12,11 +12,14 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from apps.user_service.app.schemas.clients import (
+from apps.user_service.app.schemas.common import (
     AddressesUpdate,
     AddressInput,
     BillingPreferences,
     BillingPreferencesUpdate,
+    KeyPeopleUpdate,
+    LinkedPagesUpdate,
+    ProductsUpdate,
     SocialPage,
     SocialPagesUpdate,
     Website,
@@ -24,6 +27,28 @@ from apps.user_service.app.schemas.clients import (
 )
 from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import ClientStatus
+
+
+class CompanyLeadAssociation(BaseModel):
+    """Optional lead creation/linking on company create.
+
+    Creates a new lead (v2 `public.leads`) and associates it with the created company,
+    and also with the linked/created contact when present on the same request.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage_id: str = Field(..., description="Lead pipeline stage id (UUID).")
+    intake_stage: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional intake stage label.",
+    )
+    lead_score: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional lead score label/tier.",
+    )
 
 
 class CompanyContactLink(BaseModel):
@@ -84,6 +109,15 @@ class CreateCompanyRequest(BaseModel):
 
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     additional_data: dict[str, Any] = Field(default_factory=dict)
+
+    # optional lead create + association
+    lead: CompanyLeadAssociation | None = Field(
+        default=None,
+        description=(
+            "Optional lead creation. When provided, creates a lead and associates it with "
+            "this company (and the linked contact if provided)."
+        ),
+    )
 
     # New, developer-friendly association input (one contact on create).
     contact: CompanyContactLink | None = None
@@ -234,6 +268,11 @@ class UpdateCompanyRequest(BaseModel):
 
     custom_fields: list[dict[str, Any]] | None = None
     additional_data: dict[str, Any] | None = None
+    sales_intelligence: dict[str, Any] | None = None
+
+    linked_pages: LinkedPagesUpdate | None = None
+    products: ProductsUpdate | None = None
+    key_people: KeyPeopleUpdate | None = None
 
     contacts_update: CompanyContactsUpdate | None = None
 
