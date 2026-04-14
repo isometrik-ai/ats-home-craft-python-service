@@ -12,6 +12,8 @@ The decoded ``projectId`` is mapped to our internal ``organization_id`` and all
 reads are scoped to that organization.
 """
 
+from typing import Any
+
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
@@ -19,33 +21,47 @@ from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
-from apps.user_service.app.dependencies.db import db_conn, db_uow
+from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.external_auth import get_organization_context
 from apps.user_service.app.dependencies.supabase import supabase_service
-from apps.user_service.app.schemas.enums import ClientStatus, ClientType
-from apps.user_service.app.schemas.external_clients import (
-    ExternalCompanyDetailsResponse,
-    ExternalCompanyListItem,
-    ExternalContactDetailsResponse,
-    ExternalContactListItem,
-    ExternalCreateCompanyRequest,
-    ExternalCreateCompanyResult,
-    ExternalCreateContactRequest,
-    ExternalCreateContactResult,
-    ExternalUpdateCompanyRequest,
-    ExternalUpdateContactRequest,
+from apps.user_service.app.schemas.companies import (
+    CompanyDetailsResponse,
+    CompanySummaryResponse,
+    CreateCompanyRequest,
+    UpdateCompanyRequest,
 )
-from apps.user_service.app.services.client_service import (
+from apps.user_service.app.schemas.contacts import (
+    ContactDetailsResponse,
+    ContactSummaryResponse,
+    CreateContactRequest,
+    UpdateContactRequest,
+)
+from apps.user_service.app.schemas.enums import (
+    ClientEventType,
+    ClientStatus,
+    KafkaTopics,
+)
+from apps.user_service.app.schemas.external_clients import (
+    ExternalCreateCompanyResult,
+    ExternalCreateContactResult,
+)
+from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
-    ClientService,
+)
+from apps.user_service.app.services.companies_service import CompaniesService
+from apps.user_service.app.services.contacts_service import ContactsService
+from apps.user_service.app.services.event_service import EventService
+from apps.user_service.app.services.typesense_index_service import (
+    delete_company_background,
+    delete_contact_background,
+    index_companies_background,
+    index_contacts_background,
 )
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     handle_api_exceptions,
 )
-from libs.shared_utils.http_exceptions import ConflictException
 from libs.shared_utils.response_factory import (
-    error_response,
     list_response,
     success_response,
 )
@@ -55,36 +71,16 @@ from libs.shared_utils.status_codes import CustomStatusCode
 # to avoid collisions with `/clients/{client_id}` routes.
 router = APIRouter(prefix="/integrations/clients", tags=["Clients (External)"])
 
-
-def _resolve_created_ids(records: list[dict]) -> tuple[str | None, str | None]:
-    """Return (company_id, contact_id) from created client records."""
-    company_id: str | None = None
-    contact_id: str | None = None
-    for record in records or []:
-        if record.get("client_type") == ClientType.COMPANY.value:
-            company_id = str(record.get("id")) if record.get("id") else company_id
-        elif record.get("client_type") == ClientType.PERSON.value:
-            contact_id = str(record.get("id")) if record.get("id") else contact_id
-    # In rare cases, a create may only create one row.
-    return company_id, contact_id
+CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
 
-def _build_filter_params(
-    *,
-    search: str | None,
-    status: ClientStatus | None,
-    page: int,
-    page_size: int,
-    client_type: ClientType,
-) -> dict:
-    """Build filter parameters for client list queries."""
-    return {
-        "search": search,
-        "client_type": client_type.value,
-        "status": status.value if status else None,
-        "page": page,
-        "page_size": page_size,
-    }
+def _external_user_context(*, organization_id: str, actor_email: str | None) -> UserContext:
+    """External user context."""
+    return UserContext(
+        user_id="external_integration",
+        email=actor_email or "external_integration@system.local",
+        organization_id=organization_id,
+    )
 
 
 @handle_api_exceptions("external list companies")
@@ -118,53 +114,33 @@ async def external_list_companies(
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
 ):
     """External list companies endpoint (Isometrik credential auth)."""
-    service = ClientService(db_connection=db_connection)
-    filter_params = _build_filter_params(
+    service = CompaniesService(
+        db_connection=db_connection,
+        user_context=_external_user_context(
+            organization_id=organization_id,
+            actor_email=getattr(request.state, "external_actor_email", None),
+        ),
+    )
+    result = await service.list_companies(
         search=search,
-        status=status,
+        status=status.value if status else None,
         page=page,
         page_size=page_size,
-        client_type=ClientType.COMPANY,
     )
-    result = await service.get_clients_list(
-        organization_id=organization_id,
-        filter_params=filter_params,
-    )
-
-    clients = result["clients"]
-    total = result["total"]
     items = [
-        ExternalCompanyListItem(
-            id=str(item.get("id")),
-            company_name=item.get("name") or "",
-            status=item.get("status"),
-            industry=item.get("industry"),
-            tags=item.get("tags") or [],
-            image_url=item.get("image_url"),
-            created_at=item.get("created_at"),
-            updated_at=item.get("updated_at"),
-            primary_contact=(  # best-effort
-                {
-                    "first_name": (item.get("primary_contact") or {}).get("first_name"),
-                    "last_name": (item.get("primary_contact") or {}).get("last_name"),
-                    "title": (item.get("primary_contact") or {}).get("title"),
-                    "email": (item.get("primary_contact") or {}).get("email"),
-                    "phones": (item.get("primary_contact") or {}).get("phones") or [],
-                }
-                if item.get("primary_contact") is not None
-                else None
-            ),
-        ).model_dump(exclude_none=True, mode="json")
-        for item in (clients or [])
+        CompanySummaryResponse.model_validate(summary_row).model_dump(
+            exclude_none=True, mode="json"
+        )
+        for summary_row in (result.get("items") or [])
     ]
     return list_response(
         request=request,
         items=items,
-        total=total or 0,
+        total=int(result.get("total") or 0),
         page=page,
         page_size=page_size,
         message_key="clients.success.clients_retrieved",
-        custom_code=CustomStatusCode.SUCCESS if clients else CustomStatusCode.NO_CONTENT,
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
         status_code=http_status.HTTP_200_OK,
     )
 
@@ -200,51 +176,33 @@ async def external_list_contacts(
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
 ):
     """External list contacts endpoint (Isometrik credential auth)."""
-    service = ClientService(db_connection=db_connection)
-    filter_params = _build_filter_params(
+    service = ContactsService(
+        db_connection=db_connection,
+        user_context=_external_user_context(
+            organization_id=organization_id,
+            actor_email=getattr(request.state, "external_actor_email", None),
+        ),
+    )
+    result = await service.list_contacts(
         search=search,
-        status=status,
+        status=status.value if status else None,
         page=page,
         page_size=page_size,
-        client_type=ClientType.PERSON,
     )
-    result = await service.get_clients_list(
-        organization_id=organization_id,
-        filter_params=filter_params,
-    )
-    clients = result["clients"]
-    total = result["total"]
-    items = []
-    for item in clients or []:
-        primary = item.get("primary_contact") or {}
-        phones = primary.get("phones") or []
-        items.append(
-            ExternalContactListItem(
-                id=str(item.get("id")),
-                full_name=item.get("name") or "",
-                status=item.get("status"),
-                company_id=item.get("company_id"),
-                company_name=item.get("company_name"),
-                email=primary.get("email"),
-                phones=phones,
-                title=primary.get("title"),
-                tags=item.get("tags") or [],
-                image_url=item.get("image_url"),
-                created_at=item.get("created_at"),
-                updated_at=item.get("updated_at"),
-                is_primary_contact=bool(primary.get("is_primary_contact"))
-                if "is_primary_contact" in primary
-                else None,
-            ).model_dump(exclude_none=True, mode="json")
+    items = [
+        ContactSummaryResponse.model_validate(summary_row).model_dump(
+            exclude_none=True, mode="json"
         )
+        for summary_row in (result.get("items") or [])
+    ]
     return list_response(
         request=request,
         items=items,
-        total=total or 0,
+        total=int(result.get("total") or 0),
         page=page,
         page_size=page_size,
         message_key="clients.success.clients_retrieved",
-        custom_code=CustomStatusCode.SUCCESS if clients else CustomStatusCode.NO_CONTENT,
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
         status_code=http_status.HTTP_200_OK,
     )
 
@@ -282,39 +240,50 @@ async def external_create_company(
     db_connection: asyncpg.Connection = Depends(db_conn),
     sb_client: AsyncClient = Depends(supabase_service),
     organization_id: str = Depends(get_organization_context),
-    body: ExternalCreateCompanyRequest = Body(...),
+    body: CreateCompanyRequest = Body(...),
 ):
     """External create company endpoint (Isometrik credential auth)."""
-    service_body = body.to_create_client_request()
     actor_email = request.state.external_actor_email
-    user_context = UserContext(
-        user_id="external_integration",
-        email="external_integration@system.local",
-        organization_id=organization_id,
-    )
+    user_context = _external_user_context(organization_id=organization_id, actor_email=actor_email)
+    created_events: list[tuple[dict, str]] = []
+    result: dict | None = None
     async with db_connection.transaction():
-        service = ClientService(
-            user_context=user_context,
+        service = CompaniesService(
             db_connection=db_connection,
+            user_context=user_context,
             supabase_client=sb_client,
         )
-        try:
-            result = await service.create_client(request_data=service_body)
-        except ConflictException as exc:
-            existing_client_id = exc.params.get("client_id") if exc.params else None
-            if exc.message_key == "clients.errors.email_already_exists" and existing_client_id:
-                return error_response(
-                    request=request,
-                    message_key=exc.message_key,
-                    status_code=exc.status_code,
-                    custom_code=exc.custom_code,
-                    params=exc.params,
-                    errors=[{"company_id": str(existing_client_id)}],
-                    headers=exc.headers if hasattr(exc, "headers") else None,
+        event_service = EventService(db_connection=db_connection)
+        result = await service.create_company(body)
+        company_id = str(result["company_id"])
+        created_entities = result.get("created_entities") or []
+        contact_id = next(
+            (
+                str(e.get("entity_id"))
+                for e in created_entities
+                if (
+                    e.get("entity_table") == "contacts"
+                    and e.get("action") == "create_contact"
+                    and e.get("entity_id")
                 )
-            raise
-        company_id, contact_id = _resolve_created_ids(result.records or [])
-        lead_id = result.lead_id
+            ),
+            None,
+        )
+        lead_id = None
+        for entity in created_entities:
+            entity_id = entity.get("entity_id")
+            if not entity_id:
+                continue
+            lifecycle_event = await event_service.create_lifecycle_event(
+                event_type=ClientEventType.CREATED.value,
+                aggregate_id=str(entity_id),
+                organization_id=user_context.organization_id,
+                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+                payload={"module": "companies", "action": entity.get("action") or "create"},
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            if lifecycle_event is not None:
+                created_events.append((lifecycle_event, str(entity_id)))
 
     request.state.audit_table = "clients"
     request.state.audit_requested_id = str(company_id) if company_id else ""
@@ -329,24 +298,43 @@ async def external_create_company(
         "company_id": str(company_id) if company_id else None,
         "contact_id": str(contact_id) if contact_id else None,
         "lead_id": lead_id,
-        "records": result.records or [],
+        "result": result or {},
     }
 
-    # Enrichment (best-effort) after commit
-    if result.enrichment_items:
-        enrichment_service = ClientEnrichmentService.from_settings()
+    for lifecycle_event, event_publish_key in created_events:
         background_tasks.add_task(
-            enrichment_service.run_bulk_client_enrichment,
-            result.enrichment_items,
-            service_body.model_dump(mode="json"),
+            EventService.publish_event_background,
+            event=lifecycle_event,
+            key=event_publish_key,
+            topics=CLIENT_KAFKA_TOPICS,
         )
 
     # Typesense indexing (best-effort)
-    if result.records:
-        client_refs = [(str(r["id"]), str(r["organization_id"])) for r in result.records]
+    background_tasks.add_task(
+        index_companies_background,
+        [(company_id, organization_id)],
+    )
+    for entity in created_entities:
+        if (
+            entity.get("entity_table") == "contacts"
+            and entity.get("action") == "create_contact"
+            and entity.get("entity_id")
+        ):
+            background_tasks.add_task(
+                index_contacts_background,
+                [(str(entity["entity_id"]), organization_id)],
+            )
+
+    # Enrichment (best-effort) after commit
+    enrichment_service = ClientEnrichmentService.from_settings()
+    for item in (result or {}).get("enrichment_targets") or []:
         background_tasks.add_task(
-            ClientService.index_clients_in_typesense_background,
-            client_refs,
+            enrichment_service.run_client_enrichment,
+            client_id=item["client_id"],
+            organization_id=item["organization_id"],
+            client_type=item["client_type"],
+            payload_data=item.get("payload_data") or {},
+            entity_table=item.get("entity_table") or "clients",
         )
 
     return success_response(
@@ -356,7 +344,7 @@ async def external_create_company(
         status_code=http_status.HTTP_201_CREATED,
         data=ExternalCreateCompanyResult(
             company_id=str(company_id),
-            contact_id=str(contact_id),
+            contact_id=str(contact_id) if contact_id else None,
             lead_id=lead_id,
         ).model_dump(exclude_none=True, mode="json"),
     )
@@ -395,41 +383,38 @@ async def external_create_contact(
     db_connection: asyncpg.Connection = Depends(db_conn),
     sb_client: AsyncClient = Depends(supabase_service),
     organization_id: str = Depends(get_organization_context),
-    body: ExternalCreateContactRequest = Body(...),
+    body: CreateContactRequest = Body(...),
 ):
     """External create contact endpoint (Isometrik credential auth)."""
-    service_body = body.to_create_client_request()
     actor_email = request.state.external_actor_email
-    user_context = UserContext(
-        user_id="external_integration",
-        email="external_integration@system.local",
-        organization_id=organization_id,
-    )
+    user_context = _external_user_context(organization_id=organization_id, actor_email=actor_email)
+    created_events: list[tuple[dict, str]] = []
+    result: dict | None = None
     async with db_connection.transaction():
-        service = ClientService(
-            user_context=user_context,
+        service = ContactsService(
             db_connection=db_connection,
+            user_context=user_context,
             supabase_client=sb_client,
         )
-        try:
-            result = await service.create_client(request_data=service_body)
-        except ConflictException as exc:
-            existing_client_id = exc.params.get("client_id") if exc.params else None
-            if exc.message_key == "clients.errors.email_already_exists" and existing_client_id:
-                existing_company_id = exc.params.get("company_id") if exc.params else None
-                return success_response(
-                    request=request,
-                    message_key="clients.success.client_created",
-                    custom_code=CustomStatusCode.CREATED,
-                    status_code=http_status.HTTP_201_CREATED,
-                    data=ExternalCreateContactResult(
-                        contact_id=str(existing_client_id),
-                        company_id=str(existing_company_id) if existing_company_id else None,
-                    ).model_dump(exclude_none=True, mode="json"),
-                )
-            raise
-        company_id, contact_id = _resolve_created_ids(result.records or [])
-        lead_id = result.lead_id
+        event_service = EventService(db_connection=db_connection)
+        result = await service.create_contact(body)
+        contact_id = str(result["contact_id"])
+        company_id = str(result["company_id"]) if result.get("company_id") else None
+        lead_id = None
+        for entity in result.get("created_entities") or []:
+            entity_id = entity.get("entity_id")
+            if not entity_id:
+                continue
+            lifecycle_event = await event_service.create_lifecycle_event(
+                event_type=ClientEventType.CREATED.value,
+                aggregate_id=str(entity_id),
+                organization_id=user_context.organization_id,
+                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+                payload={"module": "contacts", "action": entity.get("action") or "create"},
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            if lifecycle_event is not None:
+                created_events.append((lifecycle_event, str(entity_id)))
 
     request.state.audit_table = "clients"
     request.state.audit_requested_id = str(contact_id) if contact_id else ""
@@ -444,22 +429,40 @@ async def external_create_contact(
         "company_id": str(company_id) if company_id else None,
         "contact_id": str(contact_id) if contact_id else None,
         "lead_id": lead_id,
-        "records": result.records or [],
+        "result": result or {},
     }
 
-    if result.enrichment_items:
-        enrichment_service = ClientEnrichmentService.from_settings()
+    for lifecycle_event, event_publish_key in created_events:
         background_tasks.add_task(
-            enrichment_service.run_bulk_client_enrichment,
-            result.enrichment_items,
-            service_body.model_dump(mode="json"),
+            EventService.publish_event_background,
+            event=lifecycle_event,
+            key=event_publish_key,
+            topics=CLIENT_KAFKA_TOPICS,
         )
 
-    if result.records:
-        client_refs = [(str(r["id"]), str(r["organization_id"])) for r in result.records]
+    background_tasks.add_task(
+        index_contacts_background,
+        [(contact_id, organization_id)],
+    )
+    for entity in (result or {}).get("created_entities") or []:
+        entity_identifier = entity.get("entity_id")
+        if not entity_identifier:
+            continue
+        if entity.get("entity_table") == "companies" and entity.get("action") == "create_company":
+            background_tasks.add_task(
+                index_companies_background,
+                [(str(entity_identifier), organization_id)],
+            )
+
+    enrichment_service = ClientEnrichmentService.from_settings()
+    for item in (result or {}).get("enrichment_targets") or []:
         background_tasks.add_task(
-            ClientService.index_clients_in_typesense_background,
-            client_refs,
+            enrichment_service.run_client_enrichment,
+            client_id=item["client_id"],
+            organization_id=item["organization_id"],
+            client_type=item["client_type"],
+            payload_data=item.get("payload_data") or {},
+            entity_table=item.get("entity_table") or "clients",
         )
 
     return success_response(
@@ -499,58 +502,27 @@ async def external_create_contact(
 async def external_get_company_details(
     request: Request,
     client_id: str = Path(..., description="Client ID"),
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     organization_id: str = Depends(get_organization_context),
 ):
     """External get company details endpoint (Isometrik credential auth)."""
-    service = ClientService(db_connection=db_connection)
-    details = await service.get_client_details(client_id, organization_id)
-    if details.client_type != ClientType.COMPANY:
-        # Keep same semantics as not found for wrong type.
-        return success_response(
-            request=request,
-            message_key="clients.errors.not_found",
-            custom_code=CustomStatusCode.NOT_FOUND,
-            status_code=http_status.HTTP_404_NOT_FOUND,
-        )
+    service = CompaniesService(
+        db_connection=db_connection,
+        user_context=_external_user_context(
+            organization_id=organization_id,
+            actor_email=getattr(request.state, "external_actor_email", None),
+        ),
+    )
+    details = await service.get_company_details(company_id=client_id)
     return success_response(
         request=request,
         message_key="clients.success.client_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
-        data=ExternalCompanyDetailsResponse(
-            id=str(details.id),
-            organization_id=str(details.organization_id),
-            client_type=details.client_type,
-            company_name=details.name,
-            status=details.status,
-            portal_access=details.portal_access,
-            industry=details.industry,
-            image_url=details.image_url,
-            tags=details.tags or [],
-            primary_contact=details.primary_contact,
-            company_contacts=details.company_contacts or [],
-            websites=details.websites or [],
-            billing_preferences=details.billing_preferences,
-            custom_fields=details.custom_fields or [],
-            addresses=details.addresses or [],
-            leads=details.leads or [],
-            additional_data=details.additional_data or {},
-            sales_intelligence=details.sales_intelligence or {},
-            social_pages=details.social_pages or [],
-            target_market_segments=details.target_market_segments or [],
-            current_tech_stack=details.current_tech_stack or [],
-            description=details.description,
-            preferred_communication_channels=details.preferred_communication_channels or [],
-            industry_specific_terminologies=details.industry_specific_terminologies or [],
-            linked_pages=details.linked_pages or [],
-            products=details.products or [],
-            key_people=details.key_people or [],
-            enrichment_done=bool(details.enrichment_done),
-            last_enriched_at=details.last_enriched_at,
-            created_at=details.created_at,
-            updated_at=details.updated_at,
-        ).model_dump(exclude_none=True, mode="json"),
+        data=CompanyDetailsResponse.model_validate(details).model_dump(
+            exclude_none=True,
+            mode="json",
+        ),
     )
 
 
@@ -578,52 +550,27 @@ async def external_get_company_details(
 async def external_get_contact_details(
     request: Request,
     client_id: str = Path(..., description="Client ID"),
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     organization_id: str = Depends(get_organization_context),
 ):
     """External get contact details endpoint (Isometrik credential auth)."""
-    service = ClientService(db_connection=db_connection)
-    details = await service.get_client_details(client_id, organization_id)
-    if details.client_type != ClientType.PERSON:
-        return success_response(
-            request=request,
-            message_key="clients.errors.not_found",
-            custom_code=CustomStatusCode.NOT_FOUND,
-            status_code=http_status.HTTP_404_NOT_FOUND,
-        )
+    service = ContactsService(
+        db_connection=db_connection,
+        user_context=_external_user_context(
+            organization_id=organization_id,
+            actor_email=getattr(request.state, "external_actor_email", None),
+        ),
+    )
+    details = await service.get_contact_details(contact_id=client_id)
     return success_response(
         request=request,
         message_key="clients.success.client_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
-        data=ExternalContactDetailsResponse(
-            id=str(details.id),
-            organization_id=str(details.organization_id),
-            client_type=details.client_type,
-            full_name=details.name,
-            status=details.status,
-            portal_access=details.portal_access,
-            company_id=details.company_id,
-            company_name=details.company_name,
-            image_url=details.image_url,
-            tags=details.tags or [],
-            primary_contact=details.primary_contact,
-            websites=details.websites or [],
-            billing_preferences=details.billing_preferences,
-            custom_fields=details.custom_fields or [],
-            addresses=details.addresses or [],
-            leads=details.leads or [],
-            additional_data=details.additional_data or {},
-            sales_intelligence=details.sales_intelligence or {},
-            social_pages=details.social_pages or [],
-            work_history=details.work_history or [],
-            educational_history=details.educational_history or [],
-            skills=details.skills or [],
-            enrichment_done=bool(details.enrichment_done),
-            last_enriched_at=details.last_enriched_at,
-            created_at=details.created_at,
-            updated_at=details.updated_at,
-        ).model_dump(exclude_none=True, mode="json"),
+        data=ContactDetailsResponse.model_validate(details).model_dump(
+            exclude_none=True,
+            mode="json",
+        ),
     )
 
 
@@ -662,16 +609,72 @@ async def external_update_company(
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
     organization_id: str = Depends(get_organization_context),
-    body: ExternalUpdateCompanyRequest = Body(...),
+    body: UpdateCompanyRequest = Body(...),
 ):
     """External update company endpoint (Isometrik credential auth)."""
     actor_email = request.state.external_actor_email
 
     update_result: dict | None = None
-    internal_body = body.to_update_client_request()
+    user_context = _external_user_context(organization_id=organization_id, actor_email=actor_email)
+    update_event: dict | None = None
+    related_lifecycle_events: list[tuple[dict[str, Any], str]] = []
     async with db_connection.transaction():
-        service = ClientService(db_connection=db_connection)
-        update_result = await service.update_client(client_id, organization_id, internal_body)
+        service = CompaniesService(db_connection=db_connection, user_context=user_context)
+        event_service = EventService(db_connection=db_connection)
+        update_result = await service.update_company(company_id=client_id, body=body)
+        changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
+        update_event = await event_service.create_lifecycle_event(
+            event_type=ClientEventType.UPDATED.value,
+            aggregate_id=client_id,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={
+                "module": "companies",
+                "action": "update",
+                "changed_fields": changed_fields,
+            },
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+
+        contacts_delta = (
+            (update_result.get("contacts_delta") or {}) if isinstance(update_result, dict) else {}
+        )
+        raw_affected = contacts_delta.get("affected_contact_ids") or []
+        affected_contact_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
+        created_cid = contacts_delta.get("created_contact_id")
+        created_cid_s = str(created_cid) if created_cid else None
+        if affected_contact_ids:
+            actor = str(user_context.user_id) if user_context.user_id else None
+            org_id = user_context.organization_id
+            contact_event_items = [
+                {
+                    "event_type": (
+                        ClientEventType.CREATED.value
+                        if created_cid_s is not None and cid_s == created_cid_s
+                        else ClientEventType.UPDATED.value
+                    ),
+                    "aggregate_id": cid_s,
+                    "organization_id": org_id,
+                    "actor_user_id": actor,
+                    "payload": {
+                        "module": "companies",
+                        "action": (
+                            "contact_created_with_company"
+                            if created_cid_s is not None and cid_s == created_cid_s
+                            else "contact_association_changed"
+                        ),
+                        "company_id": client_id,
+                    },
+                }
+                for cid_s in affected_contact_ids
+            ]
+            contact_events = await event_service.create_lifecycle_events(
+                items=contact_event_items,
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            related_lifecycle_events.extend(
+                (event_payload, event_payload["aggregate_id"]) for event_payload in contact_events
+            )
     request.state.audit_table = "clients"
     request.state.audit_requested_id = client_id
     request.state.audit_description = f"Updated external company client: {client_id}"
@@ -685,41 +688,17 @@ async def external_update_company(
         request.state.raw_audit_old_data = update_result.get("old_data")
         request.state.raw_audit_new_data = update_result.get("new_data")
 
-    # Best-effort Typesense indexing after update, offloaded to background task.
-    created_company_id = update_result.get("created_company_id") if update_result else None
-    client_refs = [(client_id, organization_id)]
-    if created_company_id:
-        client_refs.append((created_company_id, organization_id))
-    background_tasks.add_task(
-        ClientService.index_clients_in_typesense_background,
-        client_refs,
+    CompaniesService.schedule_company_update_background_tasks(
+        background_tasks=background_tasks,
+        company_id=client_id,
+        organization_id=organization_id,
+        body=body,
+        update_result=update_result if isinstance(update_result, dict) else None,
+        update_event=update_event,
+        event_key=client_id,
+        event_topics=CLIENT_KAFKA_TOPICS,
+        related_lifecycle_events=related_lifecycle_events,
     )
-
-    # Trigger enrichment only when enrichment-relevant inputs have changed.
-    enrichment_input_fields = (
-        "company_name",
-        "industry",
-        "websites",
-        "social_pages",
-        "addresses",
-        "primary_contact",
-        "profile_photo_url",
-    )
-    enrichment_inputs_changed = any(
-        getattr(internal_body, field_name) is not None for field_name in enrichment_input_fields
-    )
-    if enrichment_inputs_changed:
-        background_tasks.add_task(
-            ClientService.trigger_enrichment_background,
-            client_id,
-            organization_id,
-        )
-    if created_company_id:
-        background_tasks.add_task(
-            ClientService.trigger_enrichment_background,
-            created_company_id,
-            organization_id,
-        )
 
     return success_response(
         request=request,
@@ -764,16 +743,68 @@ async def external_update_contact(
     client_id: str = Path(..., description="Client ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
     organization_id: str = Depends(get_organization_context),
-    body: ExternalUpdateContactRequest = Body(...),
+    body: UpdateContactRequest = Body(...),
 ):
     """External update contact endpoint (Isometrik credential auth)."""
     actor_email = request.state.external_actor_email
 
     update_result: dict | None = None
-    internal_body = body.to_update_client_request()
+    user_context = _external_user_context(organization_id=organization_id, actor_email=actor_email)
+    update_event: dict | None = None
+    related_lifecycle_events: list[tuple[dict[str, Any], str]] = []
     async with db_connection.transaction():
-        service = ClientService(db_connection=db_connection)
-        update_result = await service.update_client(client_id, organization_id, internal_body)
+        service = ContactsService(db_connection=db_connection, user_context=user_context)
+        event_service = EventService(db_connection=db_connection)
+        update_result = await service.update_contact(contact_id=client_id, body=body)
+        changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
+        update_event = await event_service.create_lifecycle_event(
+            event_type=ClientEventType.UPDATED.value,
+            aggregate_id=client_id,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={"module": "contacts", "action": "update", "changed_fields": changed_fields},
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+
+        companies_delta = (
+            (update_result.get("companies_delta") or {}) if isinstance(update_result, dict) else {}
+        )
+        raw_affected = companies_delta.get("affected_company_ids") or []
+        affected_company_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
+        created_cid = companies_delta.get("created_company_id")
+        created_cid_s = str(created_cid) if created_cid else None
+        if affected_company_ids:
+            actor = str(user_context.user_id) if user_context.user_id else None
+            org_id = user_context.organization_id
+            company_event_items = [
+                {
+                    "event_type": (
+                        ClientEventType.CREATED.value
+                        if created_cid_s is not None and cid_s == created_cid_s
+                        else ClientEventType.UPDATED.value
+                    ),
+                    "aggregate_id": cid_s,
+                    "organization_id": org_id,
+                    "actor_user_id": actor,
+                    "payload": {
+                        "module": "contacts",
+                        "action": (
+                            "company_created_with_contact"
+                            if created_cid_s is not None and cid_s == created_cid_s
+                            else "company_association_changed"
+                        ),
+                        "contact_id": client_id,
+                    },
+                }
+                for cid_s in affected_company_ids
+            ]
+            company_events = await event_service.create_lifecycle_events(
+                items=company_event_items,
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            related_lifecycle_events.extend(
+                (event_payload, event_payload["aggregate_id"]) for event_payload in company_events
+            )
     request.state.audit_table = "clients"
     request.state.audit_requested_id = client_id
     request.state.audit_description = f"Updated external contact client: {client_id}"
@@ -787,41 +818,17 @@ async def external_update_contact(
         request.state.raw_audit_old_data = update_result.get("old_data")
         request.state.raw_audit_new_data = update_result.get("new_data")
 
-    # Best-effort Typesense indexing after update, offloaded to background task.
-    created_company_id = update_result.get("created_company_id") if update_result else None
-    client_refs = [(client_id, organization_id)]
-    if created_company_id:
-        client_refs.append((created_company_id, organization_id))
-    background_tasks.add_task(
-        ClientService.index_clients_in_typesense_background,
-        client_refs,
+    ContactsService.schedule_contact_update_background_tasks(
+        background_tasks=background_tasks,
+        contact_id=client_id,
+        organization_id=organization_id,
+        body=body,
+        update_result=update_result if isinstance(update_result, dict) else None,
+        update_event=update_event,
+        event_key=client_id,
+        event_topics=CLIENT_KAFKA_TOPICS,
+        related_lifecycle_events=related_lifecycle_events,
     )
-
-    # Trigger enrichment only when enrichment-relevant inputs have changed.
-    enrichment_input_fields = (
-        "company_name",
-        "industry",
-        "websites",
-        "social_pages",
-        "addresses",
-        "primary_contact",
-        "profile_photo_url",
-    )
-    enrichment_inputs_changed = any(
-        getattr(internal_body, field_name) is not None for field_name in enrichment_input_fields
-    )
-    if enrichment_inputs_changed:
-        background_tasks.add_task(
-            ClientService.trigger_enrichment_background,
-            client_id,
-            organization_id,
-        )
-    if created_company_id:
-        background_tasks.add_task(
-            ClientService.trigger_enrichment_background,
-            created_company_id,
-            organization_id,
-        )
 
     return success_response(
         request=request,
@@ -867,19 +874,24 @@ async def external_delete_company(
     organization_id: str = Depends(get_organization_context),
 ):
     """External delete company endpoint (Isometrik credential auth)."""
-    service = ClientService(db_connection=db_connection)
     actor_email = request.state.external_actor_email
-    details = await service.get_client_details(client_id, organization_id)
-    if details.client_type != ClientType.COMPANY:
-        return success_response(
-            request=request,
-            message_key="clients.errors.not_found",
-            custom_code=CustomStatusCode.NOT_FOUND,
-            status_code=http_status.HTTP_404_NOT_FOUND,
-        )
+    user_context = _external_user_context(organization_id=organization_id, actor_email=actor_email)
+    service = CompaniesService(db_connection=db_connection, user_context=user_context)
+    event: dict | None = None
 
     async with db_connection.transaction():
-        await service.delete_client(client_id, organization_id)
+        event_service = EventService(db_connection=db_connection)
+        deleted = await service.soft_delete_company(company_id=client_id)
+        request.state.raw_audit_old_data = deleted.get("old_data")
+        request.state.raw_audit_new_data = deleted.get("new_data")
+        event = await event_service.create_lifecycle_event(
+            event_type=ClientEventType.DELETED.value,
+            aggregate_id=client_id,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={"module": "companies", "action": "delete"},
+            topics=CLIENT_KAFKA_TOPICS,
+        )
 
     request.state.audit_table = "clients"
     request.state.audit_requested_id = client_id
@@ -890,17 +902,17 @@ async def external_delete_company(
         "user_email": actor_email,
         "organization_id": organization_id,
     }
-    request.state.raw_audit_old_data = (
-        details.model_dump(exclude_none=True, mode="json")
-        if hasattr(details, "model_dump")
-        else details.__dict__
-    )
+
+    if event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=event,
+            key=client_id,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
 
     # Best-effort Typesense deletion, offloaded to background task.
-    background_tasks.add_task(
-        ClientService.delete_clients_from_typesense_background,
-        [client_id],
-    )
+    background_tasks.add_task(delete_company_background, client_id)
 
     return success_response(
         request=request,
@@ -946,19 +958,24 @@ async def external_delete_contact(
     organization_id: str = Depends(get_organization_context),
 ):
     """External delete contact endpoint (Isometrik credential auth)."""
-    service = ClientService(db_connection=db_connection)
     actor_email = request.state.external_actor_email
-    details = await service.get_client_details(client_id, organization_id)
-    if details.client_type != ClientType.PERSON:
-        return success_response(
-            request=request,
-            message_key="clients.errors.not_found",
-            custom_code=CustomStatusCode.NOT_FOUND,
-            status_code=http_status.HTTP_404_NOT_FOUND,
-        )
+    user_context = _external_user_context(organization_id=organization_id, actor_email=actor_email)
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
+    event: dict | None = None
 
     async with db_connection.transaction():
-        await service.delete_client(client_id, organization_id)
+        event_service = EventService(db_connection=db_connection)
+        deleted = await service.soft_delete_contact(contact_id=client_id)
+        request.state.raw_audit_old_data = deleted.get("old_data")
+        request.state.raw_audit_new_data = deleted.get("new_data")
+        event = await event_service.create_lifecycle_event(
+            event_type=ClientEventType.DELETED.value,
+            aggregate_id=client_id,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={"module": "contacts", "action": "delete"},
+            topics=CLIENT_KAFKA_TOPICS,
+        )
 
     request.state.audit_table = "clients"
     request.state.audit_requested_id = client_id
@@ -969,17 +986,17 @@ async def external_delete_contact(
         "user_email": actor_email,
         "organization_id": organization_id,
     }
-    request.state.raw_audit_old_data = (
-        details.model_dump(exclude_none=True, mode="json")
-        if hasattr(details, "model_dump")
-        else details.__dict__
-    )
+
+    if event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=event,
+            key=client_id,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
 
     # Best-effort Typesense deletion, offloaded to background task.
-    background_tasks.add_task(
-        ClientService.delete_clients_from_typesense_background,
-        [client_id],
-    )
+    background_tasks.add_task(delete_contact_background, client_id)
 
     return success_response(
         request=request,
