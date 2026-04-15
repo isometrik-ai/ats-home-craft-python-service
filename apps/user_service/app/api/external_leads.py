@@ -11,14 +11,11 @@ The decoded ``projectId`` is mapped to our internal ``organization_id`` and all
 operations are scoped to that organization.
 """
 
-from datetime import date
-from decimal import Decimal
 from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
@@ -26,17 +23,14 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.external_auth import get_organization_context
 from apps.user_service.app.dependencies.supabase import supabase_service
-from apps.user_service.app.schemas.contacts import CreateContactRequestStandalone
 from apps.user_service.app.schemas.enums import (
-    DealType,
     KafkaTopics,
     LeadEventType,
     LeadsListMode,
-    Priority,
 )
+from apps.user_service.app.schemas.external_leads import ExternalCreateLeadRequest
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
-    LeadContactCreate,
     LeadsListQueryParams,
     UpdateLeadRequest,
 )
@@ -55,7 +49,6 @@ from apps.user_service.app.utils.common_utils import (
     handle_api_exceptions,
     name_to_email_domain_label,
 )
-from libs.shared_utils.http_exceptions import BadRequestException
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -63,147 +56,6 @@ router = APIRouter(prefix="/integrations/leads", tags=["Leads (External)"])
 LEAD_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
 CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
-
-
-class ExternalCreateLeadPayload(BaseModel):
-    """External lead create payload.
-
-    This is intentionally a subset of `CreateLeadRequest` that **does not** allow any
-    contact linking/creation inside the `lead` object.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(..., min_length=1, description="Lead display title")
-    stage_id: str = Field(
-        ...,
-        description="Pipeline stage UUID (must belong to the organization)",
-    )
-    lead_source: str | None = Field(default=None, max_length=255, description="Origin channel")
-    referral_source: str | None = Field(
-        default=None,
-        max_length=255,
-        description="Referrer name or id",
-    )
-    lead_score: str | None = Field(default=None, max_length=255, description="Score label or tier")
-    close_date: date | None = Field(
-        default=None,
-        description="Expected close date (YYYY-MM-DD)",
-    )
-    amount: Decimal | None = Field(default=None, description="Estimated deal value")
-    description: str | None = Field(
-        default=None,
-        max_length=20000,
-        description="Longer opportunity description",
-    )
-    owner_id: str | None = Field(
-        default=None,
-        description="Owning user; defaults to creator when omitted (service layer)",
-    )
-    company: dict[str, Any] | None = Field(
-        default=None,
-        description="Optional single company association (same shape as internal lead create)",
-    )
-    deal_type: DealType | None = Field(
-        default=None,
-        description="New vs existing business; omit or null when unknown",
-    )
-    priority: Priority | None = Field(default=None, description="Priority tier")
-    notes: list[dict[str, Any]] = Field(default_factory=list, description="Structured notes")
-    custom_fields: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="FieldCell create payload (same rules as internal lead create)",
-    )
-
-    @model_validator(mode="after")
-    def normalize_blank_strings(self) -> "ExternalCreateLeadPayload":
-        """Normalize blank strings."""
-
-        def _norm(value: Any) -> Any:
-            if value is None:
-                return None
-            if isinstance(value, str):
-                stripped = value.strip()
-                return stripped or None
-            return value
-
-        self.lead_source = _norm(self.lead_source)
-        self.referral_source = _norm(self.referral_source)
-        self.lead_score = _norm(self.lead_score)
-        self.description = _norm(self.description)
-        return self
-
-
-class ExternalCreateLeadRequest(BaseModel):
-    """External lead create payload wrapper (external auth).
-
-    Supports either:
-    - linking existing contacts via `contact_ids`, OR
-    - creating a new contact via `contact` (and auto-linking it to the created lead).
-    """
-
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    lead: ExternalCreateLeadPayload = Field(..., description="Lead create payload (external)")
-    contact_associations: list[LeadContactCreate] = Field(
-        default_factory=list,
-        max_length=50,
-        description="Optional list of existing contacts to link to the new lead.",
-        alias="contacts",
-    )
-    create_contact: CreateContactRequestStandalone | None = Field(
-        default=None,
-        description="Optional contact create payload.",
-        alias="contact",
-    )
-    created_contact_label: str | None = Field(
-        default=None,
-        max_length=255,
-        description="Optional label for the created contact on the lead (lead_contacts.label).",
-        alias="lead_contact_label",
-    )
-
-    @model_validator(mode="after")
-    def validate_contact_create_vs_link_existing(self) -> "ExternalCreateLeadRequest":
-        """External-only constraint:
-        - link existing contact(s) via `contact_associations` (alias: `contacts`), OR
-        - create a new contact via top-level `create_contact` (alias: `contact`) (auto-linked),
-        but not both in the same request.
-        """
-        has_existing_links = bool(self.contact_associations)
-        has_contact_create = self.create_contact is not None
-
-        if has_existing_links and has_contact_create:
-            raise BadRequestException(
-                message_key="leads.errors.external_contact_link_or_create_only",
-                errors=[
-                    {
-                        "field": "body.contact_associations",
-                        "type": "bad_request",
-                        "msg": "Cannot be provided together with body.create_contact.",
-                    },
-                    {
-                        "field": "body.create_contact",
-                        "type": "bad_request",
-                        "msg": "Cannot be provided together with body.contact_associations.",
-                    },
-                ],
-            )
-
-        # `created_contact_label` is only meaningful when we're creating a new contact.
-        if self.created_contact_label is not None and not has_contact_create:
-            raise BadRequestException(
-                message_key="leads.errors.external_lead_contact_label_requires_contact",
-                errors=[
-                    {
-                        "field": "body.created_contact_label",
-                        "type": "bad_request",
-                        "msg": "Requires body.create_contact to be set.",
-                    }
-                ],
-            )
-
-        return self
 
 
 @handle_api_exceptions("external list leads")
@@ -390,10 +242,7 @@ async def external_create_lead(
             organization_id=organization_id,
         )
 
-        internal_lead = CreateLeadRequest(
-            **body.lead.model_dump(),
-            contacts=(body.contact_associations or None),
-        )
+        internal_lead = body.lead.model_copy(deep=True)
         result = await external_service.create_lead_with_optional_contact(
             lead=internal_lead,
             contact=body.create_contact,

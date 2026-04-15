@@ -41,9 +41,13 @@ class ExternalLeadsService:
     """Orchestrates external lead creation flows.
 
     This service contains the business flow for:
-    - validating required contact linkage rules for external create
+    - validating required contact linkage rules for external create:
+      - when no inline contact create payload is provided, at least one existing contact must be
+        linked via `lead.contacts`
+      - when an inline contact create payload is provided, it will be created/reused and linked,
+        and `lead.contacts` (if any) are preserved
     - optionally creating a contact (and related entities)
-    - linking the created contact to the lead payload
+    - linking the created/reused contact to the lead payload (without overwriting existing links)
     - creating lifecycle events (DB rows) for created entities
     """
 
@@ -78,7 +82,7 @@ class ExternalLeadsService:
     def _validate_contact_required_when_no_inline_contact(
         self, lead_payload: CreateLeadRequest
     ) -> None:
-        """Validate that a contact is required when no inline contact create payload is provided."""
+        """Require at least one linked contact when no inline contact create payload is provided."""
         provided_contacts = list(lead_payload.contacts or [])
         if not provided_contacts or not any(
             (c.contact_id or "").strip() for c in provided_contacts
