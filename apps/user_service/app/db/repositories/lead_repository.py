@@ -238,7 +238,9 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
         ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name,
         lc.contact_id AS contact_id,
         lc.label AS label,
-        ({_CONTACT_DISPLAY_NAME_SQL.strip()}) AS contact_name
+        ({_CONTACT_DISPLAY_NAME_SQL.strip()}) AS contact_name,
+        cu.email::text AS contact_email,
+        ct.phones AS contact_phones
     FROM leads l
     {_LEADS_JOIN_DISPLAY.strip()}
     LEFT JOIN lead_contacts lc
@@ -247,6 +249,8 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
     LEFT JOIN contacts ct
         ON ct.id = lc.contact_id
        AND ct.organization_id = lc.organization_id
+    LEFT JOIN auth.users cu
+        ON cu.id = ct.user_id
     WHERE l.organization_id = $1
       AND l.id = $2::uuid
     ORDER BY lc.created_at ASC
