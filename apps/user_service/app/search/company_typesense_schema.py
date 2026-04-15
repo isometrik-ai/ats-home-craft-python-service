@@ -12,6 +12,10 @@ COMPANIES_COLLECTION_SCHEMA: dict[str, Any] = {
         {"name": "status", "type": "string", "facet": True},
         {"name": "name", "type": "string"},
         {"name": "industry", "type": "string", "facet": True, "optional": True},
+        {"name": "email", "type": "string", "optional": True},
+        {"name": "phone_numbers", "type": "string[]", "optional": True},
+        # Stored for response parity (not used for query_by)
+        {"name": "phones_display", "type": "object[]", "index": False, "optional": True},
         # All linked contacts (not just primary). Stored for response parity.
         {"name": "contacts", "type": "object[]", "index": False, "optional": True},
         # Flattened contact facets for search (Typesense can't query nested objects directly).
@@ -51,11 +55,12 @@ COMPANIES_COLLECTION_SCHEMA: dict[str, Any] = {
 
 COMPANY_SEARCH_PARAMS: dict[str, Any] = {
     "query_by": (
-        "name,contact_full_names,contact_emails,contact_phone_numbers,contact_titles,"
-        "tags,industry,description,target_market_segments,current_tech_stack,"
-        "key_people_names,product_names,custom_field_values"
+        "name,email,phone_numbers,contact_full_names,contact_emails,"
+        "contact_phone_numbers,contact_titles,tags,industry,description,"
+        "target_market_segments,current_tech_stack,key_people_names,product_names,"
+        "custom_field_values"
     ),
-    "query_by_weights": "15,12,12,10,6,5,5,4,2,2,2,2,1",
+    "query_by_weights": "15,12,10,12,12,10,6,5,5,4,2,2,2,2,1",
     "num_typos": 2,
     "typo_tokens_threshold": 1,
     "min_len_1typo": 4,
@@ -68,14 +73,14 @@ COMPANY_SEARCH_PARAMS: dict[str, Any] = {
 
 
 COMPANY_EMAIL_SEARCH_PARAMS: dict[str, Any] = {
-    "query_by": "contact_emails",
+    "query_by": "email,contact_emails",
     "num_typos": 0,
     "prefix": False,
 }
 
 
 COMPANY_PHONE_SEARCH_PARAMS: dict[str, Any] = {
-    "query_by": "contact_phone_numbers",
+    "query_by": "phone_numbers,contact_phone_numbers",
     "num_typos": 0,
     "prefix": False,
 }

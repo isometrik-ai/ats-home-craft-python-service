@@ -92,6 +92,7 @@ _COMPANY_DETAIL_JSON_LIST_KEYS = (
     "current_tech_stack",
     "preferred_communication_channels",
     "industry_specific_terminologies",
+    "phones",
     "contacts",
     "addresses",
 )
@@ -118,7 +119,8 @@ def _normalize_company_billing_preferences(details: dict[str, Any]) -> None:
         parsed_billing = parse_json_field(billing_prefs)
         details["billing_preferences"] = parsed_billing if isinstance(parsed_billing, dict) else {}
     elif billing_prefs is None:
-        details["billing_preferences"] = None
+        # DB column is NOT NULL; keep responses consistent even if upstream data was legacy.
+        details["billing_preferences"] = {}
 
 
 def _normalize_company_additional_data(details: dict[str, Any]) -> None:
@@ -339,6 +341,7 @@ class CompaniesService:
             social_pages_payload,
             contact_phones_payload,
             contact_social_pages_payload,
+            company_phones_payload,
         ) = self._build_create_company_list_payloads(body=body)
         jsonb_params = self._serialize_company_jsonb_params(
             body=body,
@@ -369,6 +372,10 @@ class CompaniesService:
                 "industry": body.industry,
                 "profile_photo_url": body.profile_photo_url,
                 "portal_access": body.portal_access,
+                "email": (body.email or "").strip() or None,
+                "phones": serialize_jsonb_param(
+                    "phones", company_phones_payload, COMPANY_JSONB_COLUMNS
+                ),
                 "tags": body.tags,
                 "websites": jsonb_params["websites"],
                 "billing_preferences": jsonb_params["billing_preferences"],
@@ -494,6 +501,7 @@ class CompaniesService:
         list[dict[str, Any]],
         list[dict[str, Any]],
         list[dict[str, Any]],
+        list[dict[str, Any]],
     ]:
         """Build list payloads for company creation."""
         create_contact_for_payloads = (
@@ -508,6 +516,10 @@ class CompaniesService:
                 ],
                 "company_social_pages": [
                     page.model_dump(mode="json", exclude_none=True) for page in body.social_pages
+                ],
+                "company_phones": [
+                    phone.model_dump(mode="json", exclude_none=True)
+                    for phone in (body.phones or [])
                 ],
                 "contact_phones": (
                     [
@@ -532,6 +544,7 @@ class CompaniesService:
             list_payloads["company_social_pages"],
             list_payloads["contact_phones"],
             list_payloads["contact_social_pages"],
+            list_payloads["company_phones"],
         )
 
     def _serialize_company_jsonb_params(
@@ -545,9 +558,9 @@ class CompaniesService:
         """Serialize company JSONB parameters."""
         jsonb_inputs: dict[str, Any] = {
             "websites": websites_payload,
-            "billing_preferences": body.billing_preferences.model_dump(mode="json")
-            if body.billing_preferences
-            else None,
+            "billing_preferences": (
+                body.billing_preferences.model_dump(mode="json") if body.billing_preferences else {}
+            ),
             "social_pages": social_pages_payload,
             "custom_fields": validated_company_custom_fields,
             "additional_data": body.additional_data,
@@ -719,7 +732,7 @@ class CompaniesService:
                 "payload_data": {
                     "name": body.name.strip(),
                     "industry": body.industry,
-                    "email": None,
+                    "email": (body.email or "").strip() or None,
                     "websites": websites_payload,
                     "social_pages": social_pages_payload,
                     "addresses": addresses_payload,
@@ -969,6 +982,7 @@ class CompaniesService:
         for list_row in rows:
             list_row["created_at"] = format_iso_datetime(list_row.get("created_at")) or ""
             list_row["updated_at"] = format_iso_datetime(list_row.get("updated_at")) or ""
+            list_row["phones"] = coerce_json_list(list_row.get("phones"))
             raw_contacts = list_row.get("contacts")
             if isinstance(raw_contacts, str):
                 list_row["contacts"] = parse_json_field(raw_contacts) or []
@@ -1057,6 +1071,7 @@ class CompaniesService:
             ("industry", "industry"),
             ("profile_photo_url", "profile_photo_url"),
             ("portal_access", "portal_access"),
+            ("email", "email"),
             ("tags", "tags"),
             ("target_market_segments", "target_market_segments"),
             ("current_tech_stack", "current_tech_stack"),
@@ -1074,6 +1089,12 @@ class CompaniesService:
 
         if body.sales_intelligence is not None:
             update_data["sales_intelligence"] = body.sales_intelligence
+
+        if body.phones is not None:
+            phones_payload = [
+                phone.model_dump(mode="json", exclude_none=True) for phone in (body.phones or [])
+            ]
+            update_data["phones"] = self._ensure_list_item_ids(phones_payload)
 
         if body.billing_preferences is not None:
             existing = parse_json_field(current.get("billing_preferences")) or {}
@@ -1456,6 +1477,12 @@ class CompaniesService:
                     "name": hit_document.get("name") or "",
                     "industry": hit_document.get("industry"),
                     "profile_photo_url": hit_document.get("profile_photo_url") or None,
+                    "email": hit_document.get("email") or None,
+                    "phones": (
+                        hit_document.get("phones_display")
+                        if isinstance(hit_document.get("phones_display"), list)
+                        else []
+                    ),
                     "contacts": contacts_out,
                     "created_at": created_at_iso,
                     "updated_at": updated_at_iso,
