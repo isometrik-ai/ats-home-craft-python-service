@@ -1208,6 +1208,7 @@ class ContactsService:
             "social_pages",
             "work_history",
             "educational_history",
+            "leads",
         )
         for field_name in json_list_fields:
             raw_field_value = details.get(field_name)
