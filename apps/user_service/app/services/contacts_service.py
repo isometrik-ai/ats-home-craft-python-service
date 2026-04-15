@@ -30,6 +30,9 @@ from apps.user_service.app.db.repositories import (
     ContactCompaniesRepository,
     ContactsRepository,
 )
+from apps.user_service.app.db.repositories.companies_repository import (
+    COMPANY_JSONB_COLUMNS,
+)
 from apps.user_service.app.db.repositories.contacts_repository import (
     CONTACT_JSONB_COLUMNS,
 )
@@ -202,28 +205,118 @@ class ContactsService:
             )
         return user_id, str(isometrik_response["userId"]), created_password
 
-    @staticmethod
-    def _parse_company_create_input(
+    async def _prepare_optional_contact_company_association(
+        self,
+        *,
         body: CreateContactRequest,
-    ) -> tuple[str | None, str | None, bool, bool]:
-        """Extract company create/link inputs from the request.
+    ) -> tuple[str | None, dict[str, Any] | None, list[dict[str, Any]] | None, bool]:
+        """Extract company link/create inputs from the request.
+
+        Mirrors CompaniesService behavior for nested contact create:
+        - Link existing by `company_id`, OR
+        - Create a company inline via full `CreateCompanyRequest` payload (association scope).
 
         Returns:
-            (company_id, company_name, make_primary, created_new_company)
+            (company_id, company_data, company_addresses, make_primary)
         """
-        company_id: str | None = None
-        company_name: str | None = None
-        make_primary = False
-        created_new_company = False
+        if not body.company_association:
+            return None, None, None, False
 
-        if not body.company:
-            return company_id, company_name, make_primary, created_new_company
+        make_primary = bool(body.company_association.is_primary)
+        company_id = (body.company_association.existing_company_id or "").strip() or None
+        if company_id:
+            return company_id, None, None, make_primary
 
-        company_id = (body.company.company_id or "").strip() or None
-        company_name = (body.company.company_name or "").strip() or None
-        make_primary = bool(body.company.is_primary)
-        created_new_company = bool(company_name) and not company_id
-        return company_id, company_name, make_primary, created_new_company
+        create_company = body.company_association.create_company
+        if create_company is None:
+            # Schema validator should prevent this, but keep a defensive guard.
+            raise ValidationException(
+                message_key="contacts.errors.invalid_company_association",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        # Ignore nested lead/contact association blocks in the inline company payload.
+        # Membership is handled at the contact operation layer.
+        company_phones_payload = self._ensure_list_item_ids(
+            [
+                phone.model_dump(mode="json", exclude_none=True)
+                for phone in (create_company.phones or [])
+            ]
+        )
+        company_websites_payload = self._ensure_list_item_ids(
+            [w.model_dump(mode="json", exclude_none=True) for w in (create_company.websites or [])]
+        )
+        company_social_pages_payload = self._ensure_list_item_ids(
+            [
+                p.model_dump(mode="json", exclude_none=True)
+                for p in (create_company.social_pages or [])
+            ]
+        )
+
+        validated_company_custom_fields: list[dict[str, Any]] = []
+        if self.user_context and self.user_context.organization_id:
+            custom_field_service = CustomFieldService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            validated_company_custom_fields = await custom_field_service.validate_for_create(
+                create_company.custom_fields,
+                EntityType.COMPANY,
+            )
+
+        jsonb_params = {
+            "phones": serialize_jsonb_param(
+                "phones", company_phones_payload, COMPANY_JSONB_COLUMNS
+            ),
+            "websites": serialize_jsonb_param(
+                "websites", company_websites_payload, COMPANY_JSONB_COLUMNS
+            ),
+            "billing_preferences": serialize_jsonb_param(
+                "billing_preferences",
+                (
+                    create_company.billing_preferences.model_dump(mode="json")
+                    if create_company.billing_preferences
+                    else {}
+                ),
+                COMPANY_JSONB_COLUMNS,
+            ),
+            "social_pages": serialize_jsonb_param(
+                "social_pages", company_social_pages_payload, COMPANY_JSONB_COLUMNS
+            ),
+            "custom_fields": serialize_jsonb_param(
+                "custom_fields", validated_company_custom_fields, COMPANY_JSONB_COLUMNS
+            ),
+            "additional_data": serialize_jsonb_param(
+                "additional_data", (create_company.additional_data or {}), COMPANY_JSONB_COLUMNS
+            ),
+        }
+
+        company_data: dict[str, Any] = {
+            "status": ClientStatus.ACTIVE.value,
+            "name": create_company.name.strip(),
+            "industry": create_company.industry,
+            "profile_photo_url": create_company.profile_photo_url,
+            "portal_access": bool(create_company.portal_access),
+            "email": (create_company.email or "").strip() or None,
+            "phones": jsonb_params["phones"],
+            "tags": create_company.tags,
+            "websites": jsonb_params["websites"],
+            "billing_preferences": jsonb_params["billing_preferences"],
+            "social_pages": jsonb_params["social_pages"],
+            "target_market_segments": create_company.target_market_segments,
+            "current_tech_stack": create_company.current_tech_stack,
+            "preferred_communication_channels": create_company.preferred_communication_channels,
+            "industry_specific_terminologies": create_company.industry_specific_terminologies,
+            "description": create_company.description,
+            "custom_fields": jsonb_params["custom_fields"],
+            "additional_data": jsonb_params["additional_data"],
+        }
+        company_addresses = (
+            [a.model_dump(exclude_none=True) for a in (create_company.addresses or [])]
+            if getattr(create_company, "addresses", None)
+            else []
+        )
+        return None, company_data, company_addresses, make_primary
 
     async def _assert_contact_email_unique(self, *, organization_id: str, email: str) -> None:
         """Raise ConflictException if a contact with this email already exists in the org."""
@@ -414,9 +507,14 @@ class ContactsService:
             - company_id: linked/created company id when requested (str | None)
         """
         org_id = self.user_context.organization_id
-        company_id, company_name, make_primary, created_new_company = (
-            self._parse_company_create_input(body)
-        )
+        (
+            company_id,
+            company_data,
+            company_addresses,
+            make_primary,
+        ) = await self._prepare_optional_contact_company_association(body=body)
+        created_new_company = bool(company_data)
+        company_name = (company_data or {}).get("name") if company_data else None
 
         # Align with legacy behavior: prevent org-level duplicate emails when email is provided.
         email_norm = (body.email or "").strip().lower()
@@ -509,7 +607,8 @@ class ContactsService:
                 "social_pages": social_pages_jsonb,
             },
             company_id=company_id,
-            company_name=company_name,
+            company_data=company_data,
+            company_addresses=company_addresses,
             make_primary=make_primary,
         )
         contact_id = created.get("contact_id")
@@ -522,6 +621,17 @@ class ContactsService:
             )
 
         await self._create_addresses_if_any(contact_id=contact_id, addresses=body.addresses)
+
+        # If an existing company id was requested but not found, raise a clean NotFound.
+        if (
+            body.company_association
+            and body.company_association.existing_company_id
+            and not company_id
+        ):
+            raise NotFoundException(
+                message_key="contacts.errors.company_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
 
         # Optional lead creation + association (contact + optional company).
         lead_payload = getattr(body, "lead", None)

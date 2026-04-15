@@ -10,7 +10,7 @@ Contracts here are intentionally resource-specific (no legacy `clients.*` fields
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,6 +26,11 @@ from apps.user_service.app.schemas.common import (
     WorkHistoryUpdate,
 )
 from apps.user_service.app.schemas.enums import ClientStatus
+from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.status_codes import CustomStatusCode
+
+if TYPE_CHECKING:
+    from apps.user_service.app.schemas.companies import CreateCompanyRequest
 
 
 class ContactLeadAssociation(BaseModel):
@@ -51,12 +56,20 @@ class ContactLeadAssociation(BaseModel):
 
 
 class ContactCompanyLink(BaseModel):
-    """Company-link payload used during contact create or association changes."""
+    """Company association payload used during contact create.
+
+    Supports:
+    - link an existing company (by id)
+    - create a new company inline
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    company_id: str | None = Field(None, description="Existing company id to link")
-    company_name: str | None = Field(None, description="Create a new company by name")
+    existing_company_id: str | None = Field(None, description="Existing company id to link")
+    create_company: CreateCompanyRequest | None = Field(
+        None,
+        description="Create a new company inline and associate it to the contact.",
+    )
     is_primary: bool = Field(
         default=False,
         description="If true, set this contact as the company's primary contact.",
@@ -64,13 +77,24 @@ class ContactCompanyLink(BaseModel):
 
     @model_validator(mode="after")
     def validate_company_id_or_name(self) -> "ContactCompanyLink":
-        """Require exactly one of company_id / company_name when provided."""
-        cid = (self.company_id or "").strip()
-        cname = (self.company_name or "").strip()
-        if cid and cname:
-            raise ValueError("Provide only one of company_id or company_name.")
-        if self.is_primary and not (cid or cname):
-            raise ValueError("is_primary requires company_id or company_name.")
+        """Require exactly one of existing_company_id / create_company when provided."""
+        cid = (self.existing_company_id or "").strip()
+        has_company_obj = self.create_company is not None
+
+        provided = sum(bool(x) for x in [bool(cid), has_company_obj])
+        if provided != 1:
+            raise ValidationException(
+                message_key="contacts.errors.invalid_company_association",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"details": "Provide exactly one of existing_company_id or create_company."},
+            )
+
+        if self.is_primary and not (cid or has_company_obj):
+            raise ValidationException(
+                message_key="contacts.errors.invalid_company_association_primary",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"details": "is_primary requires existing_company_id or create_company."},
+            )
         return self
 
 
@@ -126,8 +150,11 @@ class CreateContactRequest(BaseModel):
         ),
     )
 
-    # optional company link at create-time
-    company: ContactCompanyLink | None = None
+    # optional company association at create-time
+    company_association: ContactCompanyLink | None = Field(
+        default=None,
+        description="Optional company association (link existing or create inline).",
+    )
 
     # optional addresses created on contact
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
@@ -175,8 +202,8 @@ class CreateContactRequestStandalone(BaseModel):
         description="Free-form JSONB payload stored on the contact.",
     )
 
-    # optional company link at create-time
-    company: ContactCompanyLink | None = None
+    # optional company association at create-time
+    company_association: ContactCompanyLink | None = None
 
     # optional addresses created on contact
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
@@ -387,3 +414,29 @@ class ContactDetailsResponse(BaseModel):
 
     created_at: str
     updated_at: str
+
+
+def _rebuild_cross_schema_models() -> None:
+    """Resolve forward references across contacts <-> companies without import cycles."""
+    # Local import to keep module import order flexible.
+    import importlib
+
+    companies_module = importlib.import_module("apps.user_service.app.schemas.companies")
+
+    ContactCompanyLink.model_rebuild(
+        _types_namespace={
+            # `CreateCompanyRequest` transitively references `CreateContactRequest` via
+            # `CompanyContactLink`, so we must provide both names here.
+            "CreateCompanyRequest": companies_module.CreateCompanyRequest,
+            "CreateContactRequest": CreateContactRequest,
+        }
+    )
+    companies_module.CompanyContactLink.model_rebuild(
+        _types_namespace={"CreateContactRequest": CreateContactRequest}
+    )
+    companies_module.CompanyContactAssociationCreate.model_rebuild(
+        _types_namespace={"CreateContactRequest": CreateContactRequest}
+    )
+
+
+_rebuild_cross_schema_models()

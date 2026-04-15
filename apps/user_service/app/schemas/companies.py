@@ -8,7 +8,7 @@ These DTOs match the split schema:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,8 +26,12 @@ from apps.user_service.app.schemas.common import (
     Website,
     WebsitesUpdate,
 )
-from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import ClientStatus
+from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.status_codes import CustomStatusCode
+
+if TYPE_CHECKING:
+    from apps.user_service.app.schemas.contacts import CreateContactRequest
 
 
 class CompanyLeadAssociation(BaseModel):
@@ -63,8 +67,10 @@ class CompanyContactLink(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    contact_id: str | None = Field(None, description="Existing contact id to link to the company")
-    contact: CreateContactRequest | None = Field(
+    existing_contact_id: str | None = Field(
+        None, description="Existing contact id to link to the company"
+    )
+    create_contact: CreateContactRequest | None = Field(
         None,
         description="Create a new contact inline and link it to the company.",
     )
@@ -76,8 +82,11 @@ class CompanyContactLink(BaseModel):
     @model_validator(mode="after")
     def validate_exactly_one(self) -> "CompanyContactLink":
         """Require exactly one of ``contact_id`` or nested ``contact`` create payload."""
-        if bool(self.contact_id) == bool(self.contact):
-            raise ValueError("Provide exactly one of contact_id or contact.")
+        if bool(self.existing_contact_id) == bool(self.create_contact):
+            raise ValidationException(
+                message_key="companies.errors.invalid_contact_association",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
         return self
 
 
@@ -125,8 +134,11 @@ class CreateCompanyRequest(BaseModel):
         ),
     )
 
-    # New, developer-friendly association input (one contact on create).
-    contact: CompanyContactLink | None = None
+    # Developer-friendly association input (one contact on create).
+    contact_association: CompanyContactLink | None = Field(
+        default=None,
+        description="Optional contact association (link existing or create inline).",
+    )
 
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
 
@@ -148,7 +160,7 @@ class CompanyContactAssociationCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    contact: CreateContactRequest = Field(
+    contact: "CreateContactRequest" = Field(
         ...,
         description="New contact payload (same shape as POST /contacts).",
     )
