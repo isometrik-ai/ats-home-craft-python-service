@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from apps.user_service.app.schemas.clients import LeadInfo
 from apps.user_service.app.schemas.common import (
     AddressesUpdate,
     AddressInput,
@@ -409,6 +410,10 @@ class ContactDetailsResponse(BaseModel):
     companies: list[dict[str, Any]] = Field(
         default_factory=list,
         description="All linked companies with is_primary flag",
+    )
+    leads: list[LeadInfo] = Field(
+        default_factory=list,
+        description="Leads linked to this contact via lead_contacts",
     )
     addresses: list[dict[str, Any]] = Field(default_factory=list)
 

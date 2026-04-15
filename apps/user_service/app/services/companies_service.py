@@ -94,6 +94,7 @@ _COMPANY_DETAIL_JSON_LIST_KEYS = (
     "industry_specific_terminologies",
     "phones",
     "contacts",
+    "leads",
     "addresses",
 )
 
