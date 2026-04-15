@@ -96,13 +96,14 @@ class ContactsRepository(BaseRepository):
         organization_id: str,
         contact_data: dict[str, Any],
         company_id: str | None,
-        company_name: str | None,
+        company_data: dict[str, Any] | None,
+        company_addresses: list[dict[str, Any]] | None,
         make_primary: bool,
     ) -> dict[str, Any]:
         """Create contact and optionally link to a company in one DB round trip.
 
         - If `company_id` is provided: link to that company.
-        - Else if `company_name` is provided: create company and link to it.
+        - Else if `company_data` is provided: create company.
         - If `make_primary` is true and a company is selected: set contact as primary.
 
         Returns:
@@ -111,16 +112,19 @@ class ContactsRepository(BaseRepository):
             - company_id (str | None)
             - contact (dict | None): inserted contact row
         """
+        addresses_payload = company_addresses or []
+        addresses_json = json.dumps(addresses_payload) if addresses_payload else None
+        company_json = json.dumps([company_data]) if company_data else None
+
         fetched_row = await self.db_connection.fetchrow(
             """
-            WITH new_company AS (
-              INSERT INTO companies (organization_id, name, primary_contact_id)
-              SELECT $1::uuid, $3::text, NULL
-              WHERE $3::text IS NOT NULL AND $2::uuid IS NULL
-              RETURNING id
-            ),
-            company AS (
-              SELECT COALESCE($2::uuid, (SELECT id FROM new_company)) AS id
+            WITH company_exists AS (
+              SELECT co.id
+              FROM companies co
+              WHERE $2::uuid IS NOT NULL
+                AND co.id = $2::uuid
+                AND co.organization_id = $1::uuid
+                AND co.status != $20::text
             ),
             contact AS (
               INSERT INTO contacts (
@@ -143,7 +147,8 @@ class ContactsRepository(BaseRepository):
               )
               VALUES (
                 $1::uuid,
-                $4::uuid,
+                $3::uuid,
+                $4::text,
                 $5::text,
                 $6::text,
                 $7::text,
@@ -160,6 +165,128 @@ class ContactsRepository(BaseRepository):
                 COALESCE($18::jsonb, '{}'::jsonb)
               )
               RETURNING *
+            ),
+            new_company AS (
+              INSERT INTO companies (
+                organization_id,
+                primary_contact_id,
+                status,
+                name,
+                industry,
+                profile_photo_url,
+                portal_access,
+                email,
+                phones,
+                tags,
+                websites,
+                billing_preferences,
+                social_pages,
+                target_market_segments,
+                current_tech_stack,
+                preferred_communication_channels,
+                industry_specific_terminologies,
+                description,
+                custom_fields,
+                additional_data
+              )
+              SELECT
+                $1::uuid,
+                CASE WHEN $19::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
+                c.status,
+                c.name,
+                c.industry,
+                c.profile_photo_url,
+                c.portal_access,
+                c.email,
+                c.phones,
+                c.tags,
+                c.websites,
+                c.billing_preferences,
+                c.social_pages,
+                c.target_market_segments,
+                c.current_tech_stack,
+                c.preferred_communication_channels,
+                c.industry_specific_terminologies,
+                c.description,
+                c.custom_fields,
+                c.additional_data
+              FROM jsonb_to_recordset(COALESCE($19::jsonb, '[]'::jsonb)) AS c(
+                status text,
+                name text,
+                industry text,
+                profile_photo_url text,
+                portal_access boolean,
+                email text,
+                phones jsonb,
+                tags text[],
+                websites jsonb,
+                billing_preferences jsonb,
+                social_pages jsonb,
+                target_market_segments text[],
+                current_tech_stack text[],
+                preferred_communication_channels text[],
+                industry_specific_terminologies text[],
+                description text,
+                custom_fields jsonb,
+                additional_data jsonb
+              )
+              WHERE $2::uuid IS NULL
+              RETURNING *
+            ),
+            company AS (
+              SELECT
+                COALESCE(
+                  (SELECT id FROM company_exists),
+                  (SELECT id FROM new_company)
+                ) AS id
+            ),
+            inserted_addresses AS (
+              INSERT INTO company_addresses (
+                company_id,
+                place_id,
+                address_line1,
+                address_line2,
+                city,
+                state,
+                postal_code,
+                country,
+                latitude,
+                longitude,
+                address_type,
+                address_data,
+                is_primary
+              )
+              SELECT
+                (SELECT id FROM company) AS company_id,
+                a.place_id,
+                a.address_line1,
+                a.address_line2,
+                a.city,
+                a.state,
+                a.postal_code,
+                a.country,
+                a.latitude,
+                a.longitude,
+                a.address_type,
+                COALESCE(a.address_data, '{}'::jsonb) AS address_data,
+                a.is_primary
+              FROM jsonb_to_recordset(COALESCE($21::jsonb, '[]'::jsonb)) AS a(
+                place_id text,
+                address_line1 text,
+                address_line2 text,
+                city text,
+                state text,
+                postal_code text,
+                country text,
+                latitude double precision,
+                longitude double precision,
+                address_type text,
+                address_data jsonb,
+                is_primary boolean
+              )
+              WHERE (SELECT id FROM company) IS NOT NULL
+                AND $19::jsonb IS NOT NULL
+              RETURNING 1
             ),
             membership AS (
               INSERT INTO contact_companies (organization_id, contact_id, company_id)
@@ -185,7 +312,6 @@ class ContactsRepository(BaseRepository):
             """,
             organization_id,
             company_id,
-            company_name,
             contact_data.get("user_id"),
             contact_data.get("isometrik_user_id"),
             contact_data.get("status"),
@@ -201,7 +327,10 @@ class ContactsRepository(BaseRepository):
             contact_data.get("custom_fields"),
             contact_data.get("additional_data"),
             contact_data.get("social_pages"),
+            company_json,
             bool(make_primary),
+            ClientStatus.DELETED.value,
+            addresses_json,
         )
         if not fetched_row:
             return {"contact_id": None, "company_id": None, "contact": None}

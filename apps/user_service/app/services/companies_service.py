@@ -505,8 +505,11 @@ class CompaniesService:
     ]:
         """Build list payloads for company creation."""
         create_contact_for_payloads = (
-            body.contact.contact
-            if (body.contact is not None and body.contact.contact is not None)
+            body.contact_association.create_contact
+            if (
+                body.contact_association is not None
+                and body.contact_association.create_contact is not None
+            )
             else None
         )
         list_payloads = self._build_list_payloads(
@@ -591,7 +594,7 @@ class CompaniesService:
         contact_addresses: list[dict[str, Any]] | None = None
         set_primary = False
 
-        if body.contact is None:
+        if body.contact_association is None:
             return (
                 contact_id,
                 contact_data,
@@ -600,10 +603,10 @@ class CompaniesService:
                 created_contact_password,
             )
 
-        set_primary = bool(body.contact.is_primary)
-        contact_id = body.contact.contact_id
+        set_primary = bool(body.contact_association.is_primary)
+        contact_id = body.contact_association.existing_contact_id
 
-        if body.contact.contact is None:
+        if body.contact_association.create_contact is None:
             return (
                 contact_id,
                 contact_data,
@@ -612,7 +615,7 @@ class CompaniesService:
                 created_contact_password,
             )
 
-        create_contact = body.contact.contact
+        create_contact = body.contact_association.create_contact
         validated_contact_custom_fields = await self._validate_custom_fields_for_create(
             custom_fields=create_contact.custom_fields,
             entity_type=EntityType.CONTACT,
