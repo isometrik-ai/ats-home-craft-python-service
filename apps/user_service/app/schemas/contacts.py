@@ -133,6 +133,55 @@ class CreateContactRequest(BaseModel):
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
 
 
+class CreateContactRequestStandalone(BaseModel):
+    """Create a contact without allowing nested lead creation.
+
+    This is used by endpoints that already own lead creation (e.g. external lead create),
+    and want to optionally create a contact but forbid sending a `lead` block inside the
+    contact payload.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # core identity/person fields
+    email: str = Field(..., description="Contact email address (required).")
+    portal_access: bool = Field(
+        default=False,
+        description="If true, provisions a portal user for this contact and sends an invite email.",
+    )
+    prefix: str | None = Field(None, max_length=50)
+    first_name: str | None = Field(None, max_length=100)
+    middle_name: str | None = Field(None, max_length=100)
+    last_name: str | None = Field(None, max_length=100)
+    title: str | None = Field(None, max_length=100)
+    date_of_birth: date | None = None
+    profile_photo_url: str | None = Field(None, max_length=500)
+
+    phones: list[PhoneInput] = Field(default_factory=list, max_length=20)
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    social_pages: list[SocialPage] = Field(default_factory=list, max_length=20)
+    websites: list[Website] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Websites for the contact (stored in additional_data.websites).",
+    )
+
+    custom_fields: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Custom fields root cells payload (validated and stored as JSONB).",
+    )
+    additional_data: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Free-form JSONB payload stored on the contact.",
+    )
+
+    # optional company link at create-time
+    company: ContactCompanyLink | None = None
+
+    # optional addresses created on contact
+    addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
+
+
 class UpdateContactRequest(BaseModel):
     """Patch a contact (contacts table) and/or manage associations."""
 

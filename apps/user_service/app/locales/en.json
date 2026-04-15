@@ -366,12 +366,14 @@
       "contacts_invalid": "Contacts must be a list.",
       "contact_id_required": "Each contact must include contact_id.",
       "contacts_duplicate": "The same contact cannot be linked more than once.",
+      "external_contact_link_or_create_only": "Provide either `contact_associations` (link existing contact(s)) OR `create_contact` (create a new contact), but not both.",
       "company_id_required": "Each company entry must include company_id.",
       "companies_duplicate": "The same company cannot be linked more than once.",
       "duplicate_contact": "This contact is already linked to the lead.",
       "duplicate_company": "This company is already linked to the lead.",
       "contact_not_linked": "This contact is not currently linked to the lead.",
-      "company_not_linked": "This company is not currently linked to the lead."
+      "company_not_linked": "This company is not currently linked to the lead.",
+      "external_lead_contact_label_requires_contact": "`created_contact_label` can only be provided when `create_contact` is set."
     },
     "success": {
       "lead_created": "Lead created successfully.",
