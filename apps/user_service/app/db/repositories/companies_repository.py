@@ -12,6 +12,7 @@ from apps.user_service.app.schemas.enums import ClientStatus
 
 COMPANY_JSONB_COLUMNS: frozenset[str] = frozenset(
     {
+        "phones",
         "websites",
         "billing_preferences",
         "custom_fields",
@@ -71,10 +72,10 @@ class CompaniesRepository(BaseRepository):
             WITH contact_exists AS (
               SELECT ct.id
               FROM contacts ct
-              WHERE $19::uuid IS NOT NULL
-                AND ct.id = $19::uuid
+              WHERE $21::uuid IS NOT NULL
+                AND ct.id = $21::uuid
                 AND ct.organization_id = $1::uuid
-                AND ct.status != $20::text
+                AND ct.status != $22::text
             ),
             new_contact AS (
               INSERT INTO contacts (
@@ -112,7 +113,7 @@ class CompaniesRepository(BaseRepository):
                 c.custom_fields,
                 c.additional_data,
                 c.social_pages
-              FROM jsonb_to_recordset(COALESCE($21::jsonb, '[]'::jsonb)) AS c(
+              FROM jsonb_to_recordset(COALESCE($23::jsonb, '[]'::jsonb)) AS c(
                 user_id uuid,
                 isometrik_user_id text,
                 status text,
@@ -129,7 +130,7 @@ class CompaniesRepository(BaseRepository):
                 additional_data jsonb,
                 social_pages jsonb
               )
-              WHERE $19::uuid IS NULL
+              WHERE $21::uuid IS NULL
               RETURNING *
             ),
             contact AS (
@@ -148,6 +149,8 @@ class CompaniesRepository(BaseRepository):
                 industry,
                 profile_photo_url,
                 portal_access,
+                email,
+                phones,
                 tags,
                 websites,
                 billing_preferences,
@@ -162,23 +165,25 @@ class CompaniesRepository(BaseRepository):
               )
               VALUES (
                 $1::uuid,
-                CASE WHEN $23::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
+                CASE WHEN $25::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
                 $2::text,
                 $3::text,
                 $4::text,
                 $5::text,
                 $6::boolean,
-                $7::text[],
-                $8::jsonb,
-                $9::jsonb,
-                $10::jsonb,
-                $11::text[],
-                $12::text[],
+                $7::text,
+                COALESCE($8::jsonb, '[]'::jsonb),
+                $9::text[],
+                COALESCE($10::jsonb, '[]'::jsonb),
+                COALESCE($11::jsonb, '{}'::jsonb),
+                COALESCE($12::jsonb, '[]'::jsonb),
                 $13::text[],
                 $14::text[],
-                $15::text,
-                $16::jsonb,
-                $17::jsonb
+                $15::text[],
+                $16::text[],
+                $17::text,
+                COALESCE($18::jsonb, '[]'::jsonb),
+                COALESCE($19::jsonb, '{}'::jsonb)
               )
               RETURNING *
             ),
@@ -212,7 +217,7 @@ class CompaniesRepository(BaseRepository):
                 a.address_type,
                 COALESCE(a.address_data, '{}'::jsonb) AS address_data,
                 a.is_primary
-              FROM jsonb_to_recordset(COALESCE($18::jsonb, '[]'::jsonb)) AS a(
+              FROM jsonb_to_recordset(COALESCE($20::jsonb, '[]'::jsonb)) AS a(
                 place_id text,
                 address_line1 text,
                 address_line2 text,
@@ -258,7 +263,7 @@ class CompaniesRepository(BaseRepository):
                 a.address_type,
                 COALESCE(a.address_data, '{}'::jsonb) AS address_data,
                 a.is_primary
-              FROM jsonb_to_recordset(COALESCE($22::jsonb, '[]'::jsonb)) AS a(
+              FROM jsonb_to_recordset(COALESCE($24::jsonb, '[]'::jsonb)) AS a(
                 place_id text,
                 address_line1 text,
                 address_line2 text,
@@ -300,6 +305,8 @@ class CompaniesRepository(BaseRepository):
             company_data.get("industry"),
             company_data.get("profile_photo_url"),
             company_data.get("portal_access"),
+            company_data.get("email"),
+            company_data.get("phones"),
             company_data.get("tags"),
             company_data.get("websites"),
             company_data.get("billing_preferences"),
@@ -567,6 +574,8 @@ class CompaniesRepository(BaseRepository):
               co.name,
               co.industry,
               co.profile_photo_url,
+              co.email,
+              COALESCE(co.phones, '[]'::jsonb) AS phones,
               COALESCE(member_contacts.contacts, '[]'::jsonb) AS contacts,
               co.created_at,
               co.updated_at

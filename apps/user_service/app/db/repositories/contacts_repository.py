@@ -153,11 +153,11 @@ class ContactsRepository(BaseRepository):
                 $11::text,
                 $12::date,
                 $13::text,
-                $14::jsonb,
-                $15::text[],
-                $16::jsonb,
-                $17::jsonb,
-                $18::jsonb
+                COALESCE($14::jsonb, '[]'::jsonb),
+                COALESCE($15::text[], '{}'::text[]),
+                COALESCE($16::jsonb, '{}'::jsonb),
+                COALESCE($17::jsonb, '{}'::jsonb),
+                COALESCE($18::jsonb, '{}'::jsonb)
               )
               RETURNING *
             ),

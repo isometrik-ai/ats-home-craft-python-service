@@ -114,6 +114,29 @@ def _extract_phone_numbers_and_display(
     return phone_numbers, phones_display
 
 
+def _extract_company_phone_numbers_and_display(
+    details: dict[str, Any],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Extract phone numbers and display from company details."""
+    phones = parse_json_field(details.get("phones")) or []
+    phone_numbers: list[str] = []
+    phones_display: list[dict[str, Any]] = []
+    if not isinstance(phones, list):
+        return phone_numbers, phones_display
+
+    for phone_entry in phones:
+        normalized = _normalize_phone_entry(phone_entry)
+        if normalized is None:
+            continue
+        phones_display.append(normalized)
+        number = (normalized.get("phone_number") or "").strip()
+        isd_code = (normalized.get("phone_isd_code") or "").strip()
+        if not number:
+            continue
+        phone_numbers.append(f"{isd_code}{number}" if isd_code else number)
+    return phone_numbers, phones_display
+
+
 def _extract_contact_company_linkage(
     details: dict[str, Any],
 ) -> tuple[list[str], list[str]]:
@@ -347,6 +370,8 @@ async def _build_company_document(
         contact_phone_numbers,
     ) = _extract_company_contacts_fields(details)
 
+    phone_numbers, phones_display = _extract_company_phone_numbers_and_display(details)
+
     custom_field_keys, custom_field_values = await _extract_company_custom_field_facets(
         conn=conn,
         organization_id=organization_id,
@@ -361,6 +386,9 @@ async def _build_company_document(
         "status": details.get("status"),
         "name": details.get("name") or "",
         "industry": details.get("industry") or None,
+        "email": (details.get("email") or "").strip().lower() or None,
+        "phone_numbers": phone_numbers or None,
+        "phones_display": phones_display or None,
         "contacts": contacts or None,
         "contact_full_names": contact_full_names or None,
         "contact_titles": contact_titles or None,

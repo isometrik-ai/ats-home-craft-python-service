@@ -19,6 +19,7 @@ from apps.user_service.app.schemas.common import (
     BillingPreferencesUpdate,
     KeyPeopleUpdate,
     LinkedPagesUpdate,
+    Phone,
     ProductsUpdate,
     SocialPage,
     SocialPagesUpdate,
@@ -95,10 +96,15 @@ class CreateCompanyRequest(BaseModel):
     industry: str | None = Field(None, max_length=100)
     profile_photo_url: str | None = Field(None, max_length=500)
     portal_access: bool = False
+    email: str | None = Field(None, max_length=320)
+    phones: list[Phone] = Field(default_factory=list, max_length=20)
 
     tags: list[str] = Field(default_factory=list, max_length=50)
     websites: list[Website] = Field(default_factory=list, max_length=10)
-    billing_preferences: BillingPreferences | None = None
+    billing_preferences: BillingPreferences | None = Field(
+        default_factory=BillingPreferences,
+        description="Billing preferences (defaults to empty preferences).",
+    )
     social_pages: list[SocialPage] = Field(default_factory=list, max_length=20)
 
     target_market_segments: list[str] = Field(default_factory=list, max_length=50)
@@ -253,6 +259,8 @@ class UpdateCompanyRequest(BaseModel):
     industry: str | None = Field(None, max_length=100)
     profile_photo_url: str | None = Field(None, max_length=500)
     portal_access: bool | None = None
+    email: str | None = Field(None, max_length=320)
+    phones: list[Phone] | None = Field(None, max_length=20)
     tags: list[str] | None = Field(None, max_length=50)
 
     websites: WebsitesUpdate | None = None
@@ -302,6 +310,8 @@ class CompanySummaryResponse(BaseModel):
     name: str
     industry: str | None = None
     profile_photo_url: str | None = None
+    email: str | None = None
+    phones: list[dict[str, Any]] = Field(default_factory=list)
     contacts: list[CompanySummaryContactItem] = Field(
         default_factory=list,
         description="Contacts linked to this company (basic fields)",
@@ -322,6 +332,8 @@ class CompanyDetailsResponse(BaseModel):
     industry: str | None = None
     profile_photo_url: str | None = None
     portal_access: bool = False
+    email: str | None = None
+    phones: list[dict[str, Any]] = Field(default_factory=list)
 
     primary_contact_id: str | None = None
     contacts: list[CompanySummaryContactItem] = Field(

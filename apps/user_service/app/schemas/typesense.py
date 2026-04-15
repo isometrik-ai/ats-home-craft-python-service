@@ -247,6 +247,9 @@ class TypesenseCompanyDocument(BaseModel):
     name: str
 
     industry: str | None = None
+    email: str | None = None
+    phone_numbers: list[str] | None = None
+    phones_display: list[TypesensePhoneEntry] | None = None
     contacts: list[dict[str, Any]] | None = None
     contact_full_names: list[str] | None = None
     contact_titles: list[str] | None = None
