@@ -155,14 +155,13 @@ class ContactsRepository(BaseRepository):
                 $8::text,
                 $9::text,
                 $10::text,
-                $11::text,
-                $12::date,
-                $13::text,
-                COALESCE($14::jsonb, '[]'::jsonb),
-                COALESCE($15::text[], '{}'::text[]),
+                $11::date,
+                $12::text,
+                COALESCE($13::jsonb, '[]'::jsonb),
+                COALESCE($14::text[], '{}'::text[]),
+                COALESCE($15::jsonb, '{}'::jsonb),
                 COALESCE($16::jsonb, '{}'::jsonb),
-                COALESCE($17::jsonb, '{}'::jsonb),
-                COALESCE($18::jsonb, '{}'::jsonb)
+                COALESCE($17::jsonb, '{}'::jsonb)
               )
               RETURNING *
             ),
@@ -210,7 +209,7 @@ class ContactsRepository(BaseRepository):
                 c.description,
                 c.custom_fields,
                 c.additional_data
-              FROM jsonb_to_recordset(COALESCE($19::jsonb, '[]'::jsonb)) AS c(
+              FROM jsonb_to_recordset(COALESCE($18::jsonb, '[]'::jsonb)) AS c(
                 status text,
                 name text,
                 industry text,
@@ -285,7 +284,7 @@ class ContactsRepository(BaseRepository):
                 is_primary boolean
               )
               WHERE (SELECT id FROM company) IS NOT NULL
-                AND $19::jsonb IS NOT NULL
+                AND $18::jsonb IS NOT NULL
               RETURNING 1
             ),
             membership AS (
