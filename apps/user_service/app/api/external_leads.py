@@ -334,7 +334,7 @@ async def external_create_lead(
             )
 
     response_data: dict[str, Any] = (
-        {"id": str(created.get("id"))} if isinstance(created, dict) else {}
+        {"lead_id": str(created.get("id"))} if isinstance(created, dict) else {}
     )
 
     if created_contact_id is not None:
