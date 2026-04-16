@@ -41,7 +41,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.schemas.contacts import (
-    ContactCompaniesUpdate,
+    ContactCompanyUpdate,
     ContactSummaryResponse,
     CreateContactRequest,
     UpdateContactRequest,
@@ -222,18 +222,19 @@ class ContactsService:
         if not body.company_association:
             return None, None, None, False
 
-        make_primary = bool(body.company_association.is_primary)
-        company_id = (body.company_association.existing_company_id or "").strip() or None
-        if company_id:
+        if body.company_association.add_association is not None:
+            make_primary = bool(body.company_association.add_association.is_primary)
+            company_id = (body.company_association.add_association.company_id or "").strip() or None
             return company_id, None, None, make_primary
 
-        create_company = body.company_association.create_company
+        create_block = body.company_association.create_and_associate
+        create_company = create_block.company if create_block is not None else None
         if create_company is None:
-            # Schema validator should prevent this, but keep a defensive guard.
             raise ValidationException(
                 message_key="contacts.errors.invalid_company_association",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        make_primary = bool(create_block.is_primary) if create_block is not None else False
 
         # Ignore nested lead/contact association blocks in the inline company payload.
         # Membership is handled at the contact operation layer.
@@ -625,7 +626,8 @@ class ContactsService:
         # If an existing company id was requested but not found, raise a clean NotFound.
         if (
             body.company_association
-            and body.company_association.existing_company_id
+            and body.company_association.add_association is not None
+            and body.company_association.add_association.company_id
             and not company_id
         ):
             raise NotFoundException(
@@ -919,10 +921,10 @@ class ContactsService:
         )
         created_company_id: str | None = None
         companies_delta: dict[str, Any] | None = None
-        if body.companies_update is not None:
+        if body.company_association is not None:
             delta_result = await self.apply_companies_update_delta(
                 contact_id=contact_id,
-                delta=body.companies_update,
+                delta=body.company_association,
             )
             created_company_id = delta_result.get("created_company_id")
             companies_delta = {
@@ -943,7 +945,7 @@ class ContactsService:
         self,
         *,
         contact_id: str,
-        delta: ContactCompaniesUpdate,
+        delta: ContactCompanyUpdate,
     ) -> dict[str, Any]:
         """Apply batch company association changes (add/remove/create) for a contact."""
         org_id = self.user_context.organization_id
@@ -1127,7 +1129,7 @@ class ContactsService:
             [(contact_id, organization_id)],
         )
 
-        if body.companies_update is not None:
+        if body.company_association is not None:
             meta = (update_result or {}).get("companies_delta") or {}
             affected_companies = meta.get("affected_company_ids") or []
             if affected_companies:
@@ -1161,11 +1163,13 @@ class ContactsService:
         created_company_id = (update_result or {}).get("created_company_id")
         created_company_name = None
         if (
-            body.companies_update is not None
-            and body.companies_update.create_and_associate is not None
-            and body.companies_update.create_and_associate.name
+            body.company_association is not None
+            and body.company_association.create_and_associate is not None
+            and body.company_association.create_and_associate.name
         ):
-            created_company_name = body.companies_update.create_and_associate.name.strip() or None
+            created_company_name = (
+                body.company_association.create_and_associate.name.strip() or None
+            )
 
         if created_company_id and created_company_name:
             enrichment_service = ClientEnrichmentService.from_settings()

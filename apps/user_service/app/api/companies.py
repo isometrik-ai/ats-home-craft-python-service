@@ -399,10 +399,11 @@ async def get_company_details(
     summary="Update a company",
     description=(
         "Updates company fields and related nested data (e.g., addresses). "
-        "May also apply contact association changes when `contacts_update` is provided "
-        "(same batch shape as `companies_update` on PATCH /contacts). "
+        "May also apply contact association changes when `contact_association` is provided "
+        "(same batch shape as `company_association` on PATCH /contacts). "
         "Side effects:\n"
-        "- Emits lifecycle events for the company and each contact touched by `contacts_update`\n"
+        "- Emits lifecycle events for the company and each contact touched by "
+        "`contact_association`\n"
         "- Schedules Typesense re-indexing for the company and those contacts"
     ),
     responses=COMMON_ERROR_RESPONSES,

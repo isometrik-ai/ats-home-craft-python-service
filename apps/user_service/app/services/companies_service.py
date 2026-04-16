@@ -32,7 +32,7 @@ from apps.user_service.app.db.repositories.companies_repository import (
     COMPANY_JSONB_COLUMNS,
 )
 from apps.user_service.app.schemas.companies import (
-    CompanyContactsUpdate,
+    CompanyContactUpdate,
     CreateCompanyRequest,
     UpdateCompanyRequest,
 )
@@ -220,7 +220,7 @@ class CompaniesService:
             [(company_id, organization_id)],
         )
 
-        if body.contacts_update is None:
+        if body.contact_association is None:
             return
 
         meta = (update_result or {}).get("contacts_delta") or {}
@@ -506,10 +506,10 @@ class CompaniesService:
     ]:
         """Build list payloads for company creation."""
         create_contact_for_payloads = (
-            body.contact_association.create_contact
+            body.contact_association.create_and_associate.contact
             if (
                 body.contact_association is not None
-                and body.contact_association.create_contact is not None
+                and body.contact_association.create_and_associate is not None
             )
             else None
         )
@@ -604,19 +604,26 @@ class CompaniesService:
                 created_contact_password,
             )
 
-        set_primary = bool(body.contact_association.is_primary)
-        contact_id = body.contact_association.existing_contact_id
-
-        if body.contact_association.create_contact is None:
+        if body.contact_association.add_association is not None:
+            set_primary = bool(body.contact_association.add_association.is_primary)
+            contact_id = body.contact_association.add_association.contact_id
             return (
-                contact_id,
+                str(contact_id) if contact_id else None,
                 contact_data,
                 contact_addresses,
                 set_primary,
                 created_contact_password,
             )
 
-        create_contact = body.contact_association.create_contact
+        create_block = body.contact_association.create_and_associate
+        create_contact = create_block.contact if create_block is not None else None
+        if create_contact is None:
+            # Schema validator should prevent this, but keep a defensive guard.
+            raise ValidationException(
+                message_key="companies.errors.invalid_contact_association",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        set_primary = bool(create_block.is_primary) if create_block is not None else False
         validated_contact_custom_fields = await self._validate_custom_fields_for_create(
             custom_fields=create_contact.custom_fields,
             entity_type=EntityType.CONTACT,
@@ -1199,11 +1206,11 @@ class CompaniesService:
         body: UpdateCompanyRequest,
     ) -> dict[str, Any] | None:
         """Apply contacts update delta if present."""
-        if body.contacts_update is None:
+        if body.contact_association is None:
             return None
         return await self.apply_contacts_update_delta(
             company_id=company_id,
-            delta=body.contacts_update,
+            delta=body.contact_association,
         )
 
     @staticmethod
@@ -1325,7 +1332,7 @@ class CompaniesService:
 
     @staticmethod
     def _parse_company_contacts_update_delta(
-        delta: CompanyContactsUpdate,
+        delta: CompanyContactUpdate,
     ) -> tuple[list[str], list[str], list[str], str | None]:
         """Split payload into remove/add/unset-primary lists and a single primary id (if any)."""
         remove_ids = list(dict.fromkeys(delta.remove_associations or []))
@@ -1358,7 +1365,7 @@ class CompaniesService:
         self,
         *,
         company_id: str,
-        delta: CompanyContactsUpdate,
+        delta: CompanyContactUpdate,
     ) -> dict[str, Any]:
         """Apply batch contact association changes (add/remove/create/primary) for a company."""
         org_id = self.user_context.organization_id
