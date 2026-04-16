@@ -392,6 +392,106 @@ async def get_company_details(
     )
 
 
+@handle_api_exceptions("enrich company")
+@router.post(
+    "/{company_id}/enrich",
+    status_code=http_status.HTTP_202_ACCEPTED,
+    summary="Trigger company enrichment",
+    description="Triggers enrichment for a company using the latest persisted data.",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="companies",
+    category="CLIENT",
+)
+async def enrich_company(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    company_id: str = Path(..., description="Company identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Trigger enrichment for a company (best-effort async)."""
+    request.state.audit_table = "companies"
+    request.state.audit_requested_id = company_id
+    request.state.audit_description = f"Triggered enrichment for company: {company_id}"
+    request.state.audit_risk_level = "medium"
+
+    enrich_event: dict | None = None
+    organization_id: str | None = None
+    payload_data: dict[str, Any] = {}
+    async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CLIENTS_MANAGEMENT_EDIT,
+        )
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        organization_id = user_context.organization_id
+
+        service = CompaniesService(db_connection=db_connection, user_context=user_context)
+        details = await service.get_company_details(company_id=company_id)
+
+        addresses_payload: list[dict[str, Any]] = []
+        raw_addresses = details.get("addresses") or []
+        if isinstance(raw_addresses, list):
+            for addr in raw_addresses:
+                if isinstance(addr, dict) and (addr.get("country") or "").strip():
+                    addresses_payload.append({"country": (addr.get("country") or "").strip()})
+
+        payload_data = {
+            "name": details.get("name"),
+            "industry": details.get("industry"),
+            "email": details.get("email"),
+            "websites": details.get("websites") or [],
+            "social_pages": details.get("social_pages") or [],
+            "addresses": addresses_payload,
+        }
+
+        event_service = EventService(db_connection=db_connection)
+        enrich_event = await event_service.create_lifecycle_event(
+            event_type=ClientEventType.ENRICHMENT_REQUESTED.value,
+            aggregate_id=company_id,
+            organization_id=organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={"module": "companies", "action": "enrich"},
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+
+    if organization_id is not None:
+        enrichment_service = ClientEnrichmentService.from_settings()
+        background_tasks.add_task(
+            enrichment_service.run_client_enrichment,
+            client_id=str(company_id),
+            organization_id=str(organization_id),
+            client_type="company",
+            payload_data=payload_data,
+            entity_table="companies",
+        )
+    if enrich_event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=enrich_event,
+            key=company_id,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+
+    return success_response(
+        request=request,
+        message_key="companies.success.company_enrichment_requested",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_202_ACCEPTED,
+    )
+
+
 @handle_api_exceptions("update company")
 @router.patch(
     "/{company_id}",
