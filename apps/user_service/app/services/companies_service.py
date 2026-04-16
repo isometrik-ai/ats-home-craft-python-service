@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
+from asyncpg import UniqueViolationError
 from fastapi import BackgroundTasks
 from supabase import AsyncClient
 
@@ -68,6 +69,7 @@ from apps.user_service.app.utils.common_utils import (
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 from libs.shared_utils.http_exceptions import (
+    ConflictException,
     NotFoundException,
     ValidationException,
 )
@@ -365,49 +367,62 @@ class CompaniesService:
 
         addresses_rows = self._company_addresses_rows(body=body)
 
-        created = await self.companies_repo.create_company_with_optional_contact_link(
-            organization_id=org_id,
-            company_data={
-                "status": ClientStatus.ACTIVE.value,
-                "name": body.name.strip(),
-                "industry": body.industry,
-                "profile_photo_url": body.profile_photo_url,
-                "portal_access": body.portal_access,
-                "email": (body.email or "").strip() or None,
-                "phones": serialize_jsonb_param(
-                    "phones", company_phones_payload, COMPANY_JSONB_COLUMNS
-                ),
-                "tags": body.tags,
-                "websites": jsonb_params["websites"],
-                "billing_preferences": jsonb_params["billing_preferences"],
-                "social_pages": jsonb_params["social_pages"],
-                "target_market_segments": body.target_market_segments,
-                "current_tech_stack": body.current_tech_stack,
-                "preferred_communication_channels": body.preferred_communication_channels,
-                "industry_specific_terminologies": body.industry_specific_terminologies,
-                "description": body.description,
-                "custom_fields": jsonb_params["custom_fields"],
-                "additional_data": serialize_jsonb_param(
-                    "additional_data",
-                    {
-                        **(body.additional_data or {}),
-                        **(
-                            {"intake_stage": (body.lead.intake_stage or "").strip()}
-                            if body.lead is not None
-                            and body.lead.intake_stage is not None
-                            and (body.lead.intake_stage or "").strip()
-                            else {}
-                        ),
+        try:
+            created = await self.companies_repo.create_company_with_optional_contact_link(
+                organization_id=org_id,
+                company_data={
+                    "status": ClientStatus.ACTIVE.value,
+                    "name": body.name.strip(),
+                    "industry": body.industry,
+                    "profile_photo_url": body.profile_photo_url,
+                    "portal_access": body.portal_access,
+                    "email": (body.email or "").strip() or None,
+                    "phones": serialize_jsonb_param(
+                        "phones", company_phones_payload, COMPANY_JSONB_COLUMNS
+                    ),
+                    "tags": body.tags,
+                    "websites": jsonb_params["websites"],
+                    "billing_preferences": jsonb_params["billing_preferences"],
+                    "social_pages": jsonb_params["social_pages"],
+                    "target_market_segments": body.target_market_segments,
+                    "current_tech_stack": body.current_tech_stack,
+                    "preferred_communication_channels": body.preferred_communication_channels,
+                    "industry_specific_terminologies": body.industry_specific_terminologies,
+                    "description": body.description,
+                    "custom_fields": jsonb_params["custom_fields"],
+                    "additional_data": serialize_jsonb_param(
+                        "additional_data",
+                        {
+                            **(body.additional_data or {}),
+                            **(
+                                {"intake_stage": (body.lead.intake_stage or "").strip()}
+                                if body.lead is not None
+                                and body.lead.intake_stage is not None
+                                and (body.lead.intake_stage or "").strip()
+                                else {}
+                            ),
+                        },
+                        COMPANY_JSONB_COLUMNS,
+                    ),
+                },
+                addresses=addresses_rows,
+                contact_id=str(contact_id) if contact_id else None,
+                contact_data=contact_data,
+                contact_addresses=contact_addresses,
+                set_primary=set_primary,
+            )
+        except UniqueViolationError as exc:
+            constraint = getattr(exc, "constraint_name", None)
+            if constraint == "uq_contacts_user_org":
+                raise ConflictException(
+                    message_key="companies.errors.contact_user_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                    params={
+                        "organization_id": org_id,
+                        "user_id": (contact_data or {}).get("user_id"),
                     },
-                    COMPANY_JSONB_COLUMNS,
-                ),
-            },
-            addresses=addresses_rows,
-            contact_id=str(contact_id) if contact_id else None,
-            contact_data=contact_data,
-            contact_addresses=contact_addresses,
-            set_primary=set_primary,
-        )
+                ) from exc
+            raise
         company_id = str(created["company_id"])
         company = created["company"]
 
