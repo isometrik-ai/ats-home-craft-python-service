@@ -17,6 +17,7 @@ from typing import Any
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
+from fastapi.responses import RedirectResponse
 from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
@@ -36,6 +37,12 @@ from apps.user_service.app.schemas.contacts import (
     CreateContactRequest,
     UpdateContactRequest,
 )
+from apps.user_service.app.schemas.contacts_imports import (
+    CreateContactsImportJobResponse,
+    ExternalCreateContactsImportJobRequest,
+    GetContactsImportJobResponse,
+    RetryContactsImportJobResponse,
+)
 from apps.user_service.app.schemas.enums import (
     ClientEventType,
     ClientStatus,
@@ -49,6 +56,10 @@ from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
 from apps.user_service.app.services.companies_service import CompaniesService
+from apps.user_service.app.services.contacts_imports_service import (
+    CONTACTS_IMPORT_TOPIC,
+    ContactsImportService,
+)
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service import (
@@ -61,6 +72,7 @@ from apps.user_service.app.utils.common_utils import (
     UserContext,
     handle_api_exceptions,
 )
+from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.response_factory import (
     list_response,
     success_response,
@@ -72,6 +84,15 @@ from libs.shared_utils.status_codes import CustomStatusCode
 router = APIRouter(prefix="/integrations/clients", tags=["Clients (External)"])
 
 CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
+
+CONTACTS_IMPORT_ERROR_RESPONSES: dict[int | str, dict] = {
+    http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+    http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+    http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+    http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+}
 
 
 def _external_user_context(*, organization_id: str, actor_email: str | None) -> UserContext:
@@ -1003,4 +1024,195 @@ async def external_delete_contact(
         message_key="clients.success.client_deleted",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("external create contacts import job")
+@router.post(
+    "/contacts/imports",
+    status_code=http_status.HTTP_202_ACCEPTED,
+    summary="Create a contacts import job (external auth)",
+    description=(
+        "Creates a contacts import job and enqueues it for async processing. "
+        "Organization is derived from Isometrik credentials (`licenseKey`/`appSecret`)."
+    ),
+    responses=CONTACTS_IMPORT_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="import_jobs",
+    category="CLIENT",
+)
+async def external_create_contacts_import_job(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    organization_id: str = Depends(get_organization_context),
+    body: ExternalCreateContactsImportJobRequest = Body(...),
+):
+    """Create a contacts import job using external (Isometrik) authentication."""
+    actor_email = request.state.external_actor_email
+    async with db_connection.transaction():
+        request.state.audit_table = "import_jobs"
+        request.state.audit_description = "Created contacts import job (external)"
+        request.state.audit_risk_level = "high"
+        request.state.audit_user_context = {
+            "user_id": "00000000-0000-0000-0000-000000000000",
+            "user_email": actor_email,
+            "organization_id": organization_id,
+        }
+
+        service = ContactsImportService(db_connection=db_connection)
+        job, event_payload = await service.create_job_and_enqueue(
+            organization_id=organization_id,
+            requested_by=actor_email,
+            file_url=str(body.file_url),
+            file_type=body.file_type.value,
+            schema_version=body.schema_version,
+            mapping=body.mapping,
+            options=body.options.model_dump(mode="json") if body.options else None,
+        )
+        request.state.audit_requested_id = str(job["job_id"])
+        request.state.raw_audit_new_data = job
+
+    background_tasks.add_task(
+        EventService.publish_event_background,
+        event=event_payload,
+        key=str(job["job_id"]),
+        topics=[CONTACTS_IMPORT_TOPIC],
+    )
+
+    return success_response(
+        request=request,
+        message_key="contacts_imports.success.job_created",
+        custom_code=CustomStatusCode.ACCEPTED,
+        status_code=http_status.HTTP_202_ACCEPTED,
+        data=CreateContactsImportJobResponse(
+            job_id=str(job["job_id"]),
+            status=job["status"],
+        ).model_dump(exclude_none=True, mode="json"),
+    )
+
+
+@handle_api_exceptions("external get contacts import job")
+@router.get(
+    "/contacts/imports/{job_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get contacts import job status (external auth)",
+    responses=CONTACTS_IMPORT_ERROR_RESPONSES,
+)
+@limiter.limit("200/minute")
+async def external_get_contacts_import_job(
+    request: Request,
+    job_id: str = Path(..., min_length=5, max_length=128, description="Import job ID"),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    organization_id: str = Depends(get_organization_context),
+):
+    """Return status and progress for an external contacts import job."""
+    service = ContactsImportService(db_connection=db_connection)
+    job = await service.get_job(job_id=job_id, organization_id=organization_id)
+    if job is None:
+        raise NotFoundException(message_key="contacts_imports.errors.job_not_found")
+
+    data = GetContactsImportJobResponse.from_job_row(job).model_dump(exclude_none=True, mode="json")
+
+    return success_response(
+        request=request,
+        message_key="contacts_imports.success.job_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=data,
+    )
+
+
+@handle_api_exceptions("external get contacts import errors")
+@router.get(
+    "/contacts/imports/{job_id}/errors",
+    status_code=http_status.HTTP_307_TEMPORARY_REDIRECT,
+    summary="Download row-level errors (external auth)",
+    responses=CONTACTS_IMPORT_ERROR_RESPONSES,
+)
+@limiter.limit("200/minute")
+async def external_get_contacts_import_errors(
+    _request: Request,
+    job_id: str = Path(..., min_length=5, max_length=128, description="Import job ID"),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    organization_id: str = Depends(get_organization_context),
+):
+    """Redirect to the presigned URL containing row-level errors for an external import."""
+    service = ContactsImportService(db_connection=db_connection)
+    job = await service.get_job(job_id=job_id, organization_id=organization_id)
+    if job is None:
+        raise NotFoundException(message_key="contacts_imports.errors.job_not_found")
+    url = job.get("errors_file_url")
+    if not url:
+        raise NotFoundException(message_key="contacts_imports.errors.errors_not_found")
+    return RedirectResponse(url=str(url), status_code=http_status.HTTP_307_TEMPORARY_REDIRECT)
+
+
+@handle_api_exceptions("external retry contacts import job")
+@router.post(
+    "/contacts/imports/{job_id}/retry",
+    status_code=http_status.HTTP_202_ACCEPTED,
+    summary="Retry contacts import job (external auth)",
+    responses=CONTACTS_IMPORT_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="import_jobs",
+    category="CLIENT",
+)
+async def external_retry_contacts_import_job(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    job_id: str = Path(..., min_length=5, max_length=128, description="Import job ID"),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    organization_id: str = Depends(get_organization_context),
+):
+    """Retry a contacts import job created via external authentication."""
+    actor_email = request.state.external_actor_email
+    async with db_connection.transaction():
+        request.state.audit_table = "import_jobs"
+        request.state.audit_requested_id = job_id
+        request.state.audit_description = f"Retried contacts import job (external): {job_id}"
+        request.state.audit_risk_level = "high"
+        request.state.audit_user_context = {
+            "user_id": "00000000-0000-0000-0000-000000000000",
+            "user_email": actor_email,
+            "organization_id": organization_id,
+        }
+
+        service = ContactsImportService(db_connection=db_connection)
+        result = await service.retry_job_and_enqueue(
+            job_id=job_id,
+            organization_id=organization_id,
+            requested_by=actor_email,
+        )
+        if result is None:
+            raise NotFoundException(message_key="contacts_imports.errors.job_not_found")
+        job, event_payload = result
+        request.state.raw_audit_new_data = job
+
+    background_tasks.add_task(
+        EventService.publish_event_background,
+        event=event_payload,
+        key=str(job["job_id"]),
+        topics=[CONTACTS_IMPORT_TOPIC],
+    )
+
+    return success_response(
+        request=request,
+        message_key="contacts_imports.success.job_queued",
+        custom_code=CustomStatusCode.ACCEPTED,
+        status_code=http_status.HTTP_202_ACCEPTED,
+        data=RetryContactsImportJobResponse(
+            job_id=str(job["job_id"]),
+            status=job["status"],
+        ).model_dump(exclude_none=True, mode="json"),
     )
