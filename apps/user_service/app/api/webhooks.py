@@ -1,5 +1,6 @@
 """Webhook endpoints for external services (e.g. enrichment callbacks)."""
 
+import uuid
 from typing import Any
 
 import asyncpg
@@ -7,9 +8,12 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.dependencies.external_auth import get_organization_context
+from apps.user_service.app.schemas.enums import KafkaTopics
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
+from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service import (
     index_companies_background,
     index_contacts_background,
@@ -100,6 +104,67 @@ async def enrichment_webhook(
                 index_contacts_background,
                 [(entity_id, organization_id)],
             )
+
+    return success_response(
+        request=request,
+        message_key="webhooks.success.received",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("email notifications webhook")
+@router.post(
+    "/email-notifications",
+    status_code=http_status.HTTP_200_OK,
+    summary="Email notifications webhook",
+    description="Receives email notification events and publishes a Kafka event.",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Webhook received"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Invalid payload"},
+    },
+)
+async def email_notifications_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    organization_id: str = Depends(get_organization_context),
+    body: dict[str, Any] = Body(...),
+):
+    """Handle POST from email notifications webhook;
+    process email notification events and publish a Kafka event.
+
+    This webhook is used to receive email notification events from external providers
+    and publish a Kafka event.
+    """
+    # Provider-agnostic: we store and publish the raw payload without assuming a schema.
+    aggregate_id = str(body.get("event_id") or uuid.uuid4())
+
+    # Store the raw webhook payload and emit a Kafka event with:
+    # - module: "email"
+    # - aggregate_id: best-effort (event_id or UUID fallback)
+    event_service = EventService(db_connection=db_connection)
+    async with db_connection.transaction():
+        event = await event_service.create_lifecycle_event(
+            event_type="email.notification.received",
+            aggregate_id=aggregate_id,
+            organization_id=organization_id,
+            actor_user_id=None,
+            payload={
+                "module": "email",
+                "action": "received",
+                "raw_event": body,
+            },
+            topics=[KafkaTopics.CRM_EVENTS],
+        )
+
+    background_tasks.add_task(
+        EventService.publish_event_background,
+        event=event,
+        key=aggregate_id,
+        topics=[KafkaTopics.CRM_EVENTS],
+    )
 
     return success_response(
         request=request,
