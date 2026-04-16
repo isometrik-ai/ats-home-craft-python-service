@@ -56,46 +56,61 @@ class ContactLeadAssociation(BaseModel):
     )
 
 
-class ContactCompanyLink(BaseModel):
-    """Company association payload used during contact create.
-
-    Supports:
-    - link an existing company (by id)
-    - create a new company inline
-    """
+class ContactCompanyAssociationCreateInline(BaseModel):
+    """Create a new company inline and link it during contact create."""
 
     model_config = ConfigDict(extra="forbid")
 
-    existing_company_id: str | None = Field(None, description="Existing company id to link")
-    create_company: CreateCompanyRequest | None = Field(
-        None,
-        description="Create a new company inline and associate it to the contact.",
+    company: CreateCompanyRequest = Field(
+        ...,
+        description="New company payload (same shape as POST /companies).",
     )
     is_primary: bool = Field(
         default=False,
         description="If true, set this contact as the company's primary contact.",
     )
 
-    @model_validator(mode="after")
-    def validate_company_id_or_name(self) -> "ContactCompanyLink":
-        """Require exactly one of existing_company_id / create_company when provided."""
-        cid = (self.existing_company_id or "").strip()
-        has_company_obj = self.create_company is not None
 
-        provided = sum(bool(x) for x in [bool(cid), has_company_obj])
-        if provided != 1:
+class ContactCompaniesCreate(BaseModel):
+    """Company association payload used during contact create.
+
+    Mirrors the update naming, but allows only a single operation:
+    - add an existing company membership (optional primary)
+    - OR create exactly one new company and associate it (optional primary)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    add_association: ContactCompanyAssociationAdd | None = Field(
+        default=None,
+        description="Associate the contact with an existing company (single).",
+    )
+    create_and_associate: ContactCompanyAssociationCreateInline | None = Field(
+        default=None,
+        description="Create exactly one new company and associate it to the contact (single).",
+    )
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "ContactCompaniesCreate":
+        """Validate the payload."""
+        if bool(self.add_association) == bool(self.create_and_associate):
             raise ValidationException(
                 message_key="contacts.errors.invalid_company_association",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
-                params={"details": "Provide exactly one of existing_company_id or create_company."},
+                params={
+                    "details": "Provide exactly one of add_association or create_and_associate."
+                },
             )
-
-        if self.is_primary and not (cid or has_company_obj):
-            raise ValidationException(
-                message_key="contacts.errors.invalid_company_association_primary",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-                params={"details": "is_primary requires existing_company_id or create_company."},
-            )
+        if self.add_association is not None:
+            cid = (self.add_association.company_id or "").strip()
+            if not cid:
+                raise ValidationException(
+                    message_key="contacts.errors.invalid_company_association",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"details": "add_association.company_id is required."},
+                )
+            # Avoid mutating nested model attributes (pylint E0237 false-positive on slots).
+            self.add_association = self.add_association.model_copy(update={"company_id": cid})
         return self
 
 
@@ -151,10 +166,10 @@ class CreateContactRequest(BaseModel):
         ),
     )
 
-    # optional company association at create-time
-    company_association: ContactCompanyLink | None = Field(
+    # optional company association at create-time (single op wrapper)
+    company_association: ContactCompaniesCreate | None = Field(
         default=None,
-        description="Optional company association (link existing or create inline).",
+        description="Optional company association (add existing OR create+associate).",
     )
 
     # optional addresses created on contact
@@ -204,7 +219,7 @@ class CreateContactRequestStandalone(BaseModel):
     )
 
     # optional company association at create-time
-    company_association: ContactCompanyLink | None = None
+    company_association: ContactCompaniesCreate | None = None
 
     # optional addresses created on contact
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
@@ -239,7 +254,7 @@ class UpdateContactRequest(BaseModel):
     addresses: AddressesUpdate | None = None
 
     # preferred company association delta (batch-friendly)
-    companies_update: ContactCompaniesUpdate | None = None
+    company_association: ContactCompanyUpdate | None = None
 
 
 class ContactCompanyAssociationAdd(BaseModel):
@@ -281,7 +296,7 @@ class ContactCompanyAssociationUpdate(BaseModel):
     )
 
 
-class ContactCompaniesUpdate(BaseModel):
+class ContactCompanyUpdate(BaseModel):
     """Batch company association changes for a contact (developer-friendly, low round trips).
 
     Supports in one request:
@@ -310,7 +325,7 @@ class ContactCompaniesUpdate(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_payload(self) -> "ContactCompaniesUpdate":
+    def validate_payload(self) -> "ContactCompanyUpdate":
         """Validate the payload."""
         remove_ids = [c.strip() for c in (self.remove_associations or []) if (c or "").strip()]
         self.remove_associations = remove_ids
@@ -349,7 +364,7 @@ class ContactCompaniesUpdate(BaseModel):
             and not self.update_associations
             and self.create_and_associate is None
         ):
-            raise ValueError("Provide at least one operation in companies_update.")
+            raise ValueError("Provide at least one operation in company_association.")
 
         return self
 
@@ -428,7 +443,7 @@ def _rebuild_cross_schema_models() -> None:
 
     companies_module = importlib.import_module("apps.user_service.app.schemas.companies")
 
-    ContactCompanyLink.model_rebuild(
+    ContactCompanyAssociationCreateInline.model_rebuild(
         _types_namespace={
             # `CreateCompanyRequest` transitively references `CreateContactRequest` via
             # `CompanyContactLink`, so we must provide both names here.
@@ -436,10 +451,10 @@ def _rebuild_cross_schema_models() -> None:
             "CreateContactRequest": CreateContactRequest,
         }
     )
-    companies_module.CompanyContactLink.model_rebuild(
+    companies_module.CompanyContactAssociationCreate.model_rebuild(
         _types_namespace={"CreateContactRequest": CreateContactRequest}
     )
-    companies_module.CompanyContactAssociationCreate.model_rebuild(
+    companies_module.CompanyContactsCreate.model_rebuild(
         _types_namespace={"CreateContactRequest": CreateContactRequest}
     )
 

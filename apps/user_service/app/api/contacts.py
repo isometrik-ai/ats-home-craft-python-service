@@ -509,9 +509,9 @@ async def get_contact_details(
     summary="Update a contact",
     description=(
         "Updates contact fields and related nested data (e.g., addresses). "
-        "May also apply company association changes when `companies_update` is provided."
+        "May also apply company association changes when `company_association` is provided."
         "Side effects:"
-        "- Emits lifecycle events for the contact and each company touched by `companies_update`"
+        "- Emits lifecycle events for the contact and each company touched by `company_association`"
         "- Schedules Typesense re-indexing for the contact and those companies"
     ),
     responses=COMMON_ERROR_RESPONSES,
@@ -557,7 +557,7 @@ async def update_contact(
         Success response envelope containing the service result payload.
 
     Side effects:
-        - Emits lifecycle events for the contact and any companies touched by `companies_update`
+        - Emits lifecycle events for the contact and any companies touched by `company_association`
           (best-effort publish via BackgroundTasks).
         - Schedules Typesense re-indexing for the contact and those companies (BackgroundTasks).
     """

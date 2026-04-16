@@ -57,40 +57,6 @@ class CompanyLeadAssociation(BaseModel):
     )
 
 
-class CompanyContactLink(BaseModel):
-    """Optional contact association during company create.
-
-    Supports:
-    - link an existing contact
-    - create a new contact inline and link it
-    - optionally set as company primary contact
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    existing_contact_id: str | None = Field(
-        None, description="Existing contact id to link to the company"
-    )
-    create_contact: CreateContactRequest | None = Field(
-        None,
-        description="Create a new contact inline and link it to the company.",
-    )
-    is_primary: bool = Field(
-        default=False,
-        description="If true, set this contact as the company's primary contact.",
-    )
-
-    @model_validator(mode="after")
-    def validate_exactly_one(self) -> "CompanyContactLink":
-        """Require exactly one of ``contact_id`` or nested ``contact`` create payload."""
-        if bool(self.existing_contact_id) == bool(self.create_contact):
-            raise ValidationException(
-                message_key="companies.errors.invalid_contact_association",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return self
-
-
 class CreateCompanyRequest(BaseModel):
     """Create a company.
 
@@ -135,10 +101,10 @@ class CreateCompanyRequest(BaseModel):
         ),
     )
 
-    # Developer-friendly association input (one contact on create).
-    contact_association: CompanyContactLink | None = Field(
+    # Developer-friendly association input (one contact operation on create).
+    contact_association: CompanyContactsCreate | None = Field(
         default=None,
-        description="Optional contact association (link existing or create inline).",
+        description="Optional contact association (add existing OR create+associate).",
     )
 
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
@@ -186,7 +152,7 @@ class CompanyContactAssociationUpdate(BaseModel):
     )
 
 
-class CompanyContactsUpdate(BaseModel):
+class CompanyContactUpdate(BaseModel):
     """Batch contact association changes for a company.
 
     Mirrors ``ContactCompaniesUpdate`` on PATCH ``/contacts``.
@@ -218,7 +184,7 @@ class CompanyContactsUpdate(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_payload(self) -> "CompanyContactsUpdate":
+    def validate_payload(self) -> "CompanyContactUpdate":
         """Normalize ids and ensure at least one batch operation is present."""
         remove_ids = [
             entry.strip() for entry in (self.remove_associations or []) if (entry or "").strip()
@@ -257,8 +223,53 @@ class CompanyContactsUpdate(BaseModel):
             and not self.update_associations
             and self.create_and_associate is None
         ):
-            raise ValueError("Provide at least one operation in contacts_update.")
+            raise ValueError("Provide at least one operation in contact_association.")
 
+        return self
+
+
+class CompanyContactsCreate(BaseModel):
+    """Contact association payload used during company create.
+
+    Mirrors the update naming, but allows only a single operation:
+    - add an existing contact membership (optional primary)
+    - OR create exactly one new contact and associate it (optional primary)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    add_association: CompanyContactAssociationAdd | None = Field(
+        default=None,
+        description="Associate an existing contact to this company (single).",
+    )
+    create_and_associate: CompanyContactAssociationCreate | None = Field(
+        default=None,
+        description="Create exactly one new contact and associate it to the company (single).",
+    )
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "CompanyContactsCreate":
+        """Validate mutual exclusivity and normalize nested ids."""
+        if bool(self.add_association) == bool(self.create_and_associate):
+            raise ValidationException(
+                message_key="companies.errors.invalid_contact_association",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={
+                    "details": "Provide exactly one of add_association or create_and_associate."
+                },
+            )
+        if self.add_association is not None:
+            contact_id = (self.add_association.contact_id or "").strip()
+            if not contact_id:
+                raise ValidationException(
+                    message_key="companies.errors.invalid_contact_association",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"details": "add_association.contact_id is required."},
+                )
+            # Avoid mutating nested model attributes (pylint E0237 false-positive on slots).
+            self.add_association = self.add_association.model_copy(
+                update={"contact_id": contact_id}
+            )
         return self
 
 
@@ -295,7 +306,7 @@ class UpdateCompanyRequest(BaseModel):
     products: ProductsUpdate | None = None
     key_people: KeyPeopleUpdate | None = None
 
-    contacts_update: CompanyContactsUpdate | None = None
+    contact_association: CompanyContactUpdate | None = None
 
 
 class CompanySummaryContactItem(BaseModel):
