@@ -55,6 +55,44 @@ class ContactsRepository(BaseRepository):
         )
         return str(fetched_row["id"]) if fetched_row and fetched_row.get("id") else None
 
+    async def get_contact_ids_by_emails(
+        self,
+        *,
+        organization_id: str,
+        emails: list[str],
+    ) -> dict[str, str]:
+        """Return existing contact ids by normalized email within an org (bulk).
+
+        Keys are normalized to lowercase/trimmed.
+        """
+        normed = [(e or "").strip().lower() for e in (emails or []) if (e or "").strip()]
+        if not normed:
+            return {}
+
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              LOWER(COALESCE(au.email::text, '')) AS email_norm,
+              ct.id::text AS id
+            FROM contacts ct
+            LEFT JOIN auth.users au
+              ON au.id = ct.user_id
+            WHERE ct.organization_id = $1::uuid
+              AND ct.status != $2::text
+              AND LOWER(COALESCE(au.email::text, '')) = ANY($3::text[])
+            """,
+            organization_id,
+            ClientStatus.DELETED.value,
+            normed,
+        )
+        out: dict[str, str] = {}
+        for r in rows:
+            email_norm = str(r["email_norm"] or "").strip().lower()
+            cid = str(r["id"] or "")
+            if email_norm and cid and email_norm not in out:
+                out[email_norm] = cid
+        return out
+
     async def create_contacts(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Create contacts in bulk."""
         required = ["organization_id"]
@@ -509,6 +547,16 @@ class ContactsRepository(BaseRepository):
             """,
             contact_id,
             address_ids,
+        )
+
+    async def delete_all_contact_addresses(self, *, contact_id: str) -> None:
+        """Delete all address rows for a contact."""
+        await self.db_connection.execute(
+            """
+            DELETE FROM contact_addresses
+            WHERE contact_id = $1::uuid
+            """,
+            contact_id,
         )
 
     async def get_contact_addresses(self, *, contact_id: str) -> list[dict[str, Any]]:

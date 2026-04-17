@@ -139,3 +139,66 @@ class ImportJobsRepository(BaseRepository):
             touch_updated_at=True,
         )
         return self._normalize_job_row(updated) if updated else None
+
+    async def set_status_and_timestamps(
+        self,
+        *,
+        job_id: str,
+        organization_id: str,
+        status: str,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Update job status and optionally set started/finished timestamps."""
+        update_data: dict[str, Any] = {"status": status}
+        if started_at is not None:
+            update_data["started_at"] = started_at
+        if finished_at is not None:
+            update_data["finished_at"] = finished_at
+        updated = await self.update_returning(
+            table=self.TABLE,
+            where_sql="WHERE job_key = $2 AND organization_id = $3",
+            where_params=[job_id, organization_id],
+            update_data=update_data,
+            jsonb_columns=self.JSONB_COLUMNS,
+            touch_updated_at=True,
+        )
+        return self._normalize_job_row(updated) if updated else None
+
+    async def increment_counters(
+        self,
+        *,
+        job_id: str,
+        organization_id: str,
+        total_rows_delta: int,
+        processed_rows_delta: int,
+        success_rows_delta: int,
+        error_rows_delta: int,
+    ) -> dict[str, Any] | None:
+        """Atomically increment progress counters for an import job.
+
+        This keeps polling cheap and ensures that concurrent updates from
+        different batches do not overwrite each other.
+        """
+        query = f"""
+            UPDATE {self.TABLE}
+            SET
+                total_rows = total_rows + $3,
+                processed_rows = processed_rows + $4,
+                success_rows = success_rows + $5,
+                error_rows = error_rows + $6,
+                updated_at = NOW()
+            WHERE job_key = $1 AND organization_id = $2
+            RETURNING *
+        """
+        row = await self.db_connection.fetchrow(
+            query,
+            job_id,
+            organization_id,
+            total_rows_delta,
+            processed_rows_delta,
+            success_rows_delta,
+            error_rows_delta,
+        )
+        return self._normalize_job_row(dict(row)) if row else None
+
