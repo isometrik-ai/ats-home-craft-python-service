@@ -197,7 +197,7 @@
       "company_not_found": "Company does not exist or has been deleted.",
       "contact_not_found": "One or more contacts do not exist or have been deleted.",
       "contact_creation_failed": "Contact creation failed. Please try again.",
-      "contact_user_already_exists": "A contact for this user already exists in your organization. Please link the existing contact instead of creating a new one.",
+      "contact_user_already_exists": "A contact for this email already exists in your organization. Please link the existing contact instead of creating a new one.",
       "invalid_contact_association": "Invalid contact association payload. Provide exactly one of `contact_id` or `contact`.",
       "website_not_found": "Website not found.",
       "social_page_not_found": "Social page not found.",
@@ -219,6 +219,7 @@
     "errors": {
       "contact_not_found": "Contact does not exist or has been deleted.",
       "company_not_found": "Company does not exist or has been deleted.",
+      "contact_user_already_exists": "A contact for this email already exists in your organization. Please link the existing contact instead of creating a new one.",
       "contact_creation_failed": "Contact creation failed. Please try again.",
       "invalid_company_association": "Invalid company association payload. Provide exactly one of `company_id` or `company`.",
       "invalid_company_association_primary": "Invalid company association payload. `is_primary` requires `company_id` or `company`.",

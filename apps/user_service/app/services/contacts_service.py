@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
+from asyncpg import UniqueViolationError
 from fastapi import BackgroundTasks
 from supabase import AsyncClient
 
@@ -494,6 +495,45 @@ class ContactsService:
             )
         return created_entities
 
+    async def _create_contact_with_company_link_or_conflict(
+        self,
+        *,
+        organization_id: str,
+        user_id: str,
+        isometrik_user_id: str | None,
+        contact_payload: dict[str, Any],
+        company_id: str | None,
+        company_data: dict[str, Any] | None,
+        company_addresses: list[dict[str, Any]] | None,
+        make_primary: bool,
+    ) -> dict[str, Any]:
+        """Create contact + company link with conflict mapping for known uniqueness rules."""
+        try:
+            return await self.contacts_repo.create_contact_with_optional_company_link(
+                organization_id=organization_id,
+                contact_data={
+                    **contact_payload,
+                    "user_id": user_id,
+                    "isometrik_user_id": isometrik_user_id,
+                },
+                company_id=company_id,
+                company_data=company_data,
+                company_addresses=company_addresses,
+                make_primary=make_primary,
+            )
+        except UniqueViolationError as exc:
+            constraint = getattr(exc, "constraint_name", None)
+            if constraint == "uq_contacts_user_org":
+                raise ConflictException(
+                    message_key="contacts.errors.contact_user_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                    params={
+                        "organization_id": organization_id,
+                        "user_id": user_id,
+                    },
+                ) from exc
+            raise
+
     async def create_contact(self, body: CreateContactRequest) -> dict[str, Any]:
         """Create a contact with optional company link (and optional primary designation).
 
@@ -587,11 +627,11 @@ class ContactsService:
         additional_data_jsonb = jsonb_params["additional_data"]
         social_pages_jsonb = jsonb_params["social_pages"]
 
-        created = await self.contacts_repo.create_contact_with_optional_company_link(
+        created = await self._create_contact_with_company_link_or_conflict(
             organization_id=org_id,
-            contact_data={
-                "user_id": user_id,
-                "isometrik_user_id": isometrik_user_id,
+            user_id=user_id,
+            isometrik_user_id=isometrik_user_id,
+            contact_payload={
                 "status": ClientStatus.ACTIVE.value,
                 "prefix": body.prefix,
                 "first_name": body.first_name,
