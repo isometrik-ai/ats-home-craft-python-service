@@ -43,7 +43,13 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.bulk_leads_creator import BulkLeadCreator
-from apps.user_service.app.utils.common_utils import UserContext, parse_json_field, serialize_jsonb_param
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    coerce_json_list,
+    parse_json_any,
+    parse_json_field,
+    serialize_jsonb_param,
+)
 from libs.shared_db.supabase_db.client import get_supabase_service_client
 
 CONTACTS_IMPORT_TOPIC = ContactsImportKafkaStream.CONTACTS_IMPORT_REQUESTED
@@ -219,28 +225,23 @@ class ContactsImportService:
         if ContactsImportJobStatus(str(job["status"])) != ContactsImportJobStatus.QUEUED:
             return
 
-        started_at = self._now_iso()
-        await job_repo.set_status_and_timestamps(
-            job_id=event.job_key,
-            organization_id=event.organization_id,
-            status=ContactsImportJobStatus.RUNNING.value,
-            started_at=started_at,
-        )
-
+        started_at_dt = datetime.now(UTC)
+        started_at = started_at_dt.isoformat()
         job_internal_id = str(job.get("id") or "")
-        await logs_repo.upsert_payload(
-            organization_id=event.organization_id,
-            job_id=job_internal_id,
-            payload={
-                "phase": "started",
-                "action": str(event.action).lower(),
-                "started_at": started_at,
-                "stats": {"processed": 0, "success": 0, "errors": 0},
-            },
-        )
 
-        mapping = job.get("mapping") or {}
-        options = job.get("options") or {}
+        mapping_raw = job.get("mapping")
+        options_raw = job.get("options")
+        try:
+            mapping_parsed = parse_json_field(mapping_raw)  # jsonb dict or JSON string
+        except Exception:
+            mapping_parsed = {}
+        try:
+            options_parsed = parse_json_field(options_raw)  # jsonb dict or JSON string
+        except Exception:
+            options_parsed = {}
+
+        mapping = mapping_parsed if isinstance(mapping_parsed, dict) else {}
+        options = options_parsed if isinstance(options_parsed, dict) else {}
 
         processed_total = 0
         success_total = 0
@@ -248,6 +249,23 @@ class ContactsImportService:
         last_log_ts = 0.0
 
         try:
+            await job_repo.set_status_and_timestamps(
+                job_id=event.job_key,
+                organization_id=event.organization_id,
+                status=ContactsImportJobStatus.RUNNING.value,
+                started_at=started_at_dt,
+            )
+            await logs_repo.upsert_payload(
+                organization_id=event.organization_id,
+                job_id=job_internal_id,
+                payload={
+                    "phase": "started",
+                    "action": str(event.action).lower(),
+                    "started_at": started_at,
+                    "stats": {"processed": 0, "success": 0, "errors": 0},
+                },
+            )
+
             supabase_client: AsyncClient = await get_supabase_service_client()
             user_context = UserContext(
                 user_id=str(event.requested_by or "system"),
@@ -350,7 +368,7 @@ class ContactsImportService:
                             )
                         )
                         continue
-                    valid_rows.append(item["contact_row"])
+                    valid_rows.append(item)
                     valid_row_numbers.append(int(item["row_number"]))
 
                 if validation_errors:
@@ -389,13 +407,11 @@ class ContactsImportService:
                             )
                         )
 
-                sem = asyncio.Semaphore(5)
-
-                async def _guarded(item: dict[str, Any]) -> None:
-                    async with sem:
-                        await _provision_for_item(item)
-
-                await asyncio.gather(*[_guarded(it) for it in claimed if it.get("contact_model")], return_exceptions=True)
+                # Important: asyncpg connections do not support concurrent operations.
+                # Provisioning touches DB, so keep it sequential on this single connection.
+                for it in claimed:
+                    if it.get("contact_model"):
+                        await _provision_for_item(it)
 
                 if identity_errors:
                     await rows_repo.mark_errors_bulk(
@@ -501,7 +517,9 @@ class ContactsImportService:
                             except Exception as exc:  # noqa: BLE001
                                 cf_errors.append((rn, "validation_error", str(exc)[:2000], None))
 
-                        await asyncio.gather(*[_validate_cf(it) for it in valid_rows], return_exceptions=True)
+                        # Important: validate_for_create performs DB reads; keep sequential on this connection.
+                        for it in valid_rows:
+                            await _validate_cf(it)
                         if cf_errors:
                             await rows_repo.mark_errors_bulk(
                                 organization_id=event.organization_id,
@@ -518,6 +536,7 @@ class ContactsImportService:
                             continue
 
                         rows_to_insert: list[dict[str, Any]] = []
+                        row_payload_by_row_number: dict[int, dict[str, Any]] = {}
                         user_id_by_row: dict[int, str] = {}
                         password_by_row: dict[int, str | None] = {}
                         portal_by_row: dict[int, bool] = {}
@@ -563,8 +582,7 @@ class ContactsImportService:
                                     CONTACT_JSONB_COLUMNS,
                                 )
 
-                            rows_to_insert.append(
-                                {
+                            row_payload = {
                                     "organization_id": event.organization_id,
                                     "user_id": user_id,
                                     "isometrik_user_id": isometrik_user_id,
@@ -582,7 +600,8 @@ class ContactsImportService:
                                     "additional_data": jsonb_params["additional_data"],
                                     "social_pages": jsonb_params["social_pages"],
                                 }
-                            )
+                            rows_to_insert.append(row_payload)
+                            row_payload_by_row_number[rn] = row_payload
                             user_id_by_row[rn] = user_id
                             password_by_row[rn] = created_password
                             portal_by_row[rn] = bool(model.portal_access)
@@ -590,21 +609,21 @@ class ContactsImportService:
                             company_id_by_row[rn] = it.get("company_id")
 
                         inserted_rows = await contacts_repo.create_contacts(rows_to_insert)
-                        inserted_by_user: dict[str, dict[str, Any]] = {}
-                        for r in inserted_rows:
-                            uid = str(r.get("user_id") or "")
-                            if uid and uid not in inserted_by_user:
-                                inserted_by_user[uid] = r
+
+                        # For retries / duplicates: inserts may be skipped due to uq_contacts_user_org.
+                        # Always fetch contact ids for all user_ids so downstream steps can proceed.
+                        contact_ids_by_user = await contacts_repo.get_contact_ids_by_user_ids(
+                            organization_id=event.organization_id,
+                            user_ids=list(user_id_by_row.values()),
+                        )
 
                         # Addresses bulk insert (parity with ContactsService._create_addresses_if_any)
                         address_rows: list[dict[str, Any]] = []
                         for it in valid_rows:
                             rn = int(it["row_number"])
                             uid = user_id_by_row.get(rn)
-                            if not uid or uid not in inserted_by_user:
-                                continue
-                            contact_id = str(inserted_by_user[uid].get("id") or "")
-                            if not contact_id:
+                            contact_id = str(contact_ids_by_user.get(uid or "") or "")
+                            if not uid or not contact_id:
                                 continue
                             model: CreateContactRequest = it["contact_model"]
                             for addr in (model.addresses or []):
@@ -616,9 +635,13 @@ class ContactsImportService:
                         if address_rows:
                             await contacts_repo.create_contact_addresses(address_rows)
 
-                        # Counters: processed = attempted rows, success = inserted contacts.
+                        # Counters: processed = attempted rows, success = contacts persisted (created or already existed).
                         processed_count = len(rows_to_insert)
-                        success_count = len(inserted_rows)
+                        success_count = sum(
+                            1
+                            for rn in valid_row_numbers
+                            if contact_ids_by_user.get(user_id_by_row.get(int(rn), "") or "")
+                        )
                         error_count = max(processed_count - success_count, 0)
                         await jobs_repo.increment_counters(
                             job_id=event.job_key,
@@ -643,6 +666,8 @@ class ContactsImportService:
                                 )
 
                         # Bulk lead creation (parity with ContactsService lead behavior).
+                        owner_id = None
+
                         lead_items = []
                         for it in valid_rows:
                             model: CreateContactRequest = it["contact_model"]
@@ -661,7 +686,7 @@ class ContactsImportService:
                                     "stage_id": str(getattr(lead_payload, "stage_id", "") or ""),
                                     "lead_source": (getattr(lead_payload, "intake_stage", None) or None),
                                     "lead_score": (getattr(lead_payload, "lead_score", None) or None),
-                                    "owner_id": str(user_context.user_id) if user_context.user_id else None,
+                                    "owner_id": owner_id,
                                     "contact_id": str(contact_id),
                                     "company_id": str(it.get("company_id") or "") or None,
                                 }
@@ -728,39 +753,33 @@ class ContactsImportService:
                                 row_numbers=success_row_numbers,
                             )
                     except Exception as exc:  # noqa: BLE001
-                        # Fallback: attempt per-row insert so we can mark ledger rows accurately.
-                        for rn, item in zip(valid_row_numbers, valid_rows, strict=False):
-                            try:
-                                await self.process_contacts_batch(
-                                    job_id=event.job_key,
-                                    organization_id=event.organization_id,
-                                    contacts=[item["contact_row"]],
-                                )
-                                processed_total += 1
-                                success_total += 1
-                            except Exception as row_exc:  # noqa: BLE001
-                                processed_total += 1
-                                errors_total += 1
-                                await rows_repo.mark_errors_bulk(
-                                    organization_id=event.organization_id,
-                                    job_id=job_internal_id,
-                                    errors=[
-                                        (
-                                            int(rn),
-                                            "db_error",
-                                            str(row_exc)[:2000],
-                                            None,
-                                        )
-                                    ],
-                                )
-                        # Preserve the batch exception as context for logs but do not fail the whole job.
+                        # One consumer event = one attempt. If the batch fails, mark row statuses and move on.
+                        err_msg = str(exc)[:2000]
+                        await rows_repo.mark_errors_bulk(
+                            organization_id=event.organization_id,
+                            job_id=job_internal_id,
+                            errors=[
+                                (int(rn), "db_error", err_msg, None)
+                                for rn in valid_row_numbers
+                            ],
+                        )
+                        processed_total += len(valid_row_numbers)
+                        errors_total += len(valid_row_numbers)
+                        await jobs_repo.increment_counters(
+                            job_id=event.job_key,
+                            organization_id=event.organization_id,
+                            total_rows_delta=len(valid_row_numbers),
+                            processed_rows_delta=len(valid_row_numbers),
+                            success_rows_delta=0,
+                            error_rows_delta=len(valid_row_numbers),
+                        )
                         await logs_repo.upsert_payload(
                             organization_id=event.organization_id,
                             job_id=job_internal_id,
                             payload={
                                 "phase": "warning",
-                                "message": "bulk_insert_failed_fallback_to_row_inserts",
-                                "error": {"message": str(exc)[:2000]},
+                                "message": "batch_failed_marked_rows_error_no_fallback",
+                                "error": {"message": err_msg},
                                 "stats": {
                                     "processed": processed_total,
                                     "success": success_total,
@@ -786,12 +805,13 @@ class ContactsImportService:
                     )
                     last_log_ts = now_ts
 
-            finished_at = self._now_iso()
+            finished_at_dt = datetime.now(UTC)
+            finished_at = finished_at_dt.isoformat()
             await job_repo.set_status_and_timestamps(
                 job_id=event.job_key,
                 organization_id=event.organization_id,
                 status=ContactsImportJobStatus.COMPLETED.value,
-                finished_at=finished_at,
+                finished_at=finished_at_dt,
             )
             await logs_repo.upsert_payload(
                 organization_id=event.organization_id,
@@ -808,28 +828,36 @@ class ContactsImportService:
                 },
             )
         except Exception as exc:  # noqa: BLE001
-            finished_at = self._now_iso()
-            await job_repo.set_status_and_timestamps(
-                job_id=event.job_key,
-                organization_id=event.organization_id,
-                status=ContactsImportJobStatus.FAILED.value,
-                finished_at=finished_at,
-            )
-            await logs_repo.upsert_payload(
-                organization_id=event.organization_id,
-                job_id=job_internal_id,
-                payload={
-                    "phase": "failed",
-                    "action": str(event.action).lower(),
-                    "finished_at": finished_at,
-                    "error": {"message": str(exc)[:2000]},
-                    "stats": {
-                        "processed": processed_total,
-                        "success": success_total,
-                        "errors": errors_total,
+            finished_at_dt = datetime.now(UTC)
+            finished_at = finished_at_dt.isoformat()
+            # Best-effort: do not let status/log persistence errors mask the original failure.
+            try:
+                await job_repo.set_status_and_timestamps(
+                    job_id=event.job_key,
+                    organization_id=event.organization_id,
+                    status=ContactsImportJobStatus.FAILED.value,
+                    finished_at=finished_at_dt,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                await logs_repo.upsert_payload(
+                    organization_id=event.organization_id,
+                    job_id=job_internal_id,
+                    payload={
+                        "phase": "failed",
+                        "action": str(event.action).lower(),
+                        "finished_at": finished_at,
+                        "error": {"message": str(exc)[:2000]},
+                        "stats": {
+                            "processed": processed_total,
+                            "success": success_total,
+                            "errors": errors_total,
+                        },
                     },
-                },
-            )
+                )
+            except Exception:  # noqa: BLE001
+                pass
             raise
 
     async def _iter_validated_rows_for_ledger(
@@ -934,24 +962,11 @@ class ContactsImportService:
                 body_dict["date_of_birth"] = dob_raw
 
             def _parse_json_array(raw: Any) -> list[Any]:
-                raw_str = (raw or "").strip()
-                if not raw_str:
-                    return []
-                try:
-                    parsed = json.loads(raw_str)
-                    return parsed if isinstance(parsed, list) else []
-                except json.JSONDecodeError:
-                    return []
+                return coerce_json_list(raw)
 
             def _parse_json_object(raw: Any) -> dict[str, Any]:
-                raw_str = (raw or "").strip()
-                if not raw_str:
-                    return {}
-                try:
-                    parsed = json.loads(raw_str)
-                    return parsed if isinstance(parsed, dict) else {}
-                except json.JSONDecodeError:
-                    return {}
+                parsed = parse_json_any(raw, default={})
+                return parsed if isinstance(parsed, dict) else {}
 
             body_dict["phones"] = _parse_json_array(canonical.get("phones_json"))
             body_dict["tags"] = _parse_json_array(canonical.get("tags_json"))

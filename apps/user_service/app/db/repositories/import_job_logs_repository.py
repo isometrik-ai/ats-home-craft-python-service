@@ -7,6 +7,7 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
+from apps.user_service.app.utils.common_utils import serialize_jsonb_param
 
 
 class ImportJobLogsRepository(BaseRepository):
@@ -33,6 +34,6 @@ class ImportJobLogsRepository(BaseRepository):
             """,
             organization_id,
             job_id,
-            payload,
+            serialize_jsonb_param("payload", payload, frozenset({"payload"})),
         )
 

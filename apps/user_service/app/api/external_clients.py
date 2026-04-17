@@ -1137,7 +1137,7 @@ async def external_get_contacts_import_job(
 )
 @limiter.limit("200/minute")
 async def external_get_contacts_import_errors(
-    _request: Request,
+    request: Request,
     job_id: str = Path(..., min_length=5, max_length=128, description="Import job ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
     organization_id: str = Depends(get_organization_context),

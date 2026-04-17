@@ -22,7 +22,7 @@ class BulkLeadCreator:
         self.db_connection = db_connection
         self.repo = LeadRepository(db_connection=db_connection)
 
-    async def create_lead_for_rows(
+    async def create_leads_for_rows(
         self,
         *,
         organization_id: str,

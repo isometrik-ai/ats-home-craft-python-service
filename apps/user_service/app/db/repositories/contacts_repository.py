@@ -94,7 +94,14 @@ class ContactsRepository(BaseRepository):
         return out
 
     async def create_contacts(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Create contacts in bulk."""
+        """Create contacts in bulk.
+
+        This operation is intentionally idempotent for imports/retries:
+        if a (organization_id, user_id) row already exists, we skip it.
+        """
+        if not rows:
+            return []
+
         required = ["organization_id"]
         optional = [
             "user_id",
@@ -126,7 +133,49 @@ class ContactsRepository(BaseRepository):
             optional_columns=optional,
             rows=rows,
             jsonb_columns=CONTACT_JSONB_COLUMNS,
+            # The DB uses a *partial unique index* named uq_contacts_user_org, not a UNIQUE CONSTRAINT.
+            # Use index inference so Postgres matches the partial index predicate.
+            on_conflict_sql=(
+                "ON CONFLICT (organization_id, user_id) "
+                "WHERE (user_id IS NOT NULL) AND (status <> 'deleted'::text) "
+                "DO NOTHING"
+            ),
         )
+
+    async def get_contact_ids_by_user_ids(
+        self,
+        *,
+        organization_id: str,
+        user_ids: list[str],
+    ) -> dict[str, str]:
+        """Return contact ids by user_id within an org (bulk).
+
+        Useful for import retries where inserts may be skipped due to unique constraints.
+        """
+        normed = [uid for uid in (user_ids or []) if str(uid or "").strip()]
+        if not normed:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              ct.user_id::text AS user_id,
+              ct.id::text AS id
+            FROM contacts ct
+            WHERE ct.organization_id = $1::uuid
+              AND ct.status != $2::text
+              AND ct.user_id = ANY($3::uuid[])
+            """,
+            organization_id,
+            ClientStatus.DELETED.value,
+            normed,
+        )
+        out: dict[str, str] = {}
+        for r in rows:
+            uid = str(r.get("user_id") or "").strip()
+            cid = str(r.get("id") or "").strip()
+            if uid and cid and uid not in out:
+                out[uid] = cid
+        return out
 
     async def create_contact_with_optional_company_link(
         self,

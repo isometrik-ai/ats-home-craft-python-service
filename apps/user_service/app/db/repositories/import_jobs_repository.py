@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -146,23 +147,39 @@ class ImportJobsRepository(BaseRepository):
         job_id: str,
         organization_id: str,
         status: str,
-        started_at: str | None = None,
-        finished_at: str | None = None,
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
     ) -> dict[str, Any] | None:
-        """Update job status and optionally set started/finished timestamps."""
-        update_data: dict[str, Any] = {"status": status}
+        """Update job status and optionally set started/finished timestamps.
+
+        Note: we cast timestamps explicitly to avoid asyncpg prepared-statement
+        cache type mismatches across pooled connections.
+        """
+        set_parts: list[str] = ["status = $1"]
+        params: list[Any] = [status]
+        idx = 2
+
         if started_at is not None:
-            update_data["started_at"] = started_at
+            set_parts.append(f"started_at = ${idx}::timestamptz")
+            params.append(started_at)
+            idx += 1
+
         if finished_at is not None:
-            update_data["finished_at"] = finished_at
-        updated = await self.update_returning(
-            table=self.TABLE,
-            where_sql="WHERE job_key = $2 AND organization_id = $3",
-            where_params=[job_id, organization_id],
-            update_data=update_data,
-            jsonb_columns=self.JSONB_COLUMNS,
-            touch_updated_at=True,
-        )
+            set_parts.append(f"finished_at = ${idx}::timestamptz")
+            params.append(finished_at)
+            idx += 1
+
+        set_parts.append("updated_at = NOW()")
+
+        query = f"""
+            UPDATE {self.TABLE}
+            SET {", ".join(set_parts)}
+            WHERE job_key = ${idx} AND organization_id = ${idx + 1}
+            RETURNING *
+        """
+        params.extend([job_id, organization_id])
+        row = await self.db_connection.fetchrow(query, *params)
+        updated = dict(row) if row else None
         return self._normalize_job_row(updated) if updated else None
 
     async def increment_counters(
