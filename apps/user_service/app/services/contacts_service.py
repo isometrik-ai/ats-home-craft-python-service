@@ -70,8 +70,10 @@ from apps.user_service.app.services.typesense_index_service import (
 )
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    coerce_json_list,
     format_iso_datetime,
     generate_random_password,
+    parse_json_any,
     parse_json_field,
     serialize_jsonb_param,
 )
@@ -737,7 +739,7 @@ class ContactsService:
             "contact_id": contact_id,
             "company_id": company_id,
             "old_data": None,
-            "new_data": contact_row,
+            "new_data": self._normalize_contact_audit_snapshot(contact_row),
             "enrichment_targets": enrichment_targets,
             "created_entities": created_entities,
         }
@@ -802,34 +804,134 @@ class ContactsService:
         payload[field_name] = updated
         current[field_name] = updated
 
-    async def _apply_contact_addresses_delta(self, *, contact_id: str, addresses: Any) -> None:
-        """Apply AddressesUpdate to `contact_addresses` table."""
+    async def _apply_contact_addresses_delta(
+        self,
+        *,
+        contact_id: str,
+        addresses: Any,
+        existing_addresses: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """Apply AddressesUpdate to `contact_addresses` table and return updated address snapshot.
+
+        This avoids an additional DB read by deriving the post-update address list from:
+        - the pre-update address list already loaded for audit (`existing_addresses`)
+        - the rows returned by UPDATE/INSERT queries executed as part of the delta
+        """
+        current_list = existing_addresses if isinstance(existing_addresses, list) else []
+        result_list: list[dict[str, Any]] = [dict(a) for a in current_list if isinstance(a, dict)]
+
         if addresses is None:
-            return
+            return result_list
+
         # remove
         if addresses.remove:
+            remove_set = {str(x) for x in (addresses.remove or [])}
             await self.contacts_repo.delete_contact_addresses(
-                contact_id=contact_id, address_ids=addresses.remove
+                contact_id=contact_id,
+                address_ids=list(remove_set),
             )
+            result_list = [a for a in result_list if str(a.get("id")) not in remove_set]
+
         # update
         if addresses.update:
             for item in addresses.update:
-                await self.contacts_repo.update_contact_address(
+                updated_row = await self.contacts_repo.update_contact_address(
                     contact_id=contact_id,
                     address_id=item.id,
                     update_data=item.model_dump(exclude={"id"}, exclude_none=True),
                 )
+                if not updated_row:
+                    continue
+                updated_id = str(updated_row.get("id"))
+                replaced = False
+                for idx, existing in enumerate(result_list):
+                    if str(existing.get("id")) == updated_id:
+                        result_list[idx] = dict(updated_row)
+                        replaced = True
+                        break
+                if not replaced:
+                    result_list.append(dict(updated_row))
+
         # add
         if addresses.add:
-            await self.contacts_repo.create_contact_addresses(
+            inserted = await self.contacts_repo.create_contact_addresses(
                 [
-                    {
-                        "contact_id": contact_id,
-                        **address.model_dump(exclude_none=True),
-                    }
+                    {"contact_id": contact_id, **address.model_dump(exclude_none=True)}
                     for address in addresses.add
                 ]
             )
+            for row in inserted or []:
+                if isinstance(row, dict):
+                    result_list.append(dict(row))
+
+        # Keep ordering consistent with `get_contact_details`: primary first then created_at.
+        def _sort_key(a: dict[str, Any]) -> tuple[int, str]:
+            is_primary = 0 if a.get("is_primary") else 1
+            created_at = format_iso_datetime(a.get("created_at")) or ""
+            return (is_primary, created_at)
+
+        result_list.sort(key=_sort_key)
+        return result_list
+
+    @staticmethod
+    def _normalize_contact_audit_snapshot(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Normalize contact audit snapshots to be JSONB-safe and DB-shaped."""
+        if row is None:
+            return None
+
+        normalized: dict[str, Any] = dict(row)
+
+        # JSONB columns on contacts table.
+        for field_name in CONTACT_JSONB_COLUMNS:
+            if field_name in normalized:
+                parsed = parse_json_any(normalized.get(field_name), None)
+                normalized[field_name] = parsed if parsed is not None else coerce_json_list(None)
+
+        # Some scalar fields (tags/skills) may be arrays depending on schema; coerce if present.
+        for field_name in ("tags", "skills"):
+            if field_name in normalized:
+                raw = normalized.get(field_name)
+                parsed = parse_json_any(raw, raw)
+                if isinstance(parsed, list):
+                    normalized[field_name] = parsed
+
+        # Derived arrays from details queries.
+        for field_name in ("companies", "leads", "addresses"):
+            if field_name in normalized:
+                normalized[field_name] = coerce_json_list(normalized.get(field_name))
+
+        # Common ids.
+        for id_field in ("id", "organization_id", "user_id", "isometrik_user_id"):
+            if id_field in normalized and normalized.get(id_field) is not None:
+                normalized[id_field] = str(normalized[id_field])
+
+        # Common timestamps.
+        for dt_field in ("created_at", "updated_at", "date_of_birth", "last_enriched_at"):
+            if dt_field in normalized and normalized.get(dt_field) is not None:
+                normalized[dt_field] = format_iso_datetime(normalized.get(dt_field))
+
+        # Normalize nested addresses (if present).
+        addresses_value = normalized.get("addresses")
+        if isinstance(addresses_value, list):
+            fixed: list[dict[str, Any]] = []
+            for addr in addresses_value:
+                if not isinstance(addr, dict):
+                    continue
+                addr_norm = dict(addr)
+                for id_field in ("id", "contact_id"):
+                    if addr_norm.get(id_field) is not None:
+                        addr_norm[id_field] = str(addr_norm[id_field])
+                for dt_field in ("created_at", "updated_at"):
+                    if addr_norm.get(dt_field) is not None:
+                        addr_norm[dt_field] = format_iso_datetime(addr_norm.get(dt_field))
+                raw_address_data = addr_norm.get("address_data")
+                parsed_address_data = parse_json_any(raw_address_data, raw_address_data)
+                if isinstance(parsed_address_data, dict):
+                    addr_norm["address_data"] = parsed_address_data
+                fixed.append(addr_norm)
+            normalized["addresses"] = fixed
+
+        return normalized
 
     @staticmethod
     def _build_contact_scalar_update_data(*, body: UpdateContactRequest) -> dict[str, Any]:
@@ -955,10 +1057,18 @@ class ContactsService:
                 update_data=update_data,
             )
 
-        await self._apply_contact_addresses_delta(
+        # Derive the post-update snapshot in-memory (no extra DB read).
+        new_snapshot: dict[str, Any] = dict(current)
+        if isinstance(updated_row, dict):
+            new_snapshot.update(updated_row)
+
+        updated_addresses = await self._apply_contact_addresses_delta(
             contact_id=contact_id,
             addresses=body.addresses,
+            existing_addresses=coerce_json_list(current.get("addresses")),
         )
+        new_snapshot["addresses"] = updated_addresses
+
         created_company_id: str | None = None
         companies_delta: dict[str, Any] | None = None
         if body.company_association is not None:
@@ -973,8 +1083,8 @@ class ContactsService:
             }
         update_response: dict[str, Any] = {
             "ok": True,
-            "old_data": current,
-            "new_data": updated_row or current,
+            "old_data": self._normalize_contact_audit_snapshot(current),
+            "new_data": self._normalize_contact_audit_snapshot(new_snapshot),
             "created_company_id": created_company_id,
         }
         if companies_delta is not None:
