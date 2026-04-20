@@ -739,7 +739,7 @@ class ContactsService:
             "contact_id": contact_id,
             "company_id": company_id,
             "old_data": None,
-            "new_data": self._normalize_contact_audit_snapshot(contact_row),
+            "new_data": contact_row,
             "enrichment_targets": enrichment_targets,
             "created_entities": created_entities,
         }
