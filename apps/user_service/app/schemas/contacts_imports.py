@@ -100,6 +100,7 @@ class GetContactsImportJobResponse(BaseModel):
     finished_at: str | None = None
     progress: ContactsImportProgress
     errors_file_url: str | None = None
+    rows: dict[str, Any] | None = None
 
     @classmethod
     def from_job_row(cls, job: Mapping[str, Any]) -> GetContactsImportJobResponse:
@@ -122,6 +123,16 @@ class RetryContactsImportJobResponse(BaseModel):
 
     job_id: str
     status: ContactsImportJobStatus
+
+
+class ContactsImportJobLogItem(BaseModel):
+    """Latest log payload for a contacts import job (one row per job)."""
+
+    job_id: str
+    job_status: ContactsImportJobStatus
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class ContactsImportEventPayload(BaseModel):

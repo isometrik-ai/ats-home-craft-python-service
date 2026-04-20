@@ -175,7 +175,7 @@ class ContactsImportService:
         repo = ImportJobsRepository(db_connection=self.db_connection)
         return await repo.get_job(job_id=job_id, organization_id=organization_id)
 
-    async def list_job_error_rows(
+    async def list_job_rows(
         self,
         *,
         job_id: str,
@@ -183,14 +183,29 @@ class ContactsImportService:
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[dict[str, Any]], int]:
-        """List row-level errors for a job (paginated)."""
+        """List all row-ledger entries for a job (paginated)."""
         rows_repo = ImportJobRowsRepository(db_connection=self.db_connection)
         job = await self.get_job(job_id=job_id, organization_id=organization_id)
         if job is None:
             return ([], 0)
-        return await rows_repo.list_error_rows(
+        return await rows_repo.list_rows(
             organization_id=organization_id,
             job_id=str(job.get("id") or ""),
+            page=page,
+            page_size=page_size,
+        )
+
+    async def list_job_logs(
+        self,
+        *,
+        organization_id: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List job logs for contacts imports (org-scoped; paginated)."""
+        repo = ImportJobLogsRepository(db_connection=self.db_connection)
+        return await repo.list_logs(
+            organization_id=organization_id,
             page=page,
             page_size=page_size,
         )

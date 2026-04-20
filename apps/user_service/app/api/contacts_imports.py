@@ -3,7 +3,6 @@
 Implements:
 - POST /contacts/imports
 - GET /contacts/imports/{job_id}
-- GET /contacts/imports/{job_id}/errors
 - POST /contacts/imports/{job_id}/retry
 """
 
@@ -19,6 +18,7 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.schemas.contacts_imports import (
+    ContactsImportJobLogItem,
     CreateContactsImportJobRequest,
     CreateContactsImportJobResponse,
     GetContactsImportJobResponse,
@@ -57,7 +57,6 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 }
 
 JOB_NOT_FOUND = "contacts_imports.errors.job_not_found"
-ERRORS_NOT_FOUND = "contacts_imports.errors.errors_not_found"
 
 
 def _schedule_contacts_import_event_publish(
@@ -150,6 +149,50 @@ async def create_contacts_import_job(
     )
 
 
+@handle_api_exceptions("list contacts import logs")
+@router.get(
+    "/logs",
+    status_code=http_status.HTTP_200_OK,
+    summary="List contacts import logs",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("200/minute")
+async def list_contacts_import_logs(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=200, description="Page size"),
+):
+    """List latest import log payloads for contacts import jobs (org-scoped)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+    )
+    service = ContactsImportService(db_connection=db_connection)
+    items, total = await service.list_job_logs(
+        organization_id=user_context.organization_id,
+        page=page,
+        page_size=page_size,
+    )
+
+    typed_items = [
+        ContactsImportJobLogItem.model_validate(i).model_dump(mode="json") for i in items
+    ]
+
+    return list_response(
+        request=request,
+        items=typed_items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        message_key="contacts_imports.success.logs_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
 @handle_api_exceptions("get contacts import job")
 @router.get(
     "/{job_id}",
@@ -163,8 +206,10 @@ async def get_contacts_import_job(
     job_id: str = Path(..., min_length=5, max_length=128),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    rows_page: int = Query(1, ge=1, description="Rows page number"),
+    rows_page_size: int = Query(50, ge=1, le=200, description="Rows page size"),
 ):
-    """Return status and progress for a contacts import job."""
+    """Return job details plus paginated row ledger entries for the import."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -176,6 +221,18 @@ async def get_contacts_import_job(
         raise NotFoundException(message_key=JOB_NOT_FOUND)
 
     data = GetContactsImportJobResponse.from_job_row(job).model_dump(exclude_none=True, mode="json")
+    rows_items, rows_total = await service.list_job_rows(
+        job_id=job_id,
+        organization_id=user_context.organization_id,
+        page=rows_page,
+        page_size=rows_page_size,
+    )
+    data["rows"] = {
+        "items": rows_items,
+        "total": rows_total,
+        "page": rows_page,
+        "page_size": rows_page_size,
+    }
 
     return success_response(
         request=request,
@@ -183,54 +240,6 @@ async def get_contacts_import_job(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=data,
-    )
-
-
-@handle_api_exceptions("download contacts import job errors")
-@router.get(
-    "/{job_id}/errors",
-    status_code=http_status.HTTP_200_OK,
-    summary="List row-level errors",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("200/minute")
-async def get_contacts_import_job_errors(
-    request: Request,
-    job_id: str = Path(..., min_length=5, max_length=128),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(50, ge=1, le=200, description="Page size"),
-):
-    """List row-level import errors for a job (no redirects)."""
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
-    )
-    service = ContactsImportService(db_connection=db_connection)
-    job = await service.get_job(job_id=job_id, organization_id=user_context.organization_id)
-    if job is None:
-        raise NotFoundException(message_key=JOB_NOT_FOUND)
-
-    items, total = await service.list_job_error_rows(
-        job_id=job_id,
-        organization_id=user_context.organization_id,
-        page=page,
-        page_size=page_size,
-    )
-    if not items:
-        raise NotFoundException(message_key=ERRORS_NOT_FOUND)
-
-    return list_response(
-        request=request,
-        items=items,
-        total=total,
-        page=page,
-        page_size=page_size,
-        message_key="contacts_imports.success.errors_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        status_code=http_status.HTTP_200_OK,
     )
 
 
