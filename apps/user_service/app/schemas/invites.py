@@ -87,7 +87,13 @@ class InviteAcceptBySettingPasswordRequest(BaseModel):
     """Request model for invitation acceptance operations."""
 
     token: str = Field(..., description="Invite token from the URL")
-    password: str = Field(..., description="Password for the user")
+    password: str | None = Field(
+        None,
+        description=(
+            "Password for the user. Required for new users and for existing users who "
+            "already have a password set; optional for existing users without password."
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -117,6 +123,10 @@ class InviteValidateLinkResponse(BaseModel):
     """Response model for invite link validation operations."""
 
     is_existing_user: bool = Field(..., description="Whether the user already exists in the system")
+    has_password: bool = Field(
+        default=False,
+        description="Whether user has a password (auth.users.encrypted_password is present)",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

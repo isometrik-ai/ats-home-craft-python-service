@@ -30,6 +30,29 @@ async def test_accept_and_set_password_invitation(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_accept_invitation_password_optional(monkeypatch, client):
+    """Accept invitation allows password to be omitted (service decides branch)."""
+
+    async def fake_accept(self, body):
+        del self
+        assert body.token == "tok123"
+        assert body.password is None
+        return {"access_token": "atk", "refresh_token": "rtk"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.invite_service.InviteService.accept_and_set_password",
+        fake_accept,
+    )
+
+    res = await client.post(
+        "/v1/invite/set-password",
+        json={"token": "tok123"},
+    )
+    body = assert_success(res, 202)
+    assert body["data"]["access_token"] == "atk"
+
+
+@pytest.mark.asyncio
 async def test_create_invitation(monkeypatch, client):
     """Create a new invitation."""
 

@@ -39,6 +39,7 @@ from apps.user_service.app.utils.common_utils import (
 from apps.user_service.app.utils.email_utils import send_organization_invitation_email
 from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_db.supabase_db.auth_repository import (
+    generate_magiclink_and_exchange_for_session,
     get_user_by_id,
     login_user,
     sign_up_supabase_user,
@@ -321,7 +322,7 @@ class InviteService:
     async def _authenticate_or_signup_user(
         self,
         email: str,
-        password: str,
+        password: str | None,
         inv_meta: dict[str, Any],
         phone_number: str | None,
         phone_isd_code: str | None,
@@ -342,10 +343,32 @@ class InviteService:
         existing_auth_user = await self.user_repository.get_auth_user_by_email(email)
 
         if existing_auth_user:
-            # User already exists, authenticate them with the provided password
-            return await self._authenticate_existing_user(email, password)
+            has_password = bool(existing_auth_user.get("encrypted_password"))
+            if has_password:
+                if not password:
+                    raise BadRequestException(
+                        message_key="auth.errors.password_required",
+                        custom_code=CustomStatusCode.BAD_REQUEST,
+                    )
+                # User already exists, authenticate them with the provided password
+                return await self._authenticate_existing_user(email, password)
+
+            if not self.supabase_client:
+                raise ServiceUnavailableException(
+                    message_key="errors.service_unavailable",
+                    custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+                )
+            return await generate_magiclink_and_exchange_for_session(
+                client=self.supabase_client,
+                email=email,
+            )
 
         # User doesn't exist, create a new account
+        if not password:
+            raise BadRequestException(
+                message_key="auth.errors.password_required",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
         signup_request = self._build_signup_request_from_invite(
             email, password, inv_meta, phone_number, phone_isd_code
         )
@@ -505,7 +528,8 @@ class InviteService:
         email = invitation_data["email"]
         existing_auth_user = await self.user_repository.get_auth_user_by_email(email)
 
-        return {"is_existing_user": existing_auth_user is not None}
+        has_password = bool(existing_auth_user and existing_auth_user.get("encrypted_password"))
+        return {"is_existing_user": existing_auth_user is not None, "has_password": has_password}
 
     async def create_invitation(
         self, organization_id: str, body: InviteCreateRequest

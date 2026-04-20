@@ -594,6 +594,9 @@ class UserService:
                 "timezone": user_metadata.get("timezone", "UTC"),
                 "salutation": user_metadata.get("salutation"),
                 "alternate_emails": alternate_emails,
+                # When the user isn't an org member, we avoid extra auth.users DB calls here.
+                # Callers that need a definitive value should populate has_password upstream.
+                "has_password": False,
                 "role_id": None,
                 "status": OrganizationMemberStatus.ACTIVE.value,
                 "created_at": None,
@@ -1192,6 +1195,7 @@ class UserService:
             role=role_info,
             permissions=permissions or [],
             identities=user_profile.get("identities", []),
+            has_password=bool(user_profile.get("has_password", False)),
             verification_preference=verification_preference,
             alternate_emails=user_profile.get("alternate_emails"),
             organization_details=organization_details,

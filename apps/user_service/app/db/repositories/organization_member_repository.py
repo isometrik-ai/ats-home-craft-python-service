@@ -91,11 +91,11 @@ class OrganizationMemberRepository:
         Returns:
             dict containing the user profile or None if not found
         """
-        where_clause = "WHERE user_id = $1"
+        where_clause = "WHERE om.user_id = $1"
         params: list[Any] = [user_id]
 
         if organization_id:
-            where_clause += " AND organization_id = $2"
+            where_clause += " AND om.organization_id = $2"
             params.append(organization_id)
 
         param_idx = len(params) + 1
@@ -104,26 +104,31 @@ class OrganizationMemberRepository:
 
         query = f"""
             SELECT
-                id,
-                user_id,
-                email,
-                first_name,
-                last_name,
-                avatar_url,
-                salutation,
-                phone_number,
-                phone_isd_code,
-                timezone,
-                role_id,
-                role,
-                member_role,
-                status,
-                created_at,
-                updated_at,
-                last_active_at,
-                joined_at,
-                organization_id
-            FROM organization_members
+                om.id,
+                om.user_id,
+                om.email,
+                om.first_name,
+                om.last_name,
+                om.avatar_url,
+                om.salutation,
+                om.phone_number,
+                om.phone_isd_code,
+                om.timezone,
+                om.role_id,
+                om.role,
+                om.member_role,
+                om.status,
+                om.created_at,
+                om.updated_at,
+                om.last_active_at,
+                om.joined_at,
+                om.organization_id,
+                CASE
+                    WHEN au.encrypted_password IS NOT NULL AND au.encrypted_password <> '' THEN TRUE
+                    ELSE FALSE
+                END AS has_password
+            FROM organization_members om
+            LEFT JOIN auth.users au ON au.id = om.user_id
             {where_clause}
             LIMIT 1
         """

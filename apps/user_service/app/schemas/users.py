@@ -177,6 +177,10 @@ class UserProfileData(BaseModel):
         None,
         description="List of all user identities (only for organization_member)",
     )
+    has_password: bool = Field(
+        default=False,
+        description="Whether the user has a password (auth.users.encrypted_password is present)",
+    )
     verification_preference: VerificationPreference | None = Field(
         None,
         description="Verification preference settings (enabled/disabled and type: PHONE or EMAIL)",

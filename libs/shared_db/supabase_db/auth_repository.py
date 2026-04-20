@@ -264,6 +264,45 @@ async def generate_magic_link(sb_client: AsyncClient, email: str) -> str | None:
     return None
 
 
+async def generate_magiclink_and_exchange_for_session(
+    *,
+    client: AsyncClient,
+    email: str,
+) -> Any:
+    """Generate a magiclink and exchange it for a session (server-side).
+
+    This wraps two Supabase Auth calls:
+    - Admin: generate_link(type=magiclink)
+    - Auth: verify_otp(type=magiclink, token_hash=...)
+    """
+    response = await client.auth.admin.generate_link(
+        {
+            "type": "magiclink",
+            "email": email,
+        }
+    )
+
+    # Exact shape (supabase_auth.helpers.parse_link_response):
+    # GenerateLinkResponse(properties=GenerateLinkProperties(hashed_token=...))
+    token_hash = getattr(getattr(response, "properties", None), "hashed_token", None)
+
+    if not token_hash:
+        raise BadRequestException(
+            message_key="auth.errors.authentication_failed",
+            custom_code=CustomStatusCode.BAD_REQUEST,
+        )
+
+    verify_params: VerifyOtpParams = {"token_hash": token_hash, "type": "magiclink"}
+    verify_response = await client.auth.verify_otp(verify_params)
+    if not getattr(verify_response, "session", None):
+        raise BadRequestException(
+            message_key="auth.errors.authentication_failed",
+            custom_code=CustomStatusCode.BAD_REQUEST,
+        )
+
+    return verify_response
+
+
 async def sign_up_supabase_user(body: SignupRequest, sb_client: AsyncClient):
     """Create user in Supabase Auth using auth.signUp for user-initiated registration
     Args:
