@@ -16,7 +16,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 
 # Logger import
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.dependencies.supabase import supabase_anon, supabase_service
+from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
     InviteAcceptResponse,
@@ -79,7 +79,10 @@ async def validate_invite_link(
         message_key="invitations.success.link_validated",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
-        data=InviteValidateLinkResponse(is_existing_user=result["is_existing_user"]),
+        data=InviteValidateLinkResponse(
+            is_existing_user=result["is_existing_user"],
+            has_password=result.get("has_password", False),
+        ),
     )
 
 
@@ -121,7 +124,7 @@ async def validate_invite_link(
 async def accept_and_set_password_invitation(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
-    sb_client: AsyncClient = Depends(supabase_anon),
+    sb_client: AsyncClient = Depends(supabase_service),
     body: InviteAcceptBySettingPasswordRequest = Body(...),
 ):
     """Accept an organization invitation by setting password"""
@@ -132,7 +135,9 @@ async def accept_and_set_password_invitation(
 
     # Create service and delegate to service
     invite_service = InviteService(
-        user_context=None, db_connection=db_connection, sb_client=sb_client
+        user_context=None,
+        db_connection=db_connection,
+        sb_client=sb_client,
     )
     result = await invite_service.accept_and_set_password(body)
 
@@ -205,7 +210,9 @@ async def create_invitation(
 
     # Create service and delegate to service
     invite_service = InviteService(
-        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+        user_context=user_context,
+        db_connection=db_connection,
+        sb_client=sb_client,
     )
     result = await invite_service.create_invitation(organization_id, body)
     request.state.audit_requested_id = str(result.get("invite_id", "")) if result else ""
@@ -349,7 +356,9 @@ async def resend_invitation(
 
     # Create service and delegate to service
     invite_service = InviteService(
-        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+        user_context=user_context,
+        db_connection=db_connection,
+        sb_client=sb_client,
     )
     result = await invite_service.resend_invitation(invite_id)
 
