@@ -12,9 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
-from fastapi.responses import RedirectResponse
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
@@ -40,7 +39,7 @@ from libs.shared_utils.common_query import (
     CLIENTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
-from libs.shared_utils.response_factory import success_response
+from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/contacts/imports", tags=["Contacts Imports"])
@@ -190,8 +189,8 @@ async def get_contacts_import_job(
 @handle_api_exceptions("download contacts import job errors")
 @router.get(
     "/{job_id}/errors",
-    status_code=http_status.HTTP_307_TEMPORARY_REDIRECT,
-    summary="Download row-level errors (redirect)",
+    status_code=http_status.HTTP_200_OK,
+    summary="List row-level errors",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("200/minute")
@@ -200,8 +199,10 @@ async def get_contacts_import_job_errors(
     job_id: str = Path(..., min_length=5, max_length=128),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=200, description="Page size"),
 ):
-    """Redirect to the presigned URL containing row-level import errors."""
+    """List row-level import errors for a job (no redirects)."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -212,11 +213,25 @@ async def get_contacts_import_job_errors(
     if job is None:
         raise NotFoundException(message_key=JOB_NOT_FOUND)
 
-    url = job.get("errors_file_url")
-    if not url:
+    items, total = await service.list_job_error_rows(
+        job_id=job_id,
+        organization_id=user_context.organization_id,
+        page=page,
+        page_size=page_size,
+    )
+    if not items:
         raise NotFoundException(message_key=ERRORS_NOT_FOUND)
 
-    return RedirectResponse(url=str(url), status_code=http_status.HTTP_307_TEMPORARY_REDIRECT)
+    return list_response(
+        request=request,
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        message_key="contacts_imports.success.errors_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
 
 
 @handle_api_exceptions("retry contacts import job")

@@ -86,9 +86,9 @@ class ContactsRepository(BaseRepository):
             normed,
         )
         out: dict[str, str] = {}
-        for r in rows:
-            email_norm = str(r["email_norm"] or "").strip().lower()
-            cid = str(r["id"] or "")
+        for row in rows:
+            email_norm = str(row["email_norm"] or "").strip().lower()
+            cid = str(row["id"] or "")
             if email_norm and cid and email_norm not in out:
                 out[email_norm] = cid
         return out
@@ -133,7 +133,8 @@ class ContactsRepository(BaseRepository):
             optional_columns=optional,
             rows=rows,
             jsonb_columns=CONTACT_JSONB_COLUMNS,
-            # The DB uses a *partial unique index* named uq_contacts_user_org, not a UNIQUE CONSTRAINT.
+            # The DB uses a *partial unique index* named uq_contacts_user_org, not a
+            # UNIQUE CONSTRAINT.
             # Use index inference so Postgres matches the partial index predicate.
             on_conflict_sql=(
                 "ON CONFLICT (organization_id, user_id) "
@@ -170,9 +171,9 @@ class ContactsRepository(BaseRepository):
             normed,
         )
         out: dict[str, str] = {}
-        for r in rows:
-            uid = str(r.get("user_id") or "").strip()
-            cid = str(r.get("id") or "").strip()
+        for row in rows:
+            uid = str(row.get("user_id") or "").strip()
+            cid = str(row.get("id") or "").strip()
             if uid and cid and uid not in out:
                 out[uid] = cid
         return out

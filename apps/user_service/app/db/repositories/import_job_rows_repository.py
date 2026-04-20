@@ -110,6 +110,7 @@ class ImportJobRowsRepository(BaseRepository):
         job_id: str,
         row_numbers: list[int],
     ) -> None:
+        """Mark multiple row-ledger entries as successful in one statement."""
         if not row_numbers:
             return
         await self.db_connection.execute(
@@ -132,6 +133,7 @@ class ImportJobRowsRepository(BaseRepository):
         job_id: str,
         row_number: int,
     ) -> None:
+        """Mark a single row-ledger entry as successful."""
         await self.db_connection.execute(
             """
             UPDATE import_job_rows
@@ -150,6 +152,7 @@ class ImportJobRowsRepository(BaseRepository):
         job_id: str,
         errors: list[tuple[int, str, str, dict[str, Any] | None]],
     ) -> None:
+        """Mark multiple row-ledger entries as errors in one statement."""
         if not errors:
             return
 
@@ -191,6 +194,7 @@ class ImportJobRowsRepository(BaseRepository):
         error_message: str,
         raw_row: dict[str, Any] | None = None,
     ) -> None:
+        """Mark a single row-ledger entry as error, optionally persisting raw_row."""
         await self.db_connection.execute(
             """
             UPDATE import_job_rows
@@ -210,3 +214,60 @@ class ImportJobRowsRepository(BaseRepository):
             raw_row,
         )
 
+    async def list_error_rows(
+        self,
+        *,
+        organization_id: str,
+        job_id: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List row-level errors for a job (paginated)."""
+        page = max(int(page or 1), 1)
+        page_size = max(int(page_size or 1), 1)
+        offset = (page - 1) * page_size
+
+        total = await self.db_connection.fetchval(
+            """
+            SELECT COUNT(*)::int
+            FROM import_job_rows
+            WHERE organization_id = $1::uuid
+              AND job_id = $2::uuid
+              AND status = 'error'
+            """,
+            organization_id,
+            job_id,
+        )
+
+        fetched = await self.db_connection.fetch(
+            """
+            SELECT
+              row_number,
+              error_code,
+              error_message,
+              raw_row,
+              updated_at
+            FROM import_job_rows
+            WHERE organization_id = $1::uuid
+              AND job_id = $2::uuid
+              AND status = 'error'
+            ORDER BY row_number ASC
+            LIMIT $3::int OFFSET $4::int
+            """,
+            organization_id,
+            job_id,
+            page_size,
+            offset,
+        )
+
+        items = [
+            {
+                "row_number": int(r["row_number"]),
+                "error_code": r.get("error_code"),
+                "error_message": r.get("error_message"),
+                "raw_row": r.get("raw_row"),
+                "updated_at": r.get("updated_at").isoformat() if r.get("updated_at") else None,
+            }
+            for r in fetched
+        ]
+        return items, int(total or 0)

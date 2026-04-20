@@ -25,6 +25,7 @@ class ImportJobLogsRepository(BaseRepository):
         job_id: str,
         payload: dict[str, Any],
     ) -> None:
+        """Insert or update the latest job log payload (idempotent by job_id)."""
         await self.db_connection.execute(
             """
             INSERT INTO import_job_logs (organization_id, job_id, payload)
@@ -36,4 +37,3 @@ class ImportJobLogsRepository(BaseRepository):
             job_id,
             serialize_jsonb_param("payload", payload, frozenset({"payload"})),
         )
-

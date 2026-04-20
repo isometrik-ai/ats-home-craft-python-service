@@ -218,4 +218,3 @@ class ImportJobsRepository(BaseRepository):
             error_rows_delta,
         )
         return self._normalize_job_row(dict(row)) if row else None
-

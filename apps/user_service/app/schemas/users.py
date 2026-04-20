@@ -274,7 +274,7 @@ class CreateUserRequest(BaseModel):
 
     email: EmailStr = Field(..., description="User's New email address")
     first_name: str = Field(..., min_length=2, max_length=255, description="User's first name")
-    last_name: str = Field(..., min_length=2, max_length=255, description="User's last name")
+    last_name: str = Field(..., min_length=1, max_length=255, description="User's last name")
     phone_number: str | None = Field(None, description="User's phone number (without ISD code)")
     phone_isd_code: str | None = Field(None, description="User's phone ISD code (e.g., '+91')")
     timezone: str | None = Field(default="UTC", description="User's timezone preference")

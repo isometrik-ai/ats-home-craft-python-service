@@ -58,9 +58,9 @@ class CompaniesRepository(BaseRepository):
             normed,
         )
         out: dict[str, str] = {}
-        for r in rows:
-            key = str(r["name_norm"] or "").strip().lower()
-            cid = str(r["id"] or "")
+        for row in rows:
+            key = str(row["name_norm"] or "").strip().lower()
+            cid = str(row["id"] or "")
             if key and cid and key not in out:
                 out[key] = cid
         return out

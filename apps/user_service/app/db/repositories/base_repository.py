@@ -65,7 +65,9 @@ class BaseRepository:
             for col in columns:
                 values_flat.append(serialize_jsonb_param(col, row.get(col), jsonb_columns))
 
-        conflict_clause = f" {on_conflict_sql.strip()} " if on_conflict_sql and on_conflict_sql.strip() else " "
+        conflict_clause = (
+            f" {on_conflict_sql.strip()} " if on_conflict_sql and on_conflict_sql.strip() else " "
+        )
         query = (
             f"INSERT INTO {table} ({', '.join(columns)}) "
             f"VALUES {', '.join(placeholders)}"

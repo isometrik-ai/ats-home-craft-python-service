@@ -17,7 +17,6 @@ from typing import Any
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
-from fastapi.responses import RedirectResponse
 from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
@@ -1131,8 +1130,8 @@ async def external_get_contacts_import_job(
 @handle_api_exceptions("external get contacts import errors")
 @router.get(
     "/contacts/imports/{job_id}/errors",
-    status_code=http_status.HTTP_307_TEMPORARY_REDIRECT,
-    summary="Download row-level errors (external auth)",
+    status_code=http_status.HTTP_200_OK,
+    summary="List row-level errors (external auth)",
     responses=CONTACTS_IMPORT_ERROR_RESPONSES,
 )
 @limiter.limit("200/minute")
@@ -1141,16 +1140,34 @@ async def external_get_contacts_import_errors(
     job_id: str = Path(..., min_length=5, max_length=128, description="Import job ID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
     organization_id: str = Depends(get_organization_context),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=200, description="Page size"),
 ):
-    """Redirect to the presigned URL containing row-level errors for an external import."""
+    """List row-level import errors for an external job (no redirects)."""
     service = ContactsImportService(db_connection=db_connection)
     job = await service.get_job(job_id=job_id, organization_id=organization_id)
     if job is None:
         raise NotFoundException(message_key="contacts_imports.errors.job_not_found")
-    url = job.get("errors_file_url")
-    if not url:
+
+    items, total = await service.list_job_error_rows(
+        job_id=job_id,
+        organization_id=organization_id,
+        page=page,
+        page_size=page_size,
+    )
+    if not items:
         raise NotFoundException(message_key="contacts_imports.errors.errors_not_found")
-    return RedirectResponse(url=str(url), status_code=http_status.HTTP_307_TEMPORARY_REDIRECT)
+
+    return list_response(
+        request=request,
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        message_key="contacts_imports.success.errors_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
 
 
 @handle_api_exceptions("external retry contacts import job")

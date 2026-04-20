@@ -16,6 +16,7 @@ import contextlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from aiokafka import AIOKafkaConsumer
@@ -24,10 +25,27 @@ from aiokafka.structs import OffsetAndMetadata, TopicPartition
 from apps.user_service.app.config.app_settings import KafkaSettings, app_settings
 from apps.user_service.app.schemas.contacts_imports import ContactsImportEventPayload
 from apps.user_service.app.schemas.enums import ContactsImportKafkaStream
-from apps.user_service.app.services.contacts_imports_service import ContactsImportService
+from apps.user_service.app.services.contacts_imports_service import (
+    ContactsImportService,
+)
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _ConsumerRunContext:
+    """Mutable runtime state for a single consumer run."""
+
+    pool: Any
+    batch_size: int
+    semaphore: asyncio.Semaphore
+    max_in_flight: int
+    commit_lock: asyncio.Lock
+    commit_event: asyncio.Event
+    in_flight: set[asyncio.Task[None]]
+    next_commit: dict[TopicPartition, int]
+    processed: dict[TopicPartition, set[int]]
 
 
 class ContactsImportConsumer:
@@ -95,6 +113,107 @@ class ContactsImportConsumer:
     # ------------------------------------------------------------------
     # Public entrypoint
     # ------------------------------------------------------------------
+    @staticmethod
+    async def _ensure_in_flight_capacity(
+        *, in_flight: set[asyncio.Task[None]], max_in_flight: int
+    ) -> None:
+        """Apply backpressure until in_flight is below max_in_flight."""
+        while len(in_flight) >= max_in_flight:
+            done, _ = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                # Propagate unexpected task failures (should be rare due to safety wrapper).
+                task.result()
+            in_flight.difference_update(done)
+
+    @staticmethod
+    def _track_task(*, in_flight: set[asyncio.Task[None]], task: asyncio.Task[None]) -> None:
+        """Track a task in the in_flight set and discard on completion."""
+        in_flight.add(task)
+        task.add_done_callback(in_flight.discard)
+
+    def _mark_done(
+        self,
+        *,
+        ctx: _ConsumerRunContext,
+        topic_partition: TopicPartition,
+        offset: int,
+    ) -> None:
+        """Record a processed offset and advance commit cursor."""
+        ctx.processed.setdefault(topic_partition, set()).add(offset)
+        if topic_partition not in ctx.next_commit:
+            ctx.next_commit[topic_partition] = offset
+
+        done_offsets = ctx.processed[topic_partition]
+        while ctx.next_commit[topic_partition] in done_offsets:
+            done_offsets.remove(ctx.next_commit[topic_partition])
+            ctx.next_commit[topic_partition] += 1
+
+    async def _commit_ready_offsets(self, *, ctx: _ConsumerRunContext) -> None:
+        """Commit the latest safe offsets for each partition."""
+        assert self._consumer is not None
+        async with ctx.commit_lock:
+            offsets: dict[TopicPartition, OffsetAndMetadata] = {}
+            for topic_partition, commit_offset in ctx.next_commit.items():
+                offsets[topic_partition] = OffsetAndMetadata(commit_offset, "")
+            if offsets:
+                await self._consumer.commit(offsets=offsets)
+
+    async def _committer_loop(self, *, ctx: _ConsumerRunContext) -> None:
+        """Background loop that commits offsets when signaled."""
+        try:
+            while True:
+                await ctx.commit_event.wait()
+                ctx.commit_event.clear()
+                try:
+                    await self._commit_ready_offsets(ctx=ctx)
+                except Exception as exc:
+                    # Commit errors are retried on the next event.
+                    logger.exception("contacts_import_consumer_commit_error", exc_info=exc)
+                    await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            return
+
+    async def _run_safely(
+        self,
+        *,
+        ctx: _ConsumerRunContext,
+        fn: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Run a unit of work within the bounded semaphore."""
+        async with ctx.semaphore:
+            await fn()
+
+    async def _handle_message(self, *, ctx: _ConsumerRunContext, message: Any) -> None:
+        """Handle a single Kafka message and update commit state."""
+        topic_partition = TopicPartition(message.topic, message.partition)
+        try:
+            payload_dict = json.loads(message.value.decode("utf-8"))
+            event = ContactsImportEventPayload.model_validate(payload_dict)
+            await self._process_event(pool=ctx.pool, event=event, batch_size=ctx.batch_size)
+        except Exception as exc:
+            # We still mark the message as "done" so the consumer can move on.
+            # The service layer is responsible for idempotency / job-state safety.
+            logger.exception("contacts_import_consumer_message_error", exc_info=exc)
+        finally:
+            async with ctx.commit_lock:
+                self._mark_done(ctx=ctx, topic_partition=topic_partition, offset=message.offset)
+            ctx.commit_event.set()
+
+    async def _consume_messages(self, *, ctx: _ConsumerRunContext) -> None:
+        """Consume messages forever and schedule work with backpressure."""
+        assert self._consumer is not None
+        async for message in self._consumer:
+            await self._ensure_in_flight_capacity(
+                in_flight=ctx.in_flight,
+                max_in_flight=ctx.max_in_flight,
+            )
+
+            async def _bound_handle_message(msg: Any = message) -> None:
+                await self._handle_message(ctx=ctx, message=msg)
+
+            task = asyncio.create_task(self._run_safely(ctx=ctx, fn=_bound_handle_message))
+            self._track_task(in_flight=ctx.in_flight, task=task)
+
     async def consume_forever(self, *, batch_size: int = 1000) -> None:
         """Main loop: consume messages and process jobs.
 
@@ -113,102 +232,29 @@ class ContactsImportConsumer:
 
         pool = await get_pool()
 
-        # Bounded concurrency: allow multiple messages to process in parallel
-        # while ensuring we only commit offsets that have been fully processed.
-        semaphore = asyncio.Semaphore(8)
-        max_in_flight = 128
+        ctx = _ConsumerRunContext(
+            pool=pool,
+            batch_size=batch_size,
+            semaphore=asyncio.Semaphore(8),
+            max_in_flight=128,
+            commit_lock=asyncio.Lock(),
+            commit_event=asyncio.Event(),
+            in_flight=set(),
+            next_commit={},
+            processed={},
+        )
 
-        commit_lock = asyncio.Lock()
-        commit_event = asyncio.Event()
-        in_flight: set[asyncio.Task[None]] = set()
-
-        # Offset tracking per partition.
-        # - next_commit[tp] is the next offset that is safe to commit (i.e., all
-        #   earlier offsets in that partition have been processed).
-        # - processed[tp] holds offsets that finished processing but may be ahead
-        #   of next_commit due to out-of-order completion.
-        next_commit: dict[TopicPartition, int] = {}
-        processed: dict[TopicPartition, set[int]] = {}
-
-        def _mark_done(tp: TopicPartition, offset: int) -> None:
-            processed.setdefault(tp, set()).add(offset)
-            if tp not in next_commit:
-                next_commit[tp] = offset
-
-            # Advance next_commit while contiguous offsets are done.
-            done_offsets = processed[tp]
-            while next_commit[tp] in done_offsets:
-                done_offsets.remove(next_commit[tp])
-                next_commit[tp] += 1
-
-        async def _commit_ready_offsets() -> None:
-            assert self._consumer is not None
-            async with commit_lock:
-                offsets: dict[TopicPartition, OffsetAndMetadata] = {}
-                for tp, commit_offset in next_commit.items():
-                    offsets[tp] = OffsetAndMetadata(commit_offset, "")
-                if offsets:
-                    await self._consumer.commit(offsets=offsets)
-
-        async def _committer_loop() -> None:
-            try:
-                while True:
-                    await commit_event.wait()
-                    commit_event.clear()
-                    try:
-                        await _commit_ready_offsets()
-                    except Exception as exc:  # noqa: BLE001
-                        # Commit errors are retried on the next event.
-                        logger.exception("contacts_import_consumer_commit_error", exc_info=exc)
-                        await asyncio.sleep(1)
-            except asyncio.CancelledError:
-                return
-
-        async def _run_safely(fn: Callable[[], Awaitable[None]]) -> None:
-            async with semaphore:
-                await fn()
-
-        async def _handle_message(message: Any) -> None:
-            assert self._consumer is not None
-            tp = TopicPartition(message.topic, message.partition)
-            try:
-                payload_dict = json.loads(message.value.decode("utf-8"))
-                event = ContactsImportEventPayload.model_validate(payload_dict)
-                await self._process_event(pool=pool, event=event, batch_size=batch_size)
-            except Exception as exc:  # noqa: BLE001
-                # We still mark the message as "done" so the consumer can move on.
-                # The service layer is responsible for idempotency / job-state safety.
-                logger.exception("contacts_import_consumer_message_error", exc_info=exc)
-            finally:
-                async with commit_lock:
-                    _mark_done(tp, message.offset)
-                commit_event.set()
-
-        committer_task = asyncio.create_task(_committer_loop())
+        committer_task = asyncio.create_task(self._committer_loop(ctx=ctx))
         try:
-            async for message in self._consumer:
-                # Backpressure: prevent unbounded task accumulation.
-                while len(in_flight) >= max_in_flight:
-                    done, pending = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
-                    in_flight = set(pending)
-                    for task in done:
-                        # Propagate unexpected task failures (should be rare due to safety wrapper).
-                        task.result()
-
-                async def _bound_handle_message(msg: Any = message) -> None:
-                    await _handle_message(msg)
-
-                task = asyncio.create_task(_run_safely(_bound_handle_message))
-                in_flight.add(task)
-                task.add_done_callback(lambda t: in_flight.discard(t))
+            await self._consume_messages(ctx=ctx)
         finally:
             # Finish any in-flight work before stopping the consumer, then commit
             # any remaining ready offsets.
             try:
-                if in_flight:
-                    await asyncio.gather(*in_flight, return_exceptions=True)
-                commit_event.set()
-                await _commit_ready_offsets()
+                if ctx.in_flight:
+                    await asyncio.gather(*ctx.in_flight, return_exceptions=True)
+                ctx.commit_event.set()
+                await self._commit_ready_offsets(ctx=ctx)
             finally:
                 committer_task.cancel()
                 with contextlib.suppress(Exception):
