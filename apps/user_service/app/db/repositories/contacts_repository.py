@@ -35,7 +35,9 @@ class ContactsRepository(BaseRepository):
         super().__init__(db_connection=db_connection)
 
     @staticmethod
-    def _coerce_jsonb_array_fields(row: dict[str, Any], field_names: tuple[str, ...]) -> dict[str, Any]:
+    def _coerce_jsonb_array_fields(
+        row: dict[str, Any], field_names: tuple[str, ...]
+    ) -> dict[str, Any]:
         """Coerce jsonb array-ish fields that may arrive as JSON strings."""
         out = dict(row)
         for json_field_name in field_names:
