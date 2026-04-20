@@ -522,6 +522,7 @@ async def update_company(
     company_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
     body: UpdateCompanyRequest = Body(...),
 ):
     """Patch company fields, nested data, and optional contact associations.
@@ -532,6 +533,7 @@ async def update_company(
         company_id: Company identifier.
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims from JWT.
+        sb_client: Supabase client.
         body: Partial update payload.
 
     Returns:
@@ -545,7 +547,11 @@ async def update_company(
             db_connection=db_connection,
             permission_codes=CLIENTS_MANAGEMENT_EDIT,
         )
-        service = CompaniesService(db_connection=db_connection, user_context=user_context)
+        service = CompaniesService(
+            db_connection=db_connection,
+            user_context=user_context,
+            supabase_client=sb_client,
+        )
         event_service = EventService(db_connection=db_connection)
         request.state.audit_table = "companies"
         request.state.audit_requested_id = company_id
