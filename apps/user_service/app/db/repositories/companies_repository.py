@@ -35,6 +35,69 @@ class CompaniesRepository(BaseRepository):
         """Initialize with the request-scoped asyncpg connection."""
         super().__init__(db_connection=db_connection)
 
+    async def get_company_ids_by_names(
+        self,
+        *,
+        organization_id: str,
+        names: list[str],
+    ) -> dict[str, str]:
+        """Best-effort lookup: return company ids keyed by normalized lowercase name."""
+        normed = [(n or "").strip().lower() for n in (names or []) if (n or "").strip()]
+        if not normed:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT LOWER(TRIM(name)) AS name_norm, id::text AS id
+            FROM companies
+            WHERE organization_id = $1::uuid
+              AND status != $2::text
+              AND LOWER(TRIM(name)) = ANY($3::text[])
+            """,
+            organization_id,
+            ClientStatus.DELETED.value,
+            normed,
+        )
+        out: dict[str, str] = {}
+        for row in rows:
+            key = str(row["name_norm"] or "").strip().lower()
+            cid = str(row["id"] or "")
+            if key and cid and key not in out:
+                out[key] = cid
+        return out
+
+    async def create_companies(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Create companies in bulk (minimal, import-focused)."""
+        if not rows:
+            return []
+        required = ["organization_id", "name"]
+        optional = [
+            "primary_contact_id",
+            "status",
+            "industry",
+            "profile_photo_url",
+            "portal_access",
+            "email",
+            "phones",
+            "tags",
+            "websites",
+            "billing_preferences",
+            "social_pages",
+            "target_market_segments",
+            "current_tech_stack",
+            "preferred_communication_channels",
+            "industry_specific_terminologies",
+            "description",
+            "custom_fields",
+            "additional_data",
+        ]
+        return await self.bulk_insert_returning(
+            table="companies",
+            required_columns=required,
+            optional_columns=optional,
+            rows=rows,
+            jsonb_columns=COMPANY_JSONB_COLUMNS,
+        )
+
     async def create_company_with_optional_contact_link(
         self,
         *,

@@ -691,3 +691,56 @@ class AcceptedFileTypes(str, Enum):
     HTML = "html"
     IMAGES = "images"
     CUSTOM = "custom"  # Custom extensions
+
+
+# ============================================================================
+# CONTACTS IMPORT ENUMS
+# ============================================================================
+
+
+class ContactsImportFileType(str, Enum):
+    """Supported file types for contacts bulk import."""
+
+    CSV = "csv"
+    XLSX = "xlsx"
+
+
+class ContactsImportMode(str, Enum):
+    """Row write mode for contacts import."""
+
+    UPSERT = "upsert"
+    INSERT_ONLY = "insert_only"
+
+
+class ContactsImportDedupeKey(str, Enum):
+    """Dedupe key when mode is upsert."""
+
+    EMAIL = "email"
+
+
+class ContactsImportJobStatus(str, Enum):
+    """Import job lifecycle (stored on ``import_jobs.status``)."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ContactsImportType(str, Enum):
+    """``import_type`` / ``import_jobs.import_type`` for this pipeline."""
+
+    CONTACTS = "contacts"
+
+
+class ContactsImportEventAction(str, Enum):
+    """Kafka metadata payload ``action`` (create vs retry)."""
+
+    CREATE = "create"
+    RETRY = "retry"
+
+
+class ContactsImportKafkaStream(str, Enum):
+    """Kafka topic and outbox ``event_type`` for contacts import (same string for both)."""
+
+    CONTACTS_IMPORT_REQUESTED = "contacts.import.requested"

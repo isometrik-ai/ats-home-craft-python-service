@@ -44,6 +44,7 @@ class BaseRepository:
         optional_columns: list[str],
         rows: list[dict[str, Any]],
         jsonb_columns: frozenset[str] = frozenset(),
+        on_conflict_sql: str | None = None,
     ) -> list[dict[str, Any]]:
         """Insert many rows in one statement and RETURNING *.
 
@@ -64,9 +65,13 @@ class BaseRepository:
             for col in columns:
                 values_flat.append(serialize_jsonb_param(col, row.get(col), jsonb_columns))
 
+        conflict_clause = (
+            f" {on_conflict_sql.strip()} " if on_conflict_sql and on_conflict_sql.strip() else " "
+        )
         query = (
             f"INSERT INTO {table} ({', '.join(columns)}) "
-            f"VALUES {', '.join(placeholders)} "
+            f"VALUES {', '.join(placeholders)}"
+            f"{conflict_clause}"
             "RETURNING *"
         )
         records = await self.db_connection.fetch(query, *values_flat)

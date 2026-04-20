@@ -88,7 +88,7 @@ class SignupRequest(BaseModel):
         None, description="Salutation for the user"
     )
     first_name: str = Field(..., min_length=2)
-    last_name: str | None = Field(None, min_length=2)
+    last_name: str | None = Field(None, min_length=1)
     # job_title: Optional[str] = None
     phone_number: str | None = Field(None, min_length=1, max_length=20)
     phone_isd_code: str | None = Field(None, min_length=1, max_length=5)

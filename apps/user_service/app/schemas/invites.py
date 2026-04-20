@@ -66,7 +66,7 @@ class InviteCreateRequest(BaseModel):
         None, description="Salutation for the user"
     )
     first_name: str = Field(..., min_length=2)
-    last_name: str | None = Field(None, min_length=2)
+    last_name: str | None = Field(None, min_length=1)
     email: EmailStr = Field(..., description="Email address to invite")
     phone_number: str | None = None
     phone_isd_code: str | None = None
@@ -142,7 +142,7 @@ class InviteListItem(BaseModel):
         None, description="Salutation for the user"
     )
     first_name: str | None = Field(None, min_length=2)
-    last_name: str | None = Field(None, min_length=2)
+    last_name: str | None = Field(None, min_length=1)
     phone: str | None = None
 
     model_config = ConfigDict(
