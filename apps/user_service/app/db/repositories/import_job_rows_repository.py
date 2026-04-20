@@ -214,7 +214,7 @@ class ImportJobRowsRepository(BaseRepository):
             raw_row,
         )
 
-    async def list_error_rows(
+    async def list_rows(
         self,
         *,
         organization_id: str,
@@ -222,7 +222,7 @@ class ImportJobRowsRepository(BaseRepository):
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[dict[str, Any]], int]:
-        """List row-level errors for a job (paginated)."""
+        """List import job rows for a job (paginated; row_number ascending)."""
         page = max(int(page or 1), 1)
         page_size = max(int(page_size or 1), 1)
         offset = (page - 1) * page_size
@@ -233,7 +233,6 @@ class ImportJobRowsRepository(BaseRepository):
             FROM import_job_rows
             WHERE organization_id = $1::uuid
               AND job_id = $2::uuid
-              AND status = 'error'
             """,
             organization_id,
             job_id,
@@ -243,14 +242,15 @@ class ImportJobRowsRepository(BaseRepository):
             """
             SELECT
               row_number,
+              status,
               error_code,
               error_message,
               raw_row,
+              created_at,
               updated_at
             FROM import_job_rows
             WHERE organization_id = $1::uuid
               AND job_id = $2::uuid
-              AND status = 'error'
             ORDER BY row_number ASC
             LIMIT $3::int OFFSET $4::int
             """,
@@ -263,9 +263,10 @@ class ImportJobRowsRepository(BaseRepository):
         items = [
             {
                 "row_number": int(r["row_number"]),
-                "error_code": r.get("error_code"),
+                "status": str(r.get("status") or ""),
                 "error_message": r.get("error_message"),
                 "raw_row": r.get("raw_row"),
+                "created_at": r.get("created_at").isoformat() if r.get("created_at") else None,
                 "updated_at": r.get("updated_at").isoformat() if r.get("updated_at") else None,
             }
             for r in fetched

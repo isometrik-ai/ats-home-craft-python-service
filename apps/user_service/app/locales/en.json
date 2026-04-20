@@ -388,5 +388,18 @@
       "lead_updated": "Lead updated successfully.",
       "lead_deleted": "Lead deleted successfully."
     }
+  },
+  "contacts_imports": {
+    "errors": {
+      "job_not_found": "Contacts import job not found.",
+      "errors_not_found": "No errors found for this contacts import job."
+    },
+    "success": {
+      "job_created": "Contacts import job created successfully.",
+      "job_queued": "Contacts import job queued successfully.",
+      "job_retrieved": "Contacts import job retrieved successfully.",
+      "logs_retrieved": "Contacts import logs retrieved successfully.",
+      "errors_retrieved": "Contacts import errors retrieved successfully."
+    }
   }
 }
