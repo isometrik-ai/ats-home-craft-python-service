@@ -327,6 +327,59 @@ def _extract_contact_address_facets(
     return cities, states, countries, postal_codes
 
 
+def _extract_company_address_facets(
+    details: dict[str, Any],
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """Extract address facets from company details (from addresses[])."""
+    addresses_raw = _ensure_list(details.get("addresses"))
+    cities: list[str] = []
+    states: list[str] = []
+    countries: list[str] = []
+    postal_codes: list[str] = []
+    for item in addresses_raw:
+        if not isinstance(item, dict):
+            continue
+        city = (item.get("city") or "").strip()
+        state = (item.get("state") or item.get("region") or "").strip()
+        country = (item.get("country") or "").strip()
+        postal = (item.get("postal_code") or item.get("zip_code") or item.get("zip") or "").strip()
+        if city:
+            cities.append(city)
+        if state:
+            states.append(state)
+        if country:
+            countries.append(country)
+        if postal:
+            postal_codes.append(postal)
+    return cities, states, countries, postal_codes
+
+
+def _extract_company_product_names(details: dict[str, Any]) -> list[str]:
+    """Extract product names from company JSONB products[] list."""
+    products_raw = _ensure_list(details.get("products"))
+    names: list[str] = []
+    for item in products_raw:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _extract_company_key_people_names(details: dict[str, Any]) -> list[str]:
+    """Extract key people names from company JSONB key_people[] list."""
+    people_raw = _ensure_list(details.get("key_people"))
+    names: list[str] = []
+    for item in people_raw:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
 def _extract_company_contacts_fields(
     details: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str], list[str]]:
@@ -529,6 +582,12 @@ async def _build_company_document(
         details=details,
     )
 
+    address_cities, address_states, address_countries, address_postal_codes = (
+        _extract_company_address_facets(details)
+    )
+    key_people_names = _extract_company_key_people_names(details)
+    product_names = _extract_company_product_names(details)
+
     created_at, updated_at = _extract_created_updated(details)
 
     document: dict[str, Any] = {
@@ -551,6 +610,12 @@ async def _build_company_document(
         "current_tech_stack": details.get("current_tech_stack") or [],
         "preferred_communication_channels": details.get("preferred_communication_channels") or [],
         "industry_specific_terminologies": details.get("industry_specific_terminologies") or [],
+        "address_cities": address_cities or None,
+        "address_states": address_states or None,
+        "address_countries": address_countries or None,
+        "address_postal_codes": address_postal_codes or None,
+        "key_people_names": key_people_names or None,
+        "product_names": product_names or None,
         "custom_field_keys": custom_field_keys or None,
         "custom_field_values": custom_field_values or None,
         "enrichment_done": bool(details.get("enrichment_done")),
