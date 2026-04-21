@@ -2227,7 +2227,6 @@ class ClientService:
 
         # Stage JSONB change for the final single client-row update.
         payload[field_name] = updated
-        current[field_name] = updated
 
     async def _apply_batch_jsonb_list_changes(
         self,

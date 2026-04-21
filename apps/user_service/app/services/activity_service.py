@@ -121,6 +121,41 @@ class ActivityService:
 
         return [i.model_dump(mode="json", exclude_none=True) for i in flattened], total
 
+    async def get_contact_activity(
+        self,
+        *,
+        contact_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Get flattened activity items for a contact id.
+
+        Mirrors `get_lead_activity` behavior:
+        - `limit` / `offset` paginate audit log rows in SQL (newest first)
+        - returned `items` are flattened lines, often one per changed field
+        - `total` is the number of audit log rows for this contact
+        """
+        rows, total = await self.audit_log_repository.get_activity_logs_for_record_with_actor_names(
+            organization_id=self.user_context.organization_id,
+            table_name="contacts",
+            record_id=contact_id,
+            limit=limit,
+            offset=offset,
+        )
+
+        audit_rows = [self._to_audit_row(r) for r in rows]
+
+        flattened: list[ActivityItem] = []
+        for audit_row in audit_rows:
+            flattened.extend(
+                self._flatten_contact_audit_row(
+                    audit_row=audit_row,
+                    record_id=contact_id,
+                )
+            )
+
+        return [i.model_dump(mode="json", exclude_none=True) for i in flattened], total
+
     @staticmethod
     def _format_association_names(
         values_blob: dict[str, Any] | None,
@@ -288,6 +323,107 @@ class ActivityService:
                 )
             )
         return items
+
+    def _flatten_contact_audit_row(
+        self,
+        audit_row: _AuditRow,
+        *,
+        record_id: str,
+    ) -> list[ActivityItem]:
+        """Flatten one contact audit record into multiple `ActivityItem`s.
+        Emits one item per changed field where applicable.
+        """
+        first = safe_str(audit_row.actor_first_name).strip()
+        last = safe_str(audit_row.actor_last_name).strip()
+        name = (f"{first} {last}").strip() or (audit_row.user_email or "Unknown user")
+        actor = ActivityActor(user_id=audit_row.user_id, name=name, email=audit_row.user_email)
+
+        old_values_blob = _coerce_audit_values_blob(audit_row.old_values)
+        new_values_blob = _coerce_audit_values_blob(audit_row.new_values)
+
+        changed_fields = list(audit_row.changed_fields or [])
+        if not changed_fields:
+            old_data = (
+                (old_values_blob or {}).get("data") if isinstance(old_values_blob, dict) else None
+            )
+            new_data = (
+                (new_values_blob or {}).get("data") if isinstance(new_values_blob, dict) else None
+            )
+            if isinstance(old_data, dict) and isinstance(new_data, dict):
+                changed_fields = sorted(set(old_data.keys()) | set(new_data.keys()))
+            elif isinstance(new_data, dict):
+                changed_fields = sorted(new_data.keys())
+
+        deny = {"updated_at", "created_at"}
+        changed_fields = [f for f in changed_fields if f.split(".")[-1] not in deny]
+
+        if audit_row.action_type in {"CREATE", "DELETE"} or not changed_fields:
+            return [
+                ActivityItem(
+                    id=f"{audit_row.id}:summary",
+                    audit_log_id=audit_row.id,
+                    timestamp=audit_row.timestamp,
+                    table_name=audit_row.table_name,
+                    record_id=record_id,
+                    action_type=audit_row.action_type,
+                    actor=actor,
+                )
+            ]
+
+        items: list[ActivityItem] = []
+        for field_path in changed_fields:
+            old_val = extract_audit_data_value(old_values_blob, field_path)
+            new_val = extract_audit_data_value(new_values_blob, field_path)
+
+            old_display, new_display = self._get_display_values_for_contact_field(
+                field_path=field_path,
+                audit_row=audit_row,
+            )
+            items.append(
+                ActivityItem(
+                    id=f"{audit_row.id}:{field_path}",
+                    audit_log_id=audit_row.id,
+                    timestamp=audit_row.timestamp,
+                    table_name=audit_row.table_name,
+                    record_id=record_id,
+                    action_type=audit_row.action_type,
+                    actor=actor,
+                    field=field_path,
+                    old_value=old_val,
+                    new_value=new_val,
+                    old_display_value=old_display,
+                    new_display_value=new_display,
+                )
+            )
+        return items
+
+    def _get_display_values_for_contact_field(
+        self,
+        *,
+        field_path: str,
+        audit_row: _AuditRow,
+    ) -> tuple[str | None, str | None]:
+        """Return optional human-friendly display values for special contact fields."""
+        field_key = field_path.split(".")[-1]
+
+        # If contact audit snapshots embed associated companies, prefer a formatted label.
+        # This is best-effort and does not perform DB lookups.
+        if field_key in {"companies", "company_association"}:
+            old_values_blob = _coerce_audit_values_blob(audit_row.old_values)
+            new_values_blob = _coerce_audit_values_blob(audit_row.new_values)
+            old_name = self._format_association_names(
+                old_values_blob,
+                list_key="companies",
+                name_key="company_name",
+            )
+            new_name = self._format_association_names(
+                new_values_blob,
+                list_key="companies",
+                name_key="company_name",
+            )
+            return old_name, new_name
+
+        return None, None
 
     def _get_display_values_for_lead_field(
         self,

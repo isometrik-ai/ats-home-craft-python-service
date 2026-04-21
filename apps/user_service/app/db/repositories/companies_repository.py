@@ -407,19 +407,102 @@ class CompaniesRepository(BaseRepository):
         }
 
     async def get_company_for_update(self, *, company_id: str, organization_id: str) -> dict | None:
-        """Load a company row with ``FOR UPDATE`` or return None when missing."""
+        """Get a company for update (DB-shaped details + `FOR UPDATE` lock).
+
+        Returns the same shape as `get_company_details` (contacts/leads/addresses included),
+        while locking the `companies` row for consistency in update flows.
+        """
         fetched_row = await self.db_connection.fetchrow(
             """
-            SELECT *
-            FROM companies
-            WHERE id = $1::uuid AND organization_id = $2::uuid AND status != $3
-            FOR UPDATE
+            SELECT
+              co.*,
+              COALESCE(contacts.contacts, '[]'::jsonb) AS contacts,
+              COALESCE(leads.leads, '[]'::jsonb) AS leads,
+              COALESCE(addresses.addresses, '[]'::jsonb) AS addresses
+            FROM companies co
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'id',         ct.id::text,
+                  'first_name', ct.first_name,
+                  'last_name',  ct.last_name,
+                  'title',      ct.title,
+                  'email',      NULLIF(au.email::text, ''),
+                  'phones',     COALESCE(ct.phones, '[]'::jsonb),
+                  'is_primary', (co.primary_contact_id IS NOT NULL
+                                 AND co.primary_contact_id = ct.id)
+                )
+                ORDER BY (co.primary_contact_id IS NOT NULL
+                          AND co.primary_contact_id = ct.id) DESC,
+                         ct.created_at ASC
+              ) FILTER (WHERE ct.id IS NOT NULL) AS contacts
+              FROM contact_companies cc
+              INNER JOIN contacts ct
+                ON ct.id = cc.contact_id
+               AND ct.organization_id = co.organization_id
+               AND ct.status != 'deleted'
+              LEFT JOIN auth.users au
+                ON au.id = ct.user_id
+              WHERE cc.organization_id = co.organization_id
+                AND cc.company_id = co.id
+            ) contacts ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'id',             l.id::text,
+                  'name',           l.name,
+                  'stage_id',       l.stage_id::text,
+                  'stage_name',     ls.stage_name,
+                  'deal_type',      l.deal_type,
+                  'priority',       l.priority,
+                  'lead_score',     l.lead_score,
+                  'close_date',     l.close_date,
+                  'amount',         l.amount,
+                  'owner_id',       l.owner_id::text,
+                  'lead_source',    l.lead_source,
+                  'referral_source',l.referral_source,
+                  'created_at',     l.created_at,
+                  'updated_at',     l.updated_at
+                )
+                ORDER BY l.updated_at DESC NULLS LAST, l.created_at DESC
+              ) FILTER (WHERE l.id IS NOT NULL) AS leads
+              FROM lead_companies lco
+              INNER JOIN leads l
+                ON l.id = lco.lead_id
+               AND l.organization_id = lco.organization_id
+              LEFT JOIN lead_stages ls
+                ON ls.id = l.stage_id
+               AND ls.organization_id = l.organization_id
+              WHERE lco.organization_id = co.organization_id
+                AND lco.company_id = co.id
+            ) leads ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                to_jsonb(addr) ORDER BY addr.is_primary DESC, addr.created_at ASC
+              ) AS addresses
+              FROM company_addresses addr
+              WHERE addr.company_id = co.id
+            ) addresses ON TRUE
+            WHERE co.id = $1::uuid
+              AND co.organization_id = $2::uuid
+              AND co.status != $3
+            FOR UPDATE OF co
             """,
             company_id,
             organization_id,
             ClientStatus.DELETED.value,
         )
-        return dict(fetched_row) if fetched_row else None
+        if not fetched_row:
+            return None
+        result = dict(fetched_row)
+        for json_field_name in ("contacts", "leads", "addresses"):
+            raw_json_value = result.get(json_field_name)
+            if isinstance(raw_json_value, str):
+                try:
+                    result[json_field_name] = json.loads(raw_json_value)
+                except json.JSONDecodeError:
+                    result[json_field_name] = []
+        return result
 
     async def get_company_for_update_by_enrichment_request_id(
         self,
