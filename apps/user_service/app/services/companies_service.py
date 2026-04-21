@@ -1060,15 +1060,17 @@ class CompaniesService:
         - `addresses` are stored in `company_addresses` table, updated via delta ops.
         """
         org_id = self.user_context.organization_id
-        current = await self.companies_repo.get_company_for_update(
+        current_raw = await self.companies_repo.get_company_for_update(
             company_id=company_id,
             organization_id=org_id,
         )
-        if not current:
+        if not current_raw:
             raise NotFoundException(
                 message_key="companies.errors.company_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        current: dict[str, Any] = dict(current_raw)
+        current["contacts"] = coerce_json_list(current.get("contacts"))
 
         update_data = await self._build_company_update_data(current=current, body=body)
         updated_row = await self._persist_company_update_if_needed(
@@ -1080,11 +1082,42 @@ class CompaniesService:
         contacts_delta = await self._maybe_apply_contacts_update_delta(
             company_id=company_id, body=body
         )
-        return self._build_company_update_response(
-            current=current,
-            updated_row=updated_row,
-            contacts_delta=contacts_delta,
-        )
+        # Build a post-update snapshot for audit logs without relying on stale nested data.
+        new_snapshot: dict[str, Any] = dict(current)
+        if isinstance(updated_row, dict):
+            new_snapshot.update(updated_row)
+        if contacts_delta is not None:
+            new_snapshot["contacts"] = coerce_json_list(
+                await self.cc_repo.get_company_contacts_snapshot(
+                    organization_id=org_id,
+                    company_id=company_id,
+                )
+            )
+        else:
+            new_snapshot["contacts"] = coerce_json_list(new_snapshot.get("contacts"))
+        update_response: dict[str, Any] = {
+            "ok": True,
+            "old_data": self._normalize_company_audit_snapshot(current),
+            "new_data": self._normalize_company_audit_snapshot(new_snapshot),
+        }
+        if contacts_delta is not None:
+            update_response["contacts_delta"] = contacts_delta
+        return update_response
+
+    @staticmethod
+    def _normalize_company_audit_snapshot(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Normalize company audit snapshots to be JSONB-safe and DB-shaped."""
+        if row is None:
+            return None
+
+        normalized: dict[str, Any] = dict(row)
+        _stringify_company_detail_uuids(normalized)
+        _coerce_company_detail_json_lists(normalized)
+        _normalize_company_billing_preferences(normalized)
+        _normalize_company_additional_data(normalized)
+        _normalize_company_detail_contacts(normalized)
+        _normalize_company_detail_timestamps(normalized)
+        return normalized
 
     async def _build_company_update_data(
         self,
@@ -1231,23 +1264,6 @@ class CompaniesService:
             delta=body.contact_association,
         )
 
-    @staticmethod
-    def _build_company_update_response(
-        *,
-        current: dict[str, Any],
-        updated_row: dict[str, Any] | None,
-        contacts_delta: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        """Build a response for a company update."""
-        update_response: dict[str, Any] = {
-            "ok": True,
-            "old_data": current,
-            "new_data": updated_row or current,
-        }
-        if contacts_delta is not None:
-            update_response["contacts_delta"] = contacts_delta
-        return update_response
-
     async def _apply_company_addresses_delta(self, *, company_id: str, addresses: Any) -> None:
         """Apply AddressesUpdate to `company_addresses` table."""
         if addresses is None:
@@ -1333,7 +1349,6 @@ class CompaniesService:
                 updated.append(new_item)
 
         payload[field_name] = updated
-        current[field_name] = updated
 
     @staticmethod
     def _merge_primary_contact_id(

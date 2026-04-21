@@ -802,7 +802,6 @@ class ContactsService:
                 updated.append(new_item)
 
         payload[field_name] = updated
-        current[field_name] = updated
 
     async def _apply_contact_addresses_delta(
         self,
@@ -1152,6 +1151,9 @@ class ContactsService:
                 "affected_company_ids": delta_result.get("affected_company_ids") or [],
                 "created_company_id": created_company_id,
             }
+            # Keep audit snapshots accurate without extra DB reads:
+            # the delta application query returns the post-update `companies[]` snapshot.
+            new_snapshot["companies"] = coerce_json_list(delta_result.get("companies"))
         update_response: dict[str, Any] = {
             "ok": True,
             "old_data": self._normalize_contact_audit_snapshot(current),
@@ -1212,7 +1214,7 @@ class ContactsService:
         if set_primary_ids:
             add_company_ids.extend(set_primary_ids)
 
-        created_company_id = await self.cc_repo.apply_companies_update_delta(
+        repo_result = await self.cc_repo.apply_companies_update_delta(
             organization_id=org_id,
             contact_id=contact_id,
             remove_company_ids=remove_ids,
@@ -1221,6 +1223,22 @@ class ContactsService:
             unset_primary_company_ids=list(dict.fromkeys(unset_primary_ids)),
             create_company_name=created_name,
             create_is_primary=created_primary,
+        )
+        created_company_id = (
+            repo_result.get("created_company_id") if isinstance(repo_result, dict) else None
+        )
+        # Always fetch the final, authoritative snapshot from DB when changes were requested.
+        # This avoids returning any stale in-memory/CTE snapshot.
+        has_company_changes = bool(
+            remove_ids or add_company_ids or set_primary_ids or unset_primary_ids or created_name
+        )
+        companies_snapshot = (
+            await self.cc_repo.get_contact_companies_snapshot(
+                organization_id=org_id,
+                contact_id=contact_id,
+            )
+            if has_company_changes
+            else (repo_result.get("companies") if isinstance(repo_result, dict) else None)
         )
         affected_company_ids: set[str] = set(remove_ids)
         affected_company_ids.update(
@@ -1235,6 +1253,7 @@ class ContactsService:
             "ok": True,
             "created_company_id": created_company_id,
             "affected_company_ids": list(affected_company_ids),
+            "companies": companies_snapshot,
         }
 
     async def trigger_enrichment(

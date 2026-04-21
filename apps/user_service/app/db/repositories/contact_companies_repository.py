@@ -197,3 +197,100 @@ class ContactCompaniesRepository:
             set_primary_contact_id,
             unset_ids,
         )
+
+    async def get_contact_companies_snapshot(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> list[object]:
+        """Fetch the latest companies snapshot for a contact.
+
+        Returns the same JSON shape as `apply_companies_update_delta(...)->companies`.
+        """
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT COALESCE(
+              jsonb_agg(
+                jsonb_build_object(
+                  'company_id', cc.company_id::text,
+                  'name',       co.name,
+                  'industry',   co.industry,
+                  'is_primary', COALESCE((co.primary_contact_id = $2::uuid), FALSE)
+                )
+                ORDER BY COALESCE(co.name, ''), cc.company_id::text
+              ),
+              '[]'::jsonb
+            ) AS companies
+            FROM contact_companies cc
+            LEFT JOIN companies co
+              ON co.id = cc.company_id
+             AND co.organization_id = $1::uuid
+             AND co.status != 'deleted'
+            WHERE cc.organization_id = $1::uuid
+              AND cc.contact_id = $2::uuid;
+            """,
+            organization_id,
+            contact_id,
+        )
+        if not row:
+            return []
+        return row["companies"] or []
+
+    async def get_company_contacts_snapshot(
+        self,
+        *,
+        organization_id: str,
+        company_id: str,
+    ) -> list[object]:
+        """Fetch the latest contacts snapshot for a company.
+
+        Returns the same JSON shape as `CompaniesRepository.get_company_details(...)->contacts`.
+        """
+        primary_contact_id = await self.db_connection.fetchval(
+            """
+            SELECT primary_contact_id
+            FROM companies
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+              AND status != 'deleted'
+            """,
+            organization_id,
+            company_id,
+        )
+
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT COALESCE(
+              jsonb_agg(
+                jsonb_build_object(
+                  'id',         ct.id::text,
+                  'first_name', ct.first_name,
+                  'last_name',  ct.last_name,
+                  'title',      ct.title,
+                  'email',      NULLIF(au.email::text, ''),
+                  'phones',     COALESCE(ct.phones, '[]'::jsonb),
+                  'is_primary', COALESCE(($3::uuid = ct.id), FALSE)
+                )
+                ORDER BY COALESCE(($3::uuid = ct.id), FALSE) DESC,
+                         ct.created_at ASC
+              ),
+              '[]'::jsonb
+            ) AS contacts
+            FROM contact_companies cc
+            INNER JOIN contacts ct
+              ON ct.id = cc.contact_id
+             AND ct.organization_id = $1::uuid
+             AND ct.status != 'deleted'
+            LEFT JOIN auth.users au
+              ON au.id = ct.user_id
+            WHERE cc.organization_id = $1::uuid
+              AND cc.company_id = $2::uuid;
+            """,
+            organization_id,
+            company_id,
+            primary_contact_id,
+        )
+        if not row:
+            return []
+        return row["contacts"] or []

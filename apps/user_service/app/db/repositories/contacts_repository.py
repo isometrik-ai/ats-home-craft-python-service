@@ -484,7 +484,7 @@ class ContactsRepository(BaseRepository):
                   'company_id', co.id::text,
                   'name',       co.name,
                   'industry',   co.industry,
-                  'is_primary', (co.primary_contact_id = ct.id)
+                  'is_primary', COALESCE((co.primary_contact_id = ct.id), FALSE)
                 )
                 ORDER BY co.name
               ) FILTER (WHERE co.id IS NOT NULL) AS companies
@@ -730,7 +730,7 @@ class ContactsRepository(BaseRepository):
                   'company_id', co.id::text,
                   'name',       co.name,
                   'industry',   co.industry,
-                  'is_primary', (co.primary_contact_id = ct.id)
+                  'is_primary', COALESCE((co.primary_contact_id = ct.id), FALSE)
                 )
                 ORDER BY co.name
               ) FILTER (WHERE co.id IS NOT NULL) AS companies
