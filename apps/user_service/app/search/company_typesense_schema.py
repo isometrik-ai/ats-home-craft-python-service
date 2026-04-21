@@ -34,6 +34,11 @@ COMPANIES_COLLECTION_SCHEMA: dict[str, Any] = {
             "facet": True,
             "optional": True,
         },
+        # Address facets (derived from addresses[])
+        {"name": "address_cities", "type": "string[]", "facet": True, "optional": True},
+        {"name": "address_states", "type": "string[]", "facet": True, "optional": True},
+        {"name": "address_countries", "type": "string[]", "facet": True, "optional": True},
+        {"name": "address_postal_codes", "type": "string[]", "facet": True, "optional": True},
         {"name": "key_people_names", "type": "string[]", "optional": True},
         {"name": "product_names", "type": "string[]", "optional": True},
         {"name": "custom_field_values", "type": "string[]", "optional": True},
@@ -57,17 +62,22 @@ COMPANY_SEARCH_PARAMS: dict[str, Any] = {
     "query_by": (
         "name,email,phone_numbers,contact_full_names,contact_emails,"
         "contact_phone_numbers,contact_titles,tags,industry,description,"
-        "target_market_segments,current_tech_stack,key_people_names,product_names,"
-        "custom_field_values"
+        "target_market_segments,current_tech_stack,industry_specific_terminologies,"
+        "address_cities,address_states,address_countries,address_postal_codes,"
+        "key_people_names,product_names,custom_field_values"
     ),
-    "query_by_weights": "15,12,10,12,12,10,6,5,5,4,2,2,2,2,1",
+    # Must match the number of comma-separated fields in `query_by`.
+    "query_by_weights": "15,12,10,12,12,10,6,5,5,4,2,2,2,2,2,2,2,1,1,1",
     "num_typos": 2,
     "typo_tokens_threshold": 1,
     "min_len_1typo": 4,
     "min_len_2typo": 7,
     "prefix": True,
     "sort_by": "_text_match:desc,updated_at:desc",
-    "facet_by": "status,tags,industry,preferred_communication_channels",
+    "facet_by": (
+        "status,tags,industry,preferred_communication_channels,"
+        "address_countries,address_states,address_cities"
+    ),
     "max_facet_values": 25,
 }
 

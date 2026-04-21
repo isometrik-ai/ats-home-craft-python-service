@@ -274,6 +274,13 @@ class TypesenseCompanyDocument(BaseModel):
     current_tech_stack: list[str] | None = None
     preferred_communication_channels: list[str] | None = None
     industry_specific_terminologies: list[str] | None = None
+    address_cities: list[str] | None = None
+    address_states: list[str] | None = None
+    address_countries: list[str] | None = None
+    address_postal_codes: list[str] | None = None
+
+    key_people_names: list[str] | None = None
+    product_names: list[str] | None = None
 
     custom_field_keys: list[str] | None = None
     custom_field_values: list[str] | None = None

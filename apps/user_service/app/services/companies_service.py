@@ -130,8 +130,11 @@ def _normalize_company_additional_data(details: dict[str, Any]) -> None:
     """Ensure ``additional_data`` is a dict after optional string JSON parsing."""
     extra_data = details.get("additional_data")
     if isinstance(extra_data, str):
-        details["additional_data"] = parse_json_field(extra_data) or {}
+        parsed = parse_json_field(extra_data)
+        details["additional_data"] = parsed if isinstance(parsed, dict) else {}
     elif extra_data is None:
+        details["additional_data"] = {}
+    elif not isinstance(extra_data, dict):
         details["additional_data"] = {}
 
 
