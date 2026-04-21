@@ -223,6 +223,18 @@ class TypesenseContactDocument(BaseModel):
     phones_display: list[TypesensePhoneEntry] | None = None
     tags: list[str] | None = None
 
+    skills: list[str] | None = None
+    work_history_companies: list[str] | None = None
+    work_history_titles: list[str] | None = None
+    educational_institutions: list[str] | None = None
+    educational_degrees: list[str] | None = None
+    social_urls: list[str] | None = None
+    websites: list[str] | None = None
+    address_cities: list[str] | None = None
+    address_states: list[str] | None = None
+    address_countries: list[str] | None = None
+    address_postal_codes: list[str] | None = None
+
     company_ids: list[str] | None = None
     company_names: list[str] | None = None
 
