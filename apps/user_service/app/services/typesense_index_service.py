@@ -195,6 +195,138 @@ def _extract_created_updated(details: dict[str, Any]) -> tuple[int, int]:
     return created_at, updated_at
 
 
+def _ensure_list(value: Any) -> list[Any]:
+    """Ensure a value is a list, parsing JSON-like strings when needed."""
+    parsed = parse_json_field(value) if isinstance(value, str) else value
+    return parsed if isinstance(parsed, list) else []
+
+
+def _ensure_dict(value: Any) -> dict[str, Any]:
+    """Ensure a value is a dict, parsing JSON-like strings when needed."""
+    parsed = parse_json_field(value) if isinstance(value, str) else value
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _extract_contact_skills(details: dict[str, Any]) -> list[str]:
+    """Extract skills from contact details."""
+    skills_raw = _ensure_list(details.get("skills"))
+    skills: list[str] = []
+    for item in skills_raw:
+        if not isinstance(item, str):
+            continue
+        value = item.strip()
+        if value:
+            skills.append(value)
+    return skills
+
+
+def _extract_contact_work_history_facets(
+    details: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Extract work history from contact details."""
+    work_history_raw = _ensure_list(details.get("work_history"))
+    companies: list[str] = []
+    titles: list[str] = []
+    for item in work_history_raw:
+        if not isinstance(item, dict):
+            continue
+        company = (item.get("company_name") or item.get("company") or "").strip()
+        title = (item.get("title") or item.get("job_title") or item.get("position") or "").strip()
+        if company:
+            companies.append(company)
+        if title:
+            titles.append(title)
+    return companies, titles
+
+
+def _extract_contact_education_facets(
+    details: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Extract education from contact details."""
+    education_raw = _ensure_list(details.get("educational_history"))
+    institutions: list[str] = []
+    degrees: list[str] = []
+    for item in education_raw:
+        if not isinstance(item, dict):
+            continue
+        institution = (
+            item.get("institution")
+            or item.get("school")
+            or item.get("university")
+            or item.get("college")
+            or ""
+        )
+        degree = item.get("degree") or item.get("qualification") or item.get("field_of_study") or ""
+        institution_s = institution.strip() if isinstance(institution, str) else ""
+        degree_s = degree.strip() if isinstance(degree, str) else ""
+        if institution_s:
+            institutions.append(institution_s)
+        if degree_s:
+            degrees.append(degree_s)
+    return institutions, degrees
+
+
+def _extract_contact_social_urls(details: dict[str, Any]) -> list[str]:
+    """Extract social URLs from contact details."""
+    social_raw = _ensure_list(details.get("social_pages"))
+    urls: list[str] = []
+    for item in social_raw:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url") or item.get("link") or item.get("profile_url") or ""
+        url_s = url.strip() if isinstance(url, str) else ""
+        if url_s:
+            urls.append(url_s)
+    return urls
+
+
+def _extract_contact_websites(details: dict[str, Any]) -> list[str]:
+    """Extract websites from contact details."""
+    additional = _ensure_dict(details.get("additional_data"))
+    websites_raw = additional.get("websites")
+    websites_list = _ensure_list(websites_raw)
+    urls: list[str] = []
+    for item in websites_list:
+        if isinstance(item, str):
+            url_s = item.strip()
+        elif isinstance(item, dict):
+            url_value = item.get("url") or item.get("website") or item.get("link") or ""
+            url_s = url_value.strip() if isinstance(url_value, str) else ""
+        else:
+            continue
+        if not url_s:
+            continue
+        urls.append(url_s)
+    return urls
+
+
+def _extract_contact_address_facets(
+    details: dict[str, Any],
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """Extract address facets from contact details."""
+    addresses_raw = _ensure_list(details.get("addresses"))
+    cities: list[str] = []
+    states: list[str] = []
+    countries: list[str] = []
+    postal_codes: list[str] = []
+    for item in addresses_raw:
+        if not isinstance(item, dict):
+            continue
+        city = (item.get("city") or "").strip()
+        state = (item.get("state") or item.get("region") or "").strip()
+        country = (item.get("country") or "").strip()
+        postal = (item.get("postal_code") or item.get("zip_code") or item.get("zip") or "").strip()
+        if city:
+            cities.append(city)
+        if state:
+            states.append(state)
+        if country:
+            countries.append(country)
+        if postal:
+            postal_codes.append(postal)
+    return cities, states, countries, postal_codes
+
+
 def _extract_company_contacts_fields(
     details: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str], list[str]]:
@@ -308,6 +440,14 @@ async def _build_contact_document(
         organization_id=organization_id,
         details=details,
     )
+    skills = _extract_contact_skills(details)
+    work_history_companies, work_history_titles = _extract_contact_work_history_facets(details)
+    educational_institutions, educational_degrees = _extract_contact_education_facets(details)
+    social_urls = _extract_contact_social_urls(details)
+    websites = _extract_contact_websites(details)
+    address_cities, address_states, address_countries, address_postal_codes = (
+        _extract_contact_address_facets(details)
+    )
     created_at, updated_at = _extract_created_updated(details)
 
     document: dict[str, Any] = {
@@ -328,6 +468,17 @@ async def _build_contact_document(
         "phone_numbers": phone_numbers or None,
         "phones_display": phones_display or None,
         "tags": details.get("tags") or [],
+        "skills": skills or None,
+        "work_history_companies": work_history_companies or None,
+        "work_history_titles": work_history_titles or None,
+        "educational_institutions": educational_institutions or None,
+        "educational_degrees": educational_degrees or None,
+        "social_urls": social_urls or None,
+        "websites": websites or None,
+        "address_cities": address_cities or None,
+        "address_states": address_states or None,
+        "address_countries": address_countries or None,
+        "address_postal_codes": address_postal_codes or None,
         "company_ids": company_ids or None,
         "company_names": company_names or None,
         "custom_field_keys": custom_field_keys or None,
