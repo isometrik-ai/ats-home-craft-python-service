@@ -27,6 +27,7 @@ from apps.user_service.app.schemas.enums import (
     ClientStatus,
     KafkaTopics,
 )
+from apps.user_service.app.services.activity_service import ActivityService
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
@@ -273,6 +274,80 @@ async def list_companies(
         message_key="companies.success.companies_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("get company activity")
+@router.get(
+    "/activity/{company_id}/",
+    status_code=http_status.HTTP_200_OK,
+    description=(
+        "Activity feed for a company. `page` / `page_size` paginate (newest first). "
+        "`data` contains flattened lines (often one per changed field). `total` and `total_pages` "
+        "refer to audit rows; `len(data)` may be larger than `page_size`."
+    ),
+    summary="Get company activity",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_company_activity(
+    request: Request,
+    company_id: str = Path(..., description="Company identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Audit log rows per page"),
+):
+    """Get activity for a company (offset pagination)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+    )
+
+    # Ensure company exists (and org-scoped) before returning activity.
+    service = CompaniesService(db_connection=db_connection, user_context=user_context)
+    await service.get_company_details(company_id=company_id)
+
+    activity_service = ActivityService(user_context=user_context, db_connection=db_connection)
+    items, total = await activity_service.get_company_activity(
+        company_id=company_id,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+
+    if not items:
+        if total == 0:
+            return list_response(
+                request=request,
+                items=[],
+                total=total,
+                message_key="success.no_data",
+                custom_code=CustomStatusCode.NO_CONTENT,
+                status_code=http_status.HTTP_200_OK,
+                page=page,
+                page_size=page_size,
+            )
+        return list_response(
+            request=request,
+            items=[],
+            total=total,
+            message_key="success.retrieved",
+            custom_code=CustomStatusCode.SUCCESS,
+            status_code=http_status.HTTP_200_OK,
+            page=page,
+            page_size=page_size,
+        )
+
+    return list_response(
+        request=request,
+        items=items,
+        total=total,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        page=page,
+        page_size=page_size,
     )
 
 
