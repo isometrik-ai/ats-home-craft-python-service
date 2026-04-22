@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -59,21 +59,6 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 JOB_NOT_FOUND = "contacts_imports.errors.job_not_found"
 
 
-def _schedule_contacts_import_event_publish(
-    *,
-    background_tasks: BackgroundTasks,
-    event_payload: dict[str, Any],
-    job_id: str,
-) -> None:
-    """Schedule a contacts import event publish."""
-    background_tasks.add_task(
-        EventService.publish_event_background,
-        event=event_payload,
-        key=str(job_id),
-        topics=CONTACTS_IMPORT_TOPICS,
-    )
-
-
 @handle_api_exceptions("create contacts import job")
 @router.post(
     "",
@@ -91,7 +76,6 @@ def _schedule_contacts_import_event_publish(
 )
 async def create_contacts_import_job(
     request: Request,
-    background_tasks: BackgroundTasks,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
     body: CreateContactsImportJobRequest = Body(...),
@@ -100,6 +84,7 @@ async def create_contacts_import_job(
     job_id: str | None = None
     event_payload: dict[str, Any] | None = None
 
+    # Wrap DB writes in an explicit transaction so we can publish only after commit.
     async with db_connection.transaction():
         user_context = await check_permissions(
             current_user=current_user,
@@ -130,11 +115,12 @@ async def create_contacts_import_job(
         request.state.audit_requested_id = job_id
         request.state.raw_audit_new_data = job
 
+    # Transaction committed here (exit from transaction context).
     if event_payload is not None and job_id:
-        _schedule_contacts_import_event_publish(
-            background_tasks=background_tasks,
-            event_payload=event_payload,
-            job_id=job_id,
+        await EventService.publish_event_background(
+            event=event_payload,
+            key=str(job_id),
+            topics=CONTACTS_IMPORT_TOPICS,
         )
 
     return success_response(
@@ -260,7 +246,6 @@ async def get_contacts_import_job(
 )
 async def retry_contacts_import_job(
     request: Request,
-    background_tasks: BackgroundTasks,
     job_id: str = Path(..., min_length=5, max_length=128),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
@@ -295,11 +280,12 @@ async def retry_contacts_import_job(
         job, event_payload = result
         request.state.raw_audit_new_data = job
 
+    # Transaction committed here (exit from transaction context).
     if event_payload is not None:
-        _schedule_contacts_import_event_publish(
-            background_tasks=background_tasks,
-            event_payload=event_payload,
-            job_id=str(job["job_id"]),
+        await EventService.publish_event_background(
+            event=event_payload,
+            key=str(job["job_id"]),
+            topics=CONTACTS_IMPORT_TOPICS,
         )
 
     return success_response(

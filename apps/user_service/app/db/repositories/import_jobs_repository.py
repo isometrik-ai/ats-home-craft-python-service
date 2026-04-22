@@ -118,7 +118,7 @@ class ImportJobsRepository(BaseRepository):
                 finished_at,
                 updated_at
             FROM {self.TABLE}
-            WHERE id = $1::uuid AND organization_id = $2::uuid
+            WHERE job_key = $1 AND organization_id = $2::uuid
         """
         row = await self.db_connection.fetchrow(query, job_id, organization_id)
         return self._normalize_job_row(dict(row)) if row else None

@@ -202,6 +202,13 @@ class EventService:
         try:
             kafka_service = get_kafka_event_service()
             resolved_topics = EventService._resolve_topics(topics)
+            logger.info(
+                "kafka_event_publish_attempt topics=%s key=%s job_key=%s organization_id=%s",
+                resolved_topics,
+                str(key) if key else None,
+                event.get("job_key"),
+                event.get("organization_id"),
+            )
             metadata = await kafka_service.produce_event(
                 event=event, key=key, topics=resolved_topics
             )
