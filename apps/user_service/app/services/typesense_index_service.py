@@ -22,9 +22,7 @@ from apps.user_service.app.db.repositories import (
 )
 from apps.user_service.app.schemas import typesense as typesense_schemas
 from apps.user_service.app.schemas.enums import EntityType
-from apps.user_service.app.search.client_typesense_schema import (
-    build_document_from_schema,
-)
+from apps.user_service.app.schemas.typesense import build_document_from_schema
 from apps.user_service.app.search.company_typesense_schema import (
     COMPANIES_COLLECTION_SCHEMA,
 )

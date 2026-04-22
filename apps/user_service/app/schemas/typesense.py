@@ -23,6 +23,22 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+def _schema_field_names(schema: dict[str, Any]) -> list[str]:
+    """Return a list of field names from a Typesense schema dict."""
+    fields = schema.get("fields") or []
+    return [f["name"] for f in fields if isinstance(f, dict) and f.get("name")]
+
+
+def build_document_from_schema(
+    *,
+    schema: dict[str, Any],
+    raw_document: dict[str, Any],
+) -> dict[str, Any]:
+    """Return a document containing exactly the schema's field names."""
+    allowed = set(_schema_field_names(schema))
+    return {k: v for k, v in raw_document.items() if k in allowed}
+
+
 class TypesensePhoneEntry(BaseModel):
     """Stored phone item for Typesense contact docs."""
 

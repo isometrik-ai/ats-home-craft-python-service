@@ -68,7 +68,6 @@ async def test_create_project_includes_only_provided_fields():
         "organization_id": "org-1",
         "project_id": "test-project",
         "project_title": "Test Project",
-        "client_id": "client-1",
         "status": "active",
     }
     repo = ProjectRepository(db_connection=conn)
@@ -78,7 +77,6 @@ async def test_create_project_includes_only_provided_fields():
             "organization_id": "org-1",
             "project_id": "test-project",
             "project_title": "Test Project",
-            "client_id": "client-1",
             "status": "active",
         }
     )
@@ -90,7 +88,6 @@ async def test_create_project_includes_only_provided_fields():
     assert "organization_id" in query
     assert "project_id" in query
     assert "project_title" in query
-    assert "client_id" in query
     assert "status" in query
 
 
@@ -168,21 +165,6 @@ async def test_get_projects_list_applies_search_filter():
 
 
 @pytest.mark.asyncio
-async def test_get_projects_list_applies_client_filter():
-    """get_projects_list applies client_id filter when provided."""
-    conn = _FakeConn()
-    conn.fetch_result = []
-    conn.fetchval_result = 0  # Total count
-    repo = ProjectRepository(db_connection=conn)
-
-    filters = ProjectListQueryParams(page=1, page_size=20, client_id="client-123")
-    await repo.get_projects_list("org-1", filters)
-
-    query = conn.fetch_calls[0][0]
-    assert "p.client_id = $" in query
-
-
-@pytest.mark.asyncio
 async def test_get_projects_list_applies_status_filter():
     """get_projects_list applies status filter when provided."""
     conn = _FakeConn()
@@ -213,37 +195,34 @@ async def test_get_projects_list_applies_priority_filter():
 
 
 @pytest.mark.asyncio
-async def test_get_project_with_client_raises_not_found():
-    """get_project_with_client returns None when project not found."""
+async def test_get_project_details_raises_not_found():
+    """get_project_details returns None when project not found."""
     conn = _FakeConn()
     conn.fetchrow_result = None
     repo = ProjectRepository(db_connection=conn)
 
-    result = await repo.get_project_with_client("project-123", "org-1")
+    result = await repo.get_project_details("project-123", "org-1")
 
     assert result is None
     assert len(conn.fetchrow_calls) == 1
     query = conn.fetchrow_calls[0][0]
-    assert "JOIN clients" in query or "clients" in query
+    assert "FROM projects" in query
 
 
 @pytest.mark.asyncio
-async def test_get_project_with_client_success():
-    """get_project_with_client returns project with client data when found."""
+async def test_get_project_details_success():
+    """get_project_details returns project when found."""
     conn = _FakeConn()
     conn.fetchrow_result = {
         "id": "project-1",
         "project_id": "test-project",
         "project_title": "Test Project",
-        "client_uuid": "client-1",
-        "client_name": "Client 1",
     }
     repo = ProjectRepository(db_connection=conn)
 
-    result = await repo.get_project_with_client("project-1", "org-1")
+    result = await repo.get_project_details("project-1", "org-1")
 
     assert result["id"] == "project-1"
-    assert result["client_uuid"] == "client-1"
     assert len(conn.fetchrow_calls) == 1
 
 
@@ -495,12 +474,11 @@ async def test_update_project_updates_only_provided_fields():
 
 @pytest.mark.asyncio
 async def test_update_project_skips_forbidden_fields():
-    """update_project skips client_id, project_id, id, organization_id."""
+    """update_project skips project_id, id, organization_id."""
     conn = _FakeConn()
     repo = ProjectRepository(db_connection=conn)
     update_data = {
         "project_title": "Updated Title",
-        "client_id": "should-be-ignored",
         "project_id": "should-be-ignored",
         "id": "should-be-ignored",
         "organization_id": "should-be-ignored",
@@ -509,7 +487,6 @@ async def test_update_project_skips_forbidden_fields():
     await repo.update_project("project-1", "org-1", update_data)
 
     query = conn.fetchrow_calls[0][0]
-    assert "client_id" not in query
     assert "project_id" not in query
     assert "id = $" in query  # Only in WHERE clause
     assert "organization_id = $" in query  # Only in WHERE clause

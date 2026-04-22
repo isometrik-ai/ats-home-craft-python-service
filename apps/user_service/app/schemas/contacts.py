@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from apps.user_service.app.schemas.clients import LeadInfo
 from apps.user_service.app.schemas.common import (
     AddressesUpdate,
     AddressInput,
     EducationalHistoryUpdate,
+    LeadInfo,
     NoteItem,
     PhoneInput,
     PhonesUpdate,

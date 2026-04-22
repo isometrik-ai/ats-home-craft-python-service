@@ -10,12 +10,7 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.schemas.enums import (
-    ClientStatus,
-    ClientUserStatus,
-    ProjectStatus,
-    TeamRoles,
-)
+from apps.user_service.app.schemas.enums import ProjectStatus, TeamRoles
 from apps.user_service.app.schemas.projects import (
     PROJECT_JSONB_COLUMNS,
     ProjectListQueryParams,
@@ -68,7 +63,6 @@ class ProjectRepository:
             "organization_id",
             "project_id",
             "project_title",
-            "client_id",
             "status",
         ]
         for field in required_fields:
@@ -393,11 +387,6 @@ class ProjectRepository:
             params.append(filters.search.strip())
             param_index += 1
 
-        if filters.client_id:
-            conditions.append(f"p.client_id = ${param_index}")
-            params.append(filters.client_id)
-            param_index += 1
-
         if filters.status:
             conditions.append(f"p.status = ${param_index}")
             params.append(filters.status.value)
@@ -448,9 +437,6 @@ class ProjectRepository:
             WITH base_projects AS (
                 SELECT p.*
                 FROM projects p
-                LEFT JOIN clients c
-                    ON c.id = p.client_id
-                    AND c.status != 'deleted'
                 {where_clause}
                 ORDER BY p.created_at DESC
                 LIMIT ${limit_param}
@@ -478,7 +464,6 @@ class ProjectRepository:
                 p.start_date,
                 p.tags,
                 p.tech_stack,
-                p.client_id,
                 p.team_id,
                 c.name AS client_name,
                 c.client_type AS client_type,
@@ -486,7 +471,6 @@ class ProjectRepository:
                 t.project_lead_id,
                 TRIM(CONCAT_WS(' ', om.first_name, om.last_name)) AS project_lead_name
             FROM base_projects p
-            LEFT JOIN clients c ON c.id = p.client_id
             LEFT JOIN team_agg t ON t.team_id = p.team_id
             LEFT JOIN organization_members om
                 ON om.user_id = t.project_lead_id
@@ -538,7 +522,7 @@ class ProjectRepository:
         query = """
             SELECT
                 p.id, p.project_id, p.project_title, p.status,
-                p.team_id, p.client_id
+                p.team_id
             FROM projects p
             WHERE (p.id::text = $1 OR p.project_id = $1)
               AND p.organization_id = $2::uuid
@@ -548,62 +532,26 @@ class ProjectRepository:
         row = await self.db_connection.fetchrow(query, project_id, organization_id)
         return dict(row) if row else None
 
-    async def get_project_with_client(
+    async def get_project_details(
         self, project_id: str, organization_id: str
     ) -> dict[str, Any] | None:
-        """Get project with client details using a single JOIN query.
-
-        Joins projects with clients and primary contact for project detail use case.
-        Returns None if project not found or client is deleted.
-
-        Args:
-            project_id: Project UUID or human-readable ID
-            organization_id: Organization UUID
-
-        Returns:
-            Project dict with embedded client fields (client_name, client_type,
-            client_email, client_phone_isd_code, client_phone_number) or None
-        """
+        """Get project details (no client association)."""
         query = """
             SELECT
                 p.id, p.organization_id, p.project_id, p.project_title, p.project_description,
-                p.client_id, p.status, p.priority, p.project_category, p.practice_areas,
+                p.status, p.priority, p.project_category, p.practice_areas,
                 p.team_id, p.start_date, p.target_end_date, p.actual_end_date, p.billing_info,
                 p.total_billed, p.total_hours, p.tech_stack, p.project_goals, p.success_criteria,
                 p.additional_ai_context, p.primary_pm_tool, p.primary_repo_url, p.tags,
                 p.custom_fields, p.documents, p.is_billable, p.is_internal, p.created_at, p.updated_at,
-                p.created_by, p.updated_by,
-                c.id AS client_uuid,
-                c.name AS client_name,
-                c.client_type AS client_type,
-                cu.title AS client_title,
-                cu.first_name AS client_first_name,
-                cu.last_name AS client_last_name,
-                au.email AS client_email,
-                au.raw_user_meta_data->>'phone_isd_code' AS client_phone_isd_code,
-                au.raw_user_meta_data->>'phone_number' AS client_phone_number
+                p.created_by, p.updated_by
             FROM projects p
-            INNER JOIN clients c
-                ON p.client_id = c.id
-                AND c.organization_id = p.organization_id
-                AND c.status != $3
-            LEFT JOIN client_users cu
-                ON cu.client_id = c.id
-                AND cu.is_primary_contact = true
-                AND cu.status != $4
-            LEFT JOIN auth.users au ON au.id = cu.user_id
             WHERE (p.id::text = $1 OR p.project_id = $1)
               AND p.organization_id = $2::uuid
               AND p.status != 'archived'
             LIMIT 1
         """
-        row = await self.db_connection.fetchrow(
-            query,
-            project_id,
-            organization_id,
-            ClientStatus.DELETED.value,
-            ClientUserStatus.DELETED.value,
-        )
+        row = await self.db_connection.fetchrow(query, project_id, organization_id)
         return dict(row) if row else None
 
     async def get_project_repositories(
@@ -671,7 +619,7 @@ class ProjectRepository:
         Args:
             project_id: Project UUID
             organization_id: Organization UUID
-            data: Field names and values to update (must not include client_id or project_id)
+            data: Field names and values to update (must not include project_id)
         """
         if not data:
             return None
@@ -680,7 +628,7 @@ class ProjectRepository:
         values: list[Any] = []
         idx = 1
         for key, value in data.items():
-            if key in ("client_id", "project_id", "id", "organization_id"):
+            if key in ("project_id", "id", "organization_id"):
                 continue
             if key in PROJECT_JSONB_COLUMNS and isinstance(value, (list, dict)):
                 value = json.dumps(value)

@@ -48,7 +48,13 @@ from apps.user_service.app.schemas.contacts import (
     CreateContactRequest,
     UpdateContactRequest,
 )
-from apps.user_service.app.schemas.enums import ClientStatus, EntityType, IsometrikRole
+from apps.user_service.app.schemas.enums import (
+    ClientEventType,
+    ClientStatus,
+    EntityType,
+    IsometrikRole,
+    KafkaTopics,
+)
 from apps.user_service.app.schemas.leads import (
     CreateLeadCompany,
     CreateLeadRequest,
@@ -100,6 +106,93 @@ logger = get_logger("contacts_service")
 
 class ContactsService:
     """Business logic for contacts."""
+
+    CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
+
+    @staticmethod
+    async def create_lifecycle_events_for_created_entities(
+        *,
+        event_service: EventService,
+        created_entities: list[dict] | None,
+        organization_id: str,
+        actor_user_id: str | None,
+    ) -> list[tuple[dict, str]]:
+        """Create lifecycle events for created entities."""
+        created_events: list[tuple[dict, str]] = []
+        for entity in created_entities or []:
+            entity_id = entity.get("entity_id")
+            if not entity_id:
+                continue
+            lifecycle_event = await event_service.create_lifecycle_event(
+                event_type=ClientEventType.CREATED.value,
+                aggregate_id=str(entity_id),
+                organization_id=organization_id,
+                actor_user_id=actor_user_id,
+                payload={"module": "contacts", "action": entity.get("action") or "create"},
+                topics=ContactsService.CLIENT_KAFKA_TOPICS,
+            )
+            if lifecycle_event is not None:
+                created_events.append((lifecycle_event, str(entity_id)))
+        return created_events
+
+    @staticmethod
+    def schedule_lifecycle_event_publishes(
+        *,
+        background_tasks: BackgroundTasks,
+        created_events: list[tuple[dict, str]],
+    ) -> None:
+        """Schedule lifecycle event publishes."""
+        for lifecycle_event, event_publish_key in created_events:
+            background_tasks.add_task(
+                EventService.publish_event_background,
+                event=lifecycle_event,
+                key=event_publish_key,
+                topics=ContactsService.CLIENT_KAFKA_TOPICS,
+            )
+
+    @staticmethod
+    def schedule_typesense_indexing_for_created_entities(
+        *,
+        background_tasks: BackgroundTasks,
+        created_entities: list[dict] | None,
+        organization_id: str,
+    ) -> None:
+        """Schedule Typesense indexing for created entities."""
+        for entity in created_entities or []:
+            entity_identifier = entity.get("entity_id")
+            if not entity_identifier:
+                continue
+            if entity.get("entity_table") == "contacts" and entity.get("action") == "create":
+                background_tasks.add_task(
+                    index_contacts_background,
+                    [(str(entity_identifier), organization_id)],
+                )
+            elif (
+                entity.get("entity_table") == "companies"
+                and entity.get("action") == "create_company"
+            ):
+                background_tasks.add_task(
+                    index_companies_background,
+                    [(str(entity_identifier), organization_id)],
+                )
+
+    @staticmethod
+    def schedule_enrichment(
+        *,
+        background_tasks: BackgroundTasks,
+        enrichment_targets: list[dict] | None,
+    ) -> None:
+        """Schedule enrichment for created entities."""
+        enrichment_service = ClientEnrichmentService.from_settings()
+        for item in enrichment_targets or []:
+            background_tasks.add_task(
+                enrichment_service.run_client_enrichment,
+                client_id=item["client_id"],
+                organization_id=item["organization_id"],
+                client_type=item["client_type"],
+                payload_data=item.get("payload_data") or {},
+                entity_table=item.get("entity_table") or "clients",
+            )
 
     def __init__(
         self,
