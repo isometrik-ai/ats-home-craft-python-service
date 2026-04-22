@@ -32,12 +32,13 @@ from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
 )
-from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_middleware.jwt_auth import check_user_access_async, get_user_from_auth
 from libs.shared_utils.common_query import (
     LEADS_MANAGEMENT_CREATE,
     LEADS_MANAGEMENT_DELETE,
     LEADS_MANAGEMENT_EDIT,
     LEADS_MANAGEMENT_VIEW,
+    LEADS_MANAGEMENT_VIEW_SYSTEM,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -169,9 +170,20 @@ async def get_lead_activity(
         permission_codes=LEADS_MANAGEMENT_VIEW,
     )
 
+    can_view_system_leads = await check_user_access_async(
+        permission_code=[LEADS_MANAGEMENT_VIEW_SYSTEM],
+        user_id=user_context.user_id,
+        organization_id=user_context.organization_id,
+        db_connection=db_connection,
+    )
+    effective_owner_id = None if can_view_system_leads else user_context.user_id
+
     # Ensure lead exists (and org-scoped) before returning activity.
     lead_service = LeadService(user_context=user_context, db_connection=db_connection)
-    await lead_service.get_lead(lead_id)
+    await lead_service.get_lead(
+        lead_id,
+        owner_id=effective_owner_id,
+    )
 
     activity_service = ActivityService(user_context=user_context, db_connection=db_connection)
     items, total = await activity_service.get_lead_activity(
@@ -255,11 +267,22 @@ async def list_leads(
         permission_codes=LEADS_MANAGEMENT_VIEW,
     )
 
+    can_view_system_leads = await check_user_access_async(
+        permission_code=[LEADS_MANAGEMENT_VIEW_SYSTEM],
+        user_id=user_context.user_id,
+        organization_id=user_context.organization_id,
+        db_connection=db_connection,
+    )
+    effective_owner_id = None if can_view_system_leads else user_context.user_id
+
     lead_service = LeadService(
         user_context=user_context,
         db_connection=db_connection,
     )
-    result = await lead_service.list_leads(params)
+    result = await lead_service.list_leads(
+        params,
+        owner_id=effective_owner_id,
+    )
 
     if params.mode == LeadsListMode.KANBAN:
         return success_response(
@@ -323,11 +346,22 @@ async def get_lead(
         permission_codes=LEADS_MANAGEMENT_VIEW,
     )
 
+    can_view_system_leads = await check_user_access_async(
+        permission_code=[LEADS_MANAGEMENT_VIEW_SYSTEM],
+        user_id=user_context.user_id,
+        organization_id=user_context.organization_id,
+        db_connection=db_connection,
+    )
+    effective_owner_id = None if can_view_system_leads else user_context.user_id
+
     lead_service = LeadService(
         user_context=user_context,
         db_connection=db_connection,
     )
-    data = await lead_service.get_lead(lead_id)
+    data = await lead_service.get_lead(
+        lead_id,
+        owner_id=effective_owner_id,
+    )
 
     return success_response(
         request=request,

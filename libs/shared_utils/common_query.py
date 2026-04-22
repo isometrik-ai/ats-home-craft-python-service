@@ -38,6 +38,7 @@ LEADS_MANAGEMENT_CREATE = "leads_management.create"
 LEADS_MANAGEMENT_VIEW = "leads_management.view"
 LEADS_MANAGEMENT_EDIT = "leads_management.edit"
 LEADS_MANAGEMENT_DELETE = "leads_management.delete"
+LEADS_MANAGEMENT_VIEW_SYSTEM = "leads_management.view_system"
 
 USERS_MANAGEMENT_DELETE = "users_management.delete"
 
@@ -252,6 +253,12 @@ DEFAULT_PERMISSIONS = [
         "leads_management.view",
         "View Leads",
         "View leads list and details",
+        "leads",
+    ),
+    (
+        LEADS_MANAGEMENT_VIEW_SYSTEM,
+        "View System Leads",
+        "View organization-wide leads",
         "leads",
     ),
     (

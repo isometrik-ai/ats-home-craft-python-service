@@ -88,18 +88,22 @@ class _FakeLeadRepository:
         self,
         organization_id: str,
         lead_id: str,
+        *,
+        owner_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Get lead detail by id."""
-        self.calls["get_lead_detail_by_id"] = (organization_id, lead_id)
+        self.calls["get_lead_detail_by_id"] = (organization_id, lead_id, owner_id)
         return self.get_lead_detail_by_id_result
 
     async def get_lead_detail_with_contacts_by_id(
         self,
         organization_id: str,
         lead_id: str,
+        *,
+        owner_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Same row shape as detail; ``get_lead`` reads contacts from this path."""
-        self.calls["get_lead_detail_with_contacts_by_id"] = (organization_id, lead_id)
+        self.calls["get_lead_detail_with_contacts_by_id"] = (organization_id, lead_id, owner_id)
         return self.get_lead_detail_by_id_result
 
     async def update_lead(
@@ -152,6 +156,7 @@ class _FakeLeadRepository:
         organization_id: str,
         *,
         stage_id: str | None = None,
+        owner_id: str | None = None,
         search: str | None = None,
         limit: int = 20,
         offset: int = 0,
@@ -160,6 +165,7 @@ class _FakeLeadRepository:
         self.calls["list_leads_page_with_total"] = (
             organization_id,
             stage_id,
+            owner_id,
             search,
             limit,
             offset,
@@ -171,10 +177,11 @@ class _FakeLeadRepository:
         organization_id: str,
         *,
         stage_id: str | None = None,
+        owner_id: str | None = None,
         search: str | None = None,
     ) -> list[dict[str, Any]]:
         """List leads for kanban."""
-        self.calls["list_leads_for_kanban"] = (organization_id, stage_id, search)
+        self.calls["list_leads_for_kanban"] = (organization_id, stage_id, owner_id, search)
         return self.list_leads_for_kanban_result
 
     async def delete_lead(
@@ -603,7 +610,14 @@ async def test_list_leads_list_mode():
     assert items[0]["close_date"] == "2026-01-10"
     assert items[0]["created_at"] == now.isoformat()
     assert items[0]["updated_at"] == now.isoformat()
-    assert lead_repo.calls["list_leads_page_with_total"] == (ORG_ID, STAGE_ID_1, "lead", 10, 10)
+    assert lead_repo.calls["list_leads_page_with_total"] == (
+        ORG_ID,
+        STAGE_ID_1,
+        None,
+        "lead",
+        10,
+        10,
+    )
     assert not stage_repo.calls
     assert not user_repo.calls
 
@@ -681,7 +695,7 @@ async def test_list_leads_kanban_groups():
     assert groups[2]["total"] == 1
     assert groups[2]["sort_order"] == 3
     assert stage_repo.calls["list_stages_by_organization"] == ORG_ID
-    assert lead_repo.calls["list_leads_for_kanban"] == (ORG_ID, None, None)
+    assert lead_repo.calls["list_leads_for_kanban"] == (ORG_ID, None, None, None)
     assert not user_repo.calls
 
 
@@ -765,7 +779,7 @@ async def test_get_lead_detail_custom_fields(monkeypatch):
     ]
     assert detail["created_at"] == now.isoformat()
     assert detail["updated_at"] == now.isoformat()
-    assert lead_repo.calls["get_lead_detail_with_contacts_by_id"] == (ORG_ID, LEAD_ID)
+    assert lead_repo.calls["get_lead_detail_with_contacts_by_id"] == (ORG_ID, LEAD_ID, None)
     assert not stage_repo.calls
     assert not user_repo.calls
 

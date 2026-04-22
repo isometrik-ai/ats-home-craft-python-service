@@ -701,6 +701,7 @@ class LeadService:
     async def list_leads(
         self,
         query: LeadsListQueryParams,
+        owner_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], int, int] | list[dict[str, Any]]:
         """List leads: list mode returns ``(items, total, page)``; kanban returns column groups."""
         organization_id = self.user_context.organization_id
@@ -713,6 +714,7 @@ class LeadService:
                 organization_id,
                 stage_id=stage_id,
                 search=search,
+                owner_id=owner_id,
                 limit=query.limit,
                 offset=offset,
             )
@@ -723,6 +725,7 @@ class LeadService:
             organization_id,
             stage_id=stage_id,
             search=search,
+            owner_id=owner_id,
         )
 
         by_stage: dict[str | None, list[dict[str, Any]]] = defaultdict(list)
@@ -763,11 +766,13 @@ class LeadService:
 
         return groups
 
-    async def get_lead(self, lead_id: str) -> dict[str, Any]:
+    async def get_lead(self, lead_id: str, owner_id: str | None = None) -> dict[str, Any]:
         """Return one lead by id for the current organization."""
         organization_id = self.user_context.organization_id
         row = await self.lead_repository.get_lead_detail_with_contacts_by_id(
-            organization_id, lead_id
+            organization_id,
+            lead_id,
+            owner_id=owner_id,
         )
         if not row:
             raise NotFoundException(
