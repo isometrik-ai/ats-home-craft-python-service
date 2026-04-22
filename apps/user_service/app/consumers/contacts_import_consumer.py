@@ -257,9 +257,9 @@ class ContactsImportConsumer:
                 await self._commit_ready_offsets(ctx=ctx)
             finally:
                 committer_task.cancel()
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(Exception, asyncio.CancelledError):
                     await committer_task
-            await self.stop()
+                await self.stop()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -281,3 +281,16 @@ async def run_contacts_import_consumer(batch_size: int = 1000) -> None:
     """Convenience entrypoint for running the contacts import consumer."""
     consumer = ContactsImportConsumer()
     await consumer.consume_forever(batch_size=batch_size)
+
+
+def main() -> None:
+    """Main entrypoint for the contacts import consumer."""
+    logging.basicConfig(level=logging.INFO)
+    try:
+        asyncio.run(run_contacts_import_consumer())
+    except KeyboardInterrupt:
+        logger.info("contacts_import_consumer_interrupted")
+
+
+if __name__ == "__main__":
+    main()
