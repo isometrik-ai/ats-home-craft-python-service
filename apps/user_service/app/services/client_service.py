@@ -493,7 +493,6 @@ class ClientService:
                 "email": user_details.get("email"),
                 "organization_id": organization_id,
                 "role": IsometrikRole.CLIENT.value,
-                "user_identifier": str(uuid.uuid4()),
             },
             isometrik_credentials=isometrik_credentials,
         )
@@ -686,7 +685,6 @@ class ClientService:
                 "role": IsometrikRole.CLIENT.value,
                 "first_name": isometrik_first_name,
                 "last_name": isometrik_last_name,
-                "user_identifier": str(uuid.uuid4()) if existing_user else None,
             },
             isometrik_credentials=isometrik_credentials,
         )

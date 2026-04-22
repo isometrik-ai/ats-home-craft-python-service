@@ -224,13 +224,14 @@ class ContactsRepository(BaseRepository):
             WITH company_exists AS (
               SELECT co.id
               FROM companies co
-              WHERE $2::uuid IS NOT NULL
-                AND co.id = $2::uuid
-                AND co.organization_id = $1::uuid
-                AND co.status != $21::text
+              WHERE $3::uuid IS NOT NULL
+                AND co.id = $3::uuid
+                AND co.organization_id = $2::uuid
+                AND co.status != $22::text
             ),
             contact AS (
               INSERT INTO contacts (
+                id,
                 organization_id,
                 user_id,
                 isometrik_user_id,
@@ -251,22 +252,23 @@ class ContactsRepository(BaseRepository):
               )
               VALUES (
                 $1::uuid,
-                $3::uuid,
-                $4::text,
+                $2::uuid,
+                $4::uuid,
                 $5::text,
                 $6::text,
                 $7::text,
                 $8::text,
                 $9::text,
                 $10::text,
-                $11::date,
-                $12::text,
-                COALESCE($13::jsonb, '[]'::jsonb),
-                COALESCE($14::text[], '{}'::text[]),
-                COALESCE($15::jsonb, '[]'::jsonb),
-                COALESCE($16::jsonb, '{}'::jsonb),
+                $11::text,
+                $12::date,
+                $13::text,
+                COALESCE($14::jsonb, '[]'::jsonb),
+                COALESCE($15::text[], '{}'::text[]),
+                COALESCE($16::jsonb, '[]'::jsonb),
                 COALESCE($17::jsonb, '{}'::jsonb),
-                COALESCE($18::jsonb, '{}'::jsonb)
+                COALESCE($18::jsonb, '{}'::jsonb),
+                COALESCE($19::jsonb, '{}'::jsonb)
               )
               RETURNING *
             ),
@@ -294,8 +296,8 @@ class ContactsRepository(BaseRepository):
                 additional_data
               )
               SELECT
-                $1::uuid,
-                CASE WHEN $20::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
+                $2::uuid,
+                CASE WHEN $21::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
                 c.status,
                 c.name,
                 c.industry,
@@ -314,7 +316,7 @@ class ContactsRepository(BaseRepository):
                 c.description,
                 c.custom_fields,
                 c.additional_data
-              FROM jsonb_to_recordset(COALESCE($19::jsonb, '[]'::jsonb)) AS c(
+              FROM jsonb_to_recordset(COALESCE($20::jsonb, '[]'::jsonb)) AS c(
                 status text,
                 name text,
                 industry text,
@@ -334,7 +336,7 @@ class ContactsRepository(BaseRepository):
                 custom_fields jsonb,
                 additional_data jsonb
               )
-              WHERE $2::uuid IS NULL
+              WHERE $3::uuid IS NULL
               RETURNING *
             ),
             company AS (
@@ -374,7 +376,7 @@ class ContactsRepository(BaseRepository):
                 a.address_type,
                 COALESCE(a.address_data, '{}'::jsonb) AS address_data,
                 a.is_primary
-              FROM jsonb_to_recordset(COALESCE($22::jsonb, '[]'::jsonb)) AS a(
+              FROM jsonb_to_recordset(COALESCE($23::jsonb, '[]'::jsonb)) AS a(
                 place_id text,
                 address_line1 text,
                 address_line2 text,
@@ -389,12 +391,12 @@ class ContactsRepository(BaseRepository):
                 is_primary boolean
               )
               WHERE (SELECT id FROM company) IS NOT NULL
-                AND $19::jsonb IS NOT NULL
+                AND $23::jsonb IS NOT NULL
               RETURNING 1
             ),
             membership AS (
               INSERT INTO contact_companies (organization_id, contact_id, company_id)
-              SELECT $1::uuid, (SELECT id FROM contact), (SELECT id FROM company)
+              SELECT $2::uuid, (SELECT id FROM contact), (SELECT id FROM company)
               WHERE (SELECT id FROM company) IS NOT NULL
               ON CONFLICT (contact_id, company_id) DO NOTHING
               RETURNING 1
@@ -404,8 +406,8 @@ class ContactsRepository(BaseRepository):
               SET primary_contact_id = (SELECT id FROM contact),
                   updated_at = NOW()
               WHERE id = (SELECT id FROM company)
-                AND organization_id = $1::uuid
-                AND $20::boolean IS TRUE
+                AND organization_id = $2::uuid
+                AND $21::boolean IS TRUE
                 AND (SELECT id FROM company) IS NOT NULL
               RETURNING 1
             )
@@ -414,6 +416,7 @@ class ContactsRepository(BaseRepository):
               (SELECT id FROM company)::text AS company_id,
               (SELECT to_jsonb(contact) FROM contact) AS contact
             """,
+            contact_data.get("id"),
             organization_id,
             company_id,
             contact_data.get("user_id"),

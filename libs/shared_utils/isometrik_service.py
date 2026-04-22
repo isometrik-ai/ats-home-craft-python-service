@@ -190,7 +190,6 @@ async def create_isometrik_user(
             - ``role`` (str): Role of the user.
             - ``first_name`` (str | None): User's first name (optional).
             - ``last_name`` (str | None): User's last name (optional).
-            - ``user_identifier`` (str | None): External identifier for the user (optional).
         isometrik_credentials (dict[str, Any]): Isometrik credentials from settings.
             Should contain: ``userSecret``, ``licenseKey``, ``appSecret``.
     Returns:
@@ -210,7 +209,6 @@ async def create_isometrik_user(
         role = user["role"]
         first_name = user.get("first_name")
         last_name = user.get("last_name")
-        user_identifier = user.get("user_identifier")
         avatar_url = user.get("avatar_url", "https://example.com/default-avatar.jpg")
 
         user_name = " ".join(filter(None, [first_name, last_name])) or email.split("@")[0]
@@ -219,7 +217,7 @@ async def create_isometrik_user(
 
         payload = {
             "userName": user_name,
-            "userIdentifier": user_identifier or str(user_id),
+            "userIdentifier": str(user_id),
             "userProfileImageUrl": avatar_url,
             "password": password,
             "metaData": {

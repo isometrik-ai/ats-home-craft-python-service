@@ -130,6 +130,7 @@ class ContactsService:
     async def _provision_contact_auth_identity(
         self,
         *,
+        contact_id: str,
         email: str,
         first_name: str | None,
         last_name: str | None,
@@ -189,16 +190,16 @@ class ContactsService:
 
         org_settings = parse_json_field(organization.get("settings"))
         isometrik_credentials = get_isometrik_data_from_settings(org_settings)
+        # For contacts, we use the contact id as Isometrik's stable identifier.
+        # The auth user id is still stored on the contact row as `contacts.user_id`.
         isometrik_response = await create_isometrik_user(
             user={
-                "user_id": user_id,
+                "user_id": contact_id,
                 "email": email_norm,
                 "organization_id": org_id,
                 "role": IsometrikRole.CLIENT.value,
                 "first_name": first_name,
                 "last_name": last_name,
-                # Keep this condition identical to ClientService._create_auth_and_isometrik_user
-                "user_identifier": str(uuid.uuid4()) if existing_user else None,
             },
             isometrik_credentials=isometrik_credentials,
         )
@@ -356,6 +357,7 @@ class ContactsService:
     async def _provision_identity(
         self,
         *,
+        contact_id: str,
         email: str,
         first_name: str | None,
         last_name: str | None,
@@ -367,6 +369,7 @@ class ContactsService:
             ``(user_id, isometrik_user_id, password_if_created)``.
         """
         return await self._provision_contact_auth_identity(
+            contact_id=contact_id,
             email=email,
             first_name=first_name,
             last_name=last_name,
@@ -576,7 +579,9 @@ class ContactsService:
             )
         org_name = str(organization.get("name") or shared_settings.company_name or "")
 
+        contact_id = str(uuid.uuid4())
         user_id, isometrik_user_id, created_password = await self._provision_identity(
+            contact_id=contact_id,
             email=email_norm,
             first_name=body.first_name,
             last_name=body.last_name,
@@ -638,6 +643,7 @@ class ContactsService:
             user_id=user_id,
             isometrik_user_id=isometrik_user_id,
             contact_payload={
+                "id": contact_id,
                 "status": ClientStatus.ACTIVE.value,
                 "prefix": body.prefix,
                 "first_name": body.first_name,
@@ -659,7 +665,7 @@ class ContactsService:
             company_addresses=company_addresses,
             make_primary=make_primary,
         )
-        contact_id = created.get("contact_id")
+        contact_id = created.get("contact_id") or contact_id
         company_id = created.get("company_id")
         contact_row = created.get("contact")
         if not contact_id:
