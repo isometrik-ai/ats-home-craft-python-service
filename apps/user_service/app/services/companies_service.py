@@ -895,11 +895,13 @@ class CompaniesService:
         if not email_norm:
             return None, None, None, None
         contacts_service = self._contacts_service()
+        contact_id = str(uuid.uuid4())
         (
             user_id,
             isometrik_user_id,
             created_password,
         ) = await contacts_service._provision_identity(
+            contact_id=contact_id,
             email=email_norm,
             first_name=create_contact.first_name,
             last_name=create_contact.last_name,

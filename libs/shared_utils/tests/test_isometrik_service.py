@@ -109,7 +109,6 @@ async def test_create_isometrik_user_custom_avatar(monkeypatch) -> None:
         "first_name": "Jane",
         "last_name": "Smith",
         "avatar_url": "https://example.com/custom-avatar.jpg",
-        "user_identifier": "external-id-123",
     }
     credentials = {
         "userSecret": "user-secret",
@@ -121,5 +120,5 @@ async def test_create_isometrik_user_custom_avatar(monkeypatch) -> None:
 
     assert result == {"userId": "isometrik-123"}
     assert calls["json"]["userName"] == "Jane Smith"
-    assert calls["json"]["userIdentifier"] == "external-id-123"
+    assert calls["json"]["userIdentifier"] == "user-2"
     assert calls["json"]["userProfileImageUrl"] == "https://example.com/custom-avatar.jpg"
