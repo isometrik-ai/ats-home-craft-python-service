@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import csv
 import ipaddress
+import logging
 import os
 import tempfile
 import time
@@ -58,7 +59,9 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_db.supabase_db.client import get_supabase_service_client
 
-CONTACTS_IMPORT_TOPIC = ContactsImportKafkaStream.CONTACTS_IMPORT_REQUESTED
+CONTACTS_IMPORT_TOPIC = ContactsImportKafkaStream.CONTACTS_IMPORT_REQUESTED.value
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -270,11 +273,31 @@ class ContactsImportService:
         rows_repo = ImportJobRowsRepository(db_connection=self.db_connection)
         logs_repo = ImportJobLogsRepository(db_connection=self.db_connection)
 
+        logger.info(
+            "contacts_import_service_event_received job_key=%s organization_id=%s action=%s",
+            str(event.job_key),
+            str(event.organization_id),
+            getattr(event.action, "value", event.action),
+        )
+
         job = await job_repo.get_job(job_id=event.job_key, organization_id=event.organization_id)
         if job is None:
+            logger.info(
+                "contacts_import_service_job_not_found job_key=%s organization_id=%s",
+                str(event.job_key),
+                str(event.organization_id),
+            )
             return
 
         if ContactsImportJobStatus(str(job["status"])) != ContactsImportJobStatus.QUEUED:
+            logger.info(
+                "contacts_import_service_job_skipped_not_queued",
+                extra={
+                    "job_key": str(event.job_key),
+                    "organization_id": str(event.organization_id),
+                    "status": str(job.get("status")),
+                },
+            )
             return
 
         started_at_dt = datetime.now(UTC)
@@ -301,6 +324,16 @@ class ContactsImportService:
                     "action": str(event.action).lower(),
                     "started_at": started_at,
                     "stats": {"processed": 0, "success": 0, "errors": 0},
+                },
+            )
+
+            logger.info(
+                "contacts_import_service_job_started",
+                extra={
+                    "job_key": str(event.job_key),
+                    "job_id": job_internal_id,
+                    "organization_id": str(event.organization_id),
+                    "file_type": str(job.get("file_type") or ""),
                 },
             )
 
@@ -356,6 +389,20 @@ class ContactsImportService:
                     },
                 },
             )
+
+            elapsed_s = max(0.0, (finished_at_dt - started_at_dt).total_seconds())
+            logger.info(
+                "contacts_import_service_job_completed",
+                extra={
+                    "job_key": str(event.job_key),
+                    "job_id": job_internal_id,
+                    "organization_id": str(event.organization_id),
+                    "elapsed_ms": int(elapsed_s * 1000),
+                    "processed": totals.processed_total,
+                    "success": totals.success_total,
+                    "errors": totals.errors_total,
+                },
+            )
         except Exception as exc:
             finished_at_dt = datetime.now(UTC)
             finished_at = finished_at_dt.isoformat()
@@ -387,6 +434,20 @@ class ContactsImportService:
                 )
             except Exception:
                 pass
+            elapsed_s = max(0.0, (finished_at_dt - started_at_dt).total_seconds())
+            logger.exception(
+                "contacts_import_service_job_failed",
+                exc_info=exc,
+                extra={
+                    "job_key": str(event.job_key),
+                    "job_id": job_internal_id,
+                    "organization_id": str(event.organization_id),
+                    "elapsed_ms": int(elapsed_s * 1000),
+                    "processed": totals.processed_total,
+                    "success": totals.success_total,
+                    "errors": totals.errors_total,
+                },
+            )
             raise
 
     @staticmethod
