@@ -55,7 +55,7 @@ class _FakeProjectRepo:
         self.project_result = {"id": "project-1"}
         self.projects_list_result = []
         self.projects_count_result = 0
-        self.project_with_client_result = None
+        self.project_details_result = None
         self.repositories_result = []
         self.integrations_result = []
         self.project_basic_result = {"id": "project-1", "team_id": "team-1"}
@@ -131,10 +131,10 @@ class _FakeProjectRepo:
         self.calls["get_projects_list"] = (organization_id, filters)
         return self.projects_list_result, self.projects_count_result
 
-    async def get_project_with_client(self, project_id, organization_id):
-        """Get project with client."""
-        self.calls["get_project_with_client"] = (project_id, organization_id)
-        return self.project_with_client_result
+    async def get_project_details(self, project_id, organization_id):
+        """Get project details (no client association)."""
+        self.calls["get_project_details"] = (project_id, organization_id)
+        return self.project_details_result
 
     async def get_project_repositories(self, project_id, organization_id, *, primary_only=False):
         """Get project repositories."""
@@ -192,20 +192,6 @@ class _FakeProjectRepo:
             integration_ids,
         )
         return None
-
-
-class _FakeClientRepo:
-    """Lightweight fake client repository."""
-
-    def __init__(self, db_connection=None):
-        self.db_connection = db_connection
-        self.calls = {}
-        self.client_details_result = {"id": "client-1", "name": "Client 1"}
-
-    async def get_client_details_with_primary_contact(self, client_id, organization_id):
-        """Get client details."""
-        self.calls["get_client_details_with_primary_contact"] = (client_id, organization_id)
-        return self.client_details_result
 
 
 class _FakeTeamRepo:
@@ -311,17 +297,12 @@ def _ctx(org_id="org-1"):
 def _service_with_fakes(monkeypatch):
     """Instantiate ProjectService with fake repositories."""
     fake_project_repo = _FakeProjectRepo()
-    fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
     fake_custom_fields = _FakeCustomFieldService()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
         lambda db_connection=None: fake_project_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ClientRepository",
-        lambda db_connection=None: fake_client_repo,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
@@ -333,7 +314,7 @@ def _service_with_fakes(monkeypatch):
     )
 
     service = ProjectService(user_context=_ctx(), db_connection=None)
-    return service, fake_project_repo, fake_client_repo, fake_team_repo, fake_custom_fields
+    return service, fake_project_repo, fake_team_repo, fake_custom_fields
 
 
 def test_generate_project_id_normalizes_title():
@@ -410,7 +391,6 @@ def test_prepare_project_data_populates_optional_fields(monkeypatch):
     request = CreateProjectRequest(
         project_title="Complex Project",
         project_description="Desc",
-        client_id="client-1",
         status=ProjectStatus.ACTIVE,
         priority=ProjectPriority.HIGH,
         project_category=["category"],
@@ -481,7 +461,6 @@ async def test_create_project_repositories_builds_payload(monkeypatch):
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
     request = CreateProjectRequest(
         project_title="Repo Project",
-        client_id="client-1",
         status=ProjectStatus.ACTIVE,
         repositories=[
             RepositoryInput(
@@ -517,7 +496,6 @@ async def test_create_project_repositories_skips_when_missing(monkeypatch):
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
     request = CreateProjectRequest(
         project_title="Repo Project",
-        client_id="client-1",
         status=ProjectStatus.ACTIVE,
         repositories=None,
     )
@@ -533,7 +511,6 @@ async def test_create_project_integrations_builds_payload(monkeypatch):
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
     request = CreateProjectRequest(
         project_title="Integration Project",
-        client_id="client-1",
         status=ProjectStatus.ACTIVE,
         integrations=[
             IntegrationInput(
@@ -568,7 +545,6 @@ async def test_create_project_integrations_skips_when_missing(monkeypatch):
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
     request = CreateProjectRequest(
         project_title="Integration Project",
-        client_id="client-1",
         status=ProjectStatus.ACTIVE,
         integrations=None,
     )
@@ -692,9 +668,9 @@ def test_build_billing_info_parses_json():
 @pytest.mark.asyncio
 async def test_get_project_details_includes_team(monkeypatch):
     """get_project_details returns team info and derived project lead."""
-    service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
+    service, fake_project_repo, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     now = datetime.now(timezone.utc)
-    fake_project_repo.project_with_client_result = {
+    fake_project_repo.project_details_result = {
         "id": "project-1",
         "organization_id": "org-1",
         "project_id": "test-project",
@@ -782,44 +758,9 @@ async def test_get_project_details_includes_team(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_project_raises_client_not_found(monkeypatch):
-    """Raises NotFoundException when client not found."""
-    fake_project_repo = _FakeProjectRepo()
-    fake_client_repo = _FakeClientRepo()
-    fake_client_repo.client_details_result = None
-    fake_team_repo = _FakeTeamRepo()
-
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ProjectRepository",
-        lambda db_connection=None: fake_project_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ClientRepository",
-        lambda db_connection=None: fake_client_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.TeamRepository",
-        lambda db_connection=None: fake_team_repo,
-    )
-
-    service = ProjectService(user_context=_ctx(), db_connection=None)
-    request_data = CreateProjectRequest(
-        project_title="Test Project",
-        client_id="client-123",
-        status=ProjectStatus.ACTIVE,
-    )
-
-    with pytest.raises(NotFoundException) as exc_info:
-        await service.create_project(request_data)
-
-    assert exc_info.value.message_key == "projects.errors.client_not_found"
-
-
-@pytest.mark.asyncio
 async def test_create_project_raises_team_member_not_found(monkeypatch):
     """Raises NotFoundException when team member not found."""
     fake_project_repo = _FakeProjectRepo()
-    fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
     fake_team_repo.members_valid = False
 
@@ -828,10 +769,6 @@ async def test_create_project_raises_team_member_not_found(monkeypatch):
         lambda db_connection=None: fake_project_repo,
     )
     monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ClientRepository",
-        lambda db_connection=None: fake_client_repo,
-    )
-    monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
         lambda db_connection=None: fake_team_repo,
     )
@@ -839,7 +776,6 @@ async def test_create_project_raises_team_member_not_found(monkeypatch):
     service = ProjectService(user_context=_ctx(), db_connection=None)
     request_data = CreateProjectRequest(
         project_title="Test Project",
-        client_id="client-123",
         status=ProjectStatus.ACTIVE,
         team_members=[
             {
@@ -861,16 +797,11 @@ async def test_create_project_raises_project_title_exists(monkeypatch):
     """Raises ConflictException when project title already exists."""
     fake_project_repo = _FakeProjectRepo()
     fake_project_repo.project_id_unique = False
-    fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
         lambda db_connection=None: fake_project_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ClientRepository",
-        lambda db_connection=None: fake_client_repo,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
@@ -880,7 +811,6 @@ async def test_create_project_raises_project_title_exists(monkeypatch):
     service = ProjectService(user_context=_ctx(), db_connection=None)
     request_data = CreateProjectRequest(
         project_title="Existing Project",
-        client_id="client-123",
         status=ProjectStatus.ACTIVE,
     )
 
@@ -894,17 +824,12 @@ async def test_create_project_raises_project_title_exists(monkeypatch):
 async def test_create_project_success(monkeypatch):
     """Successfully creates project with all components."""
     fake_project_repo = _FakeProjectRepo()
-    fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
     fake_custom_fields = _FakeCustomFieldService()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
         lambda db_connection=None: fake_project_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ClientRepository",
-        lambda db_connection=None: fake_client_repo,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
@@ -918,7 +843,6 @@ async def test_create_project_success(monkeypatch):
     service = ProjectService(user_context=_ctx(), db_connection=None)
     request_data = CreateProjectRequest(
         project_title="New Project",
-        client_id="client-123",
         status=ProjectStatus.ACTIVE,
         priority=ProjectPriority.HIGH,
     )
@@ -927,24 +851,18 @@ async def test_create_project_success(monkeypatch):
 
     assert "create_project" in fake_project_repo.calls
     assert fake_project_repo.calls["create_project"]["project_title"] == "New Project"
-    assert fake_project_repo.calls["create_project"]["client_id"] == "client-123"
 
 
 @pytest.mark.asyncio
 async def test_create_project_with_team_members(monkeypatch):
     """Successfully creates project with team members."""
     fake_project_repo = _FakeProjectRepo()
-    fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
     fake_custom_fields = _FakeCustomFieldService()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
         lambda db_connection=None: fake_project_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ClientRepository",
-        lambda db_connection=None: fake_client_repo,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
@@ -958,7 +876,6 @@ async def test_create_project_with_team_members(monkeypatch):
     service = ProjectService(user_context=_ctx(), db_connection=None)
     request_data = CreateProjectRequest(
         project_title="Project With Team",
-        client_id="client-123",
         status=ProjectStatus.ACTIVE,
         team_members=[
             {
@@ -987,9 +904,6 @@ async def test_list_projects_success(monkeypatch):
             "id": "project-1",
             "project_id": "test-project",
             "project_title": "Test Project",
-            "client_id": "client-1",
-            "client_name": "Client 1",
-            "client_type": "person",
             "project_lead_id": None,
             "project_lead_name": None,
             "team_size": 0,
@@ -1000,25 +914,14 @@ async def test_list_projects_success(monkeypatch):
             "start_date": None,
             "tags": [],
             "tech_stack": {},
-            "client_first_name": "John",
-            "client_last_name": "Doe",
-            "client_title": None,
-            "client_email": "john@example.com",
-            "client_phone_isd_code": None,
-            "client_phone_number": None,
         }
     ]
     fake_project_repo.projects_count_result = 1
-    fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
         lambda db_connection=None: fake_project_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ClientRepository",
-        lambda db_connection=None: fake_client_repo,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
@@ -1040,17 +943,12 @@ async def test_list_projects_success(monkeypatch):
 async def test_get_project_details_raises_not_found(monkeypatch):
     """Raises NotFoundException when project not found."""
     fake_project_repo = _FakeProjectRepo()
-    fake_project_repo.project_with_client_result = None
-    fake_client_repo = _FakeClientRepo()
+    fake_project_repo.project_details_result = None
     fake_team_repo = _FakeTeamRepo()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
         lambda db_connection=None: fake_project_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ClientRepository",
-        lambda db_connection=None: fake_client_repo,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
@@ -1069,21 +967,12 @@ async def test_get_project_details_raises_not_found(monkeypatch):
 async def test_get_project_details_success(monkeypatch):
     """Successfully retrieves project details."""
     fake_project_repo = _FakeProjectRepo()
-    fake_project_repo.project_with_client_result = {
+    fake_project_repo.project_details_result = {
         "id": "project-1",
         "organization_id": "org-1",
         "project_id": "test-project",
         "project_title": "Test Project",
         "project_description": "Test Description",
-        "client_uuid": "client-1",
-        "client_name": "Client 1",
-        "client_type": "person",
-        "client_first_name": "John",
-        "client_last_name": "Doe",
-        "client_title": None,
-        "client_email": "john@example.com",
-        "client_phone_isd_code": None,
-        "client_phone_number": None,
         "team_id": None,
         "status": "active",
         "priority": "high",
@@ -1110,16 +999,11 @@ async def test_get_project_details_success(monkeypatch):
         "created_by": None,
         "updated_by": None,
     }
-    fake_client_repo = _FakeClientRepo()
     fake_team_repo = _FakeTeamRepo()
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.ProjectRepository",
         lambda db_connection=None: fake_project_repo,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.project_service.ClientRepository",
-        lambda db_connection=None: fake_client_repo,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.project_service.TeamRepository",
@@ -1132,7 +1016,7 @@ async def test_get_project_details_success(monkeypatch):
 
     assert project_detail.id == "project-1"
     assert project_detail.project_title == "Test Project"
-    assert "get_project_with_client" in fake_project_repo.calls
+    assert "get_project_details" in fake_project_repo.calls
 
 
 # Update Project Tests
@@ -1187,7 +1071,7 @@ def test_build_project_update_dict_tech_stack(monkeypatch):
 @pytest.mark.asyncio
 async def test_ensure_project_team_creates_when_no_team_add(monkeypatch):
     """_ensure_project_team creates team when project has no team and add is requested."""
-    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
+    service, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     fake_team_repo.team_id_result = "new-team-1"
     project = {"id": "project-1", "project_title": "Test Project"}
     request = UpdateProjectRequest(
@@ -1232,7 +1116,7 @@ async def test_ensure_project_team_returns_existing_team_id(monkeypatch):
 @pytest.mark.asyncio
 async def test_ensure_team_raises_when_member_not_found(monkeypatch):
     """_ensure_project_team raises NotFoundException when member not found."""
-    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
+    service, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     fake_team_repo.members_valid = False
     project = {"id": "project-1", "project_title": "Test Project"}
     request = UpdateProjectRequest(
@@ -1254,7 +1138,7 @@ async def test_ensure_team_raises_when_member_not_found(monkeypatch):
 @pytest.mark.asyncio
 async def test_apply_team_members_changes_removes_member(monkeypatch):
     """_apply_team_members_changes removes member when remove is requested."""
-    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
+    service, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     request = UpdateProjectRequest(team_members=TeamMembersUpdate(remove="member-1"))
 
     await service._apply_team_members_changes("team-1", request, skip_add=False)
@@ -1268,7 +1152,7 @@ async def test_apply_team_members_changes_removes_member(monkeypatch):
 @pytest.mark.asyncio
 async def test_apply_team_members_changes_updates_member(monkeypatch):
     """_apply_team_members_changes updates member when update is requested."""
-    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
+    service, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
 
     request = UpdateProjectRequest(
         team_members=TeamMembersUpdate(
@@ -1293,7 +1177,7 @@ async def test_apply_team_members_changes_updates_member(monkeypatch):
 @pytest.mark.asyncio
 async def test_apply_team_members_changes_adds_member(monkeypatch):
     """_apply_team_members_changes adds member when add is requested."""
-    service, _, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
+    service, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     request = UpdateProjectRequest(
         team_members=TeamMembersUpdate(
             add=TeamMemberInput(
@@ -1443,7 +1327,7 @@ async def test_update_project_raises_not_found_missing(monkeypatch):
     """update_project raises NotFoundException
     when project not found."""
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_with_client_result = None
+    fake_project_repo.project_basic_result = None
     request = UpdateProjectRequest(project_title="Updated Title")
 
     with pytest.raises(NotFoundException) as exc_info:
@@ -1457,7 +1341,7 @@ async def test_update_project_raises_bad_request_no_team(monkeypatch):
     """update_project raises BadRequestException when
     updating team member without team."""
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_with_client_result = {
+    fake_project_repo.project_basic_result = {
         "id": "project-1",
         "project_title": "Test Project",
         "team_id": None,
@@ -1482,7 +1366,7 @@ async def test_update_project_raises_bad_request_no_team(monkeypatch):
 async def test_update_project_success_with_scalar_fields(monkeypatch):
     """update_project successfully updates scalar fields."""
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_with_client_result = {
+    fake_project_repo.project_details_result = {
         "id": "project-1",
         "project_title": "Original Title",
         "project_description": "Original Description",
@@ -1510,9 +1394,9 @@ async def test_update_project_success_with_scalar_fields(monkeypatch):
 @pytest.mark.asyncio
 async def test_update_project_success_with_team_member_add(monkeypatch):
     """update_project successfully adds team member."""
-    service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
+    service, fake_project_repo, fake_team_repo, _ = _service_with_fakes(monkeypatch)
     fake_team_repo.team_id_result = "new-team-1"
-    fake_project_repo.project_with_client_result = {
+    fake_project_repo.project_basic_result = {
         "id": "project-1",
         "project_title": "Test Project",
         "team_id": None,
@@ -1541,7 +1425,7 @@ async def test_update_project_success_with_team_member_add(monkeypatch):
 async def test_update_project_success_with_repo_update(monkeypatch):
     """update_project successfully updates repository."""
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_with_client_result = {
+    fake_project_repo.project_details_result = {
         "id": "project-1",
         "project_title": "Test Project",
         "team_id": None,
@@ -1565,7 +1449,7 @@ async def test_update_project_success_with_repo_update(monkeypatch):
 async def test_update_project_success_with_integration_add(monkeypatch):
     """update_project successfully adds integration."""
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_with_client_result = {
+    fake_project_repo.project_details_result = {
         "id": "project-1",
         "project_title": "Test Project",
         "team_id": None,
@@ -1589,7 +1473,7 @@ async def test_update_project_success_with_integration_add(monkeypatch):
 async def test_update_project_returns_old_data_for_audit(monkeypatch):
     """update_project returns old_data formatted for audit logging."""
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_with_client_result = {
+    fake_project_repo.project_basic_result = {
         "id": "project-1",
         "project_title": "Original Title",
         "project_description": "Original Description",
@@ -1850,7 +1734,6 @@ def test_apply_project_flags_with_none_values(monkeypatch):
     # Create request without is_billable and is_internal (they default to None in the method)
     request = CreateProjectRequest(
         project_title="Test",
-        client_id="client-1",
         status=ProjectStatus.ACTIVE,
     )
     # Manually set to None to test the None check logic
@@ -1869,7 +1752,6 @@ def test_primary_relationships_without_primary_repo(monkeypatch):
     project_data = {}
     request = CreateProjectRequest(
         project_title="Test",
-        client_id="client-1",
         status=ProjectStatus.ACTIVE,
         repositories=[
             RepositoryInput(
@@ -1892,7 +1774,6 @@ async def test_create_project_integrations_optional_missing(monkeypatch):
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
     request = CreateProjectRequest(
         project_title="Integration Project",
-        client_id="client-1",
         status=ProjectStatus.ACTIVE,
         integrations=[
             IntegrationInput(
@@ -1965,28 +1846,28 @@ async def test_apply_project_row_update_with_only_updated_by(monkeypatch):
 async def test_delete_project_raises_not_found(monkeypatch):
     """delete_project raises NotFoundException when project not found."""
     service, fake_project_repo, *_ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_with_client_result = None
+    fake_project_repo.project_basic_result = None
 
     with pytest.raises(NotFoundException) as exc_info:
         await service.delete_project("project-123")
 
     assert exc_info.value.message_key == "projects.errors.project_not_found"
-    assert "get_project_with_client" in fake_project_repo.calls
+    assert "get_project_basic_information" in fake_project_repo.calls
 
 
 @pytest.mark.asyncio
 async def test_delete_project_success_with_team(monkeypatch):
     """delete_project hard deletes team, repos, integrations; soft deletes project."""
-    service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_with_client_result = {
+    service, fake_project_repo, fake_team_repo, _ = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_basic_result = {
         "id": "project-uuid-1",
         "team_id": "team-uuid-1",
     }
 
     await service.delete_project("project-123")
 
-    assert "get_project_with_client" in fake_project_repo.calls
-    assert fake_project_repo.calls["get_project_with_client"][0] == "project-123"
+    assert "get_project_basic_information" in fake_project_repo.calls
+    assert fake_project_repo.calls["get_project_basic_information"][0] == "project-123"
     assert "delete_team_and_members" in fake_team_repo.calls
     team_delete = fake_team_repo.calls["delete_team_and_members"]
     assert team_delete.team_id == "team-uuid-1"
@@ -2007,15 +1888,15 @@ async def test_delete_project_success_with_team(monkeypatch):
 @pytest.mark.asyncio
 async def test_delete_project_success_without_team(monkeypatch):
     """delete_project skips team delete when project has no team."""
-    service, fake_project_repo, _, fake_team_repo, _ = _service_with_fakes(monkeypatch)
-    fake_project_repo.project_with_client_result = {
+    service, fake_project_repo, fake_team_repo, _ = _service_with_fakes(monkeypatch)
+    fake_project_repo.project_basic_result = {
         "id": "project-uuid-2",
         "team_id": None,
     }
 
     await service.delete_project("project-456")
 
-    assert "get_project_with_client" in fake_project_repo.calls
+    assert "get_project_basic_information" in fake_project_repo.calls
     assert "delete_team_and_members" not in fake_team_repo.calls
     assert "delete_all_project_repositories" in fake_project_repo.calls
     assert "delete_all_project_integrations" in fake_project_repo.calls

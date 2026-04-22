@@ -16,7 +16,7 @@ from supabase import AsyncClient, AuthApiError
 
 # repositories
 from apps.user_service.app.db.repositories import (
-    ClientRepository,
+    ContactsRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     SessionRepository,
@@ -1139,9 +1139,10 @@ class AuthService:
         session_repository = SessionRepository(db_connection=self.db_connection)
 
         if user_type == SelectOrganizationType.CLIENT:
-            client_repository = ClientRepository(db_connection=self.db_connection)
-            is_member = await client_repository.is_active_client_user_for_organization(
-                user_id=user_id, organization_id=organization_id
+            contacts_repository = ContactsRepository(db_connection=self.db_connection)
+            is_member = await contacts_repository.is_active_contact_user_for_organization(
+                user_id=user_id,
+                organization_id=organization_id,
             )
         else:
             organization_member_repository = OrganizationMemberRepository(

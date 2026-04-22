@@ -2,9 +2,7 @@
 
 import pytest
 
-from apps.user_service.app.schemas.clients import PrimaryContactInfo
 from apps.user_service.app.schemas.projects import (
-    ClientInfo,
     ProjectDetailData,
     ProjectLeadInfo,
     TechStack,
@@ -38,7 +36,6 @@ async def test_create_project(monkeypatch, client):
         """Fake create project."""
         del self
         assert request_data.project_title == "E-Commerce Platform Redesign"
-        assert request_data.client_id == "client-123"
         assert request_data.status == "active"
         return None
 
@@ -56,7 +53,6 @@ async def test_create_project(monkeypatch, client):
         json={
             "project_title": "E-Commerce Platform Redesign",
             "project_description": "Complete redesign and rebuild",
-            "client_id": "client-123",
             "status": "active",
             "priority": "high",
         },
@@ -84,11 +80,6 @@ async def test_list_projects(monkeypatch, client):
                     "id": "project-1",
                     "project_id": "ecommerce-platform-redesign",
                     "project_title": "E-Commerce Platform Redesign",
-                    "client": {
-                        "id": "client-1",
-                        "name": "Client 1",
-                        "type": "person",
-                    },
                     "project_lead": {
                         "id": "member-1",
                         "full_name": "John Doe",
@@ -150,18 +141,6 @@ async def test_get_project_details(monkeypatch, client):
             project_id="ecommerce-platform-redesign",
             project_title="E-Commerce Platform Redesign",
             project_description="Complete redesign and rebuild",
-            client=ClientInfo(
-                id="client-123",
-                name="Client 1",
-                type="person",
-                primary_contact=PrimaryContactInfo(
-                    first_name="John",
-                    last_name="Doe",
-                    title=None,
-                    email="john@example.com",
-                    phones=[],
-                ),
-            ),
             project_lead=ProjectLeadInfo(
                 id="member-1",
                 full_name="John Doe",
@@ -239,7 +218,6 @@ async def test_list_projects_with_filters(monkeypatch, client):
         """Fake list projects with filters."""
         del self
         assert filters.search == "ecommerce"
-        assert filters.client_id == "client-123"
         assert filters.status == "active"
         assert filters.priority == "high"
         return ([], 0)
@@ -254,10 +232,7 @@ async def test_list_projects_with_filters(monkeypatch, client):
     )
 
     res = await client.get(
-        (
-            "/v1/projects?search=ecommerce&client_id=client-123&status=active"
-            "&priority=high&page=1&page_size=20"
-        )
+        "/v1/projects?search=ecommerce&status=active&priority=high&page=1&page_size=20"
     )
     body = assert_success(res, 200)
     assert body["total"] == 0

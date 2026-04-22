@@ -28,15 +28,10 @@ from apps.user_service.app.schemas.enums import (
     KafkaTopics,
 )
 from apps.user_service.app.services.activity_service import ActivityService
-from apps.user_service.app.services.client_enrichment_service import (
-    ClientEnrichmentService,
-)
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service import (
     delete_contact_background,
-    index_companies_background,
-    index_contacts_background,
 )
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -64,88 +59,6 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     429: {"description": "Too many requests (rate limited)."},
     500: {"description": "Internal server error."},
 }
-
-
-async def _create_lifecycle_events_for_created_entities(
-    *,
-    event_service: EventService,
-    created_entities: list[dict] | None,
-    organization_id: str,
-    actor_user_id: str | None,
-) -> list[tuple[dict, str]]:
-    """Create lifecycle events for created entities."""
-    created_events: list[tuple[dict, str]] = []
-    for entity in created_entities or []:
-        entity_id = entity.get("entity_id")
-        if not entity_id:
-            continue
-        lifecycle_event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.CREATED.value,
-            aggregate_id=str(entity_id),
-            organization_id=organization_id,
-            actor_user_id=actor_user_id,
-            payload={"module": "contacts", "action": entity.get("action") or "create"},
-            topics=CLIENT_KAFKA_TOPICS,
-        )
-        if lifecycle_event is not None:
-            created_events.append((lifecycle_event, str(entity_id)))
-    return created_events
-
-
-def _schedule_lifecycle_event_publishes(
-    *,
-    background_tasks: BackgroundTasks,
-    created_events: list[tuple[dict, str]],
-) -> None:
-    """Schedule lifecycle event publishes."""
-    for lifecycle_event, event_publish_key in created_events:
-        background_tasks.add_task(
-            EventService.publish_event_background,
-            event=lifecycle_event,
-            key=event_publish_key,
-            topics=CLIENT_KAFKA_TOPICS,
-        )
-
-
-def _schedule_typesense_indexing_for_created_entities(
-    *,
-    background_tasks: BackgroundTasks,
-    created_entities: list[dict] | None,
-    organization_id: str,
-) -> None:
-    """Schedule Typesense indexing for created entities."""
-    for entity in created_entities or []:
-        entity_identifier = entity.get("entity_id")
-        if not entity_identifier:
-            continue
-        if entity.get("entity_table") == "contacts" and entity.get("action") == "create":
-            background_tasks.add_task(
-                index_contacts_background,
-                [(str(entity_identifier), organization_id)],
-            )
-        elif entity.get("entity_table") == "companies" and entity.get("action") == "create_company":
-            background_tasks.add_task(
-                index_companies_background,
-                [(str(entity_identifier), organization_id)],
-            )
-
-
-def _schedule_enrichment(
-    *,
-    background_tasks: BackgroundTasks,
-    enrichment_targets: list[dict] | None,
-) -> None:
-    """Schedule enrichment for created entities."""
-    enrichment_service = ClientEnrichmentService.from_settings()
-    for item in enrichment_targets or []:
-        background_tasks.add_task(
-            enrichment_service.run_client_enrichment,
-            client_id=item["client_id"],
-            organization_id=item["organization_id"],
-            client_type=item["client_type"],
-            payload_data=item.get("payload_data") or {},
-            entity_table=item.get("entity_table") or "clients",
-        )
 
 
 @handle_api_exceptions("create contact")
@@ -244,24 +157,24 @@ async def create_contact(
         request.state.audit_description = f"Created contact: {contact_id}"
         request.state.raw_audit_old_data = result.get("old_data")
         request.state.raw_audit_new_data = result.get("new_data")
-        created_events = await _create_lifecycle_events_for_created_entities(
+        created_events = await ContactsService.create_lifecycle_events_for_created_entities(
             event_service=event_service,
             created_entities=result.get("created_entities"),
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
         )
 
-    _schedule_lifecycle_event_publishes(
+    ContactsService.schedule_lifecycle_event_publishes(
         background_tasks=background_tasks,
         created_events=created_events,
     )
     if contact_id is not None and user_context is not None:
-        _schedule_typesense_indexing_for_created_entities(
+        ContactsService.schedule_typesense_indexing_for_created_entities(
             background_tasks=background_tasks,
             created_entities=result.get("created_entities"),
             organization_id=user_context.organization_id,
         )
-        _schedule_enrichment(
+        ContactsService.schedule_enrichment(
             background_tasks=background_tasks,
             enrichment_targets=result.get("enrichment_targets"),
         )

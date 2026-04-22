@@ -35,8 +35,6 @@ from apps.user_service.app.services.companies_service import CompaniesService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service import (
     delete_company_background,
-    index_companies_background,
-    index_contacts_background,
 )
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -145,55 +143,27 @@ async def create_company(
         request.state.audit_description = f"Created company: {company_id}"
         request.state.raw_audit_old_data = result.get("old_data")
         request.state.raw_audit_new_data = result.get("new_data")
+        created_events = await CompaniesService.create_lifecycle_events_for_created_entities(
+            event_service=event_service,
+            created_entities=result.get("created_entities"),
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+        )
 
-        for entity in result.get("created_entities") or []:
-            entity_id = entity.get("entity_id")
-            if not entity_id:
-                continue
-            lifecycle_event = await event_service.create_lifecycle_event(
-                event_type=ClientEventType.CREATED.value,
-                aggregate_id=str(entity_id),
-                organization_id=user_context.organization_id,
-                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-                payload={"module": "companies", "action": entity.get("action") or "create"},
-                topics=CLIENT_KAFKA_TOPICS,
-            )
-            if lifecycle_event is not None:
-                created_events.append((lifecycle_event, str(entity_id)))
-
-    for lifecycle_event, event_publish_key in created_events:
-        background_tasks.add_task(
-            EventService.publish_event_background,
-            event=lifecycle_event,
-            key=event_publish_key,
-            topics=CLIENT_KAFKA_TOPICS,
-        )
-    if company_id is not None:
-        background_tasks.add_task(
-            index_companies_background,
-            [(company_id, user_context.organization_id)],
-        )
-        for entity in result.get("created_entities") or []:
-            if (
-                entity.get("entity_table") == "contacts"
-                and entity.get("action") == "create_contact"
-                and entity.get("entity_id")
-            ):
-                background_tasks.add_task(
-                    index_contacts_background,
-                    [(str(entity["entity_id"]), user_context.organization_id)],
-                )
-    # Enrichment for created company and optionally created primary contact.
-    enrichment_service = ClientEnrichmentService.from_settings()
-    for item in result.get("enrichment_targets") or []:
-        background_tasks.add_task(
-            enrichment_service.run_client_enrichment,
-            client_id=item["client_id"],
-            organization_id=item["organization_id"],
-            client_type=item["client_type"],
-            payload_data=item.get("payload_data") or {},
-            entity_table=item.get("entity_table") or "clients",
-        )
+    CompaniesService.schedule_lifecycle_event_publishes(
+        background_tasks=background_tasks,
+        created_events=created_events,
+    )
+    CompaniesService.schedule_typesense_indexing_for_created_entities(
+        background_tasks=background_tasks,
+        company_id=company_id,
+        created_entities=result.get("created_entities"),
+        organization_id=user_context.organization_id,
+    )
+    CompaniesService.schedule_enrichment(
+        background_tasks=background_tasks,
+        enrichment_targets=result.get("enrichment_targets"),
+    )
 
     return success_response(
         request=request,

@@ -107,6 +107,30 @@ class ContactsRepository(BaseRepository):
                 out[email_norm] = cid
         return out
 
+    async def is_active_contact_user_for_organization(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+    ) -> bool:
+        """Return True if the auth user is an active contact in the organization."""
+        if not user_id or not organization_id:
+            return False
+        row = await self.db_connection.fetchval(
+            """
+            SELECT 1
+            FROM contacts ct
+            WHERE ct.user_id = $1::uuid
+              AND ct.organization_id = $2::uuid
+              AND ct.status != $3::text
+            LIMIT 1
+            """,
+            user_id,
+            organization_id,
+            ClientStatus.DELETED.value,
+        )
+        return row is not None
+
     async def create_contacts(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Create contacts in bulk.
 

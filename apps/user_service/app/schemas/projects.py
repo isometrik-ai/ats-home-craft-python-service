@@ -10,7 +10,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from apps.user_service.app.schemas.clients import PrimaryContactInfo
 from apps.user_service.app.schemas.enums import (
     BillingType,
     ConnectionStatus,
@@ -433,7 +432,6 @@ class CreateProjectRequest(BaseModel):
         max_length=2000,
         description="Project description",
     )
-    client_id: str = Field(..., description="Client UUID")
     status: ProjectStatus = Field(..., description="Project status")
     priority: ProjectPriority = Field(
         default=ProjectPriority.MEDIUM,
@@ -510,7 +508,6 @@ class CreateProjectRequest(BaseModel):
             "example": {
                 "project_title": "E-Commerce Platform Redesign",
                 "project_description": "Complete redesign and rebuild",
-                "client_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
                 "status": "active",
                 "priority": "high",
                 "project_category": ["E-Commerce", "FinTech"],
@@ -536,21 +533,9 @@ class ProjectListQueryParams(BaseModel):
     page: int = Field(default=1, ge=1, description="Page number")
     page_size: int = Field(default=20, ge=1, le=100, description="Page size")
     search: str | None = Field(None, min_length=2, description="Search term")
-    client_id: str | None = Field(None, description="Filter by client ID")
     status: ProjectStatus | None = Field(None, description="Filter by status")
     priority: ProjectPriority | None = Field(None, description="Filter by priority")
     tags: str | None = Field(None, description="Comma-separated tags")
-
-
-class ClientInfo(BaseModel):
-    """Client information in project response."""
-
-    id: str = Field(..., description="Client UUID")
-    name: str = Field(..., description="Client name")
-    type: str = Field(..., description="Client type")
-    primary_contact: PrimaryContactInfo | None = Field(
-        None, description="Primary contact information"
-    )
 
 
 class ProjectLeadInfo(BaseModel):
@@ -566,7 +551,6 @@ class ProjectListItem(BaseModel):
     id: str = Field(..., description="Project UUID")
     project_id: str = Field(..., description="Human-readable project ID")
     project_title: str = Field(..., description="Project title")
-    client: ClientInfo = Field(..., description="Client information")
     project_lead: ProjectLeadInfo | None = Field(None, description="Project lead information")
     team_size: int = Field(..., description="Team size")
     status: ProjectStatus = Field(..., description="Project status")
@@ -701,7 +685,6 @@ class ProjectDetailData(BaseModel):
     project_id: str = Field(..., description="Human-readable project ID")
     project_title: str = Field(..., description="Project title")
     project_description: str | None = Field(None, description="Project description")
-    client: ClientInfo = Field(..., description="Client information")
     project_lead: ProjectLeadInfo | None = Field(None, description="Project lead information")
     status: ProjectStatus = Field(..., description="Project status")
     priority: ProjectPriority = Field(..., description="Project priority")

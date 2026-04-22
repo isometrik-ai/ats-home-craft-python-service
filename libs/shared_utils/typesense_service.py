@@ -25,9 +25,6 @@ from typing import Any, Final
 import httpx
 from openai import AsyncOpenAI
 
-from apps.user_service.app.search.client_typesense_schema import (
-    CLIENT_COLLECTION_SCHEMA,
-)
 from apps.user_service.app.search.company_typesense_schema import (
     COMPANIES_COLLECTION_SCHEMA,
 )
@@ -57,7 +54,7 @@ def _default_schema_for_collection(
 ) -> Mapping[str, Any]:
     """Return the dedicated schema for a known collection name.
 
-    Falls back to the legacy/shared client schema for backwards compatibility.
+    Falls back to the contacts schema if unknown.
     """
     typesense_settings = settings.typesense
     contacts_name = getattr(typesense_settings, "contacts_collection_name", None)
@@ -66,7 +63,7 @@ def _default_schema_for_collection(
         return CONTACTS_COLLECTION_SCHEMA
     if companies_name and collection_name == companies_name:
         return COMPANIES_COLLECTION_SCHEMA
-    return CLIENT_COLLECTION_SCHEMA
+    return CONTACTS_COLLECTION_SCHEMA
 
 
 # ---------------------------------------------------------------------------

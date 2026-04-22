@@ -12,15 +12,12 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.db.repositories import (
-    ClientRepository,
     ProjectRepository,
     TeamRepository,
 )
-from apps.user_service.app.schemas.clients import PrimaryContactInfo
 from apps.user_service.app.schemas.enums import EntityType, TeamRoles
 from apps.user_service.app.schemas.projects import (
     BillingInfo,
-    ClientInfo,
     CreateProjectRequest,
     ProjectDetailData,
     ProjectListItem,
@@ -71,7 +68,6 @@ class ProjectService:
         self.db_connection = db_connection
         self.project_repository = ProjectRepository(db_connection=db_connection)
         self.team_repository = TeamRepository(db_connection=db_connection)
-        self.client_repository = ClientRepository(db_connection=db_connection)
 
     @staticmethod
     def _generate_project_id(project_title: str) -> str:
@@ -118,27 +114,6 @@ class ProjectService:
             )
 
         return project_id
-
-    async def _validate_create_project_request(self, request_data: CreateProjectRequest) -> None:
-        """Validate client exists and project title is unique.
-
-        Args:
-            request_data: Project creation request data
-
-        Raises:
-            NotFoundException: If client not found
-        """
-        organization_id = self.user_context.organization_id
-
-        # Validate client exists
-        client_exists = await self.client_repository.get_client_details_with_primary_contact(
-            request_data.client_id, organization_id
-        )
-        if not client_exists:
-            raise NotFoundException(
-                message_key="projects.errors.client_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
 
     async def _validate_and_create_team(self, request_data: CreateProjectRequest) -> str | None:
         """Validate team members and create team if provided.
@@ -293,7 +268,6 @@ class ProjectService:
             "organization_id": organization_id,
             "project_id": project_id,
             "project_title": request_data.project_title,
-            "client_id": request_data.client_id,
             "status": request_data.status.value,
             "priority": request_data.priority.value,
             "created_by": user_id,
@@ -500,9 +474,6 @@ class ProjectService:
             BadRequestException: If validation fails
             ConflictException: If project title already exists
         """
-        # Validate request
-        await self._validate_create_project_request(request_data)
-
         # Generate unique project_id from project title
         project_id = await self._generate_unique_project_id(request_data.project_title)
 
@@ -1006,7 +977,9 @@ class ProjectService:
         organization_id = self.user_context.organization_id
         user_id = self.user_context.user_id
 
-        project = await self.project_repository.get_project_with_client(project_id, organization_id)
+        project = await self.project_repository.get_project_basic_information(
+            project_id, organization_id
+        )
         if not project:
             raise NotFoundException(
                 message_key="projects.errors.project_not_found",
@@ -1058,7 +1031,9 @@ class ProjectService:
         organization_id = self.user_context.organization_id
         user_id = self.user_context.user_id
 
-        project = await self.project_repository.get_project_with_client(project_id, organization_id)
+        project = await self.project_repository.get_project_basic_information(
+            project_id, organization_id
+        )
         if not project:
             raise NotFoundException(
                 message_key="projects.errors.project_not_found",
@@ -1119,11 +1094,6 @@ class ProjectService:
                     id=str(project["id"]),
                     project_id=project["project_id"],
                     project_title=project["project_title"],
-                    client={
-                        "id": str(project["client_id"]),
-                        "name": project.get("client_name") or "",
-                        "type": project.get("client_type") or "",
-                    },
                     project_lead={
                         "id": str(project["project_lead_id"]),
                         "full_name": project.get("project_lead_name") or "",
@@ -1281,8 +1251,7 @@ class ProjectService:
         Raises:
             NotFoundException: If project not found
         """
-        # Single JOIN query for project + client (replaces 2 separate calls)
-        project = await self.project_repository.get_project_with_client(
+        project = await self.project_repository.get_project_details(
             project_id, self.user_context.organization_id
         )
         if not project:
@@ -1339,19 +1308,6 @@ class ProjectService:
             project_id=project["project_id"],
             project_title=project["project_title"],
             project_description=project.get("project_description"),
-            client=ClientInfo(
-                id=str(project["client_uuid"]),
-                name=project.get("client_name") or "",
-                type=project.get("client_type") or "",
-                primary_contact=PrimaryContactInfo(
-                    first_name=project.get("client_first_name"),
-                    last_name=project.get("client_last_name"),
-                    title=project.get("client_title"),
-                    email=project.get("client_email"),
-                    phone_isd_code=project.get("client_phone_isd_code"),
-                    phone=project.get("client_phone_number"),
-                ),
-            ),
             project_lead=project_lead_info,
             status=project["status"],
             priority=project["priority"],

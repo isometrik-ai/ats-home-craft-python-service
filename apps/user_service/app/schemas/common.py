@@ -10,6 +10,8 @@ This module contains:
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -138,6 +140,26 @@ class BillingPreferences(BaseModel):
 
     method: str | None = Field(None, description="Billing method", max_length=50)
     terms: str | None = Field(None, description="Payment terms", max_length=50)
+
+
+class LeadInfo(BaseModel):
+    """Lead summary on client detail (subset aligned with lead list/detail)."""
+
+    id: str = Field(..., description="Lead ID")
+    name: str = Field(..., description="Lead title")
+    stage_id: str | None = Field(None, description="Pipeline stage ID")
+    stage_name: str | None = Field(None, description="Stage display name")
+    deal_type: str | None = Field(None, description="Deal type (enum value)")
+    priority: str | None = Field(None, description="Priority (enum value)")
+    lead_score: str | None = Field(None, description="Score label")
+    close_date: date | None = Field(None, description="Expected close date")
+    amount: Decimal | None = Field(None, description="Estimated deal value")
+    owner_id: str | None = Field(None, description="Owning user UUID")
+    owner_name: str | None = Field(None, description="Owner display name")
+    lead_source: str | None = Field(None, description="Origin channel")
+    referral_source: str | None = Field(None, description="Referrer")
+    created_at: str | None = Field(None, description="Created at (ISO 8601)")
+    updated_at: str | None = Field(None, description="Updated at (ISO 8601)")
 
 
 # Input schemas for add operations (no id field)
