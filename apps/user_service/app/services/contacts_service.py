@@ -944,8 +944,15 @@ class ContactsService:
         for field_name in CONTACT_JSONB_COLUMNS:
             if field_name not in normalized:
                 continue
-            parsed = parse_json_any(normalized.get(field_name), None)
-            normalized[field_name] = parsed if parsed is not None else coerce_json_list(None)
+
+            # Some JSONB columns are objects (dict) while others are arrays (list).
+            # Keep types stable for audit diffs and downstream UI rendering.
+            if field_name == "additional_data":
+                parsed = parse_json_field(normalized.get(field_name))
+                normalized[field_name] = parsed if isinstance(parsed, dict) else {}
+                continue
+
+            normalized[field_name] = coerce_json_list(normalized.get(field_name))
 
     @staticmethod
     def _normalize_contact_scalar_arrays(normalized: dict[str, Any]) -> None:
