@@ -20,6 +20,7 @@ from apps.user_service.app.schemas.common import (
     BillingPreferencesUpdate,
     KeyPeopleUpdate,
     LinkedPagesUpdate,
+    NoteItem,
     Phone,
     ProductsUpdate,
     SocialPage,
@@ -91,6 +92,7 @@ class CreateCompanyRequest(BaseModel):
 
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     additional_data: dict[str, Any] = Field(default_factory=dict)
+    notes: list[NoteItem] = Field(default_factory=list, description="Structured notes")
 
     # optional lead create + association
     lead: CompanyLeadAssociation | None = Field(
@@ -301,6 +303,7 @@ class UpdateCompanyRequest(BaseModel):
     custom_fields: list[dict[str, Any]] | None = None
     additional_data: dict[str, Any] | None = None
     sales_intelligence: dict[str, Any] | None = None
+    notes: list[NoteItem] | None = None
 
     linked_pages: LinkedPagesUpdate | None = None
     products: ProductsUpdate | None = None
@@ -372,6 +375,7 @@ class CompanyDetailsResponse(BaseModel):
 
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     additional_data: dict[str, Any] = Field(default_factory=dict)
+    notes: list[NoteItem] = Field(default_factory=list)
 
     target_market_segments: list[str] = Field(default_factory=list)
     current_tech_stack: list[str] = Field(default_factory=list)

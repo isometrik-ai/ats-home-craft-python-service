@@ -13,6 +13,7 @@ from apps.user_service.app.schemas.enums import ClientStatus
 COMPANY_JSONB_COLUMNS: frozenset[str] = frozenset(
     {
         "phones",
+        "notes",
         "websites",
         "billing_preferences",
         "custom_fields",
@@ -79,6 +80,7 @@ class CompaniesRepository(BaseRepository):
             "email",
             "phones",
             "tags",
+            "notes",
             "websites",
             "billing_preferences",
             "social_pages",
@@ -155,6 +157,7 @@ class CompaniesRepository(BaseRepository):
                 profile_photo_url,
                 phones,
                 tags,
+                notes,
                 custom_fields,
                 additional_data,
                 social_pages
@@ -173,6 +176,7 @@ class CompaniesRepository(BaseRepository):
                 c.profile_photo_url,
                 c.phones,
                 c.tags,
+                COALESCE(c.notes, '[]'::jsonb),
                 c.custom_fields,
                 c.additional_data,
                 c.social_pages
@@ -189,6 +193,7 @@ class CompaniesRepository(BaseRepository):
                 profile_photo_url text,
                 phones jsonb,
                 tags text[],
+                notes jsonb,
                 custom_fields jsonb,
                 additional_data jsonb,
                 social_pages jsonb
@@ -224,7 +229,8 @@ class CompaniesRepository(BaseRepository):
                 industry_specific_terminologies,
                 description,
                 custom_fields,
-                additional_data
+                additional_data,
+                notes
               )
               VALUES (
                 $1::uuid,
@@ -246,7 +252,8 @@ class CompaniesRepository(BaseRepository):
                 $16::text[],
                 $17::text,
                 COALESCE($18::jsonb, '[]'::jsonb),
-                COALESCE($19::jsonb, '{}'::jsonb)
+                COALESCE($19::jsonb, '{}'::jsonb),
+                COALESCE($26::jsonb, '[]'::jsonb)
               )
               RETURNING *
             ),
@@ -387,6 +394,7 @@ class CompaniesRepository(BaseRepository):
             json.dumps([contact_data]) if contact_data else None,
             contact_addresses_json,
             bool(set_primary),
+            company_data.get("notes"),
         )
         if not fetched_row:
             return {

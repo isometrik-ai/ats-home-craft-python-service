@@ -16,6 +16,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 CONTACT_JSONB_COLUMNS: frozenset[str] = frozenset(
     {
         "phones",
+        "notes",
         "custom_fields",
         "additional_data",
         "social_pages",
@@ -129,6 +130,7 @@ class ContactsRepository(BaseRepository):
             "profile_photo_url",
             "phones",
             "tags",
+            "notes",
             "custom_fields",
             "additional_data",
             "social_pages",
@@ -225,7 +227,7 @@ class ContactsRepository(BaseRepository):
               WHERE $2::uuid IS NOT NULL
                 AND co.id = $2::uuid
                 AND co.organization_id = $1::uuid
-                AND co.status != $20::text
+                AND co.status != $21::text
             ),
             contact AS (
               INSERT INTO contacts (
@@ -242,6 +244,7 @@ class ContactsRepository(BaseRepository):
                 profile_photo_url,
                 phones,
                 tags,
+                notes,
                 custom_fields,
                 additional_data,
                 social_pages
@@ -260,9 +263,10 @@ class ContactsRepository(BaseRepository):
                 $12::text,
                 COALESCE($13::jsonb, '[]'::jsonb),
                 COALESCE($14::text[], '{}'::text[]),
-                COALESCE($15::jsonb, '{}'::jsonb),
+                COALESCE($15::jsonb, '[]'::jsonb),
                 COALESCE($16::jsonb, '{}'::jsonb),
-                COALESCE($17::jsonb, '{}'::jsonb)
+                COALESCE($17::jsonb, '{}'::jsonb),
+                COALESCE($18::jsonb, '{}'::jsonb)
               )
               RETURNING *
             ),
@@ -291,7 +295,7 @@ class ContactsRepository(BaseRepository):
               )
               SELECT
                 $1::uuid,
-                CASE WHEN $19::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
+                CASE WHEN $20::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
                 c.status,
                 c.name,
                 c.industry,
@@ -310,7 +314,7 @@ class ContactsRepository(BaseRepository):
                 c.description,
                 c.custom_fields,
                 c.additional_data
-              FROM jsonb_to_recordset(COALESCE($18::jsonb, '[]'::jsonb)) AS c(
+              FROM jsonb_to_recordset(COALESCE($19::jsonb, '[]'::jsonb)) AS c(
                 status text,
                 name text,
                 industry text,
@@ -370,7 +374,7 @@ class ContactsRepository(BaseRepository):
                 a.address_type,
                 COALESCE(a.address_data, '{}'::jsonb) AS address_data,
                 a.is_primary
-              FROM jsonb_to_recordset(COALESCE($21::jsonb, '[]'::jsonb)) AS a(
+              FROM jsonb_to_recordset(COALESCE($22::jsonb, '[]'::jsonb)) AS a(
                 place_id text,
                 address_line1 text,
                 address_line2 text,
@@ -385,7 +389,7 @@ class ContactsRepository(BaseRepository):
                 is_primary boolean
               )
               WHERE (SELECT id FROM company) IS NOT NULL
-                AND $18::jsonb IS NOT NULL
+                AND $19::jsonb IS NOT NULL
               RETURNING 1
             ),
             membership AS (
@@ -401,7 +405,7 @@ class ContactsRepository(BaseRepository):
                   updated_at = NOW()
               WHERE id = (SELECT id FROM company)
                 AND organization_id = $1::uuid
-                AND $19::boolean IS TRUE
+                AND $20::boolean IS TRUE
                 AND (SELECT id FROM company) IS NOT NULL
               RETURNING 1
             )
@@ -424,6 +428,7 @@ class ContactsRepository(BaseRepository):
             contact_data.get("profile_photo_url"),
             contact_data.get("phones"),
             contact_data.get("tags"),
+            contact_data.get("notes"),
             contact_data.get("custom_fields"),
             contact_data.get("additional_data"),
             contact_data.get("social_pages"),
