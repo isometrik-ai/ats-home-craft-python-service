@@ -30,8 +30,8 @@ NULLIF(
 # Optional search: lead name, linked company name, or any linked contact name (EXISTS only).
 _LEADS_SEARCH_PREDICATE = f"""
       AND (
-          $3::text IS NULL
-          OR l.name ILIKE $3
+          $4::text IS NULL
+          OR l.name ILIKE $4
           OR EXISTS (
               SELECT 1
               FROM lead_companies lco
@@ -40,7 +40,7 @@ _LEADS_SEARCH_PREDICATE = f"""
                  AND co.organization_id = lco.organization_id
               WHERE lco.lead_id = l.id
                 AND lco.organization_id = l.organization_id
-                AND co.name ILIKE $3
+                AND co.name ILIKE $4
           )
           OR EXISTS (
               SELECT 1
@@ -50,15 +50,16 @@ _LEADS_SEARCH_PREDICATE = f"""
                  AND ct.organization_id = lct.organization_id
               WHERE lct.lead_id = l.id
                 AND lct.organization_id = l.organization_id
-                AND ({_CONTACT_DISPLAY_NAME_SQL.strip()}) ILIKE $3
+                AND ({_CONTACT_DISPLAY_NAME_SQL.strip()}) ILIKE $4
           )
       )
 """
 
-# $1 org | $2 stage (optional) | $3 ILIKE pattern (optional)
+# $1 org | $2 stage (optional) | $3 owner (optional) | $4 ILIKE pattern (optional)
 _LEADS_FILTER_WHERE = f"""
     WHERE l.organization_id = $1
       AND ($2::uuid IS NULL OR l.stage_id = $2)
+      AND ($3::uuid IS NULL OR l.owner_id = $3)
     {_LEADS_SEARCH_PREDICATE}
 """
 
@@ -178,7 +179,7 @@ _SQL_LEADS_LIST_WITH_TOTAL = f"""
     {_LEADS_JOIN_DISPLAY.strip()}
     {_LEADS_FILTER_WHERE}
     {_LEADS_LIST_ORDER_BY}
-    LIMIT $4::int OFFSET $5::int
+    LIMIT $5::int OFFSET $6::int
 """
 
 # List body + sort (kanban + paginated list).
@@ -211,6 +212,7 @@ _SQL_LEAD_DETAIL_BY_ID = f"""
     {_LEADS_JOIN_DISPLAY.strip()}
     WHERE l.organization_id = $1
       AND l.id = $2::uuid
+      AND ($3::uuid IS NULL OR l.owner_id = $3)
     LIMIT 1
 """
 
@@ -253,6 +255,7 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
         ON cu.id = ct.user_id
     WHERE l.organization_id = $1
       AND l.id = $2::uuid
+      AND ($3::uuid IS NULL OR l.owner_id = $3)
     ORDER BY lc.created_at ASC
 """
 
@@ -439,6 +442,7 @@ class LeadRepository:
         organization_id: str,
         *,
         stage_id: str | None = None,
+        owner_id: str | None = None,
         search: str | None = None,
         limit: int = 20,
         offset: int = 0,
@@ -448,6 +452,7 @@ class LeadRepository:
             _SQL_LEADS_LIST_WITH_TOTAL,
             organization_id,
             stage_id,
+            owner_id,
             _ilike_pattern(search),
             limit,
             offset,
@@ -461,6 +466,7 @@ class LeadRepository:
         organization_id: str,
         *,
         stage_id: str | None = None,
+        owner_id: str | None = None,
         search: str | None = None,
     ) -> list[dict[str, Any]]:
         """All matching leads (kanban) with companies, stage, and owner display columns."""
@@ -468,6 +474,7 @@ class LeadRepository:
             _SQL_LEADS_LIST_ORDERED,
             organization_id,
             stage_id,
+            owner_id,
             _ilike_pattern(search),
         )
         return [dict(r) for r in rows]
@@ -476,12 +483,15 @@ class LeadRepository:
         self,
         organization_id: str,
         lead_id: str,
+        *,
+        owner_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Single lead scoped to organization with companies, stage, and owner display columns."""
         row = await self.db_connection.fetchrow(
             _SQL_LEAD_DETAIL_BY_ID,
             organization_id,
             lead_id,
+            owner_id,
         )
         return dict(row) if row else None
 
@@ -489,6 +499,8 @@ class LeadRepository:
         self,
         organization_id: str,
         lead_id: str,
+        *,
+        owner_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Lead row (companies, stage, owner display) plus contacts.
 
@@ -499,6 +511,7 @@ class LeadRepository:
             _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID,
             organization_id,
             lead_id,
+            owner_id,
         )
         if not rows:
             return None

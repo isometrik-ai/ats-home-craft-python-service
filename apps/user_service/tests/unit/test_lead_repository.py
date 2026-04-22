@@ -292,11 +292,12 @@ async def test_list_with_total_uses_limit_offset_window_count():
     query, args = conn.fetch_calls[0]
     assert "FROM leads" in query
     assert "COUNT(*) OVER()" in query
-    assert "LIMIT $4::int" in query
-    assert "OFFSET $5::int" in query
+    assert "LIMIT $5::int" in query
+    assert "OFFSET $6::int" in query
     assert args == (
         "org-1",
         "22222222-2222-2222-2222-222222222222",
+        None,
         "%lead%",
         10,
         20,
@@ -335,7 +336,7 @@ async def test_list_leads_kanban_fetch():
     query, args = conn.fetch_calls[0]
     assert "FROM leads" in query
     assert "LIMIT $4::int" not in query
-    assert args == ("org-1", None, "%lead%")
+    assert args == ("org-1", None, None, "%lead%")
 
 
 @pytest.mark.asyncio
@@ -350,7 +351,7 @@ async def test_get_lead_detail_by_id_returns_row_or_none():
     assert len(conn.fetchrow_calls) == 1
     query, args = conn.fetchrow_calls[0]
     assert "LIMIT 1" in query
-    assert args == ("org-1", "lead-1")
+    assert args == ("org-1", "lead-1", None)
 
     conn.fetchrow_result = None
     missing = await repo.get_lead_detail_by_id("org-1", "missing")
@@ -381,7 +382,7 @@ async def test_get_lead_detail_with_contacts_by_id():
     assert len(conn.fetchrow_calls) == 0
     assert len(conn.fetch_calls) == 1
     assert "FROM leads l" in conn.fetch_calls[0][0]
-    assert conn.fetch_calls[0][1] == ("org-1", "lead-1")
+    assert conn.fetch_calls[0][1] == ("org-1", "lead-1", None)
 
     conn.fetch_result = []
     missing = await repo.get_lead_detail_with_contacts_by_id("org-1", "missing")
