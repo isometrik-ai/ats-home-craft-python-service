@@ -18,34 +18,15 @@ from pydantic import (
     model_validator,
 )
 
-from apps.user_service.app.schemas.common import Phone
+from apps.user_service.app.schemas.common import NoteItem, Phone
 from apps.user_service.app.schemas.enums import DealType, LeadsListMode, Priority
 from apps.user_service.app.schemas.lead_stages import UNSET, Unset
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
-class LeadNoteItem(BaseModel):
+class LeadNoteItem(NoteItem):
     """One structured note in ``leads.notes`` (JSONB array)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    title: str = Field(..., max_length=500)
-    content: str = Field(..., max_length=50000)
-
-    @field_validator("title", "content", mode="before")
-    @classmethod
-    def strip_whitespace(cls, value: str) -> str:
-        """Strip whitespace; treat blank strings as unset (``None``)."""
-        return value.strip()
-
-    @field_validator("title", "content")
-    @classmethod
-    def non_empty_after_strip(cls, value: str) -> str:
-        """Raise ValueError if stripped value is empty."""
-        if not value:
-            raise ValueError("must not be empty")
-        return value
 
 
 class LeadContactCreate(BaseModel):

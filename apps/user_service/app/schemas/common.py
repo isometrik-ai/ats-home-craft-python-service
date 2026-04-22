@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.enums import AddressType, PlanType, PracticeArea
 from libs.shared_utils.http_exceptions import ValidationException
@@ -73,6 +73,29 @@ class OrganizationBasicDetails(BaseModel):
     secondary_practice_areas: list[PracticeArea] | None = Field(
         None, description="Organization's secondary practice areas"
     )
+
+
+class NoteItem(BaseModel):
+    """One structured note item stored as a JSONB array element."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., max_length=500)
+    content: str = Field(..., max_length=50000)
+
+    @field_validator("title", "content", mode="before")
+    @classmethod
+    def strip_whitespace(cls, value: str) -> str:
+        """Strip whitespace from the title and content."""
+        return value.strip()
+
+    @field_validator("title", "content")
+    @classmethod
+    def non_empty_after_strip(cls, value: str) -> str:
+        """Raise ValueError if the value is empty after stripping whitespace."""
+        if not value:
+            raise ValueError("must not be empty")
+        return value
 
 
 # =====================================================================

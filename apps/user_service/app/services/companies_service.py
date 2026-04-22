@@ -32,6 +32,7 @@ from apps.user_service.app.db.repositories import (
 from apps.user_service.app.db.repositories.companies_repository import (
     COMPANY_JSONB_COLUMNS,
 )
+from apps.user_service.app.schemas.common import NoteItem
 from apps.user_service.app.schemas.companies import (
     CompanyContactUpdate,
     CreateCompanyRequest,
@@ -98,10 +99,27 @@ _COMPANY_DETAIL_JSON_LIST_KEYS = (
     "preferred_communication_channels",
     "industry_specific_terminologies",
     "phones",
+    "notes",
     "contacts",
     "leads",
     "addresses",
 )
+
+
+def _normalize_notes_for_detail(raw_notes: Any) -> list[dict[str, str]]:
+    """Normalize notes field to a list of strict {title, content} dicts."""
+    items = coerce_json_list(raw_notes)
+    out: list[dict[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = (item.get("title") or "").strip()
+        content = (item.get("content") or "").strip()
+        if not title or not content:
+            continue
+        note = NoteItem(title=title, content=content)
+        out.append(note.model_dump())
+    return out
 
 
 def _stringify_company_detail_uuids(details: dict[str, Any]) -> None:
@@ -116,6 +134,7 @@ def _coerce_company_detail_json_lists(details: dict[str, Any]) -> None:
     """Coerce JSON-backed list fields on company details to Python lists."""
     for field_name in _COMPANY_DETAIL_JSON_LIST_KEYS:
         details[field_name] = coerce_json_list(details.get(field_name))
+    details["notes"] = _normalize_notes_for_detail(details.get("notes"))
 
 
 def _normalize_company_billing_preferences(details: dict[str, Any]) -> None:
@@ -387,6 +406,9 @@ class CompaniesService:
                         "phones", company_phones_payload, COMPANY_JSONB_COLUMNS
                     ),
                     "tags": body.tags,
+                    "notes": serialize_jsonb_param(
+                        "notes", [n.model_dump() for n in (body.notes or [])], COMPANY_JSONB_COLUMNS
+                    ),
                     "websites": jsonb_params["websites"],
                     "billing_preferences": jsonb_params["billing_preferences"],
                     "social_pages": jsonb_params["social_pages"],
@@ -671,6 +693,7 @@ class CompaniesService:
             "email": email_norm,
             "phones": contact_phones_payload,
             "tags": create_contact.tags,
+            "notes": [n.model_dump() for n in (getattr(create_contact, "notes", None) or [])],
             "custom_fields": validated_contact_custom_fields,
             "additional_data": create_contact.additional_data,
             "social_pages": contact_social_pages_payload,
@@ -1154,6 +1177,12 @@ class CompaniesService:
 
         if body.sales_intelligence is not None:
             update_data["sales_intelligence"] = body.sales_intelligence
+
+        if "notes" in getattr(body, "model_fields_set", set()):
+            notes_list = body.notes
+            update_data["notes"] = (
+                [n.model_dump() for n in (notes_list or [])] if notes_list is not None else []
+            )
 
         if body.phones is not None:
             phones_payload = [

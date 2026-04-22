@@ -19,6 +19,7 @@ from apps.user_service.app.schemas.common import (
     AddressesUpdate,
     AddressInput,
     EducationalHistoryUpdate,
+    NoteItem,
     PhoneInput,
     PhonesUpdate,
     SocialPage,
@@ -156,6 +157,7 @@ class CreateContactRequest(BaseModel):
         default_factory=dict,
         description="Free-form JSONB payload stored on the contact.",
     )
+    notes: list[NoteItem] = Field(default_factory=list, description="Structured notes")
 
     # optional lead create + association
     lead: ContactLeadAssociation | None = Field(
@@ -217,6 +219,7 @@ class CreateContactRequestStandalone(BaseModel):
         default_factory=dict,
         description="Free-form JSONB payload stored on the contact.",
     )
+    notes: list[NoteItem] = Field(default_factory=list, description="Structured notes")
 
     # optional company association at create-time
     company_association: ContactCompaniesCreate | None = None
@@ -244,6 +247,7 @@ class UpdateContactRequest(BaseModel):
     custom_fields: list[dict[str, Any]] | None = None
     additional_data: dict[str, Any] | None = None
     description: str | None = None
+    notes: list[NoteItem] | None = None
 
     # person enrichment/profile fields (same storage columns as ContactDetailsResponse)
     work_history: WorkHistoryUpdate | None = None
@@ -413,6 +417,7 @@ class ContactDetailsResponse(BaseModel):
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     additional_data: dict[str, Any] = Field(default_factory=dict)
     social_pages: list[dict[str, Any]] = Field(default_factory=list)
+    notes: list[NoteItem] = Field(default_factory=list)
 
     work_history: list[dict[str, Any]] = Field(default_factory=list)
     educational_history: list[dict[str, Any]] = Field(default_factory=list)

@@ -41,6 +41,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
+from apps.user_service.app.schemas.common import NoteItem
 from apps.user_service.app.schemas.contacts import (
     ContactCompanyUpdate,
     ContactSummaryResponse,
@@ -598,6 +599,7 @@ class ContactsService:
         phones_payload = list_payloads["phones"]
         social_pages_payload = list_payloads["social_pages"]
         websites_payload = list_payloads["websites"]
+        notes_payload = [n.model_dump() for n in (getattr(body, "notes", None) or [])]
 
         # Persist intake_stage on the contact when provided (for downstream indexing/filters).
         additional_data_payload = dict(body.additional_data or {})
@@ -612,6 +614,7 @@ class ContactsService:
         # Prepare JSONB params once at the service layer
         jsonb_inputs: dict[str, Any] = {
             "phones": phones_payload,
+            "notes": notes_payload,
             "custom_fields": validated_custom_fields,
             "additional_data": additional_data_payload,
             "social_pages": social_pages_payload,
@@ -625,6 +628,7 @@ class ContactsService:
             )
 
         phones_jsonb = jsonb_params["phones"]
+        notes_jsonb = jsonb_params["notes"]
         custom_fields_jsonb = jsonb_params["custom_fields"]
         additional_data_jsonb = jsonb_params["additional_data"]
         social_pages_jsonb = jsonb_params["social_pages"]
@@ -645,6 +649,7 @@ class ContactsService:
                 "email": email_norm,
                 "phones": phones_jsonb,
                 "tags": body.tags,
+                "notes": notes_jsonb,
                 "custom_fields": custom_fields_jsonb,
                 "additional_data": additional_data_jsonb,
                 "social_pages": social_pages_jsonb,
@@ -1036,6 +1041,12 @@ class ContactsService:
 
         if body.skills is not None:
             update_data["skills"] = body.skills
+
+        if "notes" in getattr(body, "model_fields_set", set()):
+            notes_list = body.notes
+            update_data["notes"] = (
+                [n.model_dump() for n in (notes_list or [])] if notes_list is not None else []
+            )
 
         return update_data
 
@@ -1455,6 +1466,7 @@ class ContactsService:
 
         json_list_fields = (
             "phones",
+            "notes",
             "custom_fields",
             "social_pages",
             "work_history",
@@ -1468,6 +1480,8 @@ class ContactsService:
             elif raw_field_value is None:
                 details[field_name] = []
 
+        details["notes"] = self._normalize_notes_for_detail(details.get("notes"))
+
         additional_raw = details.get("additional_data")
         if isinstance(additional_raw, str):
             details["additional_data"] = parse_json_field(additional_raw) or {}
@@ -1478,6 +1492,22 @@ class ContactsService:
         details["updated_at"] = format_iso_datetime(details.get("updated_at")) or ""
         details["last_enriched_at"] = format_iso_datetime(details.get("last_enriched_at"))
         return details
+
+    @staticmethod
+    def _normalize_notes_for_detail(raw_notes: Any) -> list[dict[str, str]]:
+        """Normalize notes field to a list of strict {title, content} dicts."""
+        items = coerce_json_list(raw_notes)
+        out: list[dict[str, str]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = (item.get("title") or "").strip()
+            content = (item.get("content") or "").strip()
+            if not title or not content:
+                continue
+            note = NoteItem(title=title, content=content)
+            out.append(note.model_dump())
+        return out
 
     async def list_contacts(
         self,
