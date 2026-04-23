@@ -20,6 +20,7 @@ from apps.user_service.app.schemas.contacts import (
     ContactDetailsResponse,
     ContactSummaryResponse,
     CreateContactRequest,
+    ListContactsRequest,
     UpdateContactRequest,
 )
 from apps.user_service.app.schemas.enums import (
@@ -188,8 +189,8 @@ async def create_contact(
 
 
 @handle_api_exceptions("list contacts")
-@router.get(
-    "",
+@router.post(
+    "/list",
     status_code=http_status.HTTP_200_OK,
     summary="List contacts (database)",
     description=(
@@ -205,26 +206,7 @@ async def list_contacts(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
-    search: str | None = Query(
-        None,
-        min_length=2,
-        description="Optional search string. Typically matches common identifying fields.",
-    ),
-    status: ClientStatus | None = Query(
-        None,
-        description="Optional contact status filter.",
-    ),
-    page: int = Query(
-        1,
-        ge=1,
-        description="1-based page number.",
-    ),
-    page_size: int = Query(
-        20,
-        ge=1,
-        le=100,
-        description="Number of items per page (max 100).",
-    ),
+    body: ListContactsRequest = Body(...),
 ):
     """List contacts from PostgreSQL with pagination.
 
@@ -232,10 +214,7 @@ async def list_contacts(
         request: FastAPI request.
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims extracted from JWT.
-        search: Optional lightweight search filter (min 2 chars).
-        status: Optional status filter.
-        page: 1-based page number.
-        page_size: Items per page (max 100).
+        body: JSON body with filters and pagination.
 
     Returns:
         Paginated list response envelope containing contact summary items and total count.
@@ -246,11 +225,14 @@ async def list_contacts(
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
+
+    dropdown_filters = [f.model_dump(mode="json") for f in body.dropdown_filters]
     result = await service.list_contacts(
-        search=search,
-        status=status.value if status else None,
-        page=page,
-        page_size=page_size,
+        search=body.search,
+        status=body.status.value if body.status else None,
+        dropdown_filters=dropdown_filters,
+        page=body.page,
+        page_size=body.page_size,
     )
     items = [
         ContactSummaryResponse.model_validate(summary_row).model_dump(exclude_none=True)
@@ -262,8 +244,8 @@ async def list_contacts(
             request=request,
             items=[],
             total=0,
-            page=page,
-            page_size=page_size,
+            page=body.page,
+            page_size=body.page_size,
             message_key="success.no_data",
             custom_code=CustomStatusCode.NO_CONTENT,
             status_code=http_status.HTTP_200_OK,
@@ -272,8 +254,8 @@ async def list_contacts(
         request=request,
         items=items,
         total=total,
-        page=page,
-        page_size=page_size,
+        page=body.page,
+        page_size=body.page_size,
         message_key="contacts.success.contacts_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,

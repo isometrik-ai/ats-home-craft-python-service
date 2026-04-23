@@ -52,6 +52,7 @@ from apps.user_service.app.schemas.enums import (
     ClientEventType,
     ClientStatus,
     EntityType,
+    FieldType,
     IsometrikRole,
     KafkaTopics,
 )
@@ -87,6 +88,7 @@ from apps.user_service.app.utils.common_utils import (
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.supabase_db.auth_repository import create_user
+from libs.shared_utils.custom_field_filtering import normalize_dropdown_filters_payload
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -1608,11 +1610,71 @@ class ContactsService:
             out.append(note.model_dump())
         return out
 
+    @staticmethod
+    def _collect_dropdown_custom_field_ids(definitions: Any) -> set[str]:
+        """Collect ids for dropdown custom field definitions (including nested sub_fields)."""
+        dropdown_ids: set[str] = set()
+
+        def walk(defn: Any) -> None:
+            if not defn:
+                return
+            if (getattr(defn, "field_type", None) or "") == FieldType.DROPDOWN.value:
+                dropdown_ids.add(str(defn.id))
+            for child in getattr(defn, "sub_fields", None) or []:
+                walk(child)
+
+        for root in definitions or []:
+            walk(root)
+        return dropdown_ids
+
+    async def _validate_contact_dropdown_filters(
+        self, parsed_filters: dict[str, list[str]]
+    ) -> None:
+        """Ensure filters reference only dropdown custom fields for contacts."""
+        if not parsed_filters:
+            return
+
+        cfs = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        definitions, _ = await cfs.get_custom_fields_list(EntityType.CONTACT)
+        dropdown_ids = self._collect_dropdown_custom_field_ids(definitions)
+        unknown = sorted(set(parsed_filters) - dropdown_ids)
+        if unknown:
+            raise ValidationException(
+                message_key="custom_fields.errors.invalid_filter_payload",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={
+                    "details": "Non-dropdown or unknown custom field id(s).",
+                    "field_ids": unknown,
+                },
+            )
+
+    @staticmethod
+    def _normalize_contact_list_row(list_row: dict[str, Any]) -> None:
+        """Normalize and coerce DB list row fields to API response shape."""
+        list_row["created_at"] = format_iso_datetime(list_row.get("created_at")) or ""
+        list_row["updated_at"] = format_iso_datetime(list_row.get("updated_at")) or ""
+
+        company_names = list_row.get("company_names")
+        if isinstance(company_names, str):
+            list_row["company_names"] = parse_json_field(company_names) or []
+        elif company_names is None:
+            list_row["company_names"] = []
+
+        phones = list_row.get("phones")
+        if isinstance(phones, str):
+            list_row["phones"] = parse_json_field(phones) or []
+        elif phones is None:
+            list_row["phones"] = []
+
     async def list_contacts(
         self,
         *,
         search: str | None,
         status: str | None,
+        dropdown_filters: Any = None,
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
@@ -1621,26 +1683,20 @@ class ContactsService:
         This is the non-Typesense list endpoint; it is optimized for predictable ordering.
         """
         org_id = self.user_context.organization_id
+        parsed_filters = normalize_dropdown_filters_payload(dropdown_filters)
+
+        await self._validate_contact_dropdown_filters(parsed_filters)
+
         rows, total = await self.contacts_repo.list_contacts(
             organization_id=org_id,
             search=search,
             status=status,
+            dropdown_filters=parsed_filters,
             page=page,
             page_size=page_size,
         )
         for list_row in rows:
-            list_row["created_at"] = format_iso_datetime(list_row.get("created_at")) or ""
-            list_row["updated_at"] = format_iso_datetime(list_row.get("updated_at")) or ""
-            company_names = list_row.get("company_names")
-            if isinstance(company_names, str):
-                list_row["company_names"] = parse_json_field(company_names) or []
-            elif company_names is None:
-                list_row["company_names"] = []
-            phones = list_row.get("phones")
-            if isinstance(phones, str):
-                list_row["phones"] = parse_json_field(phones) or []
-            elif phones is None:
-                list_row["phones"] = []
+            self._normalize_contact_list_row(list_row)
         return {"items": rows, "total": total}
 
     async def soft_delete_contact(self, *, contact_id: str) -> dict[str, Any]:
