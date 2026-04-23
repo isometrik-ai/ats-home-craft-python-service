@@ -20,6 +20,7 @@ from apps.user_service.app.schemas.companies import (
     CompanyDetailsResponse,
     CompanySummaryResponse,
     CreateCompanyRequest,
+    ListCompaniesRequest,
     UpdateCompanyRequest,
 )
 from apps.user_service.app.schemas.enums import (
@@ -174,8 +175,8 @@ async def create_company(
 
 
 @handle_api_exceptions("list companies")
-@router.get(
-    "",
+@router.post(
+    "/list",
     status_code=http_status.HTTP_200_OK,
     summary="List companies (database)",
     responses=COMMON_ERROR_RESPONSES,
@@ -185,36 +186,23 @@ async def list_companies(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
-    search: str | None = Query(None, min_length=2),
-    status: ClientStatus | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    body: ListCompaniesRequest = Body(...),
 ):
-    """List companies from PostgreSQL with pagination.
-
-    Args:
-        request: FastAPI request.
-        db_connection: PostgreSQL connection (request-scoped).
-        current_user: Authenticated user claims from JWT.
-        search: Optional name search (min 2 characters).
-        status: Optional status filter.
-        page: 1-based page index.
-        page_size: Page size (max 100).
-
-    Returns:
-        Paginated list response with company summaries.
-    """
+    """List companies from PostgreSQL with pagination."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
         permission_codes=CLIENTS_MANAGEMENT_VIEW,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
+
+    dropdown_filters = [f.model_dump(mode="json") for f in body.dropdown_filters]
     result = await service.list_companies(
-        search=search,
-        status=status.value if status else None,
-        page=page,
-        page_size=page_size,
+        search=body.search,
+        status=body.status.value if body.status else None,
+        dropdown_filters=dropdown_filters,
+        page=body.page,
+        page_size=body.page_size,
     )
     items = [
         CompanySummaryResponse.model_validate(summary_row).model_dump(
@@ -229,8 +217,8 @@ async def list_companies(
             request=request,
             items=[],
             total=0,
-            page=page,
-            page_size=page_size,
+            page=body.page,
+            page_size=body.page_size,
             message_key="success.no_data",
             custom_code=CustomStatusCode.NO_CONTENT,
             status_code=http_status.HTTP_200_OK,
@@ -239,8 +227,8 @@ async def list_companies(
         request=request,
         items=items,
         total=total,
-        page=page,
-        page_size=page_size,
+        page=body.page,
+        page_size=body.page_size,
         message_key="companies.success.companies_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,

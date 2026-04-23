@@ -10,6 +10,7 @@ import asyncpg
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.enums import ClientStatus
 from apps.user_service.app.utils.common_utils import parse_json_any
+from libs.shared_utils.custom_field_filtering import build_dropdown_jsonb_where
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -830,6 +831,7 @@ class ContactsRepository(BaseRepository):
         organization_id: str,
         search: str | None,
         status: str | None,
+        dropdown_filters: dict[str, list[str]] | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -851,6 +853,17 @@ class ContactsRepository(BaseRepository):
             where.append(name_email_match)
             args.append(f"%{search.strip()}%")
             next_param_index += 1
+
+        if dropdown_filters:
+            dropdown_where, dropdown_args, next_param_index = build_dropdown_jsonb_where(
+                custom_fields_column_sql="ct.custom_fields",
+                filters=dropdown_filters,
+                param_start_index=next_param_index,
+            )
+            if dropdown_where:
+                where.append(dropdown_where)
+                args.extend(dropdown_args)
+
         where_sql = " AND ".join(where)
         total = await self.db_connection.fetchval(
             f"""

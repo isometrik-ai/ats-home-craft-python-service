@@ -9,6 +9,7 @@ import asyncpg
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.enums import ClientStatus
+from libs.shared_utils.custom_field_filtering import build_dropdown_jsonb_where
 
 COMPANY_JSONB_COLUMNS: frozenset[str] = frozenset(
     {
@@ -729,6 +730,7 @@ class CompaniesRepository(BaseRepository):
         organization_id: str,
         search: str | None,
         status: str | None,
+        dropdown_filters: dict[str, list[str]] | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -745,6 +747,17 @@ class CompaniesRepository(BaseRepository):
             where.append(f"COALESCE(co.name,'') ILIKE ${next_param_index}")
             args.append(f"%{search.strip()}%")
             next_param_index += 1
+
+        if dropdown_filters:
+            dropdown_where, dropdown_args, next_param_index = build_dropdown_jsonb_where(
+                custom_fields_column_sql="co.custom_fields",
+                filters=dropdown_filters,
+                param_start_index=next_param_index,
+            )
+            if dropdown_where:
+                where.append(dropdown_where)
+                args.extend(dropdown_args)
+
         where_sql = " AND ".join(where)
         total = await self.db_connection.fetchval(
             f"SELECT COUNT(1) FROM companies co WHERE {where_sql}",

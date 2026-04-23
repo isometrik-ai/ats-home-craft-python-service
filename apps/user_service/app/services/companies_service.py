@@ -43,6 +43,7 @@ from apps.user_service.app.schemas.enums import (
     ClientEventType,
     ClientStatus,
     EntityType,
+    FieldType,
     KafkaTopics,
 )
 from apps.user_service.app.schemas.leads import (
@@ -74,6 +75,7 @@ from apps.user_service.app.utils.common_utils import (
     serialize_jsonb_param,
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
+from libs.shared_utils.custom_field_filtering import normalize_dropdown_filters_payload
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -1110,34 +1112,87 @@ class CompaniesService:
         _normalize_company_detail_timestamps(details)
         return details
 
+    @staticmethod
+    def _collect_dropdown_custom_field_ids(definitions: Any) -> set[str]:
+        """Collect ids for dropdown custom field definitions (including nested sub_fields)."""
+        dropdown_ids: set[str] = set()
+
+        def walk(defn: Any) -> None:
+            if not defn:
+                return
+            if (getattr(defn, "field_type", None) or "") == FieldType.DROPDOWN.value:
+                dropdown_ids.add(str(defn.id))
+            for child in getattr(defn, "sub_fields", None) or []:
+                walk(child)
+
+        for root in definitions or []:
+            walk(root)
+        return dropdown_ids
+
+    async def _validate_company_dropdown_filters(
+        self, parsed_filters: dict[str, list[str]]
+    ) -> None:
+        """Ensure filters reference only dropdown custom fields for companies."""
+        if not parsed_filters:
+            return
+
+        cfs = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        definitions, _ = await cfs.get_custom_fields_list(EntityType.COMPANY)
+        dropdown_ids = self._collect_dropdown_custom_field_ids(definitions)
+        unknown = sorted(set(parsed_filters) - dropdown_ids)
+        if unknown:
+            raise ValidationException(
+                message_key="custom_fields.errors.invalid_filter_payload",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={
+                    "details": "Non-dropdown or unknown custom field id(s).",
+                    "field_ids": unknown,
+                },
+            )
+
+    @staticmethod
+    def _normalize_company_list_row(list_row: dict[str, Any]) -> None:
+        """Normalize and coerce DB list row fields to API response shape."""
+        list_row["created_at"] = format_iso_datetime(list_row.get("created_at")) or ""
+        list_row["updated_at"] = format_iso_datetime(list_row.get("updated_at")) or ""
+        list_row["phones"] = coerce_json_list(list_row.get("phones"))
+
+        raw_contacts = list_row.get("contacts")
+        if isinstance(raw_contacts, str):
+            list_row["contacts"] = parse_json_field(raw_contacts) or []
+        elif raw_contacts is None:
+            list_row["contacts"] = []
+        elif not isinstance(raw_contacts, list):
+            list_row["contacts"] = []
+
     async def list_companies(
         self,
         *,
         search: str | None,
         status: str | None,
+        dropdown_filters: Any = None,
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
         """List companies from PostgreSQL with pagination."""
         org_id = self.user_context.organization_id
+        parsed_filters = normalize_dropdown_filters_payload(dropdown_filters)
+
+        await self._validate_company_dropdown_filters(parsed_filters)
+
         rows, total = await self.companies_repo.list_companies(
             organization_id=org_id,
             search=search,
             status=status,
+            dropdown_filters=parsed_filters,
             page=page,
             page_size=page_size,
         )
         for list_row in rows:
-            list_row["created_at"] = format_iso_datetime(list_row.get("created_at")) or ""
-            list_row["updated_at"] = format_iso_datetime(list_row.get("updated_at")) or ""
-            list_row["phones"] = coerce_json_list(list_row.get("phones"))
-            raw_contacts = list_row.get("contacts")
-            if isinstance(raw_contacts, str):
-                list_row["contacts"] = parse_json_field(raw_contacts) or []
-            elif raw_contacts is None:
-                list_row["contacts"] = []
-            elif not isinstance(raw_contacts, list):
-                list_row["contacts"] = []
+            self._normalize_company_list_row(list_row)
         return {"items": rows, "total": total}
 
     async def soft_delete_company(self, *, company_id: str) -> dict[str, Any]:

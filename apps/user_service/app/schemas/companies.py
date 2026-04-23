@@ -29,11 +29,24 @@ from apps.user_service.app.schemas.common import (
     WebsitesUpdate,
 )
 from apps.user_service.app.schemas.enums import ClientStatus
+from apps.user_service.app.schemas.list_filters import DropdownCustomFieldFilter
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 if TYPE_CHECKING:
     from apps.user_service.app.schemas.contacts import CreateContactRequest
+
+
+class ListCompaniesRequest(BaseModel):
+    """Request body for listing companies (DB-backed)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    search: str | None = Field(default=None, min_length=2)
+    status: ClientStatus | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+    dropdown_filters: list[DropdownCustomFieldFilter] = Field(default_factory=list)
 
 
 class CompanyLeadAssociation(BaseModel):
