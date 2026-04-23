@@ -428,25 +428,6 @@ class ClientEnrichmentService:
         )
 
     @staticmethod
-    def _build_contact_personal_update(enriched_profile: dict[str, Any]) -> dict[str, Any]:
-        """Build update dict for first_name, middle_name, last_name from enriched_profile."""
-        personal = enriched_profile.get("personalInfo") or {}
-        if not isinstance(personal, dict):
-            return {}
-
-        update: dict[str, Any] = {}
-        first = (personal.get("firstName") or "").strip()
-        middle = (personal.get("middleName") or "").strip()
-        last = (personal.get("lastName") or "").strip()
-        if first:
-            update["first_name"] = first
-        if middle:
-            update["middle_name"] = middle
-        if last:
-            update["last_name"] = last
-        return update
-
-    @staticmethod
     def _build_contact_social_pages_update(enriched_profile: dict[str, Any]) -> dict[str, Any]:
         """Build update dict for social_pages from enriched_profile."""
         social = enriched_profile.get("socialProfiles")
@@ -515,7 +496,6 @@ class ClientEnrichmentService:
 
         update: dict[str, Any] = {}
 
-        update.update(ClientEnrichmentService._build_contact_personal_update(enriched_profile))
         update.update(ClientEnrichmentService._build_contact_social_pages_update(enriched_profile))
         update.update(ClientEnrichmentService._build_contact_skills_update(enriched_profile))
         update.update(ClientEnrichmentService._build_contact_work_history_update(enriched_profile))

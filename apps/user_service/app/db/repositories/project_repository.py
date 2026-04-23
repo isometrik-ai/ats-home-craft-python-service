@@ -465,8 +465,6 @@ class ProjectRepository:
                 p.tags,
                 p.tech_stack,
                 p.team_id,
-                c.name AS client_name,
-                c.client_type AS client_type,
                 COALESCE(t.team_size, 0)::int AS team_size,
                 t.project_lead_id,
                 TRIM(CONCAT_WS(' ', om.first_name, om.last_name)) AS project_lead_name
