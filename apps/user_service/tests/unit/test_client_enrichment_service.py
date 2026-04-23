@@ -485,8 +485,9 @@ async def test_person_webhook_finds_client_and_updates(monkeypatch):
     result = await svc.process_person_enrichment_webhook(MagicMock(), body)
     assert result == ("c1", "org-1")
     mock_update.assert_called_once()
-    assert mock_update.call_args[1]["update_data"].get("first_name") == "Jane"
-    assert mock_update.call_args[1]["update_data"].get("last_name") == "Doe"
+    # Enrichment must not change contact names; only enrich non-name fields + metadata.
+    assert "first_name" not in (mock_update.call_args[1]["update_data"] or {})
+    assert "last_name" not in (mock_update.call_args[1]["update_data"] or {})
 
 
 @pytest.mark.asyncio
