@@ -631,11 +631,16 @@ class ContactsImportService:
             row_number = int(item["row_number"])
             model: CreateContactRequest = item["contact_model"]
             try:
+                contact_id = str(item.get("contact_id") or "").strip()
+                if not contact_id:
+                    contact_id = str(uuid.uuid4())
+                    item["contact_id"] = contact_id
                 (
                     user_id,
                     isometrik_user_id,
                     created_password,
                 ) = await contacts_service._provision_contact_auth_identity(
+                    contact_id=contact_id,
                     email=str(model.email or "").strip().lower(),
                     first_name=model.first_name,
                     last_name=model.last_name,
@@ -872,6 +877,8 @@ class ContactsImportService:
             row_number = int(item["row_number"])
             model = item["contact_model"]
             user_id, isometrik_user_id, created_password = item["identity"]
+            contact_id = str(item.get("contact_id") or "").strip() or str(uuid.uuid4())
+            item["contact_id"] = contact_id
 
             phones_payload = ContactsService._ensure_list_item_ids(
                 [p.model_dump(mode="json", exclude_none=True) for p in model.phones]
@@ -907,6 +914,7 @@ class ContactsImportService:
                 )
 
             row_payload = {
+                "id": contact_id,
                 "organization_id": event.organization_id,
                 "user_id": user_id,
                 "isometrik_user_id": isometrik_user_id,

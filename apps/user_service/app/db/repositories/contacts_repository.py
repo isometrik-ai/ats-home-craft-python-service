@@ -143,6 +143,7 @@ class ContactsRepository(BaseRepository):
 
         required = ["organization_id"]
         optional = [
+            "id",
             "user_id",
             "isometrik_user_id",
             "status",
