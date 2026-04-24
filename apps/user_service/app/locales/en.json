@@ -401,5 +401,22 @@
       "logs_retrieved": "Contacts import logs retrieved successfully.",
       "errors_retrieved": "Contacts import errors retrieved successfully."
     }
+  },
+  "entity_lists": {
+    "errors": {
+      "list_not_found": "The list you are trying to access does not exist or has been deleted.",
+      "cannot_modify_deleted_list": "This list has been deleted and cannot be modified.",
+      "empty_update_payload": "At least one field must be provided to update a list.",
+      "too_many_member_ids": "Too many member IDs provided. You can add or remove up to {max} members at a time.",
+      "name_already_exists": "A list with this name already exists. Please choose a different name."
+    },
+    "success": {
+      "list_created": "List created successfully.",
+      "lists_retrieved": "Lists retrieved successfully.",
+      "no_lists_found": "No lists found.",
+      "list_retrieved": "List retrieved successfully.",
+      "list_updated": "List updated successfully.",
+      "list_deleted": "List deleted successfully."
+    }
   }
 }

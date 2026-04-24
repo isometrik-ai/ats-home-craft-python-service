@@ -661,6 +661,22 @@ class EntityType(str, Enum):
     PROJECT = "project"
 
 
+class EntityListStatus(str, Enum):
+    """List lifecycle state displayed in the UI tabs."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    DELETED = "deleted"
+
+
+class EntityTable(str, Enum):
+    """Database table names for CRM entity types."""
+
+    CONTACTS = "contacts"
+    COMPANIES = "companies"
+    LEADS = "leads"
+
+
 class FieldType(str, Enum):
     """Field type enumeration for custom fields."""
 
