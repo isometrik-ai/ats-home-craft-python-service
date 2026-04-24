@@ -371,7 +371,7 @@ class KafkaTopics(str, Enum):
     defaults) to avoid accidental publishing to the wrong topic.
     """
 
-    CRM_EVENTS = "crm.events"
+    CRM_EVENTS = "crm.events.dev"
 
 
 class UiColor(str, Enum):
