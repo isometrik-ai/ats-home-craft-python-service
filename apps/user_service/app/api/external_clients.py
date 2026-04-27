@@ -50,8 +50,8 @@ from apps.user_service.app.schemas.enums import (
     KafkaTopics,
 )
 from apps.user_service.app.schemas.external_clients import (
-    ExternalContactFieldValue,
     ExternalContactFieldsByPhoneRequest,
+    ExternalContactFieldValue,
     ExternalCreateCompanyResult,
     ExternalCreateContactResult,
 )
