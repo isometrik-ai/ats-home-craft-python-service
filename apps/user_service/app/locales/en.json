@@ -392,6 +392,7 @@
   "contacts_imports": {
     "errors": {
       "job_not_found": "Contacts import job not found.",
+      "duplicate_email_in_file": "Duplicate email found in the uploaded file.",
       "errors_not_found": "No errors found for this contacts import job."
     },
     "success": {
