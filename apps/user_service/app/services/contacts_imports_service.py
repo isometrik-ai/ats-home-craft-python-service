@@ -523,6 +523,68 @@ class ContactsImportService:
                 emails_to_check.append(email_norm)
         return emails_to_check, email_by_row
 
+    @staticmethod
+    def _collect_in_file_duplicate_email_errors(
+        *, claimed: list[dict[str, Any]]
+    ) -> list[tuple[int, str, str, dict[str, Any] | None]]:
+        """Return mark-error tuples for duplicate emails within the same file.
+
+        Important: this detects duplicates in the *current claimed batch*.
+        Because row ledger claiming runs in row_number order, earlier rows will be
+        processed first and later duplicates will be marked as errors.
+        """
+        first_row_by_email: dict[str, int] = {}
+        duplicates: list[tuple[int, str, str, dict[str, Any] | None]] = []
+
+        for item in claimed:
+            if item.get("error") or item.get("contact_model") is None:
+                continue
+            row_number = int(item["row_number"])
+            email_norm = str(item["contact_model"].email or "").strip().lower()
+            if not email_norm:
+                continue
+            if email_norm in first_row_by_email:
+                duplicates.append(
+                    ContactsImportService._build_mark_error_tuple(
+                        row_number=row_number,
+                        code="duplicate_email_in_file",
+                        message="contacts_imports.errors.duplicate_email_in_file",
+                        raw_row={
+                            "email": email_norm,
+                            "duplicate_of_row_number": int(first_row_by_email[email_norm]),
+                        },
+                    )
+                )
+            else:
+                first_row_by_email[email_norm] = row_number
+
+        return duplicates
+
+    async def _apply_in_file_duplicate_email_errors(
+        self,
+        *,
+        organization_id: str,
+        job_internal_id: str,
+        rows_repo: ImportJobRowsRepository,
+        claimed: list[dict[str, Any]],
+        totals: _ContactsImportTotals,
+    ) -> list[dict[str, Any]]:
+        """Mark in-file duplicate-email rows as errors and return remaining claimed rows."""
+        duplicate_errors = self._collect_in_file_duplicate_email_errors(claimed=claimed)
+        if not duplicate_errors:
+            return claimed
+
+        await rows_repo.mark_errors_bulk(
+            organization_id=organization_id,
+            job_id=job_internal_id,
+            errors=duplicate_errors,
+        )
+        totals.processed_total += len(duplicate_errors)
+        totals.errors_total += len(duplicate_errors)
+
+        duplicate_row_numbers = {row_number for row_number, _, _, _ in duplicate_errors}
+        return [item for item in claimed if int(item["row_number"]) not in duplicate_row_numbers]
+
     async def _apply_duplicate_email_errors(
         self,
         *,
@@ -1210,6 +1272,20 @@ class ContactsImportService:
             )
 
             claimed = self._filter_claimed_by_status(batch=batch, statuses=statuses)
+
+            if not claimed:
+                continue
+
+            # Detect duplicates inside the uploaded file and mark later duplicates as row errors.
+            # This prevents `import_job_rows.status='success'` for rows that cannot produce
+            # a distinct contact due to email uniqueness rules.
+            claimed = await self._apply_in_file_duplicate_email_errors(
+                organization_id=event.organization_id,
+                job_internal_id=job_internal_id,
+                rows_repo=rows_repo,
+                claimed=claimed,
+                totals=totals,
+            )
 
             if not claimed:
                 continue
