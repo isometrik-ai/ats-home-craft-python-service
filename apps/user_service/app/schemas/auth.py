@@ -17,7 +17,6 @@ from apps.user_service.app.schemas.enums import (
     CustomReporting,
     EncryptionRequirement,
     ExpectedMembers,
-    FirmSize,
     LoginMethod,
     PracticeArea,
     PreferredIntegration,
@@ -342,7 +341,7 @@ class CompanyData(BaseModel):
     company_name: str
     company_website: str | None = None
     industry: str | None = None
-    company_size: FirmSize | None = None
+    company_size: str | None = None
     description: str | None = None
     logo_url: str | None = None
     address: OrganizationAddress | None = None
