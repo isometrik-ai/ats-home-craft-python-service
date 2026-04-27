@@ -12,6 +12,7 @@ The decoded ``projectId`` is mapped to our internal ``organization_id`` and all
 reads are scoped to that organization.
 """
 
+import json
 from typing import Any
 from uuid import UUID
 
@@ -75,6 +76,7 @@ from apps.user_service.app.utils.common_utils import (
     handle_api_exceptions,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import (
     list_response,
     success_response,
@@ -86,6 +88,8 @@ from libs.shared_utils.status_codes import CustomStatusCode
 router = APIRouter(prefix="/integrations/clients", tags=["Clients (External)"])
 
 CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
+
+logger = get_logger(__name__)
 
 CONTACTS_IMPORT_ERROR_RESPONSES: dict[int | str, dict] = {
     http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
@@ -104,6 +108,16 @@ def _external_user_context(*, organization_id: str, actor_email: str | None) -> 
         email=actor_email or "external_integration@system.local",
         organization_id=organization_id,
     )
+
+
+def _mask_phone_number(value: str | None) -> str | None:
+    """Mask phone number."""
+    if not value:
+        return value
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if len(digits) <= 4:
+        return "***"
+    return f"***{digits[-4:]}"
 
 
 @handle_api_exceptions("external list companies")
@@ -629,11 +643,37 @@ async def external_get_contact_fields_by_phone(
     request.state.external_actor_email = None
     user_context = _external_user_context(organization_id=organization_id, actor_email=None)
 
+    req_log = {
+        "path": str(request.url.path),
+        "organization_id": str(organization_id),
+        "phone_number_masked": _mask_phone_number(getattr(body, "phone_number", None)),
+        "variable_keys": list(body.variable_keys or []),
+    }
+    logger.info("external_get_contact_fields_by_phone request %s", json.dumps(req_log))
+
     service = ContactsService(db_connection=db_connection, user_context=user_context)
     items = await service.get_contact_fields_by_phone(
         phone_number=body.phone_number,
         variable_keys=body.variable_keys,
     )
+
+    resp_log = {
+        "path": str(request.url.path),
+        "organization_id": str(organization_id),
+        "items_count": len(items or []),
+        "items": [
+            (
+                it
+                if isinstance(it, dict)
+                else {
+                    "variable_key": getattr(it, "variable_key", None),
+                    "variable_value": getattr(it, "variable_value", None),
+                }
+            )
+            for it in (items or [])
+        ],
+    }
+    logger.info("external_get_contact_fields_by_phone response %s", json.dumps(resp_log))
 
     return items
 
