@@ -1559,7 +1559,124 @@ class ContactsService:
                 message_key="contacts.errors.contact_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        return self._normalize_contact_details(details)
 
+    async def get_contact_details_by_phone(self, *, phone_number: str) -> dict[str, Any]:
+        """Return the earliest-created contact (by created_at) matching a phone number.
+
+        Response payload is normalized exactly like `get_contact_details()`.
+        """
+        org_id = self.user_context.organization_id
+        details = await self.contacts_repo.get_contact_details_by_phone(
+            organization_id=org_id,
+            phone_number=phone_number,
+        )
+        if not details:
+            raise NotFoundException(
+                message_key="contacts.errors.contact_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return self._normalize_contact_details(details)
+
+    async def get_contact_fields_by_phone(
+        self,
+        *,
+        phone_number: str,
+        variable_keys: list[str],
+    ) -> list[dict[str, Any]]:
+        """Return requested field values for the first contact matched by phone number.
+
+        - `variable_key` in the response is always the input key (verbatim).
+        - `variable_value` is resolved from:
+          1) normalized top-level contact fields (DB-backed keys)
+          2) `additional_data`
+          3) `custom_fields`
+        """
+        details = await self.get_contact_details_by_phone(phone_number=phone_number)
+
+        additional_data = self._coerce_additional_data(details.get("additional_data"))
+
+        custom_field_service = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        field_definitions, _ = await custom_field_service.get_custom_fields_list(EntityType.CONTACT)
+        id_to_def = {str(defn.id): defn for defn in (field_definitions or [])}
+        resolved_custom_fields = custom_field_service.resolve_fields_for_read(
+            details.get("custom_fields"),
+            id_to_def,
+        )
+        custom_field_value_by_key = self._build_custom_field_value_map(resolved_custom_fields)
+
+        items: list[dict[str, Any]] = []
+        for raw_key in variable_keys or []:
+            value = self._resolve_contact_field_value(
+                details=details,
+                additional_data=additional_data,
+                custom_field_value_by_key=custom_field_value_by_key,
+                raw_key=raw_key,
+            )
+            items.append({"variable_key": raw_key, "variable_value": value})
+
+        return items
+
+    @staticmethod
+    def _coerce_additional_data(raw_additional_data: Any) -> dict[str, Any]:
+        """Coerce `additional_data` to a dict; non-dict values become `{}`."""
+        if isinstance(raw_additional_data, dict):
+            return raw_additional_data
+        return {}
+
+    def _build_custom_field_value_map(self, resolved_custom_fields: Any) -> dict[str, Any]:
+        """Build normalized-key -> scalar value map from resolved custom fields."""
+        custom_field_value_by_key: dict[str, Any] = {}
+        for cell in resolved_custom_fields or []:
+            if not isinstance(cell, dict):
+                continue
+            field_key = str(cell.get("field_key") or "")
+            if not field_key:
+                continue
+            norm_key = self._normalize_variable_key(field_key)
+            if not norm_key:
+                continue
+            # Enforce scalar-only access pattern for this external lookup.
+            # Non-scalar field types resolve to `sub_fields`/`items` and will map to None here.
+            custom_field_value_by_key[norm_key] = cell.get("value")
+        return custom_field_value_by_key
+
+    def _resolve_contact_field_value(
+        self,
+        *,
+        details: dict[str, Any],
+        additional_data: dict[str, Any],
+        custom_field_value_by_key: dict[str, Any],
+        raw_key: str,
+    ) -> object | None:
+        """Resolve a variable value from details, additional_data, then custom fields."""
+        normalized_key = self._normalize_variable_key(raw_key)
+
+        value: object | None = None
+        if normalized_key and normalized_key in details:
+            value = details.get(normalized_key)
+
+        if value is None and normalized_key:
+            for candidate in (
+                raw_key,
+                (raw_key or "").strip(),
+                (raw_key or "").strip().lower(),
+                normalized_key,
+            ):
+                if candidate in additional_data:
+                    value = additional_data.get(candidate)
+                    break
+
+        if value is None and normalized_key:
+            value = custom_field_value_by_key.get(normalized_key)
+
+        return value
+
+    def _normalize_contact_details(self, details: dict[str, Any]) -> dict[str, Any]:
+        """Normalize DB contact details to the API response shape."""
         for uuid_field_name in ("id", "organization_id", "user_id"):
             field_value = details.get(uuid_field_name)
             if field_value is not None and not isinstance(field_value, str):
@@ -1593,6 +1710,13 @@ class ContactsService:
         details["updated_at"] = format_iso_datetime(details.get("updated_at")) or ""
         details["last_enriched_at"] = format_iso_datetime(details.get("last_enriched_at"))
         return details
+
+    @staticmethod
+    def _normalize_variable_key(raw_key: str) -> str:
+        """Normalize variable keys for consistent lookups (strip/lower/underscore/alnum)."""
+        key = (raw_key or "").strip().lower()
+        key = key.replace(" ", "_")
+        return "".join(ch for ch in key if ch.isalnum() or ch == "_")
 
     @staticmethod
     def _normalize_notes_for_detail(raw_notes: Any) -> list[dict[str, str]]:

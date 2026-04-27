@@ -826,6 +826,112 @@ class ContactsRepository(BaseRepository):
         result = dict(fetched_row)
         return self._coerce_jsonb_array_fields(result, ("companies", "leads", "addresses"))
 
+    async def get_contact_details_by_phone(
+        self,
+        *,
+        organization_id: str,
+        phone_number: str,
+    ) -> dict[str, Any] | None:
+        """Get the earliest-created contact (by created_at) matching phone in an org.
+
+        Matching is done against `contacts.phones` JSONB array items, comparing digits-only
+        forms to tolerate formatting differences.
+        """
+        phone_raw = (phone_number or "").strip()
+        if not phone_raw:
+            return None
+
+        fetched_row = await self.db_connection.fetchrow(
+            """
+            SELECT
+              ct.*,
+              NULLIF(au.email::text, '') AS email,
+              COALESCE(companies.companies, '[]'::jsonb) AS companies,
+              COALESCE(leads.leads, '[]'::jsonb) AS leads,
+              COALESCE(addresses.addresses, '[]'::jsonb) AS addresses
+            FROM contacts ct
+            LEFT JOIN auth.users au
+              ON au.id = ct.user_id
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'company_id', co.id::text,
+                  'name',       co.name,
+                  'industry',   co.industry,
+                  'is_primary', COALESCE((co.primary_contact_id = ct.id), FALSE)
+                )
+                ORDER BY co.name
+              ) FILTER (WHERE co.id IS NOT NULL) AS companies
+              FROM contact_companies cc
+              INNER JOIN companies co
+                ON co.id = cc.company_id
+               AND co.organization_id = ct.organization_id
+               AND co.status != 'deleted'
+              WHERE cc.organization_id = ct.organization_id
+                AND cc.contact_id = ct.id
+            ) companies ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'id',             l.id::text,
+                  'name',           l.name,
+                  'stage_id',       l.stage_id::text,
+                  'stage_name',     ls.stage_name,
+                  'deal_type',      l.deal_type,
+                  'priority',       l.priority,
+                  'lead_score',     l.lead_score,
+                  'close_date',     l.close_date,
+                  'amount',         l.amount,
+                  'owner_id',       l.owner_id::text,
+                  'lead_source',    l.lead_source,
+                  'referral_source',l.referral_source,
+                  'created_at',     l.created_at,
+                  'updated_at',     l.updated_at
+                )
+                ORDER BY l.updated_at DESC NULLS LAST, l.created_at DESC
+              ) FILTER (WHERE l.id IS NOT NULL) AS leads
+              FROM lead_contacts lct
+              INNER JOIN leads l
+                ON l.id = lct.lead_id
+               AND l.organization_id = lct.organization_id
+              LEFT JOIN lead_stages ls
+                ON ls.id = l.stage_id
+               AND ls.organization_id = l.organization_id
+              WHERE lct.organization_id = ct.organization_id
+                AND lct.contact_id = ct.id
+            ) leads ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                to_jsonb(addr) ORDER BY addr.is_primary DESC, addr.created_at ASC
+              ) AS addresses
+              FROM contact_addresses addr
+              WHERE addr.contact_id = ct.id
+            ) addresses ON TRUE
+            WHERE ct.organization_id = $1::uuid
+              AND ct.status != $2
+              AND EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(COALESCE(ct.phones, '[]'::jsonb)) AS p(phone)
+                WHERE regexp_replace(COALESCE(p.phone->>'phone_number',''), '\\D', '', 'g')
+                        = regexp_replace($3::text, '\\D', '', 'g')
+                   OR regexp_replace(
+                        COALESCE(p.phone->>'phone_isd_code','')
+                          || COALESCE(p.phone->>'phone_number',''),
+                        '\\D', '', 'g'
+                      ) = regexp_replace($3::text, '\\D', '', 'g')
+              )
+            ORDER BY ct.created_at ASC
+            LIMIT 1
+            """,
+            organization_id,
+            ClientStatus.DELETED.value,
+            phone_raw,
+        )
+        if not fetched_row:
+            return None
+        result = dict(fetched_row)
+        return self._coerce_jsonb_array_fields(result, ("companies", "leads", "addresses"))
+
     async def list_contacts(
         self,
         *,

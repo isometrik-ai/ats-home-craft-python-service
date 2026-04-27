@@ -13,6 +13,7 @@ reads are scoped to that organization.
 """
 
 from typing import Any
+from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
@@ -48,6 +49,7 @@ from apps.user_service.app.schemas.enums import (
     KafkaTopics,
 )
 from apps.user_service.app.schemas.external_clients import (
+    ExternalContactFieldsByPhoneRequest,
     ExternalCreateCompanyResult,
     ExternalCreateContactResult,
 )
@@ -591,6 +593,51 @@ async def external_get_contact_details(
             exclude_none=True,
             mode="json",
         ),
+    )
+
+
+@handle_api_exceptions("external get contact fields by phone")
+@router.post(
+    "/contacts/by-phone",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get selected contact fields by phone number (external auth)",
+    description=(
+        "Given a phone number and a list of requested field keys, returns values from the "
+        "first matching contact in the organization resolved from Isometrik credentials "
+        "(`licenseKey`/`appSecret`)."
+    ),
+    responses={
+        http_status.HTTP_200_OK: {"description": "Contact fields retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Contact not found"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+    },
+)
+@limiter.limit("200/minute")
+async def external_get_contact_fields_by_phone(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    body: ExternalContactFieldsByPhoneRequest = Body(...),
+):
+    """External get contact fields by phone endpoint (Isometrik credential auth)."""
+    organization_id = UUID("381b7581-8c6b-4e88-b0e7-d9485eecfecc")
+    user_context = _external_user_context(organization_id=organization_id, actor_email=None)
+
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
+    items = await service.get_contact_fields_by_phone(
+        phone_number=body.phone_number,
+        variable_keys=body.variable_keys,
+    )
+
+    return success_response(
+        request=request,
+        message_key="clients.success.client_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=items,
     )
 
 
