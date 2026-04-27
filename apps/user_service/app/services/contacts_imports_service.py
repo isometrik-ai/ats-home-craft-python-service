@@ -46,6 +46,7 @@ from apps.user_service.app.schemas.enums import (
     ContactsImportJobStatus,
     ContactsImportKafkaStream,
     ContactsImportType,
+    EntityType,
 )
 from apps.user_service.app.services.bulk_leads_creator import BulkLeadCreator
 from apps.user_service.app.services.contacts_service import ContactsService
@@ -820,7 +821,7 @@ class ContactsImportService:
                 async with cf_sem:
                     validated = await cf_service.validate_for_create(
                         model.custom_fields,
-                        ContactsImportType.CONTACTS,
+                        EntityType.CONTACT,
                     )
                 custom_fields_by_row[row_number] = validated
             except Exception as exc:
@@ -1553,7 +1554,7 @@ class ContactsImportService:
         )
         validated_custom_fields = await custom_field_service.validate_for_create(
             row_model.custom_fields,
-            ContactsImportType.CONTACTS,
+            EntityType.CONTACT,
         )
 
         jsonb_inputs: dict[str, Any] = {
