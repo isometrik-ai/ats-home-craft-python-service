@@ -67,7 +67,8 @@ class InviteService:
         self,
         user_context: UserContext | None,
         db_connection: asyncpg.Connection,
-        sb_client: AsyncClient | None = None,
+        sb_admin_client: AsyncClient | None = None,
+        sb_anon_client: AsyncClient | None = None,
     ) -> None:
         self.user_context = user_context
         self.db_connection = db_connection
@@ -79,7 +80,8 @@ class InviteService:
         )
         self.user_repository = UserRepository(db_connection=db_connection)
         self.session_management_service = SessionManagementService(db_connection=db_connection)
-        self.supabase_client = sb_client
+        self.supabase_admin_client = sb_admin_client
+        self.supabase_anon_client = sb_anon_client
 
     def _generate_invite_token(self) -> tuple[str, str]:
         """Generate a fresh invite token and its hash.
@@ -264,7 +266,7 @@ class InviteService:
         """
         try:
             auth_result = await login_user(
-                email=email, password=password, sb_client=self.supabase_client
+                email=email, password=password, sb_client=self.supabase_anon_client
             )
         except AuthApiError as login_error:
             if login_error.status == 400:
@@ -304,7 +306,7 @@ class InviteService:
             InternalServerErrorException: If auth result is invalid
         """
         try:
-            auth_result = await sign_up_supabase_user(signup_request, self.supabase_client)
+            auth_result = await sign_up_supabase_user(signup_request, self.supabase_anon_client)
         except AuthApiError as signup_error:
             raise BadRequestException(
                 message_key="auth.errors.authentication_failed",
@@ -353,13 +355,14 @@ class InviteService:
                 # User already exists, authenticate them with the provided password
                 return await self._authenticate_existing_user(email, password)
 
-            if not self.supabase_client:
+            if not self.supabase_admin_client or not self.supabase_anon_client:
                 raise ServiceUnavailableException(
                     message_key="errors.service_unavailable",
                     custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
                 )
             return await generate_magiclink_and_exchange_for_session(
-                client=self.supabase_client,
+                admin_client=self.supabase_admin_client,
+                anon_client=self.supabase_anon_client,
                 email=email,
             )
 
@@ -605,7 +608,7 @@ class InviteService:
         # Generate invitation URL
         invite_url = self._generate_invite_url(invite_token)
 
-        inviter = await get_user_by_id(self.supabase_client, self.user_context.user_id)
+        inviter = await get_user_by_id(self.supabase_admin_client, self.user_context.user_id)
 
         invitee_full_name = build_full_name(body.salutation, body.first_name, body.last_name)
 
@@ -703,7 +706,9 @@ class InviteService:
 
         role_data = await self._get_role_data(invitation_data["role_id"], organization_data["id"])
 
-        inviter = await get_user_by_id(self.supabase_client, str(invitation_data["invited_by"]))
+        inviter = await get_user_by_id(
+            self.supabase_admin_client, str(invitation_data["invited_by"])
+        )
 
         inv_meta = self._parse_json_field(invitation_data.get("metadata"))
         invitee_full_name = build_full_name(

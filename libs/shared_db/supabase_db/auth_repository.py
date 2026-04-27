@@ -266,7 +266,8 @@ async def generate_magic_link(sb_client: AsyncClient, email: str) -> str | None:
 
 async def generate_magiclink_and_exchange_for_session(
     *,
-    client: AsyncClient,
+    admin_client: AsyncClient,
+    anon_client: AsyncClient,
     email: str,
 ) -> Any:
     """Generate a magiclink and exchange it for a session (server-side).
@@ -275,7 +276,7 @@ async def generate_magiclink_and_exchange_for_session(
     - Admin: generate_link(type=magiclink)
     - Auth: verify_otp(type=magiclink, token_hash=...)
     """
-    response = await client.auth.admin.generate_link(
+    response = await admin_client.auth.admin.generate_link(
         {
             "type": "magiclink",
             "email": email,
@@ -293,7 +294,7 @@ async def generate_magiclink_and_exchange_for_session(
         )
 
     verify_params: VerifyOtpParams = {"token_hash": token_hash, "type": "magiclink"}
-    verify_response = await client.auth.verify_otp(verify_params)
+    verify_response = await anon_client.auth.verify_otp(verify_params)
     if not getattr(verify_response, "session", None):
         raise BadRequestException(
             message_key="auth.errors.authentication_failed",
