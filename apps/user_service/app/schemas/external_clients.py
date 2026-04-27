@@ -8,7 +8,7 @@ resource APIs (e.g., returning created identifiers).
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ExternalCreateCompanyResult(BaseModel):
@@ -34,10 +34,19 @@ class ExternalCreateContactResult(BaseModel):
 class ExternalContactFieldsByPhoneRequest(BaseModel):
     """Request to fetch selected contact fields by phone number."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    phone_number: str = Field(..., min_length=5, max_length=64)
-    variable_keys: list[str] = Field(..., min_length=1)
+    phone_number: str = Field(
+        ...,
+        min_length=5,
+        max_length=64,
+        validation_alias=AliasChoices("phone_number", "phoneNumber"),
+    )
+    variable_keys: list[str] = Field(
+        ...,
+        min_length=1,
+        validation_alias=AliasChoices("variable_keys", "variableKeys"),
+    )
 
 
 class ExternalContactFieldValue(BaseModel):

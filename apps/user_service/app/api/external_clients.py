@@ -50,6 +50,7 @@ from apps.user_service.app.schemas.enums import (
     KafkaTopics,
 )
 from apps.user_service.app.schemas.external_clients import (
+    ExternalContactFieldsByPhoneRequest,
     ExternalContactFieldValue,
     ExternalCreateCompanyResult,
     ExternalCreateContactResult,
@@ -635,7 +636,7 @@ async def external_get_contact_details(
 async def external_get_contact_fields_by_phone(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
-    body: object = Body(...),
+    body: ExternalContactFieldsByPhoneRequest = Body(...),
 ):
     """External get contact fields by phone endpoint (Isometrik credential auth)."""
     organization_id = UUID("381b7581-8c6b-4e88-b0e7-d9485eecfecc")
@@ -646,9 +647,8 @@ async def external_get_contact_fields_by_phone(
     raw_body_text = raw_body_bytes.decode("utf-8", errors="replace")
     logger.info("external_get_contact_fields_by_phone raw_body %s", raw_body_text)
 
-    payload = body if isinstance(body, dict) else {}
-    phone_number = payload.get("phone_number") if isinstance(payload, dict) else None
-    variable_keys = payload.get("variable_keys") if isinstance(payload, dict) else None
+    phone_number = body.phone_number
+    variable_keys = body.variable_keys
 
     req_log = {
         "path": str(request.url.path),
