@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import asyncpg
-from asyncpg import types as asyncpg_types
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 
@@ -34,14 +34,15 @@ class ImportJobRowsRepository(BaseRepository):
             return {}
 
         row_numbers = [int(rn) for rn, _ in rows]
-        # Explicit JSON encoding avoids asyncpg `jsonb[]` bind issues.
-        raw_rows = [(asyncpg_types.Json(raw) if raw is not None else None) for _, raw in rows]
+        raw_rows = [
+            json.dumps(raw, ensure_ascii=False) if raw is not None else None for _, raw in rows
+        ]
 
         await self.db_connection.execute(
             """
             INSERT INTO import_job_rows (organization_id, job_id, row_number, status, raw_row)
-            SELECT $1::uuid, $2::uuid, u.row_number, 'processing', u.raw_row
-            FROM unnest($3::int[], $4::jsonb[]) AS u(row_number, raw_row)
+            SELECT $1::uuid, $2::uuid, u.row_number, 'processing', u.raw_row_text::jsonb
+            FROM unnest($3::int[], $4::text[]) AS u(row_number, raw_row_text)
             ON CONFLICT (job_id, row_number) DO NOTHING
             """,
             organization_id,
@@ -161,12 +162,10 @@ class ImportJobRowsRepository(BaseRepository):
         row_numbers = [int(rn) for rn, _, _, _ in errors]
         error_codes = [str(code) for _, code, _, _ in errors]
         error_messages = [str(msg) for _, _, msg, _ in errors]
-        # Explicit JSON encoding avoids asyncpg `jsonb[]` bind issues.
-        raw_rows = (
-            [(asyncpg_types.Json(raw) if raw is not None else None) for _, _, _, raw in errors]
-            if errors
-            else []
-        )
+        raw_rows = [
+            json.dumps(raw, ensure_ascii=False) if raw is not None else None
+            for _, _, _, raw in errors
+        ]
 
         await self.db_connection.execute(
             """
@@ -175,10 +174,10 @@ class ImportJobRowsRepository(BaseRepository):
               status = 'error',
               error_code = u.error_code,
               error_message = u.error_message,
-              raw_row = COALESCE(u.raw_row, r.raw_row),
+              raw_row = COALESCE(u.raw_row_text::jsonb, r.raw_row),
               updated_at = NOW()
-            FROM unnest($3::int[], $4::text[], $5::text[], $6::jsonb[])
-              AS u(row_number, error_code, error_message, raw_row)
+            FROM unnest($3::int[], $4::text[], $5::text[], $6::text[])
+              AS u(row_number, error_code, error_message, raw_row_text)
             WHERE r.organization_id = $1::uuid
               AND r.job_id = $2::uuid
               AND r.row_number = u.row_number
