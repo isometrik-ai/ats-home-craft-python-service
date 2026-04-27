@@ -50,6 +50,7 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.schemas.external_clients import (
     ExternalContactFieldsByPhoneRequest,
+    ExternalContactFieldValue,
     ExternalCreateCompanyResult,
     ExternalCreateContactResult,
 )
@@ -600,6 +601,7 @@ async def external_get_contact_details(
 @router.post(
     "/contacts/by-phone",
     status_code=http_status.HTTP_200_OK,
+    response_model=list[ExternalContactFieldValue],
     summary="Get selected contact fields by phone number (external auth)",
     description=(
         "Given a phone number and a list of requested field keys, returns values from the "
@@ -624,6 +626,7 @@ async def external_get_contact_fields_by_phone(
 ):
     """External get contact fields by phone endpoint (Isometrik credential auth)."""
     organization_id = UUID("381b7581-8c6b-4e88-b0e7-d9485eecfecc")
+    request.state.external_actor_email = None
     user_context = _external_user_context(organization_id=organization_id, actor_email=None)
 
     service = ContactsService(db_connection=db_connection, user_context=user_context)
@@ -632,13 +635,7 @@ async def external_get_contact_fields_by_phone(
         variable_keys=body.variable_keys,
     )
 
-    return success_response(
-        request=request,
-        message_key="clients.success.client_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        status_code=http_status.HTTP_200_OK,
-        data=items,
-    )
+    return items
 
 
 @handle_api_exceptions("external update company")
