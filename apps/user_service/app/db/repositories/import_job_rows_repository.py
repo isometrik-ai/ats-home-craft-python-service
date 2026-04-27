@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import asyncpg
+from asyncpg import types as asyncpg_types
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 
@@ -33,7 +34,8 @@ class ImportJobRowsRepository(BaseRepository):
             return {}
 
         row_numbers = [int(rn) for rn, _ in rows]
-        raw_rows = [raw for _, raw in rows]
+        # Explicit JSON encoding avoids asyncpg `jsonb[]` bind issues.
+        raw_rows = [(asyncpg_types.Json(raw) if raw is not None else None) for _, raw in rows]
 
         await self.db_connection.execute(
             """
@@ -159,7 +161,12 @@ class ImportJobRowsRepository(BaseRepository):
         row_numbers = [int(rn) for rn, _, _, _ in errors]
         error_codes = [str(code) for _, code, _, _ in errors]
         error_messages = [str(msg) for _, _, msg, _ in errors]
-        raw_rows = [raw for _, _, _, raw in errors]
+        # Explicit JSON encoding avoids asyncpg `jsonb[]` bind issues.
+        raw_rows = (
+            [(asyncpg_types.Json(raw) if raw is not None else None) for _, _, _, raw in errors]
+            if errors
+            else []
+        )
 
         await self.db_connection.execute(
             """
