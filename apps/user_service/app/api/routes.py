@@ -8,6 +8,7 @@ from apps.user_service.app.api.companies import router as companies_router
 from apps.user_service.app.api.contacts import router as contacts_router
 from apps.user_service.app.api.contacts_imports import router as contacts_imports_router
 from apps.user_service.app.api.custom_fields import router as custom_fields_router
+from apps.user_service.app.api.entity_lists import router as entity_lists_router
 from apps.user_service.app.api.external_clients import router as external_clients_router
 from apps.user_service.app.api.external_leads import router as external_leads_router
 from apps.user_service.app.api.invites import router as invites_router
@@ -49,6 +50,7 @@ router.include_router(webhooks_router)
 router.include_router(contacts_router)
 router.include_router(contacts_imports_router)
 router.include_router(companies_router)
+router.include_router(entity_lists_router)
 
 
 @router.get("/status")
