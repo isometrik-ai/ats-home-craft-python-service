@@ -16,7 +16,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 
 # Logger import
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.dependencies.supabase import supabase_service
+from apps.user_service.app.dependencies.supabase import supabase_anon, supabase_service
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
     InviteAcceptResponse,
@@ -124,7 +124,8 @@ async def validate_invite_link(
 async def accept_and_set_password_invitation(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
-    sb_client: AsyncClient = Depends(supabase_service),
+    sb_admin_client: AsyncClient = Depends(supabase_service),
+    sb_anon_client: AsyncClient = Depends(supabase_anon),
     body: InviteAcceptBySettingPasswordRequest = Body(...),
 ):
     """Accept an organization invitation by setting password"""
@@ -137,7 +138,8 @@ async def accept_and_set_password_invitation(
     invite_service = InviteService(
         user_context=None,
         db_connection=db_connection,
-        sb_client=sb_client,
+        sb_admin_client=sb_admin_client,
+        sb_anon_client=sb_anon_client,
     )
     result = await invite_service.accept_and_set_password(body)
 
@@ -212,7 +214,7 @@ async def create_invitation(
     invite_service = InviteService(
         user_context=user_context,
         db_connection=db_connection,
-        sb_client=sb_client,
+        sb_admin_client=sb_client,
     )
     result = await invite_service.create_invitation(organization_id, body)
     request.state.audit_requested_id = str(result.get("invite_id", "")) if result else ""
@@ -358,7 +360,7 @@ async def resend_invitation(
     invite_service = InviteService(
         user_context=user_context,
         db_connection=db_connection,
-        sb_client=sb_client,
+        sb_admin_client=sb_client,
     )
     result = await invite_service.resend_invitation(invite_id)
 
