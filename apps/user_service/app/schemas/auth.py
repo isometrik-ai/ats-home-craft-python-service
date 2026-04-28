@@ -184,13 +184,15 @@ class SetPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     """Request model for reset password operations
 
-    The token should be the access_token extracted from the password reset email URL.
-    Email URL format: http://localhost:3000/#access_token=eyJhbGciOiJIUzI1NiIs...
-                      &expires_at=1758009136&expires_in=3600...
-                      &refresh_token=4bz3ixdhgdbv&token_type=bearer&type=recovery
+    Supabase reset email uses implicit flow and redirects to:
+    /reset-password#access_token=...&refresh_token=...&type=recovery
+
+    The frontend should extract `access_token` and `refresh_token` from the URL hash and
+    send them to this endpoint along with `new_password`.
     """
 
-    token: str  # access_token from the password reset email URL
+    access_token: str
+    refresh_token: str
     new_password: str
 
     @classmethod

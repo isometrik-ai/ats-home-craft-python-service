@@ -34,11 +34,15 @@ def test_signup_request_valid():
 
 def test_reset_password_min_length():
     """Test that reset password request accepts minimum length password."""
-    obj = ResetPasswordRequest(token="tok", new_password="123")
-    assert obj.new_password == "123"
+    obj = ResetPasswordRequest(access_token="atk", refresh_token="rtk", new_password="123456")
+    assert obj.new_password == "123456"
 
 
 def test_reset_password_valid():
     """Test that valid reset password request is accepted."""
-    obj = ResetPasswordRequest(token="tok", new_password="StrongPass123!")
-    assert obj.token == "tok"
+    obj = ResetPasswordRequest(
+        access_token="atk",
+        refresh_token="rtk",
+        new_password="StrongPass123!",
+    )
+    assert obj.access_token == "atk"

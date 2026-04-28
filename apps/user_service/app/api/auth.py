@@ -227,7 +227,8 @@ async def reset_password(
     """Reset user password using token from email"""
     auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
     result = await auth_service.reset_password(
-        token=data.token,
+        access_token=data.access_token,
+        refresh_token=data.refresh_token,
         new_password=data.new_password,
     )
     return success_response(

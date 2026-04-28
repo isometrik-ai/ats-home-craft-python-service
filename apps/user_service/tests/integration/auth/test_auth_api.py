@@ -154,9 +154,10 @@ async def test_forgot_password(monkeypatch, client):
 async def test_reset_password(monkeypatch, client):
     """Test that the reset password endpoint resets the password."""
 
-    async def fake_reset(_self, token: str, new_password: str):
+    async def fake_reset(_self, access_token: str, refresh_token: str, new_password: str):
         del _self
-        assert token == "tok123"
+        assert access_token == "atk123"
+        assert refresh_token == "rtk123"
         assert new_password == "NewPass123!"
         return {"message": "reset"}
 
@@ -167,7 +168,7 @@ async def test_reset_password(monkeypatch, client):
 
     res = await client.post(
         "/v1/auth/reset-password",
-        json={"token": "tok123", "new_password": "NewPass123!"},
+        json={"access_token": "atk123", "refresh_token": "rtk123", "new_password": "NewPass123!"},
     )
     assert_success(res, 200)
 
