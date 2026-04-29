@@ -12,8 +12,8 @@ from apps.user_service.app.schemas.enums import OrganizationStatus
 from apps.user_service.app.utils.common_utils import parse_json_field
 from apps.user_service.app.utils.email_utils import send_email
 from libs.shared_db.supabase_db.auth_repository import generate_magic_link, update_email
-from libs.shared_utils.isometrik_service import login_to_isometrik
 from libs.shared_utils.http_exceptions import ForbiddenException
+from libs.shared_utils.isometrik_service import login_to_isometrik
 from libs.shared_utils.logger import get_logger  # Logger import
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -205,7 +205,7 @@ async def send_admin_update_email(sb_client: AsyncClient, user: dict) -> bool:
         ) from error
 
 
-async def get_isometrik_details(
+async def get_isometrik_details(  # pylint: disable=too-complex
     *,
     user_id: str | None = None,
     organization_id: str,
@@ -248,7 +248,6 @@ async def get_isometrik_details(
             token = login_response.get("userToken") or None
             identifier_used = user_id
         except Exception as exc:
-            # Fallback: some orgs key Isometrik userIdentifier off member_id instead of auth user_id.
             try:
                 member_id = None
                 if organization_member_repository is not None:
@@ -264,7 +263,7 @@ async def get_isometrik_details(
                     identifier_used = member_id
                 else:
                     logger.warning(
-                        "Isometrik login failed and member_id not found: user_id=%s org_id=%s error=%s",
+                        "Isometrik login failed: user_id=%s org_id=%s error=%s",
                         user_id,
                         organization_id,
                         str(exc),
@@ -272,7 +271,7 @@ async def get_isometrik_details(
             except Exception as exc2:
                 # Do NOT fail the parent API if Isometrik fails.
                 logger.warning(
-                    "Isometrik login failed (both identifiers). user_id=%s org_id=%s error=%s fallback_error=%s",
+                    "Isometrik login failed. user_id=%s org_id=%s error=%s fallback_error=%s",
                     user_id,
                     organization_id,
                     str(exc),

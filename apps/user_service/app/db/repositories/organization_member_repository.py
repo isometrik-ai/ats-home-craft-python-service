@@ -3,6 +3,8 @@
 This repository encapsulates all DB operations for organization_members.
 """
 
+# pylint: disable=too-many-public-methods
+
 from typing import Any
 
 import asyncpg
