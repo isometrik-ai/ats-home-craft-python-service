@@ -26,54 +26,106 @@ class OrganizationMemberRepository:
         member_data: dict[str, Any],
     ) -> dict[str, Any]:
         """Add a member to an organization."""
-        query = """
-            INSERT INTO organization_members (
-                user_id,
-                isometrik_user_id,
-                email,
-                role_id,
-                role,
-                member_role,
-                status,
-                organization_id,
-                created_at,
-                updated_at,
-                joined_at,
-                first_name,
-                last_name,
-                phone_number,
-                phone_isd_code,
-                timezone,
-                salutation,
-                invited_by
-            )
-            VALUES (
-                $1, $2, $3, $4, $5, $6, $7,
-                $8, NOW(), NOW(), NOW(),
-                $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15
-            )
-            RETURNING *
-        """
         # Set default status to ACTIVE if not provided
         status = member_data.get("status") or OrganizationMemberStatus.ACTIVE.value
-        row = await self.db_connection.fetchrow(
-            query,
-            member_data.get("user_id"),
-            member_data.get("isometrik_user_id"),
-            member_data.get("email"),
-            member_data.get("role_id"),
-            member_data.get("role"),
-            member_data.get("member_role"),
-            status,
-            organization_id,
-            member_data.get("first_name"),
-            member_data.get("last_name"),
-            member_data.get("phone_number"),
-            member_data.get("phone_isd_code"),
-            member_data.get("timezone"),
-            member_data.get("salutation"),
-            member_data.get("invited_by"),
-        )
+        member_id = member_data.get("id")
+
+        if member_id:
+            query = """
+                INSERT INTO organization_members (
+                    id,
+                    user_id,
+                    isometrik_user_id,
+                    email,
+                    role_id,
+                    role,
+                    member_role,
+                    status,
+                    organization_id,
+                    created_at,
+                    updated_at,
+                    joined_at,
+                    first_name,
+                    last_name,
+                    phone_number,
+                    phone_isd_code,
+                    timezone,
+                    salutation,
+                    invited_by
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8,
+                    $9, NOW(), NOW(), NOW(),
+                    $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16
+                )
+                RETURNING *
+            """
+            row = await self.db_connection.fetchrow(
+                query,
+                member_id,
+                member_data.get("user_id"),
+                member_data.get("isometrik_user_id"),
+                member_data.get("email"),
+                member_data.get("role_id"),
+                member_data.get("role"),
+                member_data.get("member_role"),
+                status,
+                organization_id,
+                member_data.get("first_name"),
+                member_data.get("last_name"),
+                member_data.get("phone_number"),
+                member_data.get("phone_isd_code"),
+                member_data.get("timezone"),
+                member_data.get("salutation"),
+                member_data.get("invited_by"),
+            )
+        else:
+            query = """
+                INSERT INTO organization_members (
+                    user_id,
+                    isometrik_user_id,
+                    email,
+                    role_id,
+                    role,
+                    member_role,
+                    status,
+                    organization_id,
+                    created_at,
+                    updated_at,
+                    joined_at,
+                    first_name,
+                    last_name,
+                    phone_number,
+                    phone_isd_code,
+                    timezone,
+                    salutation,
+                    invited_by
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6, $7,
+                    $8, NOW(), NOW(), NOW(),
+                    $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15
+                )
+                RETURNING *
+            """
+            row = await self.db_connection.fetchrow(
+                query,
+                member_data.get("user_id"),
+                member_data.get("isometrik_user_id"),
+                member_data.get("email"),
+                member_data.get("role_id"),
+                member_data.get("role"),
+                member_data.get("member_role"),
+                status,
+                organization_id,
+                member_data.get("first_name"),
+                member_data.get("last_name"),
+                member_data.get("phone_number"),
+                member_data.get("phone_isd_code"),
+                member_data.get("timezone"),
+                member_data.get("salutation"),
+                member_data.get("invited_by"),
+            )
         return dict(row) if row else {}
 
     # READ OPERATIONS
