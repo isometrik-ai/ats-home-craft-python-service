@@ -4,6 +4,7 @@ import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 import asyncpg
 from supabase import AsyncClient, AuthApiError
@@ -775,10 +776,11 @@ class InviteService:
         isometrik_credentials: dict[str, Any],
     ) -> None:
         """Add user to organization as a member."""
+        member_id = str(uuid4())
         isometrik_user_id = None
         isometrik_response = await create_isometrik_user(
             user={
-                "user_id": invite_data["user_id"],
+                "user_id": member_id,
                 "first_name": invite_data.get("first_name", None),
                 "last_name": invite_data.get("last_name", None),
                 "email": email,
@@ -796,10 +798,8 @@ class InviteService:
                     custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
                 )
 
-        if isometrik_user_id:
-            invite_data["isometrik_user_id"] = isometrik_user_id
-
         member_record = {
+            "id": member_id,
             "user_id": invite_data["user_id"],
             "email": email,
             "first_name": invite_data.get("first_name", None),
@@ -813,7 +813,7 @@ class InviteService:
             "member_role": member_role,
             "status": OrganizationMemberStatus.ACTIVE.value,
             "invited_by": invited_by,
-            "isometrik_user_id": invite_data.get("isometrik_user_id", None),
+            "isometrik_user_id": isometrik_user_id,
         }
 
         await self.organization_member_repository.add_member(
