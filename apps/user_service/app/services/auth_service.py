@@ -853,13 +853,12 @@ class AuthService:
         )
 
     async def reset_password(
-        self, access_token: str, refresh_token: str, new_password: str
+        self, code: str, new_password: str
     ) -> PasswordResponse:
-        """Reset user password using tokens from the Supabase reset email redirect URL hash.
+        """Reset user password using code from the Supabase reset email redirect URL hash.
 
         Args:
-            access_token: Access token extracted from reset URL hash
-            refresh_token: Refresh token extracted from reset URL hash
+            code: Code extracted from reset URL hash
             new_password: New password
 
         Returns:
@@ -874,8 +873,7 @@ class AuthService:
         # Use anon client for recovery token operations (standard Supabase flow)
         try:
             result = await update_password_with_token(
-                access_token=access_token,
-                refresh_token=refresh_token,
+                code=code,
                 new_password=new_password,
                 sb_client=self.supabase_client,
             )
