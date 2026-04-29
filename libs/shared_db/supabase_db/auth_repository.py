@@ -369,18 +369,14 @@ async def send_password_reset_email(email: str, sb_client: AsyncClient):
     return await sb_client.auth.reset_password_email(email, {"redirect_to": redirect_to})
 
 
-async def update_password_with_token(
-    code: str,
+async def update_password_by_user_id(
+    user_id: str,
     new_password: str,
     sb_client: AsyncClient,
 ) -> dict:
-    """Update password using code from Supabase reset link.
-
-    Supabase reset password PKCE flow redirects with `code`
-    in the URL hash. This method establishes the session and updates the password.
-
+    """Update password using user_id.
     Args:
-        code: Code extracted from the reset email redirect URL hash
+        user_id: User's ID
         new_password: New password to set
         sb_client: Supabase anon client (not admin client)
 
@@ -391,11 +387,9 @@ async def update_password_with_token(
         dict: Supabase auth response containing user and session information
     """
 
-    exchange_response = await sb_client.auth.exchange_code_for_session(code)
-    if not exchange_response.session:
-        raise ValueError("Session establishment failed - no session established")
-
-    update_response = await sb_client.auth.update_user({"password": new_password})
+    update_response = await sb_client.auth.admin.update_user_by_id(
+        user_id, {"password": new_password}
+    )
     return update_response
 
 

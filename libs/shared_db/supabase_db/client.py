@@ -46,13 +46,6 @@ async def get_supabase_client() -> AsyncClient:
     return _cache.anon
 
 
-async def get_supabase_anon_with_pkce_flow() -> AsyncClient:
-    """Create a per-request anon Supabase client with implicit flow."""
-    return await create_async_client(
-        SUPABASE_URL, SUPABASE_ANON_KEY, options=ClientOptions(flow_type="pkce")
-    )
-
-
 async def supabase_anon_with_headers(
     request: Request,
 ) -> AsyncClient:
