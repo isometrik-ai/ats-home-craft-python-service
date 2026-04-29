@@ -27,9 +27,10 @@ async def supabase_anon():
     """Yield the anon Supabase client."""
     return await get_supabase_client()
 
-async def supabase_anon_with_pkce_flow(request: Request) -> AsyncClient:
+
+async def supabase_anon_with_pkce_flow() -> AsyncClient:
     """Yield the anon Supabase client with implicit flow."""
-    return await get_supabase_anon_with_pkce_flow(request)
+    return await get_supabase_anon_with_pkce_flow()
 
 
 async def supabase_anon_client_with_headers(request: Request) -> AsyncClient:

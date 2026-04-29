@@ -852,9 +852,7 @@ class AuthService:
             message="Password reset email sent successfully. Please check your email."
         )
 
-    async def reset_password(
-        self, code: str, new_password: str
-    ) -> PasswordResponse:
+    async def reset_password(self, code: str, new_password: str) -> PasswordResponse:
         """Reset user password using code from the Supabase reset email redirect URL hash.
 
         Args:

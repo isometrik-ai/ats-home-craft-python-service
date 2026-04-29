@@ -209,8 +209,10 @@ class ResetPasswordRequest(BaseModel):
 
 class PKCEFlowResetPasswordRequest(BaseModel):
     """Request model for reset password operations using PKCE flow"""
+
     code: str
     new_password: str
+
 
 class PasswordResponse(BaseModel):
     """Response model for set/reset password operations"""

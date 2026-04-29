@@ -390,7 +390,7 @@ async def update_password_with_token(
     Returns:
         dict: Supabase auth response containing user and session information
     """
-    
+
     exchange_response = await sb_client.auth.exchange_code_for_session(code)
     if not exchange_response.session:
         raise ValueError("Session establishment failed - no session established")
