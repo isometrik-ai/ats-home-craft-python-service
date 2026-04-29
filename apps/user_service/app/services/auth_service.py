@@ -65,8 +65,8 @@ from libs.shared_db.supabase_db.auth_repository import (
     refresh_session,
     send_password_reset_email,
     sign_up_supabase_user,
+    update_password_by_user_id,
     update_password_with_link_identity,
-    update_password_with_token,
 )
 
 # Internal utility imports
@@ -852,11 +852,11 @@ class AuthService:
             message="Password reset email sent successfully. Please check your email."
         )
 
-    async def reset_password(self, code: str, new_password: str) -> PasswordResponse:
-        """Reset user password using code from the Supabase reset email redirect URL hash.
+    async def reset_password(self, user_id: str, new_password: str) -> PasswordResponse:
+        """Reset user password using user_id.
 
         Args:
-            code: Code extracted from reset URL hash
+            user_id: User's ID
             new_password: New password
 
         Returns:
@@ -870,8 +870,8 @@ class AuthService:
 
         # Use anon client for recovery token operations (standard Supabase flow)
         try:
-            result = await update_password_with_token(
-                code=code,
+            result = await update_password_by_user_id(
+                user_id=user_id,
                 new_password=new_password,
                 sb_client=self.supabase_client,
             )

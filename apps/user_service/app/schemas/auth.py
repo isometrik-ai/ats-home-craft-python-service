@@ -182,17 +182,8 @@ class SetPasswordRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    """Request model for reset password operations
+    """Request model for reset password operations"""
 
-    Supabase reset email uses implicit flow and redirects to:
-    /reset-password#access_token=...&refresh_token=...&type=recovery
-
-    The frontend should extract `access_token` and `refresh_token` from the URL hash and
-    send them to this endpoint along with `new_password`.
-    """
-
-    access_token: str
-    refresh_token: str
     new_password: str
 
     @classmethod
@@ -205,13 +196,6 @@ class ResetPasswordRequest(BaseModel):
                 custom_code=CustomStatusCode.INVALID_DATA,
             )
         return value
-
-
-class PKCEFlowResetPasswordRequest(BaseModel):
-    """Request model for reset password operations using PKCE flow"""
-
-    code: str
-    new_password: str
 
 
 class PasswordResponse(BaseModel):

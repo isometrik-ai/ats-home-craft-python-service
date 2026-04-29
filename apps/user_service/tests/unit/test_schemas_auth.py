@@ -41,8 +41,6 @@ def test_reset_password_min_length():
 def test_reset_password_valid():
     """Test that valid reset password request is accepted."""
     obj = ResetPasswordRequest(
-        access_token="atk",
-        refresh_token="rtk",
         new_password="StrongPass123!",
     )
-    assert obj.access_token == "atk"
+    assert obj.new_password == "StrongPass123!"
