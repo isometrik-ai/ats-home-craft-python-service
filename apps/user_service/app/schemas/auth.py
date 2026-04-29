@@ -136,13 +136,13 @@ class OrganizationInfo(BaseModel):
 class IsometrikDetails(BaseModel):
     """Isometrik details model"""
 
-    user_id: str = Field(None, description="Isometrik user ID")
-    token: str = Field(None, description="Isometrik token")
-    license_key: str = Field(None, description="Isometrik license key")
-    user_secret: str = Field(None, description="Isometrik user secret")
-    app_secret: str = Field(None, description="Isometrik app secret")
-    project_id: str = Field(None, description="Isometrik project ID")
-    keyset_id: str = Field(None, description="Isometrik keyset ID")
+    user_id: str | None = Field(default=None, description="Isometrik user ID")
+    token: str | None = Field(default=None, description="Isometrik token")
+    license_key: str | None = Field(default=None, description="Isometrik license key")
+    user_secret: str | None = Field(default=None, description="Isometrik user secret")
+    app_secret: str | None = Field(default=None, description="Isometrik app secret")
+    project_id: str | None = Field(default=None, description="Isometrik project ID")
+    keyset_id: str | None = Field(default=None, description="Isometrik keyset ID")
 
 
 class AuthResponse(BaseModel):

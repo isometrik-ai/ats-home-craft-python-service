@@ -363,7 +363,6 @@ class InviteService:
                 )
             return await generate_magiclink_and_exchange_for_session(
                 admin_client=self.supabase_admin_client,
-                anon_client=self.supabase_anon_client,
                 email=email,
             )
 
