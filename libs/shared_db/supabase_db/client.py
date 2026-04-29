@@ -1,8 +1,8 @@
 """Supabase async client factory with caching.
 
-Provides:
-- Anon client factory (RLS-enforced, not cached)
-- Cached service client (admin/service-role)
+Provides two cached clients:
+- Anon client (RLS-enforced)
+- Service client (admin/service-role)
 """
 
 from __future__ import annotations
@@ -21,11 +21,6 @@ class _SupabaseCache:
     """Simple cache for Supabase clients."""
 
     def __init__(self) -> None:
-        # NOTE: We intentionally avoid caching anon clients.
-        #
-        # anon clients are used for user-auth flows (e.g. verify_otp/sign-in) which
-        # mutate client auth state (Authorization header + in-memory session). If
-        # cached globally, one request can "poison" later requests.
         self.anon: AsyncClient | None = None
         self.service: AsyncClient | None = None
 
@@ -43,18 +38,12 @@ _cache = _SupabaseCache()
 
 
 async def get_supabase_client() -> AsyncClient:
-    """Create an anon Supabase client (RLS enforced).
-
-    IMPORTANT: This is NOT cached.
-    `supabase-py` auth flows like `verify_otp()` mutate the passed client instance
-    (session + Authorization header). Returning a fresh client avoids cross-request
-    session leakage and accidental privilege downgrades.
-    """
-    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY must be set for anon client.")
-
-    options = ClientOptions(persist_session=False)
-    return await create_async_client(SUPABASE_URL, SUPABASE_ANON_KEY, options=options)
+    """Get the cached anon Supabase client (RLS enforced)."""
+    if _cache.anon is None:
+        if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+            raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY must be set for anon client.")
+        _cache.anon = await create_async_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    return _cache.anon
 
 
 async def supabase_anon_with_headers(
@@ -93,25 +82,10 @@ async def get_supabase_service_client() -> AsyncClient:
                 "SUPABASE_URL and SUPABASE_SERVICE_KEY must be set for service client."
             )
 
-        # Force service-role Authorization explicitly.
-        #
-        # In supabase-py, if ClientOptions.headers does NOT include Authorization,
-        # AsyncClient.create() may attempt to load an existing auth session and set
-        # Authorization: Bearer <user_access_token>, even when the client was
-        # created with the service role key.
-        #
-        # By setting Authorization here, we guarantee admin calls always use the
-        # service role bearer token and cannot be affected by any user auth flows.
-        options = ClientOptions(
-            persist_session=False,
-            headers={
-                "apikey": SUPABASE_SERVICE_KEY,
-                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-            },
-        )
-
         _cache.service = await create_async_client(
-            SUPABASE_URL, SUPABASE_SERVICE_KEY, options=options
+            SUPABASE_URL,
+            SUPABASE_SERVICE_KEY,
+            options=ClientOptions(persist_session=False),
         )
 
         try:
