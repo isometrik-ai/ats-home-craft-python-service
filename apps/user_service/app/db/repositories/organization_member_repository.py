@@ -271,6 +271,25 @@ class OrganizationMemberRepository:
         )
         return bool(exists)
 
+    async def get_member_id_by_user_id(self, user_id: str, organization_id: str) -> str | None:
+        """Get organization_members.id (member_id) for a given auth user_id.
+
+        This is used for integrations that may key off member_id instead of auth user_id.
+        Returns None if no active membership exists.
+        """
+        query = """
+            SELECT id
+            FROM organization_members
+            WHERE user_id = $1
+              AND organization_id = $2
+              AND status != $3
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(
+            query, user_id, organization_id, OrganizationMemberStatus.DELETED.value
+        )
+        return str(row["id"]) if row and row.get("id") else None
+
     async def check_phone_exists_for_other_user(
         self,
         phone_number: str,

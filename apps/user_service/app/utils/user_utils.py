@@ -12,8 +12,8 @@ from apps.user_service.app.schemas.enums import OrganizationStatus
 from apps.user_service.app.utils.common_utils import parse_json_field
 from apps.user_service.app.utils.email_utils import send_email
 from libs.shared_db.supabase_db.auth_repository import generate_magic_link, update_email
-from libs.shared_utils.http_exceptions import ForbiddenException
 from libs.shared_utils.isometrik_service import login_to_isometrik
+from libs.shared_utils.http_exceptions import ForbiddenException
 from libs.shared_utils.logger import get_logger  # Logger import
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -206,14 +206,20 @@ async def send_admin_update_email(sb_client: AsyncClient, user: dict) -> bool:
 
 
 async def get_isometrik_details(
-    user_id: str, organization_id: str, organization_repository: OrganizationRepository
+    *,
+    user_id: str | None = None,
+    organization_id: str,
+    organization_repository: OrganizationRepository,
+    organization_member_repository: OrganizationMemberRepository | None = None,
 ) -> IsometrikDetails | None:
     """Get Isometrik details for a user.
 
     Args:
-        user_id: User ID
+        user_id: Auth user id (Supabase). If provided, we attempt Isometrik login
+            to return a usable token. If login fails, we retry with member_id.
         organization_id: Organization ID
         organization_repository: Organization repository
+        organization_member_repository: Optional repository to resolve member_id for fallback
     Returns:
         dict | None: Isometrik details
     """
@@ -227,19 +233,59 @@ async def get_isometrik_details(
         )
     org_settings = parse_json_field(organization.get("settings"))
     isometrik_credentials = org_settings.get("isometrik_application_details", {})
-    isometrik_login_response = await login_to_isometrik(
-        user_id=user_id,
-        isometrik_credentials=isometrik_credentials,
+    if not isometrik_credentials:
+        return None
+
+    token: str | None = None
+    identifier_used: str | None = None
+
+    if user_id:
+        try:
+            login_response = await login_to_isometrik(
+                user_id=user_id,
+                isometrik_credentials=isometrik_credentials,
+            )
+            token = login_response.get("userToken") or None
+            identifier_used = user_id
+        except Exception as exc:
+            # Fallback: some orgs key Isometrik userIdentifier off member_id instead of auth user_id.
+            try:
+                member_id = None
+                if organization_member_repository is not None:
+                    member_id = await organization_member_repository.get_member_id_by_user_id(
+                        user_id=user_id, organization_id=organization_id
+                    )
+                if member_id:
+                    login_response = await login_to_isometrik(
+                        user_id=member_id,
+                        isometrik_credentials=isometrik_credentials,
+                    )
+                    token = login_response.get("userToken") or None
+                    identifier_used = member_id
+                else:
+                    logger.warning(
+                        "Isometrik login failed and member_id not found: user_id=%s org_id=%s error=%s",
+                        user_id,
+                        organization_id,
+                        str(exc),
+                    )
+            except Exception as exc2:
+                # Do NOT fail the parent API if Isometrik fails.
+                logger.warning(
+                    "Isometrik login failed (both identifiers). user_id=%s org_id=%s error=%s fallback_error=%s",
+                    user_id,
+                    organization_id,
+                    str(exc),
+                    str(exc2),
+                    exc_info=True,
+                )
+
+    return IsometrikDetails(
+        user_id=identifier_used,
+        token=token,
+        license_key=isometrik_credentials.get("licenseKey"),
+        user_secret=isometrik_credentials.get("userSecret"),
+        app_secret=isometrik_credentials.get("appSecret"),
+        project_id=isometrik_credentials.get("projectId"),
+        keyset_id=isometrik_credentials.get("keysetId"),
     )
-    isometrik_details = None
-    if isometrik_login_response:
-        isometrik_details = IsometrikDetails(
-            user_id=isometrik_login_response.get("userId"),
-            token=isometrik_login_response.get("userToken"),
-            license_key=isometrik_credentials.get("licenseKey"),
-            user_secret=isometrik_credentials.get("userSecret"),
-            app_secret=isometrik_credentials.get("appSecret"),
-            project_id=isometrik_credentials.get("projectId"),
-            keyset_id=isometrik_credentials.get("keysetId"),
-        )
-    return isometrik_details

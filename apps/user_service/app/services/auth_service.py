@@ -1187,11 +1187,14 @@ class AuthService:
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
-        # Get isometrik details for the organization
+        # Get isometrik details for the organization (best-effort; never blocks the API)
         isometrik_details = await get_isometrik_details(
             user_id=user_id,
             organization_id=organization_id,
             organization_repository=self.organization_repository,
+            organization_member_repository=organization_member_repository
+            if user_type != SelectOrganizationType.CLIENT
+            else None,
         )
 
         return SelectOrganizationResponse(isometrik_details=isometrik_details)

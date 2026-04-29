@@ -467,6 +467,7 @@ class UserService:
                 user_id=user_id,
                 organization_id=organization_id,
                 organization_repository=self.organization_repository,
+                organization_member_repository=self.organization_member_repository,
             )
         else:
             # No organization context

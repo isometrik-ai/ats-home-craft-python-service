@@ -5,7 +5,7 @@ Use with the service client for admin operations on auth users.
 
 from typing import Any
 
-from supabase import AsyncClient
+from supabase import AsyncClient, ClientOptions, create_async_client
 from supabase_auth.types import VerifyOtpParams
 
 from apps.user_service.app.schemas.auth import SignupRequest
@@ -268,7 +268,6 @@ async def generate_magic_link(sb_client: AsyncClient, email: str) -> str | None:
 async def generate_magiclink_and_exchange_for_session(
     *,
     admin_client: AsyncClient,
-    anon_client: AsyncClient,
     email: str,
 ) -> Any:
     """Generate a magiclink and exchange it for a session (server-side).
@@ -295,7 +294,13 @@ async def generate_magiclink_and_exchange_for_session(
         )
 
     verify_params: VerifyOtpParams = {"token_hash": token_hash, "type": "magiclink"}
-    verify_response = await anon_client.auth.verify_otp(verify_params)
+    # Use a fresh anon client for OTP verification to avoid mutating any cached/shared client state.
+    fresh_anon_client = await create_async_client(
+        shared_settings.supabase.url,
+        shared_settings.supabase.anon_key,
+        options=ClientOptions(persist_session=False),
+    )
+    verify_response = await fresh_anon_client.auth.verify_otp(verify_params)
     if not getattr(verify_response, "session", None):
         raise BadRequestException(
             message_key="auth.errors.authentication_failed",
