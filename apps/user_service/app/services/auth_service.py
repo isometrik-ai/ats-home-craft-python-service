@@ -852,32 +852,34 @@ class AuthService:
             message="Password reset email sent successfully. Please check your email."
         )
 
-    async def reset_password(self, token: str, new_password: str) -> PasswordResponse:
-        """Reset user password using token from email.
+    async def reset_password(self, code: str, new_password: str) -> PasswordResponse:
+        """Reset user password using code from the Supabase reset email redirect URL hash.
 
         Args:
-            token: Reset token (access_token from email URL)
+            code: Code extracted from reset URL hash
             new_password: New password
 
         Returns:
             PasswordResponse: Success response
 
         Raises:
-            NotFoundException: If user not found
-            BadRequestException: If password is weak or update fails
+            BadRequestException: If password is weak or reset tokens are invalid/expired
             InternalServerErrorException: If supabase client is not configured
         """
         self._validate_password_strength(new_password)
 
         # Use anon client for recovery token operations (standard Supabase flow)
         try:
-            result = await update_password_with_token(token, new_password, self.supabase_client)
-        except (AuthApiError, ValueError, Exception) as exc:
-            # Convert to NotFoundException to maintain same behavior
+            result = await update_password_with_token(
+                code=code,
+                new_password=new_password,
+                sb_client=self.supabase_client,
+            )
+        except (AuthApiError, ValueError) as exc:
             logger.error("Password reset token validation failed: %s", str(exc))
-            raise NotFoundException(
-                message_key="auth.errors.email_not_found_in_system",
-                custom_code=CustomStatusCode.NOT_FOUND,
+            raise BadRequestException(
+                message_key="auth.errors.invalid_or_expired_reset_token",
+                custom_code=CustomStatusCode.BAD_REQUEST,
             ) from exc
 
         if not result.user:

@@ -11,6 +11,7 @@ from fastapi import Request
 from supabase import AsyncClient
 
 from libs.shared_db.supabase_db.client import (
+    get_supabase_anon_with_pkce_flow,
     get_supabase_client,
     get_supabase_service_client,
     supabase_anon_with_headers,
@@ -25,6 +26,11 @@ async def supabase_service():
 async def supabase_anon():
     """Yield the anon Supabase client."""
     return await get_supabase_client()
+
+
+async def supabase_anon_with_pkce_flow() -> AsyncClient:
+    """Yield the anon Supabase client with implicit flow."""
+    return await get_supabase_anon_with_pkce_flow()
 
 
 async def supabase_anon_client_with_headers(request: Request) -> AsyncClient:

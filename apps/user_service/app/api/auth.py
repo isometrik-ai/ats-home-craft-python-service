@@ -16,6 +16,7 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import (
     supabase_anon,
     supabase_anon_client_with_headers,
+    supabase_anon_with_pkce_flow,
     supabase_service,
 )
 from apps.user_service.app.schemas.auth import (
@@ -26,8 +27,8 @@ from apps.user_service.app.schemas.auth import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     PasswordResponse,
+    PKCEFlowResetPasswordRequest,
     RefreshSessionResponse,
-    ResetPasswordRequest,
     SelectOrganizationRequest,
     SelectOrganizationResponse,
     SetPasswordRequest,
@@ -188,7 +189,7 @@ async def forgot_password(
     request: Request,
     data: ForgotPasswordRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
-    sb_client: AsyncClient = Depends(supabase_anon),
+    sb_client: AsyncClient = Depends(supabase_anon_with_pkce_flow),
 ):
     """Send password reset email to user (only if email exists in system)"""
     auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
@@ -220,14 +221,14 @@ async def forgot_password(
 @limiter.limit("100/minute")
 async def reset_password(
     request: Request,
-    data: ResetPasswordRequest = Body(...),
+    data: PKCEFlowResetPasswordRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
-    sb_client: AsyncClient = Depends(supabase_anon),
+    sb_client: AsyncClient = Depends(supabase_anon_with_pkce_flow),
 ):
     """Reset user password using token from email"""
     auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
     result = await auth_service.reset_password(
-        token=data.token,
+        code=data.code,
         new_password=data.new_password,
     )
     return success_response(

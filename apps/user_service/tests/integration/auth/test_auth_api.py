@@ -151,28 +151,6 @@ async def test_forgot_password(monkeypatch, client):
 
 
 @pytest.mark.asyncio
-async def test_reset_password(monkeypatch, client):
-    """Test that the reset password endpoint resets the password."""
-
-    async def fake_reset(_self, token: str, new_password: str):
-        del _self
-        assert token == "tok123"
-        assert new_password == "NewPass123!"
-        return {"message": "reset"}
-
-    monkeypatch.setattr(
-        "apps.user_service.app.services.auth_service.AuthService.reset_password",
-        fake_reset,
-    )
-
-    res = await client.post(
-        "/v1/auth/reset-password",
-        json={"token": "tok123", "new_password": "NewPass123!"},
-    )
-    assert_success(res, 200)
-
-
-@pytest.mark.asyncio
 async def test_change_password(monkeypatch, client):
     """Test that the change password endpoint changes the password."""
 

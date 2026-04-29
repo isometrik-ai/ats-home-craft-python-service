@@ -9,6 +9,7 @@ from supabase import AsyncClient
 from supabase_auth.types import VerifyOtpParams
 
 from apps.user_service.app.schemas.auth import SignupRequest
+from libs.shared_config.app_settings import shared_settings
 from libs.shared_utils.http_exceptions import BadRequestException
 from libs.shared_utils.response_factory import CustomStatusCode
 
@@ -364,34 +365,37 @@ async def send_password_reset_email(email: str, sb_client: AsyncClient):
     Returns:
         dict: Supabase auth response containing user and session information
     """
-    return await sb_client.auth.reset_password_email(email)
+    redirect_to = f"{shared_settings.website_url.rstrip('/')}/reset-password"
+    return await sb_client.auth.reset_password_email(email, {"redirect_to": redirect_to})
 
 
-async def update_password_with_token(token: str, new_password: str, sb_client: AsyncClient) -> dict:
-    """Update password with recovery token using standard Supabase flow.
+async def update_password_with_token(
+    code: str,
+    new_password: str,
+    sb_client: AsyncClient,
+) -> dict:
+    """Update password using code from Supabase reset link.
 
-    This follows the standard Supabase password reset flow:
-    1. Verify the recovery token using verify_otp
-    2. Update password using update_user (which uses the verified session)
+    Supabase reset password PKCE flow redirects with `code`
+    in the URL hash. This method establishes the session and updates the password.
 
     Args:
-        token: Recovery token from password reset email URL (use the token parameter,
-               not the access_token from the URL hash)
-        new_password: New password
+        code: Code extracted from the reset email redirect URL hash
+        new_password: New password to set
         sb_client: Supabase anon client (not admin client)
+
+    Raises:
+        ValueError: If session is not established
+
     Returns:
         dict: Supabase auth response containing user and session information
     """
-    # Step 1: Verify the recovery token - this establishes a session
-    verify_params: VerifyOtpParams = {"token_hash": token, "type": "recovery"}
-    verify_response = await sb_client.auth.verify_otp(verify_params)
 
-    if not verify_response.session:
-        raise ValueError("Token verification failed - no session established")
+    exchange_response = await sb_client.auth.exchange_code_for_session(code)
+    if not exchange_response.session:
+        raise ValueError("Session establishment failed - no session established")
 
-    # Step 2: Update password using the verified session
     update_response = await sb_client.auth.update_user({"password": new_password})
-
     return update_response
 
 
