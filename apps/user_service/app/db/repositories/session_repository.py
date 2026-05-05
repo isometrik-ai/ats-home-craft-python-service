@@ -26,6 +26,16 @@ SESSION_FIELDS = (
     "accessed_phi, phi_access_purpose"
 )
 
+# - org sessions: prefer organization_members (email + first/last)
+SESSION_USER_FIELDS = """
+    COALESCE(om.email, au.email) AS user_email,
+    COALESCE(
+        NULLIF(TRIM(COALESCE(om.first_name, '') || ' ' || COALESCE(om.last_name, '')), ''),
+        au.raw_user_meta_data->>'full_name',
+        au.raw_user_meta_data->>'name'
+    ) AS user_name
+""".strip()
+
 
 class SessionRepository:
     """Database operations class for session management using asyncpg.
@@ -86,15 +96,35 @@ class SessionRepository:
             params.append(filters.login_method)
             param_index += 1
 
-        # Handle search with organization_members join if search and organization_id are provided
-        if include_search and filters.search and organization_id:
+        # Handle search (email/name) across organization_members + auth.users
+        if include_search and filters.search:
             search_term = f"%{filters.search}%"
+            param_placeholder = f"${param_index}"
             conditions.append(
                 (
-                    f"(LOWER(om.email) LIKE LOWER(${param_index}) OR "
-                    f"LOWER(om.first_name || ' ' || COALESCE(om.last_name, '')) "
-                    f"LIKE LOWER(${param_index}))"
-                )
+                    f"""
+                    (
+                        LOWER(COALESCE(om.email, au.email)) LIKE LOWER({param_placeholder})
+                        OR LOWER(
+                            NULLIF(
+                                TRIM(
+                                    COALESCE(om.first_name, '')
+                                    || ' '
+                                    || COALESCE(om.last_name, '')
+                                ),
+                                ''
+                            )
+                        ) LIKE LOWER({param_placeholder})
+                        OR LOWER(
+                            COALESCE(
+                                au.raw_user_meta_data->>'full_name',
+                                au.raw_user_meta_data->>'name',
+                                ''
+                            )
+                        ) LIKE LOWER({param_placeholder})
+                    )
+                    """
+                ).strip()
             )
             params.append(search_term)
             param_index += 1
@@ -118,63 +148,63 @@ class SessionRepository:
         Returns:
             dict containing the paginated list of sessions and total count
         """
-        # Determine if we need search join
         needs_search_join = bool(filters.search and organization_id)
-
-        # Build filters
         where_clause, params = self._build_session_filters(
             organization_id=organization_id,
             user_id=user_id,
             filters=filters,
-            include_search=needs_search_join,
+            include_search=True,
         )
 
-        # Build query parameters
-        deleted_status_param = len(params) + 1
-        limit_param = len(params) + 2
-        offset_param = len(params) + 3
-        deleted_status = OrganizationMemberStatus.DELETED.value
+        limit_param = len(params) + 1
+        offset_param = len(params) + 2
+        query_params = [*params, filters.limit, filters.offset]
 
-        # Build main query dynamically
+        field_list = ", ".join(f"us.{field.strip()}" for field in SESSION_FIELDS.split(","))
+        query = f"""
+            SELECT DISTINCT {field_list}, {SESSION_USER_FIELDS}
+            FROM user_sessions us
+            LEFT JOIN organization_members om
+                ON us.user_id = om.user_id
+                AND om.organization_id = us.organization_id
+                AND om.status != '{OrganizationMemberStatus.DELETED.value}'
+            LEFT JOIN auth.users au
+                ON au.id = us.user_id
+            WHERE {where_clause}
+            ORDER BY us.login_timestamp DESC
+            LIMIT ${limit_param} OFFSET ${offset_param}
+        """
+
+        # Count query must include join only when search uses om.* fields.
         if needs_search_join:
-            field_list = ", ".join([f"us.{field.strip()}" for field in SESSION_FIELDS.split(",")])
-            query_params = params + [deleted_status, filters.limit, filters.offset]
-            query = f"""
-                SELECT DISTINCT {field_list}
-                FROM user_sessions us
-                INNER JOIN organization_members om
-                    ON us.user_id = om.user_id
-                    AND om.status != ${deleted_status_param}
-                WHERE {where_clause}
-                ORDER BY us.login_timestamp DESC
-                LIMIT ${limit_param} OFFSET ${offset_param}
-            """
-            count_query_params = params + [deleted_status]
+            deleted_status_param = len(params) + 1
+            count_query_params = [*params, OrganizationMemberStatus.DELETED.value]
             count_query = f"""
                 SELECT COUNT(DISTINCT us.id)
                 FROM user_sessions us
                 INNER JOIN organization_members om
                     ON us.user_id = om.user_id
                     AND om.status != ${deleted_status_param}
+                LEFT JOIN auth.users au
+                    ON au.id = us.user_id
                 WHERE {where_clause}
             """
         else:
-            limit_param = len(params) + 1
-            offset_param = len(params) + 2
-            query_params = params + [filters.limit, filters.offset]
-            query = f"""
-                SELECT {SESSION_FIELDS}
-                FROM user_sessions
-                WHERE {where_clause}
-                ORDER BY login_timestamp DESC
-                LIMIT ${limit_param} OFFSET ${offset_param}
-            """
             count_query_params = params
-            count_query = f"""
-                SELECT COUNT(*)
-                FROM user_sessions
-                WHERE {where_clause}
-            """
+            if filters.search:
+                count_query = f"""
+                    SELECT COUNT(*)
+                    FROM user_sessions us
+                    LEFT JOIN auth.users au
+                        ON au.id = us.user_id
+                    WHERE {where_clause}
+                """
+            else:
+                count_query = f"""
+                    SELECT COUNT(*)
+                    FROM user_sessions us
+                    WHERE {where_clause}
+                """
 
         # Execute queries
         rows = await self.db_connection.fetch(query, *query_params)
@@ -221,14 +251,34 @@ class SessionRepository:
         # Handle search with organization_members join if search is provided
         if include_search and filters.search:
             search_term = f"%{filters.search}%"
+            param_placeholder = f"${param_index}"
             conditions.append(
                 (
-                    f"(LOWER(om.email) LIKE LOWER(${param_index}) OR "
-                    f"LOWER(om.first_name || ' ' || COALESCE(om.last_name, '')) "
-                    f"LIKE LOWER(${param_index}) OR "
-                    f"LOWER(us.ip_address::text) LIKE LOWER(${param_index}) OR "
-                    f"LOWER(us.user_agent) LIKE LOWER(${param_index}))"
-                )
+                    f"""
+                    (
+                        LOWER(COALESCE(om.email, au.email)) LIKE LOWER({param_placeholder})
+                        OR LOWER(
+                            NULLIF(
+                                TRIM(
+                                    COALESCE(om.first_name, '')
+                                    || ' '
+                                    || COALESCE(om.last_name, '')
+                                ),
+                                ''
+                            )
+                        ) LIKE LOWER({param_placeholder})
+                        OR LOWER(
+                            COALESCE(
+                                au.raw_user_meta_data->>'full_name',
+                                au.raw_user_meta_data->>'name',
+                                ''
+                            )
+                        ) LIKE LOWER({param_placeholder})
+                        OR LOWER(us.ip_address::text) LIKE LOWER({param_placeholder})
+                        OR LOWER(us.user_agent) LIKE LOWER({param_placeholder})
+                    )
+                    """
+                ).strip()
             )
 
             params.append(search_term)
@@ -276,11 +326,13 @@ class SessionRepository:
             field_list = ", ".join([f"us.{field.strip()}" for field in SESSION_FIELDS.split(",")])
             query_params = params + [deleted_status, filters.limit, filters.offset]
             query = f"""
-                SELECT DISTINCT {field_list}
+                SELECT DISTINCT {field_list}, {SESSION_USER_FIELDS}
                 FROM user_sessions us
                 INNER JOIN organization_members om ON us.user_id = om.user_id
                     AND om.organization_id = $1
                     AND om.status != ${deleted_status_param}
+                LEFT JOIN auth.users au
+                    ON au.id = us.user_id
                 WHERE {where_clause}
                 ORDER BY us.login_timestamp DESC
                 LIMIT ${limit_param} OFFSET ${offset_param}
@@ -292,15 +344,24 @@ class SessionRepository:
                 INNER JOIN organization_members om ON us.user_id = om.user_id
                     AND om.organization_id = $1
                     AND om.status != ${deleted_status_param}
+                LEFT JOIN auth.users au
+                    ON au.id = us.user_id
                 WHERE {where_clause}
             """
         else:
             limit_param = len(params) + 1
             offset_param = len(params) + 2
             query_params = params + [filters.limit, filters.offset]
+            field_list = ", ".join([f"us.{field.strip()}" for field in SESSION_FIELDS.split(",")])
             query = f"""
-                SELECT {SESSION_FIELDS}
+                SELECT {field_list}, {SESSION_USER_FIELDS}
                 FROM user_sessions us
+                LEFT JOIN organization_members om
+                    ON us.user_id = om.user_id
+                    AND om.organization_id = us.organization_id
+                    AND om.status != '{OrganizationMemberStatus.DELETED.value}'
+                LEFT JOIN auth.users au
+                    ON au.id = us.user_id
                 WHERE {where_clause}
                 ORDER BY us.login_timestamp DESC
                 LIMIT ${limit_param} OFFSET ${offset_param}

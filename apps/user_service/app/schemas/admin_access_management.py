@@ -414,6 +414,14 @@ class SessionItem(BaseModel):
     login_method: str = Field(..., description="Method used for login")
     accessed_phi: bool = Field(..., description="Whether PHI was accessed during session")
     phi_access_purpose: str | None = Field(None, description="Purpose of PHI access if applicable")
+    user_email: str | None = Field(
+        None,
+        description="User email for the session (available for organization sessions)",
+    )
+    user_name: str | None = Field(
+        None,
+        description="User display name for the session (available for organization sessions)",
+    )
 
 
 class CreateSessionRequest(BaseModel):
