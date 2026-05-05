@@ -281,6 +281,7 @@ class AuditLogService:
                 if isinstance(audit_log_data["timestamp"], str)
                 else format_iso_datetime(audit_log_data["timestamp"]) or ""
             ),
+            actor_name=audit_log_data.get("actor_name"),
             status_code=audit_log_data.get("status_code"),
             category=audit_log_data.get("category"),
         )
@@ -317,6 +318,7 @@ class AuditLogService:
                 if isinstance(audit_log_data["timestamp"], str)
                 else format_iso_datetime(audit_log_data["timestamp"]) or ""
             ),
+            actor_name=audit_log_data.get("actor_name"),
             hash_signature=audit_log_data.get("hash_signature"),
             previous_hash=audit_log_data.get("previous_hash"),
             retention_date=(

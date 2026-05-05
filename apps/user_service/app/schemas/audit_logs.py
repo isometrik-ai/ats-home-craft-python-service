@@ -58,6 +58,7 @@ class AuditLogBase(BaseModel):
         ip_address (str): IP address of the user who performed the action
         description (str): Human-readable description of the action
         timestamp (str): ISO timestamp when the audit log was created
+        actor_name (str | None): Display name of the actor (derived from user profile)
         status_code (int | None): HTTP status code of the API call
         category (str | None): Category classification for the audit log
     """
@@ -84,6 +85,7 @@ class AuditLogBase(BaseModel):
     ip_address: str = Field(..., description="IP address of the user who performed the action")
     description: str = Field(..., description="Human-readable description of the action")
     timestamp: str = Field(..., description="ISO timestamp when the audit log was created")
+    actor_name: str | None = Field(None, description="Display name of the actor")
     status_code: int | None = Field(None, description="HTTP status code of the API call")
     category: str | None = Field(None, description="Category classification for the audit log")
 

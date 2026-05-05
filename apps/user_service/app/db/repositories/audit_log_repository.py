@@ -103,38 +103,38 @@ class AuditLogRepository:
             Tuple containing (where_clause, params) for use in SQL query
         """
         conditions = [
-            "organization_id = $1",
+            "al.organization_id = $1",
         ]
         params = [filter_params.organization_id]
         param_index = 2
 
         # Apply user_id filter
         if filter_params.user_id:
-            conditions.append(f"user_id = ${param_index}")
+            conditions.append(f"al.user_id = ${param_index}")
             params.append(filter_params.user_id)
             param_index += 1
 
         # Apply action_type filter
         if filter_params.action_type:
-            conditions.append(f"action_type = ${param_index}")
+            conditions.append(f"al.action_type = ${param_index}")
             params.append(filter_params.action_type)
             param_index += 1
 
         # Apply table_name filter
         if filter_params.table_name:
-            conditions.append(f"table_name = ${param_index}")
+            conditions.append(f"al.table_name = ${param_index}")
             params.append(filter_params.table_name)
             param_index += 1
 
         # Apply start_date filter
         if filter_params.start_date:
-            conditions.append(f"timestamp >= ${param_index}")
+            conditions.append(f"al.timestamp >= ${param_index}")
             params.append(filter_params.start_date)
             param_index += 1
 
         # Apply end_date filter
         if filter_params.end_date:
-            conditions.append(f"timestamp <= ${param_index}")
+            conditions.append(f"al.timestamp <= ${param_index}")
             params.append(filter_params.end_date)
             param_index += 1
 
@@ -142,9 +142,9 @@ class AuditLogRepository:
         if filter_params.search:
             search_term = f"%{filter_params.search}%"
             conditions.append(
-                f"(description ILIKE ${param_index} OR "
-                f"action_type ILIKE ${param_index} OR "
-                f"table_name ILIKE ${param_index})"
+                f"(al.description ILIKE ${param_index} OR "
+                f"al.action_type ILIKE ${param_index} OR "
+                f"al.table_name ILIKE ${param_index})"
             )
             params.append(search_term)
             param_index += 1
@@ -168,11 +168,29 @@ class AuditLogRepository:
         offset_param = len(params) + 2
         query_params = params + [filter_params.limit, filter_params.offset]
 
+        list_fields_aliased = AUDIT_LOG_LIST_FIELDS_ALIASED.replace(
+            "al.user_email AS user_email",
+            "au.email AS user_email",
+        )
+
         query = f"""
-            SELECT {AUDIT_LOG_LIST_FIELDS}
-            FROM audit_logs
+            SELECT
+                {list_fields_aliased},
+                NULLIF(
+                    TRIM(
+                        CONCAT_WS(
+                            ' ',
+                            NULLIF(TRIM(COALESCE(au.raw_user_meta_data->>'first_name', '')), ''),
+                            NULLIF(TRIM(COALESCE(au.raw_user_meta_data->>'last_name', '')), '')
+                        )
+                    ),
+                    ''
+                ) AS actor_name
+            FROM audit_logs al
+            LEFT JOIN auth.users au
+                ON au.id = al.user_id
             WHERE {where_clause}
-            ORDER BY timestamp DESC
+            ORDER BY al.timestamp DESC
             LIMIT ${limit_param} OFFSET ${offset_param}
         """
 
@@ -192,7 +210,7 @@ class AuditLogRepository:
 
         query = f"""
             SELECT COUNT(*)
-            FROM audit_logs
+            FROM audit_logs al
             WHERE {where_clause}
         """
 
