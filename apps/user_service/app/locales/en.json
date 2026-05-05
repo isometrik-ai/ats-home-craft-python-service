@@ -249,7 +249,11 @@
   "sessions": {
     "errors": {
       "bad_request": "Organization ID is required to list organization-wide sessions",
-      "invalid_session_data": "Invalid session data provided"
+      "invalid_session_data": "Invalid session data provided",
+      "cannot_revoke_current_session": "You cannot revoke your current session."
+    },
+    "success": {
+      "session_revoked": "Session revoked successfully."
     }
   },
   "users": {

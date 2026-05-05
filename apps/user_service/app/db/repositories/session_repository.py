@@ -337,6 +337,36 @@ class SessionRepository:
         result = await self.db_connection.fetchval(query, session_id, SessionStatus.ACTIVE.value)
         return str(result) if result else None
 
+    async def get_valid_session_context(self, session_id: str) -> dict[str, Any] | None:
+        """Validate session (single DB call) and return session context.
+
+        This validates **session existence only** (not organization existence):
+        - session exists in our `user_sessions` table
+        - session is ACTIVE
+        - session still exists in Supabase Auth (`auth.sessions`) (revocation support)
+
+        Returns a dict containing `organization_id` (can be None) or None if invalid.
+        """
+        if not session_id or not session_id.strip():
+            return None
+
+        query = """
+            SELECT us.organization_id
+            FROM user_sessions us
+            WHERE us.id = $1
+              AND us.session_status = $2
+              AND EXISTS (
+                SELECT 1
+                FROM auth.sessions s
+                WHERE s.id = us.id
+              )
+        """
+        row = await self.db_connection.fetchrow(query, session_id, SessionStatus.ACTIVE.value)
+        if not row:
+            return None
+        org_id = row.get("organization_id") if hasattr(row, "get") else row["organization_id"]
+        return {"organization_id": str(org_id) if org_id is not None else None}
+
     async def check_session_has_organization(self, session_id: str) -> bool:
         """Check if session already has an organization_id linked.
 
@@ -378,3 +408,11 @@ class SessionRepository:
         await self.db_connection.execute(
             query, organization_id, session_id, user_id, SessionStatus.ACTIVE.value
         )
+
+    async def delete_auth_session_by_id(self, session_id: str) -> None:
+        """Delete a Supabase Auth session row by session id.
+
+        This revokes the session at Supabase level by deleting from `auth.sessions`.
+        Requires a privileged Postgres connection.
+        """
+        await self.db_connection.execute("DELETE FROM auth.sessions WHERE id = $1", session_id)

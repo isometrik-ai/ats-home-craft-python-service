@@ -145,3 +145,20 @@ class SessionService:
             "sessions": sessions,
             "total_count": total_count,
         }
+
+    async def revoke_session_by_id(
+        self,
+        *,
+        session_id: str,
+    ) -> None:
+        """Revoke a specific session at Supabase (DB) level.
+
+        This deletes the row from `auth.sessions` by session id.
+        """
+        if not session_id or not session_id.strip():
+            raise BadRequestException(
+                message_key="sessions.errors.bad_request",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+
+        await self.session_repository.delete_auth_session_by_id(session_id)
