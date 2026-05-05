@@ -222,18 +222,21 @@ async def get_user_from_auth(
     from apps.user_service.app.db.repositories import SessionRepository
 
     session_repo = SessionRepository(db_connection=db_connection)
-    organization_id = await session_repo.get_session_organization_id(session_id)
 
-    setup_audit_context(request, user_id, user_email, organization_id, session_id)
-
-    # Validate basic authentication
-    if not user:
+    # Single-call validation: session must exist (org may be NULL)
+    session_ctx = await session_repo.get_valid_session_context(session_id)
+    if not session_ctx:
         raise UnauthorizedException(
-            message_key="errors.unauthorized",
+            message_key="auth.errors.session_not_found",
             custom_code=CustomStatusCode.UNAUTHORIZED,
-            params={"user_id": user_id},
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    organization_id = session_ctx.get("organization_id")
+
+    # Update audit context with validated org/session info
+    setup_audit_context(request, user_id, user_email, organization_id, session_id)
+
     request.state.audit_risk_level = "low"
     request.state.audit_description = "Successfully authenticated and authorized user"
 
