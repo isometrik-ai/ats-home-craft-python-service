@@ -334,46 +334,6 @@ async def signup(
     )
 
 
-@handle_api_exceptions("delete user")
-@router.delete(
-    "/user",
-    status_code=http_status.HTTP_204_NO_CONTENT,
-    description="Delete user directly from auth.users table without validation",
-    summary="Delete user directly from auth.users table without validation",
-    responses={
-        http_status.HTTP_204_NO_CONTENT: {"description": "User deleted successfully"},
-        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
-        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
-        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
-        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
-    },
-)
-@limiter.limit("100/minute")
-@audit_api_call(
-    action_type="DELETE",
-    data_classification="confidential",
-    compliance_tags=["gdpr", "pii", "audit_required"],
-    table_name="auth.users",
-    category="USER_DELETE",
-)
-async def delete_user(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-    sb_client: AsyncClient = Depends(supabase_service),
-):
-    """Delete user directly from auth.users table without validation."""
-    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
-    user_id = current_user["sub"]
-    await auth_service.delete_user(user_id)
-    return success_response(
-        request=request,
-        message_key="auth.success.user_deleted",
-        custom_code=CustomStatusCode.SUCCESS,
-        status_code=http_status.HTTP_200_OK,
-    )
-
-
 @handle_api_exceptions("validate_account")
 @router.post(
     "/validate/account",

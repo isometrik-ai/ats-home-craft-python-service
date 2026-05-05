@@ -240,25 +240,6 @@ async def test_validate_account(monkeypatch, client):
 
 
 @pytest.mark.asyncio
-async def test_delete_user(monkeypatch, client):
-    """Test that the delete user endpoint deletes a user."""
-
-    async def fake_delete(_self, user_id: str):
-        del _self
-        assert user_id == "test-user-id"
-        return None
-
-    monkeypatch.setattr(
-        "apps.user_service.app.services.auth_service.AuthService.delete_user",
-        fake_delete,
-    )
-
-    res = await client.delete("/v1/auth/user")
-    body = assert_success(res, 200)
-    assert body["code"]  # ensure custom code present
-
-
-@pytest.mark.asyncio
 async def test_validate_token_success(client):
     """Test that the validate token endpoint returns organization_id when token is valid."""
     res = await client.get("/v1/auth/validate")
