@@ -42,6 +42,40 @@ class SessionService:
         self.session_repository = SessionRepository(db_connection=db_connection)
 
     @staticmethod
+    def normalize_items(items: list[Any]) -> list[dict[str, Any]]:
+        """Normalize service items to JSON-ready dicts."""
+        normalized: list[dict[str, Any]] = []
+        for item in items:
+            if hasattr(item, "model_dump"):
+                data = item.model_dump(mode="json", exclude_none=False)
+            else:
+                data = dict(item)
+            normalized.append(data)
+        return normalized
+
+    async def get_user_sessions_json(
+        self,
+        filters: SessionFilter,
+    ) -> dict[str, Any]:
+        """Get user sessions as JSON-ready dicts (API convenience wrapper)."""
+        result = await self.get_user_sessions(filters=filters)
+        return {
+            "sessions": self.normalize_items(result["sessions"]),
+            "total_count": result["total_count"],
+        }
+
+    async def get_organization_sessions_json(
+        self,
+        filters: SessionFilter,
+    ) -> dict[str, Any]:
+        """Get org sessions as JSON-ready dicts (API convenience wrapper)."""
+        result = await self.get_organization_sessions(filters=filters)
+        return {
+            "sessions": self.normalize_items(result["sessions"]),
+            "total_count": result["total_count"],
+        }
+
+    @staticmethod
     def _format_session_item(session_data: dict) -> SessionItem:
         """Format session data into SessionItem.
 
@@ -51,6 +85,9 @@ class SessionService:
         Returns:
             SessionItem: Formatted session item
         """
+        user_email = session_data.get("user_email")
+        user_name = session_data.get("user_name")
+
         return SessionItem(
             id=str(session_data["id"]),
             user_id=str(session_data["user_id"]),
@@ -75,6 +112,8 @@ class SessionService:
             login_method=session_data["login_method"],
             accessed_phi=session_data["accessed_phi"],
             phi_access_purpose=session_data["phi_access_purpose"],
+            user_email=user_email,
+            user_name=user_name,
         )
 
     async def get_user_sessions(

@@ -47,7 +47,8 @@ def test_build_session_filters_includes_search():
 
     # Note: organization_id filtering is currently disabled in implementation
     assert "us.user_id = $1" in where
-    assert "LOWER(om.email)" in where
+    # search now includes auth.users fallback
+    assert "COALESCE(om.email, au.email)" in where
     assert params[0] == "u1"
     assert params[-1] == "%abc%"
 
@@ -83,8 +84,9 @@ async def test_get_sessions_with_count_joins_on_search():
         filters=_filters(search="abc"),
     )
 
-    # ensure join variant used (alias us.)
-    assert "INNER JOIN organization_members" in conn.fetch_calls[0][0]
+    # main query always includes joins (om + au); count query adds INNER JOIN when needed
+    assert "LEFT JOIN organization_members" in conn.fetch_calls[0][0]
+    assert "LEFT JOIN auth.users au" in conn.fetch_calls[0][0]
     assert result["total_count"] == 1
     assert result["data"][0]["id"] == "s1"
 

@@ -28,7 +28,17 @@ async def test_get_sessions_list(monkeypatch, client):
 
     async def fake_get_user_sessions(self, filters: SessionFilter):
         del self, filters
-        return {"sessions": [{"id": "s1", "user_id": "u1"}], "total_count": 1}
+        return {
+            "sessions": [
+                {
+                    "id": "s1",
+                    "user_id": "u1",
+                    "user_email": "u1@example.com",
+                    "user_name": "User One",
+                }
+            ],
+            "total_count": 1,
+        }
 
     monkeypatch.setattr(
         "apps.user_service.app.api.sessions.extract_user_context",
@@ -46,6 +56,8 @@ async def test_get_sessions_list(monkeypatch, client):
     res = await client.get("/v1/sessions?page=1&page_size=10")
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == "s1"
+    assert body["data"][0]["user_email"] == "u1@example.com"
+    assert body["data"][0]["user_name"] == "User One"
     assert body["total"] == 1
 
 
@@ -61,7 +73,17 @@ async def test_get_organization_sessions(monkeypatch, client):
 
     async def fake_get_org_sessions(self, filters: SessionFilter):
         del self, filters
-        return {"sessions": [{"id": "s2", "user_id": "u2"}], "total_count": 1}
+        return {
+            "sessions": [
+                {
+                    "id": "s2",
+                    "user_id": "u2",
+                    "user_email": "u2@example.com",
+                    "user_name": "User Two",
+                }
+            ],
+            "total_count": 1,
+        }
 
     monkeypatch.setattr(
         "apps.user_service.app.api.sessions.check_permissions",
@@ -75,6 +97,8 @@ async def test_get_organization_sessions(monkeypatch, client):
     res = await client.get("/v1/sessions/all?page=1&page_size=10")
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == "s2"
+    assert body["data"][0]["user_email"] == "u2@example.com"
+    assert body["data"][0]["user_name"] == "User Two"
     assert body["total"] == 1
 
 

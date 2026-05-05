@@ -89,8 +89,7 @@ async def get_sessions_list(
 
     # Create service and delegate to service
     session_service = SessionService(user_context=user_context, db_connection=db_connection)
-    result = await session_service.get_user_sessions(filters=filters)
-
+    result = await session_service.get_user_sessions_json(filters=filters)
     sessions = result["sessions"]
     total_count = result["total_count"]
 
@@ -174,8 +173,7 @@ async def get_organization_sessions(
 
     # Create service and delegate to service
     session_service = SessionService(user_context=user_context, db_connection=db_connection)
-    result = await session_service.get_organization_sessions(filters=filters)
-
+    result = await session_service.get_organization_sessions_json(filters=filters)
     sessions = result["sessions"]
     total_count = result["total_count"]
 
