@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from apps.user_service.app.schemas.enums import DealType
+from apps.user_service.app.schemas.enums import DealType, LeadCurrency
 from apps.user_service.app.schemas.lead_stages import UNSET
 from apps.user_service.app.schemas.leads import (
     CreateLeadCompany,
@@ -53,6 +53,44 @@ def test_create_lead_deal_type_optional_and_nullable():
         {"name": "Lead", "stage_id": STAGE_ID, "deal_type": None}
     )
     assert from_null.deal_type is None
+
+
+def test_lead_requires_currency_when_amount_present():
+    """CreateLeadRequest requires currency when amount is provided."""
+    with pytest.raises(ValidationException):
+        CreateLeadRequest(name="Lead", stage_id=STAGE_ID, amount="100.00")
+
+    ok = CreateLeadRequest(
+        name="Lead",
+        stage_id=STAGE_ID,
+        amount="100.00",
+        currency=LeadCurrency.USD,
+    )
+    assert ok.currency == LeadCurrency.USD
+
+
+def test_lead_requires_currency_when_amount():
+    """UpdateLeadRequest requires currency when amount is provided (non-null)."""
+    with pytest.raises(ValidationException):
+        UpdateLeadRequest(amount="100.00")
+
+    ok = UpdateLeadRequest(amount="100.00", currency=LeadCurrency.EUR)
+    assert ok.amount is not None
+
+    cleared = UpdateLeadRequest(amount=None)
+    assert cleared.amount is None
+
+
+def test_currency_rejected_when_amount_missing_or_null():
+    """currency must not be sent unless amount is provided and non-null."""
+    with pytest.raises(ValidationException):
+        CreateLeadRequest(name="Lead", stage_id=STAGE_ID, currency=LeadCurrency.USD)
+
+    with pytest.raises(ValidationException):
+        UpdateLeadRequest(currency=LeadCurrency.USD)
+
+    with pytest.raises(ValidationException):
+        UpdateLeadRequest(amount=None, currency=LeadCurrency.USD)
 
 
 def test_update_lead_rejects_empty_payload():
