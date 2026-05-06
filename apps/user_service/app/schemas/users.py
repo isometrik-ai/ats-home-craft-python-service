@@ -197,6 +197,9 @@ class UserProfileData(BaseModel):
         None,
         description="Isometrik integration details",
     )
+    member_role: OrganizationMemberRole | None = Field(
+        None, description="Organization member role (owner, member)"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -247,6 +250,7 @@ class UserProfileData(BaseModel):
                     "two_fa_enabled": True,
                     "verification_method": "PHONE",
                 },
+                "member_role": OrganizationMemberRole.OWNER.value,
             }
         }
     )

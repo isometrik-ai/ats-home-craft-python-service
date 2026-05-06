@@ -1201,6 +1201,7 @@ class UserService:
             alternate_emails=user_profile.get("alternate_emails"),
             organization_details=organization_details,
             isometrik_details=isometrik_details,
+            member_role=user_profile.get("member_role"),
         )
 
     async def _update_isometrik_user_if_needed(
