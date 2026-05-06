@@ -155,6 +155,7 @@ async def create_isometrik_application(
             "productType": product_types,
             "regionId": shared_settings.isometrik.region_id,
             "plan": plan,
+            "isHighLimit": True,
         }
 
         # Prepare headers
