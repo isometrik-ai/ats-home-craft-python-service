@@ -13,16 +13,19 @@ Design goals:
 - Keep enrichment and Typesense behavior consistent, but targeted to split tables/collections.
 """
 
+# pylint: disable=too-many-lines
 from __future__ import annotations
 
 import json
 import uuid
 from datetime import datetime, timezone
+from email.utils import parseaddr
 from typing import Any
 
 import asyncpg
 from asyncpg import UniqueViolationError
 from fastapi import BackgroundTasks
+from publicsuffix2 import get_sld
 from supabase import AsyncClient
 
 from apps.user_service.app.config.app_settings import app_settings, shared_settings
@@ -110,6 +113,141 @@ class ContactsService:
     """Business logic for contacts."""
 
     CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
+
+    # Basic consumer/free email providers that should *not* be inferred as companies.
+    # Keep this list focused; it is only used for the "no company selected/provided" fallback.
+    _CONSUMER_EMAIL_DOMAINS: frozenset[str] = frozenset(
+        {
+            "gmail.com",
+            "googlemail.com",
+            "yahoo.com",
+            "yahoo.co.in",
+            "yahoo.co.uk",
+            "hotmail.com",
+            "outlook.com",
+            "live.com",
+            "msn.com",
+            "icloud.com",
+            "me.com",
+            "mac.com",
+            "aol.com",
+            "proton.me",
+            "protonmail.com",
+            "yandex.com",
+            "yandex.ru",
+            "zoho.com",
+            "zohomail.com",
+            "mail.com",
+            "gmx.com",
+        }
+    )
+
+    @staticmethod
+    def _extract_email_domain(email: str | None) -> str | None:
+        """Extract domain portion from an email address.
+
+        Accepts plain emails and "Name <email@domain>" formats.
+        Returns a lowercase domain, or None.
+        """
+        raw = (email or "").strip()
+        if not raw:
+            return None
+        _, addr = parseaddr(raw)
+        addr = (addr or raw).strip()
+        if "@" not in addr:
+            return None
+        domain = addr.split("@", 1)[1].strip().lower().strip(".")
+        if not domain or "." not in domain:
+            return None
+        # Strip common trailing punctuation (copy/paste artifacts)
+        domain = domain.rstrip(">,);")
+        return domain or None
+
+    @classmethod
+    def _infer_company_name_from_email(cls, email: str | None) -> str | None:
+        """Infer company name from email domain when the domain isn't a mail provider.
+
+        Example: "rohit@appscrip.co" -> "appscrip"
+        """
+        email_domain = cls._extract_email_domain(email)
+        if not email_domain:
+            return None
+
+        # Guard: consumer/free providers are not treated as companies.
+        if email_domain in cls._CONSUMER_EMAIL_DOMAINS:
+            return None
+
+        # Some providers use subdomains; treat any subdomain under a known provider as consumer.
+        if any(email_domain.endswith("." + provider) for provider in cls._CONSUMER_EMAIL_DOMAINS):
+            return None
+
+        registrable = (get_sld(email_domain) or "").strip().lower().strip(".")
+        if not registrable or "." not in registrable:
+            return None
+
+        # company token is the left-most label of the registrable domain
+        sld = registrable.split(".", 1)[0]
+        company = (sld or "").strip().lower()
+        if not company:
+            return None
+        # Keep only basic safe chars; company names in DB are free-form
+        company = "".join(ch for ch in company if ch.isalnum() or ch in ("-", "_"))
+        return company or None
+
+    async def _apply_inferred_company_assoc_on_create(
+        self,
+        *,
+        organization_id: str,
+        email_norm: str,
+        company_id: str | None,
+        company_data: dict[str, Any] | None,
+        company_addresses: list[dict[str, Any]] | None,
+        make_primary: bool,
+    ) -> tuple[str | None, dict[str, Any] | None, list[dict[str, Any]] | None, bool]:
+        """Apply inferred company association for contact create when no company was provided.
+
+        Rules:
+        - Only runs when caller has no `company_id` and no `company_data`
+        - Infers company name from email domain (non-consumer providers only)
+        - Links existing company by case-insensitive name match, else creates a minimal company
+        - Never adds company addresses for inferred companies
+        """
+        if company_id is not None or company_data:
+            return company_id, company_data, company_addresses, make_primary
+
+        inferred_name = self._infer_company_name_from_email(email_norm)
+        if not inferred_name:
+            return company_id, company_data, company_addresses, make_primary
+
+        existing_by_name = await self.companies_repo.get_company_ids_by_names(
+            organization_id=organization_id,
+            names=[inferred_name],
+        )
+        existing_company_id = existing_by_name.get(inferred_name)
+        if existing_company_id:
+            return str(existing_company_id), None, None, False
+
+        inferred_company_data: dict[str, Any] = {
+            "status": ClientStatus.ACTIVE.value,
+            "name": inferred_name,
+            "industry": None,
+            "profile_photo_url": None,
+            "portal_access": False,
+            "email": None,
+            "phones": [],
+            "tags": [],
+            "websites": [],
+            "billing_preferences": {},
+            "social_pages": [],
+            "target_market_segments": [],
+            "current_tech_stack": [],
+            "preferred_communication_channels": [],
+            "industry_specific_terminologies": [],
+            "description": None,
+            "custom_fields": [],
+            "additional_data": {},
+        }
+        return None, inferred_company_data, [], False
 
     @staticmethod
     async def create_lifecycle_events_for_created_entities(
@@ -655,11 +793,28 @@ class ContactsService:
             company_addresses,
             make_primary,
         ) = await self._prepare_optional_contact_company_association(body=body)
+
+        # Feature: on contact creation only, when no company is selected/provided,
+        # infer a company name from email domain (excluding consumer mail providers).
+        email_norm = (body.email or "").strip().lower()
+        (
+            company_id,
+            company_data,
+            company_addresses,
+            make_primary,
+        ) = await self._apply_inferred_company_assoc_on_create(
+            organization_id=org_id,
+            email_norm=email_norm,
+            company_id=company_id,
+            company_data=company_data,
+            company_addresses=company_addresses,
+            make_primary=make_primary,
+        )
+
         created_new_company = bool(company_data)
         company_name = (company_data or {}).get("name") if company_data else None
 
         # Align with legacy behavior: prevent org-level duplicate emails when email is provided.
-        email_norm = (body.email or "").strip().lower()
         await self._assert_contact_email_unique(organization_id=org_id, email=email_norm)
 
         # Custom fields: validate/normalize exactly as existing behavior.
