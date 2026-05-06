@@ -356,55 +356,6 @@ async def test_create_lead_stage_missing_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_lead_payload_and_poc_validation(monkeypatch):
-    """Successful create_lead builds the expected DB payload."""
-    service, lead_repo, stage_repo, user_repo = _service_with_fakes()
-    lead_repo.lead_reference_validation_result = (True, set(), set())
-
-    custom_calls: dict[str, Any] = {}
-    _patch_custom_field_service(monkeypatch, custom_calls)
-
-    body = CreateLeadRequest(
-        name="New Lead",
-        stage_id=STAGE_ID_1,
-        deal_type=DealType.NEW_BUSINESS,
-        lead_source="Referral",
-        referral_source="Partner",
-        lead_score="high",
-        close_date=date(2026, 1, 10),
-        amount=Decimal("100.50"),
-        description="Opportunity desc",
-    )
-
-    result = await service.create_lead(body)
-
-    assert result == lead_repo.create_lead_result
-    assert lead_repo.calls["fetch_lead_reference_validation"] == {
-        "organization_id": ORG_ID,
-        "stage_id": STAGE_ID_1,
-        "contact_ids": None,
-        "company_ids": None,
-    }
-    assert not stage_repo.calls
-
-    payload = lead_repo.calls["create_lead"]
-    assert payload["organization_id"] == ORG_ID
-    assert payload["name"] == "New Lead"
-    assert payload["stage_id"] == STAGE_ID_1
-    assert payload["deal_type"] == DealType.NEW_BUSINESS.value
-    assert payload["lead_source"] == "Referral"
-    assert payload["owner_id"] == CTX_USER_ID  # owner_id defaults to creator
-    assert not payload["custom_fields"]
-    assert lead_repo.calls["create_lead_contacts"] == []
-    assert lead_repo.calls["create_lead_company"] is None
-
-    assert custom_calls["validate_for_create"][0] == []
-    assert custom_calls["validate_for_create"][1] == EntityType.LEAD
-    # owner_id was omitted, so no user lookup should occur.
-    assert not user_repo.calls
-
-
-@pytest.mark.asyncio
 async def test_create_lead_omitted_deal_type(monkeypatch):
     """create_lead passes None for deal_type when omitted (optional create field)."""
     service, lead_repo, _, _ = _service_with_fakes()

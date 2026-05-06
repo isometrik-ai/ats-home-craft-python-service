@@ -19,7 +19,12 @@ from pydantic import (
 )
 
 from apps.user_service.app.schemas.common import NoteItem, Phone
-from apps.user_service.app.schemas.enums import DealType, LeadsListMode, Priority
+from apps.user_service.app.schemas.enums import (
+    DealType,
+    LeadCurrency,
+    LeadsListMode,
+    Priority,
+)
 from apps.user_service.app.schemas.lead_stages import UNSET, Unset
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -307,6 +312,10 @@ class CreateLeadRequest(BaseModel):
         description="Expected close date (YYYY-MM-DD)",
     )
     amount: Decimal | None = Field(default=None, description="Estimated deal value")
+    currency: LeadCurrency | None = Field(
+        default=None,
+        description="ISO 4217 alpha-3 currency code for `amount`",
+    )
     description: str | None = Field(
         default=None,
         max_length=20000,
@@ -347,6 +356,28 @@ class CreateLeadRequest(BaseModel):
         stripped = value.strip()
         return stripped or None
 
+    @model_validator(mode="after")
+    def require_currency_when_amount_present(self) -> "CreateLeadRequest":
+        """Currency rules:
+
+        - If `amount` is provided (non-null), `currency` is mandatory.
+        - If `amount` is omitted/null, `currency` must not be sent.
+        """
+        if self.amount is not None:
+            if self.currency is None:
+                raise ValidationException(
+                    message_key="leads.errors.currency_required_when_amount_provided",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            return self
+
+        if self.currency is not None:
+            raise ValidationException(
+                message_key="leads.errors.currency_not_allowed_without_amount",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
+
 
 class UpdateLeadRequest(BaseModel):
     """Request body for ``PATCH /leads/{lead_id}``.
@@ -381,6 +412,10 @@ class UpdateLeadRequest(BaseModel):
     amount: Decimal | None | Unset = Field(
         default=UNSET,
         description="Deal value; null clears",
+    )
+    currency: LeadCurrency | None | Unset = Field(
+        default=UNSET,
+        description="ISO 4217 alpha-3 currency code for amount; null clears",
     )
     description: str | None | Unset = Field(
         default=UNSET,
@@ -445,6 +480,25 @@ class UpdateLeadRequest(BaseModel):
             raise ValueError("contacts_update must be an object when provided.")
         if "companies_update" in self.model_fields_set and self.companies_update is None:
             raise ValueError("companies_update must be an object when provided.")
+
+        amount_set = "amount" in self.model_fields_set and not isinstance(self.amount, Unset)
+        currency_set = "currency" in self.model_fields_set and not isinstance(self.currency, Unset)
+
+        # If currency is sent, amount must also be sent and must be non-null.
+        if currency_set:
+            if not amount_set or self.amount is None:
+                raise ValidationException(
+                    message_key="leads.errors.currency_not_allowed_without_amount",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+
+        # If PATCH sets a non-null amount, currency must be sent and non-null.
+        if amount_set and self.amount is not None:
+            if (not currency_set) or self.currency is None:
+                raise ValidationException(
+                    message_key="leads.errors.currency_required_when_amount_provided",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
 
         if not self.model_fields_set:
             raise ValidationException(
@@ -517,6 +571,7 @@ class LeadListItem(BaseModel):
     lead_score: str | None = Field(None, description="Score label")
     close_date: date | None = Field(None, description="Expected close date")
     amount: Decimal | None = Field(None, description="Estimated value")
+    currency: str | None = Field(None, description="ISO 4217 alpha-3 currency code for amount")
     owner_id: str | None = Field(None, description="Owning organization member user UUID")
     owner_name: str | None = Field(
         None,
@@ -575,6 +630,7 @@ class LeadDetail(BaseModel):
     close_date: date | None = Field(None, description="Expected close date")
     notes: list[LeadNoteItem] = Field(default_factory=list, description="Structured notes")
     amount: Decimal | None = Field(None, description="Estimated value")
+    currency: str | None = Field(None, description="ISO 4217 alpha-3 currency code for amount")
     description: str | None = Field(None, description="Opportunity description")
     owner_id: str | None = Field(None, description="Owning organization member user UUID")
     owner_name: str | None = Field(
