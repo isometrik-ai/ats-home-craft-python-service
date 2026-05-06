@@ -35,8 +35,8 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    CLIENTS_MANAGEMENT_CREATE,
-    CLIENTS_MANAGEMENT_VIEW,
+    CONTACTS_MANAGEMENT_CREATE,
+    CONTACTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.response_factory import list_response, success_response
@@ -89,7 +89,7 @@ async def create_contacts_import_job(
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_CREATE,
+            permission_codes=CONTACTS_MANAGEMENT_CREATE,
         )
         request.state.audit_table = "import_jobs"
         request.state.audit_description = "Created contacts import job"
@@ -154,7 +154,7 @@ async def list_contacts_import_logs(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
     service = ContactsImportService(db_connection=db_connection)
     items, total = await service.list_job_logs(
@@ -199,7 +199,7 @@ async def get_contacts_import_job(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
     service = ContactsImportService(db_connection=db_connection)
     job = await service.get_job(job_id=job_id, organization_id=user_context.organization_id)
@@ -257,7 +257,7 @@ async def retry_contacts_import_job(
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_CREATE,
+            permission_codes=CONTACTS_MANAGEMENT_CREATE,
         )
         request.state.audit_table = "import_jobs"
         request.state.audit_requested_id = job_id

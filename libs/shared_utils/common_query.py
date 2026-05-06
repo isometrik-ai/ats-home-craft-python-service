@@ -19,10 +19,15 @@ PERMISSIONS_MANAGEMENT_VIEW = "permissions_management.view"
 PERMISSIONS_MANAGEMENT_EDIT = "permissions_management.edit"
 PERMISSIONS_MANAGEMENT_DELETE = "permissions_management.delete"
 
-CLIENTS_MANAGEMENT_CREATE = "clients_management.create"
-CLIENTS_MANAGEMENT_VIEW = "clients_management.view"
-CLIENTS_MANAGEMENT_EDIT = "clients_management.edit"
-CLIENTS_MANAGEMENT_DELETE = "clients_management.delete"
+CONTACTS_MANAGEMENT_CREATE = "contacts_management.create"
+CONTACTS_MANAGEMENT_VIEW = "contacts_management.view"
+CONTACTS_MANAGEMENT_EDIT = "contacts_management.edit"
+CONTACTS_MANAGEMENT_DELETE = "contacts_management.delete"
+
+COMPANIES_MANAGEMENT_CREATE = "companies_management.create"
+COMPANIES_MANAGEMENT_VIEW = "companies_management.view"
+COMPANIES_MANAGEMENT_EDIT = "companies_management.edit"
+COMPANIES_MANAGEMENT_DELETE = "companies_management.delete"
 
 PROJECTS_MANAGEMENT_CREATE = "projects_management.create"
 PROJECTS_MANAGEMENT_VIEW = "projects_management.view"
@@ -173,30 +178,55 @@ DEFAULT_PERMISSIONS = [
         "Remove permissions",
         "permissions",
     ),
-    # clients management
+    # contacts management
     (
-        "clients_management.view",
-        "View Clients",
-        "View client list and details",
-        "clients",
+        "contacts_management.view",
+        "View Contacts",
+        "View contact list and details",
+        "contacts",
     ),
     (
-        "clients_management.create",
-        "Create Clients",
-        "Create new clients",
-        "clients",
+        "contacts_management.create",
+        "Create Contacts",
+        "Create new contacts",
+        "contacts",
     ),
     (
-        "clients_management.edit",
-        "Edit Clients",
-        "Modify client information",
-        "clients",
+        "contacts_management.edit",
+        "Edit Contacts",
+        "Modify contact information",
+        "contacts",
     ),
     (
-        "clients_management.delete",
-        "Delete Clients",
-        "Remove clients from the system",
-        "clients",
+        "contacts_management.delete",
+        "Delete Contacts",
+        "Remove contacts from the system",
+        "contacts",
+    ),
+    # companies management
+    (
+        "companies_management.view",
+        "View Companies",
+        "View company list and details",
+        "companies",
+    ),
+    (
+        "companies_management.create",
+        "Create Companies",
+        "Create new companies",
+        "companies",
+    ),
+    (
+        "companies_management.edit",
+        "Edit Companies",
+        "Modify company information",
+        "companies",
+    ),
+    (
+        "companies_management.delete",
+        "Delete Companies",
+        "Remove companies from the system",
+        "companies",
     ),
     # projects management
     (
