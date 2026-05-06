@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, assert_never
 
 from asyncpg import UniqueViolationError
 
@@ -19,14 +19,22 @@ from apps.user_service.app.utils.common_utils import (
     require_permission,
 )
 from libs.shared_utils.common_query import (
-    CLIENTS_MANAGEMENT_CREATE,
-    CLIENTS_MANAGEMENT_DELETE,
-    CLIENTS_MANAGEMENT_EDIT,
-    CLIENTS_MANAGEMENT_VIEW,
+    COMPANIES_MANAGEMENT_CREATE,
+    COMPANIES_MANAGEMENT_DELETE,
+    COMPANIES_MANAGEMENT_EDIT,
+    COMPANIES_MANAGEMENT_VIEW,
+    CONTACTS_MANAGEMENT_CREATE,
+    CONTACTS_MANAGEMENT_DELETE,
+    CONTACTS_MANAGEMENT_EDIT,
+    CONTACTS_MANAGEMENT_VIEW,
     LEADS_MANAGEMENT_CREATE,
     LEADS_MANAGEMENT_DELETE,
     LEADS_MANAGEMENT_EDIT,
     LEADS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_CREATE,
+    PROJECTS_MANAGEMENT_DELETE,
+    PROJECTS_MANAGEMENT_EDIT,
+    PROJECTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.http_exceptions import (
     DuplicateValueException,
@@ -159,22 +167,39 @@ class EntityListsService:
         Returns:
             Permission code string used by `require_permission`.
         """
-        if entity_type == EntityType.LEAD:
-            if action == "create":
-                return LEADS_MANAGEMENT_CREATE
-            if action == "edit":
-                return LEADS_MANAGEMENT_EDIT
-            if action == "delete":
-                return LEADS_MANAGEMENT_DELETE
-            return LEADS_MANAGEMENT_VIEW
+        normalized_action = action if action in {"create", "edit", "delete"} else "view"
 
-        if action == "create":
-            return CLIENTS_MANAGEMENT_CREATE
-        if action == "edit":
-            return CLIENTS_MANAGEMENT_EDIT
-        if action == "delete":
-            return CLIENTS_MANAGEMENT_DELETE
-        return CLIENTS_MANAGEMENT_VIEW
+        permission_map: dict[EntityType, dict[str, str]] = {
+            EntityType.LEAD: {
+                "create": LEADS_MANAGEMENT_CREATE,
+                "edit": LEADS_MANAGEMENT_EDIT,
+                "delete": LEADS_MANAGEMENT_DELETE,
+                "view": LEADS_MANAGEMENT_VIEW,
+            },
+            EntityType.CONTACT: {
+                "create": CONTACTS_MANAGEMENT_CREATE,
+                "edit": CONTACTS_MANAGEMENT_EDIT,
+                "delete": CONTACTS_MANAGEMENT_DELETE,
+                "view": CONTACTS_MANAGEMENT_VIEW,
+            },
+            EntityType.COMPANY: {
+                "create": COMPANIES_MANAGEMENT_CREATE,
+                "edit": COMPANIES_MANAGEMENT_EDIT,
+                "delete": COMPANIES_MANAGEMENT_DELETE,
+                "view": COMPANIES_MANAGEMENT_VIEW,
+            },
+            EntityType.PROJECT: {
+                "create": PROJECTS_MANAGEMENT_CREATE,
+                "edit": PROJECTS_MANAGEMENT_EDIT,
+                "delete": PROJECTS_MANAGEMENT_DELETE,
+                "view": PROJECTS_MANAGEMENT_VIEW,
+            },
+        }
+
+        try:
+            return permission_map[entity_type][normalized_action]
+        except KeyError:
+            assert_never(entity_type)
 
     async def create_list(self, body: CreateEntityListRequest) -> dict[str, Any]:
         """Create a list and optionally add initial members.

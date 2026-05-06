@@ -43,10 +43,10 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    CLIENTS_MANAGEMENT_CREATE,
-    CLIENTS_MANAGEMENT_DELETE,
-    CLIENTS_MANAGEMENT_EDIT,
-    CLIENTS_MANAGEMENT_VIEW,
+    COMPANIES_MANAGEMENT_CREATE,
+    COMPANIES_MANAGEMENT_DELETE,
+    COMPANIES_MANAGEMENT_EDIT,
+    COMPANIES_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -122,7 +122,7 @@ async def create_company(
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_CREATE,
+            permission_codes=COMPANIES_MANAGEMENT_CREATE,
         )
         request.state.audit_table = "companies"
         request.state.audit_description = "Created company"
@@ -192,7 +192,7 @@ async def list_companies(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=COMPANIES_MANAGEMENT_VIEW,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
 
@@ -260,7 +260,7 @@ async def get_company_activity(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=COMPANIES_MANAGEMENT_VIEW,
     )
 
     # Ensure company exists (and org-scoped) before returning activity.
@@ -343,7 +343,7 @@ async def search_companies(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=COMPANIES_MANAGEMENT_VIEW,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
     result = await service.search_companies(
@@ -411,7 +411,7 @@ async def get_company_details(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=COMPANIES_MANAGEMENT_VIEW,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
     details = await service.get_company_details(company_id=company_id)
@@ -461,7 +461,7 @@ async def enrich_company(
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_EDIT,
+            permission_codes=COMPANIES_MANAGEMENT_EDIT,
         )
         request.state.audit_user_context = {
             "user_id": user_context.user_id,
@@ -578,7 +578,7 @@ async def update_company(
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_EDIT,
+            permission_codes=COMPANIES_MANAGEMENT_EDIT,
         )
         service = CompaniesService(
             db_connection=db_connection,
@@ -708,7 +708,7 @@ async def delete_company(
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_DELETE,
+            permission_codes=COMPANIES_MANAGEMENT_DELETE,
         )
         service = CompaniesService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)

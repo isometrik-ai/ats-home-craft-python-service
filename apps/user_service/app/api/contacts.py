@@ -40,10 +40,10 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    CLIENTS_MANAGEMENT_CREATE,
-    CLIENTS_MANAGEMENT_DELETE,
-    CLIENTS_MANAGEMENT_EDIT,
-    CLIENTS_MANAGEMENT_VIEW,
+    CONTACTS_MANAGEMENT_CREATE,
+    CONTACTS_MANAGEMENT_DELETE,
+    CONTACTS_MANAGEMENT_EDIT,
+    CONTACTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -136,7 +136,7 @@ async def create_contact(
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_CREATE,
+            permission_codes=CONTACTS_MANAGEMENT_CREATE,
         )
         request.state.audit_table = "contacts"
         request.state.audit_description = "Created contact"
@@ -222,7 +222,7 @@ async def list_contacts(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
 
@@ -287,7 +287,7 @@ async def get_contact_activity(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
 
     # Ensure contact exists (and org-scoped) before returning activity.
@@ -393,7 +393,7 @@ async def search_contacts(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
     result = await service.search_contacts(
@@ -458,7 +458,7 @@ async def get_contact_details(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_VIEW,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
     details = await service.get_contact_details(contact_id=contact_id)
@@ -537,7 +537,7 @@ async def update_contact(
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_EDIT,
+            permission_codes=CONTACTS_MANAGEMENT_EDIT,
         )
         service = ContactsService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
@@ -661,7 +661,7 @@ async def enrich_contact(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CLIENTS_MANAGEMENT_EDIT,
+        permission_codes=CONTACTS_MANAGEMENT_EDIT,
     )
     request.state.audit_table = "contacts"
     request.state.audit_requested_id = contact_id
@@ -742,7 +742,7 @@ async def delete_contact(
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
-            permission_codes=CLIENTS_MANAGEMENT_DELETE,
+            permission_codes=CONTACTS_MANAGEMENT_DELETE,
         )
         service = ContactsService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
