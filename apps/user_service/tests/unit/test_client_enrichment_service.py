@@ -491,6 +491,76 @@ async def test_person_webhook_finds_client_and_updates(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_person_webhook_stores_profile_photo_key(monkeypatch):
+    """person webhook stores enrichment profileUrl as R2 object key (best-effort)."""
+    existing = {
+        "id": "c1",
+        "organization_id": "org-1",
+        "name": "Old",
+        "additional_data": None,
+        "profile_photo_url": None,
+    }
+    mock_get = AsyncMock(return_value=existing)
+    mock_update = AsyncMock()
+
+    class FakeRepo:
+        """Minimal ContactsRepository double for profile photo tests."""
+
+        get_contact_for_update_by_enrichment_request_id = mock_get
+        update_contact = mock_update
+
+    async def fake_store_photo(
+        _self,
+        *,
+        enriched_profile,
+        contact_id,
+        organization_id,
+        existing_profile_photo_url,
+    ):
+        """Fake profile photo storage function."""
+        assert contact_id == "c1"
+        assert organization_id == "org-1"
+        assert existing_profile_photo_url is None
+        assert enriched_profile["personalInfo"]["profileUrl"].startswith("https://")
+        return "contacts/org-1/c1/profile_test.jpg"
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ContactsRepository",
+        lambda conn: FakeRepo(),
+    )
+    monkeypatch.setattr(
+        (
+            "apps.user_service.app.services.client_enrichment_service."
+            "ClientEnrichmentService._maybe_store_profile_photo_from_enrichment"
+        ),
+        fake_store_photo,
+    )
+    mock_fetch_sales = AsyncMock(return_value=None)
+    monkeypatch.setattr(ClientEnrichmentService, "_fetch_sales_intelligence", mock_fetch_sales)
+
+    svc = ClientEnrichmentService(
+        base_url="http://e",
+        webhook_url="http://w",
+        timeout_seconds=30.0,
+    )
+    body = {
+        "request_id": "req-1",
+        "enriched_profile": {
+            "personalInfo": {
+                "firstName": "Jane",
+                "lastName": "Doe",
+                "profileUrl": "https://media.licdn.com/dms/image/v2/x.jpg",
+            },
+        },
+    }
+    result = await svc.process_person_enrichment_webhook(MagicMock(), body)
+    assert result == ("c1", "org-1")
+    mock_update.assert_called_once()
+    updated_key = mock_update.call_args[1]["update_data"].get("profile_photo_url")
+    assert updated_key == "contacts/org-1/c1/profile_test.jpg"
+
+
+@pytest.mark.asyncio
 async def test_company_webhook_updates_client_sales_intel(monkeypatch):
     """Company webhook updates client record only; sales intelligence runs in background task."""
     existing = {
