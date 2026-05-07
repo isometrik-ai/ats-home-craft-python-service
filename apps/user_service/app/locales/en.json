@@ -93,13 +93,15 @@
       "session_cannot_access_organization": "Your current session cannot access this organization. Please login with the appropriate organization.",
       "user_not_member_of_organization": "You are not a member of this organization.",
       "session_already_has_organization": "Your session is already linked to an organization. Please logout and login again to switch organizations.",
-      "session_not_found": "Session not found. Please login again."
+      "session_not_found": "Session not found. Please login again.",
+      "session_renewal_failed": "Password updated, but we couldn't sign you in automatically. Please log in again with your new password."
     },
     "success": {
       "login_successful": "Login successful.",
       "session_refreshed": "Session refreshed successfully.",
       "token_not_expired": "Token is still valid. No refresh needed.",
       "password_set_successfully": "Password set successfully.",
+      "password_set_and_logged_in": "Password set successfully. You're signed in.",
       "password_reset_email_sent": "Password reset email sent successfully. Please check your email.",
       "password_reset_successfully": "Password reset successfully. You can now login with your new password.",
       "user_signed_up": "User signed up successfully.",

@@ -1,5 +1,7 @@
 """Auth Schemas Module"""
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Literal
 
@@ -156,6 +158,19 @@ class AuthResponse(BaseModel):
     organizations: list[OrganizationBasicDetails] = Field(
         default_factory=list, description="List of user's active organizations"
     )
+
+
+class SetPasswordResponse(BaseModel):
+    """Response model for set-password when it also returns a fresh session.
+
+    Contains:
+    - `auth`: Same payload shape as login (`AuthResponse`)
+    - `select_organization`: Best-effort organization selection context for the session,
+      if an organization was already selected on the previous session.
+    """
+
+    auth: AuthResponse
+    select_organization: SelectOrganizationResponse | None = None
 
 
 class RefreshSessionResponse(BaseModel):

@@ -31,6 +31,7 @@ from apps.user_service.app.schemas.auth import (
     SelectOrganizationRequest,
     SelectOrganizationResponse,
     SetPasswordRequest,
+    SetPasswordResponse,
     SignupRequest,
     ValidateAccountRequest,
     ValidateAccountResponse,
@@ -133,12 +134,16 @@ async def refresh(
 @handle_api_exceptions("set password")
 @router.post(
     "/set-password",
-    status_code=http_status.HTTP_202_ACCEPTED,
-    response_model=PasswordResponse,
-    description="Set password for user Signed Up from Google or Magic Link.",
-    summary="Set password for user Signed Up from Google or Magic Link.",
+    status_code=http_status.HTTP_200_OK,
+    response_model=SetPasswordResponse,
+    description=(
+        "Set password for user Signed Up from Google or Magic Link and return a fresh session. "
+        "Supabase revokes existing sessions on password change; this endpoint re-authenticates "
+        "the user so they stay signed in."
+    ),
+    summary="Set password and return fresh session",
     responses={
-        http_status.HTTP_202_ACCEPTED: {"description": "Password set successfully"},
+        http_status.HTTP_200_OK: {"description": "Password set successfully and user signed in"},
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
         http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
         http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
@@ -151,19 +156,23 @@ async def set_password(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
     data: SetPasswordRequest = Body(...),
-    sb_client: AsyncClient = Depends(supabase_service),
+    sb_admin: AsyncClient = Depends(supabase_service),
+    sb_anon: AsyncClient = Depends(supabase_anon_client_with_headers),
 ):
-    """Set password for user Signed Up from Google or Magic Link."""
-    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
+    """Set password for user and return a fresh AuthResponse."""
+    auth_service = AuthService(db_connection=db_connection, sb_client=sb_admin)
     result = await auth_service.set_password(
         user_id=current_user["sub"],
+        current_session_id=current_user.get("session_id"),
         password=data.password,
+        admin_client=sb_admin,
+        anon_client=sb_anon,
     )
     return success_response(
         request=request,
-        message_key="auth.success.password_set_successfully",
+        message_key="auth.success.password_set_and_logged_in",
         custom_code=CustomStatusCode.SUCCESS,
-        status_code=http_status.HTTP_202_ACCEPTED,
+        status_code=http_status.HTTP_200_OK,
         data=result,
     )
 

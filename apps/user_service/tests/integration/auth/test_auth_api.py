@@ -111,13 +111,42 @@ async def test_refresh_token_not_expired(monkeypatch, client):
 
 @pytest.mark.asyncio
 async def test_set_password_for_authenticated_user(monkeypatch, client):
-    """Test that the set password endpoint sets the password for an authenticated user."""
+    """Set-password should return a fresh AuthResponse (auto-login)."""
 
-    async def fake_set_password(_self, user_id: str, password: str):
-        del _self
+    fake_result = {
+        "auth": {
+            "access_token": "new-atk",
+            "refresh_token": "new-rtk",
+            "expires_in": 3600,
+            "expires_at": dt.datetime(2024, 1, 1, 0, 0, 0),
+            "user": {
+                "id": "user-1",
+                "email": "user@example.com",
+                "first_name": "Test",
+                "last_name": "User",
+                "timezone": "UTC",
+                "org_setup_status_completed": True,
+                "organization_id": "org-123",
+            },
+            "organizations": [],
+        },
+        "select_organization": {"isometrik_details": None},
+    }
+
+    async def fake_set_password(
+        _self,
+        *,
+        user_id: str,
+        current_session_id: str | None,
+        password: str,
+        admin_client,
+        anon_client,
+    ):
+        del _self, admin_client, anon_client
         assert user_id == "test-user-id"
         assert password == "NewPass123!"
-        return {"message": "ok"}
+        assert current_session_id is None or isinstance(current_session_id, str)
+        return fake_result
 
     monkeypatch.setattr(
         "apps.user_service.app.services.auth_service.AuthService.set_password",
@@ -129,7 +158,10 @@ async def test_set_password_for_authenticated_user(monkeypatch, client):
         json={"password": "NewPass123!"},
     )
 
-    assert_success(res, 202)
+    body = assert_success(res, 200)
+    assert body["data"]["auth"]["access_token"] == "new-atk"
+    assert body["data"]["auth"]["refresh_token"] == "new-rtk"
+    assert body["data"]["auth"]["user"]["email"] == "user@example.com"
 
 
 @pytest.mark.asyncio
