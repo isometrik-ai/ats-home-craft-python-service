@@ -20,6 +20,8 @@ from apps.user_service.app.db.repositories.audit_log_repository import (
     AuditLogRepository,
 )
 from apps.user_service.app.schemas.activity import ActivityActor, ActivityItem
+from apps.user_service.app.schemas.enums import EntityType
+from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     extract_audit_data_value,
@@ -78,6 +80,78 @@ class ActivityService:
         self.user_context = user_context
         self.db_connection = db_connection
         self.audit_log_repository = AuditLogRepository(db_connection=db_connection)
+        # Cache of field_id -> field_name for custom fields, keyed by entity type.
+        self._custom_field_name_map_cache: dict[EntityType, dict[str, str]] = {}
+
+    async def _get_custom_field_name_map(self, *, entity_type: EntityType) -> dict[str, str]:
+        """Build a flat {field_id: field_name} map for an entity type (cached)."""
+        cached = self._custom_field_name_map_cache.get(entity_type)
+        if cached is not None:
+            return cached
+
+        # In unit tests we may instantiate ActivityService with db_connection=None.
+        if self.db_connection is None:
+            self._custom_field_name_map_cache[entity_type] = {}
+            return {}
+
+        custom_field_service = CustomFieldService(
+            user_context=self.user_context,
+            db_connection=self.db_connection,
+        )
+        definitions, _ = await custom_field_service.get_custom_fields_list(entity_type)
+
+        mapping: dict[str, str] = {}
+
+        def walk(node: Any) -> None:
+            if not isinstance(node, dict):
+                return
+            node_id = node.get("id")
+            node_name = node.get("field_name")
+            if node_id and node_name:
+                mapping[str(node_id)] = str(node_name)
+            sub_fields = node.get("sub_fields")
+            if isinstance(sub_fields, list):
+                for child in sub_fields:
+                    walk(child)
+
+        for root in definitions:
+            walk(root.model_dump(exclude_none=True))
+
+        self._custom_field_name_map_cache[entity_type] = mapping
+        return mapping
+
+    @staticmethod
+    def _normalize_and_enrich_custom_fields_value(
+        value: Any,
+        *,
+        field_name_map: dict[str, str],
+    ) -> Any:
+        """Ensure custom_fields is JSON (not a JSON-string) and attach field_name(s).
+
+        Supports both:
+        - list of custom-field value dicts
+        - JSON-encoded string of that list
+        """
+        normalized = parse_json_any(value, None)
+        if normalized is None:
+            return value
+        if not isinstance(normalized, list):
+            return normalized
+
+        def enrich_item(item: Any) -> Any:
+            if not isinstance(item, dict):
+                return item
+            field_id = item.get("field_id")
+            if field_id is not None and "field_name" not in item:
+                name = field_name_map.get(str(field_id))
+                if name:
+                    item["field_name"] = name
+            sub_fields = item.get("sub_fields")
+            if isinstance(sub_fields, list):
+                item["sub_fields"] = [enrich_item(sf) for sf in sub_fields]
+            return item
+
+        return [enrich_item(dict(x) if isinstance(x, dict) else x) for x in normalized]
 
     async def get_lead_activity(
         self,
@@ -108,6 +182,7 @@ class ActivityService:
             offset=offset,
         )
 
+        custom_field_name_map = await self._get_custom_field_name_map(entity_type=EntityType.LEAD)
         audit_rows = [self._to_audit_row(r) for r in rows]
 
         flattened: list[ActivityItem] = []
@@ -116,6 +191,7 @@ class ActivityService:
                 self._flatten_lead_audit_row(
                     audit_row=audit_row,
                     record_id=lead_id,
+                    custom_field_name_map=custom_field_name_map,
                 )
             )
 
@@ -143,6 +219,9 @@ class ActivityService:
             offset=offset,
         )
 
+        custom_field_name_map = await self._get_custom_field_name_map(
+            entity_type=EntityType.CONTACT
+        )
         audit_rows = [self._to_audit_row(r) for r in rows]
 
         flattened: list[ActivityItem] = []
@@ -151,6 +230,7 @@ class ActivityService:
                 self._flatten_contact_audit_row(
                     audit_row=audit_row,
                     record_id=contact_id,
+                    custom_field_name_map=custom_field_name_map,
                 )
             )
 
@@ -178,6 +258,9 @@ class ActivityService:
             offset=offset,
         )
 
+        custom_field_name_map = await self._get_custom_field_name_map(
+            entity_type=EntityType.COMPANY
+        )
         audit_rows = [self._to_audit_row(r) for r in rows]
 
         flattened: list[ActivityItem] = []
@@ -186,6 +269,7 @@ class ActivityService:
                 self._flatten_company_audit_row(
                     audit_row=audit_row,
                     record_id=company_id,
+                    custom_field_name_map=custom_field_name_map,
                 )
             )
 
@@ -290,6 +374,7 @@ class ActivityService:
         audit_row: _AuditRow,
         *,
         record_id: str,
+        custom_field_name_map: dict[str, str] | None = None,
     ) -> list[ActivityItem]:
         """Flatten one audit record into multiple `ActivityItem`s (one per changed field)."""
         first = safe_str(audit_row.actor_first_name).strip()
@@ -337,6 +422,16 @@ class ActivityService:
             old_val = extract_audit_data_value(old_values_blob, field_path)
             new_val = extract_audit_data_value(new_values_blob, field_path)
 
+            field_key = field_path.split(".")[-1]
+            if field_key == "custom_fields":
+                field_name_map = custom_field_name_map or {}
+                old_val = self._normalize_and_enrich_custom_fields_value(
+                    old_val, field_name_map=field_name_map
+                )
+                new_val = self._normalize_and_enrich_custom_fields_value(
+                    new_val, field_name_map=field_name_map
+                )
+
             old_display, new_display = self._get_display_values_for_lead_field(
                 field_path=field_path,
                 audit_row=audit_row,
@@ -364,6 +459,7 @@ class ActivityService:
         audit_row: _AuditRow,
         *,
         record_id: str,
+        custom_field_name_map: dict[str, str] | None = None,
     ) -> list[ActivityItem]:
         """Flatten one contact audit record into multiple `ActivityItem`s.
         Emits one item per changed field where applicable.
@@ -410,6 +506,16 @@ class ActivityService:
             old_val = extract_audit_data_value(old_values_blob, field_path)
             new_val = extract_audit_data_value(new_values_blob, field_path)
 
+            field_key = field_path.split(".")[-1]
+            if field_key == "custom_fields":
+                field_name_map = custom_field_name_map or {}
+                old_val = self._normalize_and_enrich_custom_fields_value(
+                    old_val, field_name_map=field_name_map
+                )
+                new_val = self._normalize_and_enrich_custom_fields_value(
+                    new_val, field_name_map=field_name_map
+                )
+
             old_display, new_display = self._get_display_values_for_contact_field(
                 field_path=field_path,
                 audit_row=audit_row,
@@ -437,6 +543,7 @@ class ActivityService:
         audit_row: _AuditRow,
         *,
         record_id: str,
+        custom_field_name_map: dict[str, str] | None = None,
     ) -> list[ActivityItem]:
         """Flatten one company audit record into multiple `ActivityItem`s.
 
@@ -483,6 +590,16 @@ class ActivityService:
         for field_path in changed_fields:
             old_val = extract_audit_data_value(old_values_blob, field_path)
             new_val = extract_audit_data_value(new_values_blob, field_path)
+
+            field_key = field_path.split(".")[-1]
+            if field_key == "custom_fields":
+                field_name_map = custom_field_name_map or {}
+                old_val = self._normalize_and_enrich_custom_fields_value(
+                    old_val, field_name_map=field_name_map
+                )
+                new_val = self._normalize_and_enrich_custom_fields_value(
+                    new_val, field_name_map=field_name_map
+                )
 
             old_display, new_display = self._get_display_values_for_company_field(
                 field_path=field_path,
