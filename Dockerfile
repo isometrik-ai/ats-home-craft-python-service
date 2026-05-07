@@ -8,9 +8,6 @@ LABEL service="legalai-fast-api"
 ARG BUILD_ENV=production
 ARG BUILD_VERSION=1.0.0
 
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
 # Set working directory to the root of the project
 WORKDIR /app
 
@@ -28,12 +25,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the entire project structure
 COPY . .
 
-# Change ownership to non-root user
-RUN chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
-
 # Environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
@@ -49,4 +40,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
 # Start the FastAPI app
-CMD ["uvicorn", "apps.user_service.app.main:app", "--host", "0.0.0.0", "--port", "5000", "--log-level", "info", "--access-log"]
+# CMD ["uvicorn", "apps.user_service.app.main:app", "--host", "0.0.0.0", "--port", "5000", "--log-level", "info", "--access-log"]
+CMD ["gunicorn", "apps.user_service.app.main:app", "-k", "uvicorn.workers.UvicornWorker", "-w", "3", "-b", "0.0.0.0:5000", "--log-level", "info", "--capture-output", "--access-logfile", "/dev/null", "--error-logfile", "-"]
