@@ -210,3 +210,44 @@ def test_old_new_values_as_json_strings():
     assert items[0].new_value == "New desc"
     assert items[0].old_display_value is None
     assert items[0].new_display_value is None
+
+
+def test_custom_fields_parsed_and_enriched_with_names():
+    """custom_fields should be returned as JSON and include field_name keys when possible."""
+    service = _service()
+
+    # We pass a map directly to the flattener so the test doesn't require DB.
+    custom_field_name_map = {
+        "root-1": "Vehicle details",
+        "sub-1": "Wheel type",
+        "sub-2": "Wheel count",
+    }
+    row = _audit_row(
+        id="audit-cf-1",
+        old_values={"data": {"custom_fields": "[]"}},
+        new_values={
+            "data": {
+                "custom_fields": (
+                    '[{"type":"object","field_id":"root-1","sub_fields":'
+                    '[{"type":"dropdown","value":"Steel wheels","field_id":"sub-1",'
+                    '"instance_id":"i1"},'
+                    '{"type":"dropdown","value":"3","field_id":"sub-2","instance_id":"i2"}],'
+                    '"instance_id":"root-inst"}]'
+                )
+            }
+        },
+        changed_fields=["custom_fields"],
+    )
+
+    items = service._flatten_lead_audit_row(  # pylint: disable=protected-access
+        audit_row=row,
+        record_id="lead-1",
+        custom_field_name_map=custom_field_name_map,
+    )
+    assert len(items) == 1
+    assert items[0].field == "custom_fields"
+    assert items[0].old_value == []
+    assert isinstance(items[0].new_value, list)
+    assert items[0].new_value[0]["field_name"] == "Vehicle details"
+    assert items[0].new_value[0]["sub_fields"][0]["field_name"] == "Wheel type"
+    assert items[0].new_value[0]["sub_fields"][1]["field_name"] == "Wheel count"
