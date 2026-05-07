@@ -9,15 +9,18 @@ in the Update API; never overwrites non-empty existing data with empty enrichmen
 """
 
 import asyncio
+import ipaddress
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import asyncpg
 import httpx
 
-from apps.user_service.app.config.app_settings import app_settings
+from apps.user_service.app.api.presigned_url import get_r2_client
+from apps.user_service.app.config.app_settings import app_settings, shared_settings
 from apps.user_service.app.db.repositories import (
     CompaniesRepository,
     ContactsRepository,
@@ -35,6 +38,8 @@ from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("client_enrichment_service")
+
+_MAX_PROFILE_PHOTO_BYTES = 50 * 1024 * 1024  # 10MB safety cap
 
 
 def _normalize_webhook_update_payload(payload: dict[str, Any], jsonb_keys: frozenset[str]) -> None:
@@ -1211,11 +1216,34 @@ class ClientEnrichmentService:
         organization_id = existing["organization_id"]
         existing_additional_raw = existing.get("additional_data")
         existing_additional = safe_json_loads(existing_additional_raw)
+
+        # Store enrichment-provided profile image in our CDN (R2) and persist the object key.
+        # Best-effort: failures must not break enrichment updates.
+        profile_photo_key: str | None = None
+        try:
+            profile_photo_key = await self._maybe_store_profile_photo_from_enrichment(
+                enriched_profile=enriched_profile,
+                contact_id=str(contact_id),
+                organization_id=str(organization_id),
+                existing_profile_photo_url=existing.get("profile_photo_url"),
+            )
+        except Exception as e:
+            logger.warning(
+                "Profile photo storage threw; continuing enrichment update",
+                extra={
+                    "contact_id": str(contact_id),
+                    "organization_id": str(organization_id),
+                    "request_id": str(request_id),
+                    "error": str(e),
+                },
+            )
         update_data = self.build_contact_enrichment_update(
             enriched_profile,
             existing_contact=existing,
             existing_additional_data=existing_additional,
         )
+        if profile_photo_key:
+            update_data["profile_photo_url"] = profile_photo_key
         _normalize_webhook_update_payload(update_data, CONTACT_JSONB_COLUMNS)
         await repo.update_contact(
             contact_id=str(contact_id),
@@ -1228,6 +1256,181 @@ class ClientEnrichmentService:
             extra={"contact_id": str(contact_id), "request_id": request_id},
         )
         return (str(contact_id), str(organization_id))
+
+    @staticmethod
+    def _is_safe_public_http_url(url: str) -> bool:
+        """Return True if URL is http(s) and not obviously local/private.
+
+        This is a basic SSRF guard intended for enrichment-provided URLs.
+        DNS names are allowed (no resolution performed).
+        """
+        if not url or len(url) > 4096:
+            return False
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            return False
+        host = parsed.hostname or ""
+        if not host:
+            return False
+        if host in {"localhost"} or host.endswith(".localhost"):
+            return False
+        try:
+            ip = ipaddress.ip_address(host)
+            if any(
+                (
+                    ip.is_private,
+                    ip.is_loopback,
+                    ip.is_link_local,
+                    ip.is_multicast,
+                    ip.is_reserved,
+                    ip.is_unspecified,
+                )
+            ):
+                return False
+        except ValueError:
+            # Not an IP literal (DNS name). Allow.
+            pass
+        return True
+
+    @staticmethod
+    def _ext_and_content_type_from_response(resp: httpx.Response) -> tuple[str, str]:
+        """Infer safe (ext, content_type) for an image response."""
+        content_type = (resp.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        mapping = {
+            "image/jpeg": ("jpg", "image/jpeg"),
+            "image/jpg": ("jpg", "image/jpeg"),
+            "image/png": ("png", "image/png"),
+            "image/webp": ("webp", "image/webp"),
+            "image/gif": ("gif", "image/gif"),
+        }
+        if content_type in mapping:
+            return mapping[content_type]
+        # Default: store as jpeg key; keep content-type generic to avoid surprises.
+        return ("jpg", "image/jpeg")
+
+    @staticmethod
+    def _extract_profile_photo_url(enriched_profile: dict[str, Any]) -> str | None:
+        """Return trimmed `personalInfo.profileUrl` from an enriched profile."""
+        if not isinstance(enriched_profile, dict):
+            return None
+        personal = enriched_profile.get("personalInfo")
+        if not isinstance(personal, dict):
+            return None
+        raw_url = personal.get("profileUrl")
+        if not isinstance(raw_url, str):
+            return None
+        url = raw_url.strip()
+        return url or None
+
+    async def _download_profile_photo(self, *, remote_url: str) -> tuple[bytes, str, str] | None:
+        """Download image bytes and return (bytes, ext, content_type)."""
+        async with httpx.AsyncClient(
+            timeout=self._timeout,
+            follow_redirects=True,
+            headers={"user-agent": "house-of-apps-legal-ai/1.0"},
+        ) as client:
+            async with client.stream("GET", remote_url) as resp:
+                resp.raise_for_status()
+                ext, content_type = self._ext_and_content_type_from_response(resp)
+                buf = bytearray()
+                async for chunk in resp.aiter_bytes():
+                    if not chunk:
+                        continue
+                    buf.extend(chunk)
+                    if len(buf) > _MAX_PROFILE_PHOTO_BYTES:
+                        raise ValueError("profile photo exceeds size limit")
+                image_bytes = bytes(buf)
+                if not image_bytes:
+                    return None
+        return (image_bytes, ext, content_type)
+
+    @staticmethod
+    def _build_profile_photo_object_key(*, organization_id: str, contact_id: str, ext: str) -> str:
+        """Build deterministic-ish object key for stored profile photos."""
+        return f"contacts/{organization_id}/{contact_id}/profile_{uuid.uuid4().hex}.{ext}"
+
+    async def _upload_profile_photo_to_r2(
+        self,
+        *,
+        bucket: str,
+        object_key: str,
+        image_bytes: bytes,
+        content_type: str,
+    ) -> None:
+        """Upload bytes to R2 using synchronous boto3 client (threaded)."""
+
+        def _upload_sync() -> None:
+            r2_client = get_r2_client()
+            r2_client.put_object(
+                Bucket=bucket,
+                Key=object_key,
+                Body=image_bytes,
+                ContentType=content_type,
+            )
+
+        await asyncio.to_thread(_upload_sync)
+
+    async def _maybe_store_profile_photo_from_enrichment(
+        self,
+        *,
+        enriched_profile: dict[str, Any],
+        contact_id: str,
+        organization_id: str,
+        existing_profile_photo_url: Any,
+    ) -> str | None:
+        """Download enrichment `personalInfo.profileUrl`, upload to R2, return object key.
+
+        Never overwrites an existing non-empty `profile_photo_url`.
+        Best-effort: returns None on any failure.
+        """
+        has_existing = isinstance(existing_profile_photo_url, str) and bool(
+            existing_profile_photo_url.strip()
+        )
+        if has_existing:
+            return None
+
+        remote_url = self._extract_profile_photo_url(enriched_profile)
+        if remote_url is None:
+            return None
+        if not self._is_safe_public_http_url(remote_url):
+            logger.warning(
+                "Skipping unsafe enrichment profileUrl",
+                extra={"contact_id": contact_id, "organization_id": organization_id},
+            )
+            return None
+
+        try:
+            downloaded = await self._download_profile_photo(remote_url=remote_url)
+            if downloaded is None:
+                return None
+            image_bytes, ext, content_type = downloaded
+
+            object_key = self._build_profile_photo_object_key(
+                organization_id=organization_id,
+                contact_id=contact_id,
+                ext=ext,
+            )
+            bucket = shared_settings.cloudflare_r2.bucket_name
+            if not bucket:
+                return None
+
+            await self._upload_profile_photo_to_r2(
+                bucket=bucket,
+                object_key=object_key,
+                image_bytes=image_bytes,
+                content_type=content_type,
+            )
+            return object_key
+        except Exception as e:
+            logger.warning(
+                "Failed to store enrichment profile photo",
+                extra={
+                    "contact_id": contact_id,
+                    "organization_id": organization_id,
+                    "error": str(e),
+                },
+            )
+            return None
 
     async def fetch_and_store_sales_intelligence_for_request(
         self,
