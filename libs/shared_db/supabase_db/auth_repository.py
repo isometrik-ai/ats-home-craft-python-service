@@ -204,42 +204,41 @@ async def update_password_with_link_identity(
     client: AsyncClient,
     user_id: str,
     password: str,
-) -> bool:
+) -> Any | None:
     """Add or update email/password identity for an existing auth user.
+
+    For OAuth-only users (no `email` provider yet) this also adds the email
+    provider so they can subsequently sign in with email + password.
+
     Args:
-        client: Supabase client
+        client: Supabase client (service/admin)
         user_id: User's ID
-        password: User's password
+        password: New password to set
     Returns:
-        bool: True if password updated successfully, False otherwise
+        The updated Supabase User object on success, otherwise None.
+        Callers can read `email`/`app_metadata`/`user_metadata` directly to
+        avoid an extra `admin.get_user_by_id` round-trip.
     """
     user_data = await client.auth.admin.get_user_by_id(uid=user_id)
     current_providers = user_data.user.app_metadata.get("providers", [])
 
-    # If user already has email provider, just update password
-    if "email" in current_providers:
-        result = await client.auth.admin.update_user_by_id(
-            user_id,
-            {"password": password},
+    attributes: dict[str, Any] = {"password": password}
+    if "email" not in current_providers:
+        attributes.update(
+            {
+                "app_metadata": {
+                    **user_data.user.app_metadata,
+                    "providers": current_providers + ["email"],
+                },
+                "user_metadata": {
+                    **user_data.user.user_metadata,
+                },
+            }
         )
-        return result.user is not None
 
-    # For OAuth-only users, add email/password identity using update_user_by_id
-    result = await client.auth.admin.update_user_by_id(
-        user_id,
-        {
-            "password": password,
-            "app_metadata": {
-                **user_data.user.app_metadata,
-                "providers": current_providers + ["email"],
-            },
-            "user_metadata": {
-                **user_data.user.user_metadata,
-            },
-        },
-    )
+    result = await client.auth.admin.update_user_by_id(user_id, attributes)
 
-    return result is not None
+    return result.user if result and getattr(result, "user", None) else None
 
 
 async def generate_magic_link(sb_client: AsyncClient, email: str) -> str | None:

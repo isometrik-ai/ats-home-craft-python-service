@@ -32,6 +32,7 @@ from apps.user_service.app.schemas.auth import (
     PasswordResponse,
     RefreshSessionResponse,
     SelectOrganizationResponse,
+    SetPasswordResponse,
     SignupRequest,
     UserInfo,
     ValidateAccountResponse,
@@ -615,6 +616,49 @@ class AuthService:
             organizations=organizations,
         )
 
+    async def _build_auth_response(self, *, session: Any, user: Any) -> AuthResponse:
+        """Build an AuthResponse from a Supabase session + user.
+
+        Loads the user's active organizations and shapes the standard auth
+        response used by login and post-set-password auto-login flows.
+        """
+        user_metadata = getattr(user, "user_metadata", {}) or {}
+        phone_number = user_metadata.get("phone_number")
+        phone_isd_code = user_metadata.get("phone_isd_code")
+
+        user_id = getattr(user, "id", None)
+        organizations_data = await self.organization_repository.get_user_active_organizations(
+            user_id
+        )
+        organizations = [
+            OrganizationBasicDetails(
+                id=str(org["id"]),
+                name=org["name"],
+                domain=org.get("domain"),
+                logo_url=org.get("logo_url"),
+                description=org.get("description"),
+            )
+            for org in organizations_data
+        ]
+
+        return AuthResponse(
+            access_token=session.access_token,
+            refresh_token=getattr(session, "refresh_token", None),
+            expires_in=getattr(session, "expires_in", None),
+            expires_at=getattr(session, "expires_at", None),
+            user=UserInfo(
+                id=user_id,
+                email=getattr(user, "email", None),
+                first_name=user_metadata.get("first_name", None),
+                last_name=user_metadata.get("last_name", None),
+                phone_number=phone_number,
+                phone_isd_code=phone_isd_code,
+                timezone=user_metadata.get("timezone", None),
+                org_setup_status_completed=bool(organizations),
+            ),
+            organizations=organizations,
+        )
+
     def _validate_tokens_present(
         self, access_token: str | None, refresh_token: str | None
     ) -> tuple[str, str]:
@@ -802,31 +846,173 @@ class AuthService:
             token_refreshed=True,
         )
 
-    async def set_password(self, user_id: str, password: str) -> PasswordResponse:
-        """Set password for user Signed Up from Google or Magic Link.
+    async def set_password(
+        self,
+        *,
+        user_id: str,
+        current_session_id: str | None,
+        password: str,
+        admin_client: AsyncClient,
+        anon_client: AsyncClient,
+    ) -> SetPasswordResponse:
+        """Set password (admin) and return a fresh session (auto-login).
 
-        Args:
-            user_id: User ID
-            password: New password
+        Supabase revokes existing sessions when the password is changed via the
+        admin API, so we sign in again with the new password and return a fresh
+        AuthResponse. If the caller's previous session had an organization
+        selected, that selection is carried over to the new session row.
 
-        Returns:
-            PasswordResponse: Success message
+        Note: 2FA is intentionally not enforced here. The caller is already
+        authenticated via JWT, and this flow is effectively a session renewal
+        for the same user.
 
         Raises:
-            BadRequestException: If password is weak or update fails
+            BadRequestException: If password is weak or update fails / email missing.
+            UnauthorizedException: If post-update sign-in fails.
         """
         self._validate_password_strength(password)
-        result = await update_password_with_link_identity(
-            client=self.supabase_client,
+
+        session_repo = SessionRepository(db_connection=self.db_connection)
+
+        old_org_id = await self._get_session_org_id(session_repo, current_session_id)
+        email = await self._set_password_and_get_email(
+            admin_client=admin_client, user_id=user_id, password=password
+        )
+        session, user = await self._relogin_after_password_set(
+            anon_client=anon_client, email=email, password=password, user_id=user_id
+        )
+        await self._carry_over_org_context(
+            session_repo=session_repo,
+            anon_client=anon_client,
+            user_id=user_id,
+            old_org_id=old_org_id,
+            access_token=session.access_token,
+        )
+
+        auth_response = await self._build_auth_response(session=session, user=user)
+        select_org_response = await self._build_select_org_response(user_id, old_org_id)
+        return SetPasswordResponse(auth=auth_response, select_organization=select_org_response)
+
+    @staticmethod
+    async def _get_session_org_id(
+        session_repo: SessionRepository,
+        current_session_id: str | None,
+    ) -> str | None:
+        """Return the organization_id for the current session, if available."""
+        if not current_session_id:
+            return None
+        ctx = await session_repo.get_valid_session_context(current_session_id)
+        return ctx.get("organization_id") if ctx else None
+
+    async def _set_password_and_get_email(
+        self,
+        *,
+        admin_client: AsyncClient,
+        user_id: str,
+        password: str,
+    ) -> str:
+        """Update password via admin client and return the user's email."""
+        updated_user = await update_password_with_link_identity(
+            client=admin_client,
             user_id=user_id,
             password=password,
         )
-        if result:
-            return PasswordResponse(message="Password set successfully")
-        raise BadRequestException(
-            message_key="auth.errors.failed_to_set_password",
-            custom_code=CustomStatusCode.BAD_REQUEST,
-        )
+        email = getattr(updated_user, "email", None) if updated_user else None
+        if not updated_user or not email:
+            raise BadRequestException(
+                message_key="auth.errors.failed_to_set_password",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+        return email
+
+    @staticmethod
+    async def _relogin_after_password_set(
+        *,
+        anon_client: AsyncClient,
+        email: str,
+        password: str,
+        user_id: str,
+    ) -> tuple[Any, Any]:
+        """Sign in with the new password and return (session, user)."""
+        try:
+            login_result = await login_user(email=email, password=password, sb_client=anon_client)
+        except Exception as login_error:
+            logger.error(
+                "Auto-login after set_password failed for user %s: %s",
+                user_id,
+                str(login_error),
+            )
+            raise UnauthorizedException(
+                message_key="auth.errors.session_renewal_failed",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            ) from login_error
+
+        session = getattr(login_result, "session", None)
+        user = getattr(login_result, "user", None)
+        if not session or not getattr(session, "access_token", None) or not user:
+            logger.error(
+                "Post-set-password sign-in returned incomplete session for user %s",
+                user_id,
+            )
+            raise UnauthorizedException(
+                message_key="auth.errors.session_renewal_failed",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            )
+        return session, user
+
+    @staticmethod
+    async def _carry_over_org_context(
+        *,
+        session_repo: SessionRepository,
+        anon_client: AsyncClient,
+        user_id: str,
+        old_org_id: str | None,
+        access_token: str,
+    ) -> None:
+        """Copy previous organization context to the newly issued session row."""
+        if not old_org_id:
+            return
+        try:
+            new_claims = await get_claims_from_token(access_token, anon_client)
+            new_session_id = new_claims.get("session_id") if new_claims else None
+            if new_session_id:
+                await session_repo.update_session_organization_context(
+                    session_id=new_session_id,
+                    user_id=user_id,
+                    organization_id=old_org_id,
+                )
+        except Exception as carry_error:
+            logger.error(
+                "Failed to carry organization context to new session for user %s: %s",
+                user_id,
+                str(carry_error),
+            )
+
+    async def _build_select_org_response(
+        self,
+        user_id: str,
+        old_org_id: str | None,
+    ) -> SelectOrganizationResponse | None:
+        """Build select-organization payload when an old org context exists."""
+        if not old_org_id:
+            return None
+        try:
+            org_member_repo = OrganizationMemberRepository(db_connection=self.db_connection)
+            isometrik_details = await get_isometrik_details(
+                user_id=user_id,
+                organization_id=old_org_id,
+                organization_repository=self.organization_repository,
+                organization_member_repository=org_member_repo,
+            )
+            return SelectOrganizationResponse(isometrik_details=isometrik_details)
+        except Exception as exc:
+            logger.warning(
+                "Failed to build select-organization response for user %s org %s: %s",
+                user_id,
+                old_org_id,
+                str(exc),
+            )
+            return None
 
     async def forgot_password(self, email: str) -> ForgotPasswordResponse:
         """Send password reset email to user (only if email exists in system).
