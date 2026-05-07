@@ -518,8 +518,12 @@ class LeadsListQueryParams(BaseModel):
         description="list (flat paginated) or kanban (grouped by stage)",
     )
     stage_id: str | None = Field(default=None, description="Filter by pipeline stage")
+    owner_id: str | None = Field(default=None, description="Filter by owner user id")
+    start_date: date | None = Field(default=None, description="created_at date (inclusive)")
+    end_date: date | None = Field(default=None, description="created_at date (inclusive)")
     search: str | None = Field(
-        default=None, description="Search by lead name, company name, or any linked contact name"
+        default=None,
+        description="Search by lead name, company name, owner name, contact name, or contact email",
     )
     page: int = Field(default=1, ge=1, description="Page number (list mode)")
     limit: int = Field(
@@ -537,6 +541,16 @@ class LeadsListQueryParams(BaseModel):
             return None
         stripped = value.strip()
         return stripped or None
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> LeadsListQueryParams:
+        """Validate that the start date is before the end date."""
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValidationException(
+                message_key="leads.errors.invalid_date_range",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
 
 class LeadCompanyListItem(BaseModel):

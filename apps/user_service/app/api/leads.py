@@ -1,5 +1,7 @@
 """Leads API module."""
 
+from datetime import date
+
 import asyncpg
 from fastapi import (
     APIRouter,
@@ -243,13 +245,19 @@ async def get_lead_activity(
     },
 )
 @limiter.limit("100/minute")
-async def list_leads(
+async def list_leads(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
     mode: LeadsListMode = Query(..., description="list or kanban"),
     stage_id: str | None = Query(None, description="Filter by pipeline stage"),
-    search: str | None = Query(None, description="Search by lead name, company, or contact"),
+    owner_id: str | None = Query(None, description="Filter by owner user id"),
+    start_date: date | None = Query(None, description="Filter by created_at date (inclusive)"),
+    end_date: date | None = Query(None, description="Filter by created_at date (inclusive)"),
+    search: str | None = Query(
+        None,
+        description="Search by lead name, email, company name, contact name, or owner name",
+    ),
     page: int = Query(1, ge=1, description="Page number (list mode)"),
     limit: int = Query(20, ge=1, le=100, description="Page size (list mode)"),
 ):
@@ -257,6 +265,9 @@ async def list_leads(
     params = LeadsListQueryParams(
         mode=mode,
         stage_id=stage_id,
+        owner_id=owner_id,
+        start_date=start_date,
+        end_date=end_date,
         search=search,
         page=page,
         limit=limit,
@@ -273,7 +284,7 @@ async def list_leads(
         organization_id=user_context.organization_id,
         db_connection=db_connection,
     )
-    effective_owner_id = None if can_view_system_leads else user_context.user_id
+    effective_owner_id = owner_id if can_view_system_leads else user_context.user_id
 
     lead_service = LeadService(
         user_context=user_context,
