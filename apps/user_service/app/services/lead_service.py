@@ -711,6 +711,8 @@ class LeadService:
         organization_id = self.user_context.organization_id
         stage_id = query.stage_id
         search = query.search
+        start_date = query.start_date
+        end_date = query.end_date
 
         if query.mode == LeadsListMode.LIST:
             offset = (query.page - 1) * query.limit
@@ -719,6 +721,8 @@ class LeadService:
                 stage_id=stage_id,
                 search=search,
                 owner_id=owner_id,
+                start_date=start_date,
+                end_date=end_date,
                 limit=query.limit,
                 offset=offset,
             )
@@ -730,6 +734,8 @@ class LeadService:
             stage_id=stage_id,
             search=search,
             owner_id=owner_id,
+            start_date=start_date,
+            end_date=end_date,
         )
 
         by_stage: dict[str | None, list[dict[str, Any]]] = defaultdict(list)

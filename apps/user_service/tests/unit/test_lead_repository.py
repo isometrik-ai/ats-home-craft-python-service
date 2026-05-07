@@ -292,11 +292,13 @@ async def test_list_with_total_uses_limit_offset_window_count():
     query, args = conn.fetch_calls[0]
     assert "FROM leads" in query
     assert "COUNT(*) OVER()" in query
-    assert "LIMIT $5::int" in query
-    assert "OFFSET $6::int" in query
+    assert "LIMIT $7::int" in query
+    assert "OFFSET $8::int" in query
     assert args == (
         "org-1",
         "22222222-2222-2222-2222-222222222222",
+        None,
+        None,
         None,
         "%lead%",
         10,
@@ -336,7 +338,7 @@ async def test_list_leads_kanban_fetch():
     query, args = conn.fetch_calls[0]
     assert "FROM leads" in query
     assert "LIMIT $4::int" not in query
-    assert args == ("org-1", None, None, "%lead%")
+    assert args == ("org-1", None, None, None, None, "%lead%")
 
 
 @pytest.mark.asyncio

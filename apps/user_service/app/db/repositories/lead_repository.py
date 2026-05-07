@@ -27,11 +27,29 @@ NULLIF(
 )
 """
 
-# Optional search: lead name, linked company name, or any linked contact name (EXISTS only).
+# Mirrors ``UserRepository._display_name_from_meta`` (first_name / last_name in JSON).
+_LEAD_OWNER_DISPLAY_NAME_SQL = """
+CASE
+    WHEN l.owner_id IS NULL THEN NULL::text
+    ELSE NULLIF(
+        TRIM(
+            CONCAT_WS(
+                ' ',
+                NULLIF(TRIM(COALESCE(u.raw_user_meta_data->>'first_name', '')), ''),
+                NULLIF(TRIM(COALESCE(u.raw_user_meta_data->>'last_name', '')), '')
+            )
+        ),
+        ''
+    )
+END
+"""
+
+# Optional search: lead name, company name, contact name/email/phone, or owner display name.
 _LEADS_SEARCH_PREDICATE = f"""
       AND (
-          $4::text IS NULL
-          OR l.name ILIKE $4
+          $6::text IS NULL
+          OR l.name ILIKE $6
+          OR ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) ILIKE $6
           OR EXISTS (
               SELECT 1
               FROM lead_companies lco
@@ -40,7 +58,7 @@ _LEADS_SEARCH_PREDICATE = f"""
                  AND co.organization_id = lco.organization_id
               WHERE lco.lead_id = l.id
                 AND lco.organization_id = l.organization_id
-                AND co.name ILIKE $4
+                AND co.name ILIKE $6
           )
           OR EXISTS (
               SELECT 1
@@ -48,18 +66,24 @@ _LEADS_SEARCH_PREDICATE = f"""
               INNER JOIN contacts ct
                   ON ct.id = lct.contact_id
                  AND ct.organization_id = lct.organization_id
+              LEFT JOIN auth.users cu
+                  ON cu.id = ct.user_id
               WHERE lct.lead_id = l.id
                 AND lct.organization_id = l.organization_id
-                AND ({_CONTACT_DISPLAY_NAME_SQL.strip()}) ILIKE $4
+                AND (
+                    ({_CONTACT_DISPLAY_NAME_SQL.strip()}) ILIKE $6
+                    OR cu.email::text ILIKE $6
+                )
           )
       )
 """
 
-# $1 org | $2 stage (optional) | $3 owner (optional) | $4 ILIKE pattern (optional)
 _LEADS_FILTER_WHERE = f"""
     WHERE l.organization_id = $1
       AND ($2::uuid IS NULL OR l.stage_id = $2)
       AND ($3::uuid IS NULL OR l.owner_id = $3)
+      AND ($4::date IS NULL OR l.created_at::date >= $4::date)
+      AND ($5::date IS NULL OR l.created_at::date <= $5::date)
     {_LEADS_SEARCH_PREDICATE}
 """
 
@@ -117,23 +141,6 @@ LEFT JOIN lead_stages ls
 LEFT JOIN auth.users u ON u.id = l.owner_id
 """
 
-# Mirrors ``UserRepository._display_name_from_meta`` (first_name / last_name in JSON).
-_LEAD_OWNER_DISPLAY_NAME_SQL = """
-CASE
-    WHEN l.owner_id IS NULL THEN NULL::text
-    ELSE NULLIF(
-        TRIM(
-            CONCAT_WS(
-                ' ',
-                NULLIF(TRIM(COALESCE(u.raw_user_meta_data->>'first_name', '')), ''),
-                NULLIF(TRIM(COALESCE(u.raw_user_meta_data->>'last_name', '')), '')
-            )
-        ),
-        ''
-    )
-END
-"""
-
 # Filtered list rows (shared by paginated list, kanban, and window-count query).
 _SQL_LEADS_LIST = f"""
     SELECT
@@ -181,7 +188,7 @@ _SQL_LEADS_LIST_WITH_TOTAL = f"""
     {_LEADS_JOIN_DISPLAY.strip()}
     {_LEADS_FILTER_WHERE}
     {_LEADS_LIST_ORDER_BY}
-    LIMIT $5::int OFFSET $6::int
+    LIMIT $7::int OFFSET $8::int
 """
 
 # List body + sort (kanban + paginated list).
@@ -449,6 +456,8 @@ class LeadRepository:
         *,
         stage_id: str | None = None,
         owner_id: str | None = None,
+        start_date: Any = None,
+        end_date: Any = None,
         search: str | None = None,
         limit: int = 20,
         offset: int = 0,
@@ -459,6 +468,8 @@ class LeadRepository:
             organization_id,
             stage_id,
             owner_id,
+            start_date,
+            end_date,
             _ilike_pattern(search),
             limit,
             offset,
@@ -473,6 +484,8 @@ class LeadRepository:
         *,
         stage_id: str | None = None,
         owner_id: str | None = None,
+        start_date: Any = None,
+        end_date: Any = None,
         search: str | None = None,
     ) -> list[dict[str, Any]]:
         """All matching leads (kanban) with companies, stage, and owner display columns."""
@@ -481,6 +494,8 @@ class LeadRepository:
             organization_id,
             stage_id,
             owner_id,
+            start_date,
+            end_date,
             _ilike_pattern(search),
         )
         return [dict(r) for r in rows]

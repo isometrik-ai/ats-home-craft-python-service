@@ -157,6 +157,8 @@ class _FakeLeadRepository:
         *,
         stage_id: str | None = None,
         owner_id: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         search: str | None = None,
         limit: int = 20,
         offset: int = 0,
@@ -166,6 +168,8 @@ class _FakeLeadRepository:
             organization_id,
             stage_id,
             owner_id,
+            start_date,
+            end_date,
             search,
             limit,
             offset,
@@ -178,10 +182,19 @@ class _FakeLeadRepository:
         *,
         stage_id: str | None = None,
         owner_id: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         search: str | None = None,
     ) -> list[dict[str, Any]]:
         """List leads for kanban."""
-        self.calls["list_leads_for_kanban"] = (organization_id, stage_id, owner_id, search)
+        self.calls["list_leads_for_kanban"] = (
+            organization_id,
+            stage_id,
+            owner_id,
+            start_date,
+            end_date,
+            search,
+        )
         return self.list_leads_for_kanban_result
 
     async def delete_lead(
@@ -565,6 +578,8 @@ async def test_list_leads_list_mode():
         ORG_ID,
         STAGE_ID_1,
         None,
+        None,
+        None,
         "lead",
         10,
         10,
@@ -646,7 +661,7 @@ async def test_list_leads_kanban_groups():
     assert groups[2]["total"] == 1
     assert groups[2]["sort_order"] == 3
     assert stage_repo.calls["list_stages_by_organization"] == ORG_ID
-    assert lead_repo.calls["list_leads_for_kanban"] == (ORG_ID, None, None, None)
+    assert lead_repo.calls["list_leads_for_kanban"] == (ORG_ID, None, None, None, None, None)
     assert not user_repo.calls
 
 
