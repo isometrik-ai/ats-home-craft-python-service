@@ -1392,3 +1392,138 @@ Best regards,
     except Exception as error:
         logger.error("Error sending client creation email: %s", str(error))
         return False
+
+
+def send_org_member_banned_email(
+    *,
+    email: str,
+    organization_name: str,
+    banned_by_email: str,
+    support_email: str = COMMON_SUPPORT_EMAIL,
+    company_name: str = COMMON_COMPANY_NAME,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL,
+) -> bool:
+    """Notify a user that they were banned/suspended from an organization."""
+    try:
+        current_year = datetime.now().year
+        subject = f"Access removed from {organization_name}"
+
+        message = f"""Hello,
+
+Your access to the organization "{organization_name}" has been removed by an
+administrator ({banned_by_email}).
+
+If you believe this is a mistake, please contact your organization admin or reach
+out to support at {support_email}.
+
+© {current_year} {company_name}. All rights reserved.
+{company_address}"""
+
+        html_message = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Access removed</title>
+</head>
+<body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.04); overflow:hidden;">
+    <div style="padding:20px 28px; background:#dc2626; color:#fff; font-weight:bold; text-align:center;">
+      Access Removed
+    </div>
+    <div style="padding:28px; font-size:15px; color:#444; line-height:1.6;">
+      <p style="margin:0 0 14px 0;">Hello,</p>
+      <p style="margin:0 0 14px 0;">
+        Your access to <strong>{organization_name}</strong> has been removed by an administrator
+        (<strong>{banned_by_email}</strong>).
+      </p>
+      <div style="background:#f3f4f6; padding:12px 14px; border-radius:6px; margin:18px 0;">
+        If you believe this is a mistake, please contact your organization admin or email
+        <a href="mailto:{support_email}" style="color:#2563eb; text-decoration:none;"
+          >{support_email}</a>.
+      </div>
+      <p style="margin:18px 0 0 0;">Thanks,<br />{company_name} Team</p>
+    </div>
+    <div style="padding:16px 28px; background:#f9fafb; color:#6b7280; font-size:12px; text-align:center;">
+      © {current_year} {company_name}. All rights reserved.<br />
+      {company_address}<br />
+      <a href="{privacy_policy_url}" style="color:#6b7280;">Privacy Policy</a> |
+      <a href="{terms_url}" style="color:#6b7280;">Terms of Service</a>
+    </div>
+  </div>
+</body>
+</html>"""
+
+        return send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
+    except Exception as error:
+        logger.error("Error sending org member banned email: %s", str(error))
+        return False
+
+
+def send_org_member_unbanned_email(
+    *,
+    email: str,
+    organization_name: str,
+    unbanned_by_email: str,
+    support_email: str = COMMON_SUPPORT_EMAIL,
+    company_name: str = COMMON_COMPANY_NAME,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL,
+) -> bool:
+    """Notify a user that they were unbanned/unsuspended for an organization."""
+    try:
+        current_year = datetime.now().year
+        subject = f"Access restored for {organization_name}"
+
+        message = f"""Hello,
+
+Your access to the organization "{organization_name}" has been restored by an
+administrator ({unbanned_by_email}).
+
+You can now sign in and select the organization again.
+
+If you have trouble accessing the organization, contact support at {support_email}.
+
+© {current_year} {company_name}. All rights reserved.
+{company_address}"""
+
+        html_message = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Access restored</title>
+</head>
+<body style="margin:0; padding:40px 0; background:#f7f8fa; font-family:Arial, sans-serif;">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.04); overflow:hidden;">
+    <div style="padding:20px 28px; background:#16a34a; color:#fff; font-weight:bold; text-align:center;">
+      Access Restored
+    </div>
+    <div style="padding:28px; font-size:15px; color:#444; line-height:1.6;">
+      <p style="margin:0 0 14px 0;">Hello,</p>
+      <p style="margin:0 0 14px 0;">
+        Your access to <strong>{organization_name}</strong> has been restored by an administrator
+        (<strong>{unbanned_by_email}</strong>).
+      </p>
+      <div style="background:#f3f4f6; padding:12px 14px; border-radius:6px; margin:18px 0;">
+        You can now sign in and select the organization again.
+      </div>
+      <p style="margin:18px 0 0 0;">Thanks,<br />{company_name} Team</p>
+    </div>
+    <div style="padding:16px 28px; background:#f9fafb; color:#6b7280; font-size:12px; text-align:center;">
+      © {current_year} {company_name}. All rights reserved.<br />
+      {company_address}<br />
+      <a href="{privacy_policy_url}" style="color:#6b7280;">Privacy Policy</a> |
+      <a href="{terms_url}" style="color:#6b7280;">Terms of Service</a>
+    </div>
+  </div>
+</body>
+</html>"""
+
+        return send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
+    except Exception as error:
+        logger.error("Error sending org member unbanned email: %s", str(error))
+        return False

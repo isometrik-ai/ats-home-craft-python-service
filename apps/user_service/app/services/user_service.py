@@ -39,6 +39,10 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_field,
 )
+from apps.user_service.app.utils.email_utils import (
+    send_org_member_banned_email,
+    send_org_member_unbanned_email,
+)
 from apps.user_service.app.utils.user_utils import (
     build_full_name,
     get_isometrik_details,
@@ -851,6 +855,23 @@ class UserService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+        # Best-effort email notification (do not fail the operation)
+        try:
+            org = await self.organization_repository.get_organization_by_id(organization_id)
+            org_name = (org or {}).get("name") or "your organization"
+            send_org_member_banned_email(
+                email=current_user_data["email"],
+                organization_name=org_name,
+                banned_by_email=self.user_context.email,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to send org-ban email: user_id=%s org_id=%s error=%s",
+                user_id,
+                organization_id,
+                str(exc),
+            )
+
         # Revoke sessions for that user scoped to this org (kicks them out)
         session_repo = SessionRepository(
             db_connection=self.organization_member_repository.db_connection
@@ -922,6 +943,23 @@ class UserService:
             raise NotFoundException(
                 message_key="users.errors.organization_user_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        # Best-effort email notification (do not fail the operation)
+        try:
+            org = await self.organization_repository.get_organization_by_id(organization_id)
+            org_name = (org or {}).get("name") or "your organization"
+            send_org_member_unbanned_email(
+                email=current_user_data["email"],
+                organization_name=org_name,
+                unbanned_by_email=self.user_context.email,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to send org-unban email: user_id=%s org_id=%s error=%s",
+                user_id,
+                organization_id,
+                str(exc),
             )
 
         # Prepare audit data
