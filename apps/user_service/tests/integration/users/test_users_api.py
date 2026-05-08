@@ -180,6 +180,10 @@ async def test_ban_unban_user(monkeypatch, client):
         del current_user, db_connection, permission_codes
         return _ctx()
 
+    async def fake_require_org_creator(user_context, organization_id, db_connection):
+        del user_context, organization_id, db_connection
+        return None
+
     async def fake_ban(self, user_id, organization_id):
         del self
         assert user_id == "u2"
@@ -225,6 +229,10 @@ async def test_ban_unban_user(monkeypatch, client):
     monkeypatch.setattr(
         "apps.user_service.app.api.users.check_permissions",
         fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.users.require_organization_creator",
+        fake_require_org_creator,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.user_service.UserService.ban_user",

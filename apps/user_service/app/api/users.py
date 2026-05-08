@@ -22,6 +22,7 @@ from apps.user_service.app.utils.common_utils import (
     check_permissions,
     extract_user_context,
     handle_api_exceptions,
+    require_organization_creator,
     set_audit_old_data_from_user,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -254,6 +255,11 @@ async def ban_user(
         db_connection,
         SETTINGS_USERS_MANAGE,
     )
+    await require_organization_creator(
+        user_context=user_context,
+        organization_id=user_context.organization_id,
+        db_connection=db_connection,
+    )
 
     # Set audit context
     request.state.audit_risk_level = "high"
@@ -320,6 +326,11 @@ async def unban_user(
         current_user,
         db_connection,
         SETTINGS_USERS_MANAGE,
+    )
+    await require_organization_creator(
+        user_context=user_context,
+        organization_id=user_context.organization_id,
+        db_connection=db_connection,
     )
 
     # Set audit context
