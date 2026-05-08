@@ -1336,8 +1336,11 @@ class AuthService:
             organization_member_repository = OrganizationMemberRepository(
                 db_connection=self.db_connection
             )
+            # For select-org, suspended members should be treated as non-members.
             is_member = await organization_member_repository.check_user_membership_by_user_id(
-                user_id=user_id, organization_id=organization_id
+                user_id=user_id,
+                organization_id=organization_id,
+                disallow_suspended=True,
             )
         if not is_member:
             raise NotFoundException(

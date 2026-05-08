@@ -477,3 +477,28 @@ class SessionRepository:
         Requires a privileged Postgres connection.
         """
         await self.db_connection.execute("DELETE FROM auth.sessions WHERE id = $1", session_id)
+
+    async def revoke_org_sessions_for_user(self, user_id: str, organization_id: str) -> None:
+        """Revoke sessions for a user **scoped to one organization**.
+
+        Implementation detail:
+        - We revoke at Supabase level by deleting rows from `auth.sessions`
+          for session ids that exist in `public.user_sessions` for the given
+          (user_id, organization_id).
+        - We intentionally do **not** update rows in `public.user_sessions` here,
+          because lifecycle bookkeeping is handled by database triggers.
+
+        """
+        if not user_id or not user_id.strip():
+            return
+        if not organization_id or not organization_id.strip():
+            return
+
+        query = """
+            DELETE FROM auth.sessions s
+            USING public.user_sessions us
+            WHERE us.id = s.id
+              AND us.user_id = $1
+              AND us.organization_id = $2
+        """
+        await self.db_connection.execute(query, user_id, organization_id)

@@ -249,28 +249,42 @@ class OrganizationMemberRepository:
         )
         return row is not None
 
-    async def check_user_membership_by_user_id(self, user_id: str, organization_id: str) -> bool:
+    async def check_user_membership_by_user_id(
+        self,
+        user_id: str,
+        organization_id: str,
+        disallow_suspended: bool = False,
+    ) -> bool:
         """Check if user is a member of the organization by user_id.
 
         Args:
             user_id: User ID
             organization_id: Organization ID
+            disallow_suspended: When True, treat suspended members as not-a-member.
 
         Returns:
             bool: True if user is a member, False otherwise
         """
-        query = """
+        where_status = "AND status != $3"
+        params: list[object] = [
+            user_id,
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+        ]
+        if disallow_suspended:
+            where_status += " AND status != $4"
+            params.append(OrganizationMemberStatus.SUSPENDED.value)
+
+        query = f"""
             SELECT EXISTS(
                 SELECT 1
                 FROM organization_members
                 WHERE user_id = $1
                     AND organization_id = $2
-                    AND status != $3
+                    {where_status}
             )
         """
-        exists = await self.db_connection.fetchval(
-            query, user_id, organization_id, OrganizationMemberStatus.DELETED.value
-        )
+        exists = await self.db_connection.fetchval(query, *params)
         return bool(exists)
 
     async def get_member_id_by_user_id(self, user_id: str, organization_id: str) -> str | None:
