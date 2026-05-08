@@ -17,6 +17,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
+from apps.user_service.app.db.repositories.session_repository import SessionRepository
 from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
@@ -45,9 +46,7 @@ from apps.user_service.app.utils.user_utils import (
 )
 from libs.shared_config.app_settings import shared_settings
 from libs.shared_db.supabase_db.auth_repository import (
-    ban_user,
     get_user_by_id,
-    unban_user,
     update_metadata,
 )
 from libs.shared_utils.http_exceptions import BadRequestException, NotFoundException
@@ -806,13 +805,13 @@ class UserService:
         ]
 
     async def ban_user(self, user_id: str, organization_id: str) -> dict[str, Any]:
-        """Ban a user in the organization.
+        """Ban/suspend a user **from an organization** (not Supabase Auth).
 
         Handles all business logic for banning:
         - Validates user cannot ban themselves
         - Gets current user data for audit
-        - Bans user in Supabase Auth
-        - Suspends user in organization
+        - Suspends user in organization (organization_members.status)
+        - Revokes all sessions for that user (deletes auth.sessions + terminates user_sessions)
         - Returns audit data
 
         Args:
@@ -844,14 +843,6 @@ class UserService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # Ban user in Supabase Auth
-        result = await ban_user(self.supabase_client, user_id)
-        if not result:
-            raise NotFoundException(
-                message_key="users.errors.user_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-
         # Suspend user in organization
         suspend_result = await self.suspend_user(user_id, organization_id)
         if not suspend_result:
@@ -859,6 +850,12 @@ class UserService:
                 message_key="users.errors.organization_user_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+
+        # Revoke sessions for that user scoped to this org (kicks them out)
+        session_repo = SessionRepository(
+            db_connection=self.organization_member_repository.db_connection
+        )
+        await session_repo.revoke_org_sessions_for_user(user_id, organization_id)
 
         # Prepare audit data
         audit_data = {
@@ -871,7 +868,7 @@ class UserService:
             "banned_by_user_id": self.user_context.user_id,
             "banned_by_email": self.user_context.email,
             "ban_timestamp": datetime.now().isoformat(),
-            "ban_reason": "Admin ban action",
+            "ban_reason": "Org-level ban",
         }
 
         return {
@@ -880,12 +877,11 @@ class UserService:
         }
 
     async def unban_user(self, user_id: str, organization_id: str) -> dict[str, Any]:
-        """Unban a user in the organization.
+        """Unban/unsuspend a user **from an organization** (not Supabase Auth).
 
         Handles all business logic for unbanning:
         - Validates user cannot unban themselves
         - Gets current user data for audit
-        - Unbans user in Supabase Auth
         - Revokes suspension in organization
         - Returns audit data
 
@@ -917,14 +913,6 @@ class UserService:
         if not current_user_data:
             raise NotFoundException(
                 message_key="users.errors.organization_user_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-
-        # Unban user in Supabase Auth
-        result = await unban_user(self.supabase_client, user_id)
-        if not result:
-            raise NotFoundException(
-                message_key="users.errors.user_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
