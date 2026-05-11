@@ -42,6 +42,7 @@ class EnrichmentServiceSettings(BaseSettings):
         default="https://api-v2.houseofapps.ai/v1/webhooks/enrichment",
     )
     timeout_seconds: float = config("ENRICHMENT_SERVICE_TIMEOUT", default=30.0)
+    logo_dev_key: str | None = config("LOGO_DEV_KEY", default=None)
 
 
 class ExternalServiceSettings(BaseSettings):

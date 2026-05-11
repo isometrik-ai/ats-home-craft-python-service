@@ -332,6 +332,7 @@ class ContactsService:
                 client_type=item["client_type"],
                 payload_data=item.get("payload_data") or {},
                 entity_table=item.get("entity_table") or "clients",
+                skip_company_logo=bool(item.get("skip_company_logo")),
             )
 
     def __init__(
@@ -690,6 +691,7 @@ class ContactsService:
         created_new_company: bool,
         company_id: str | None,
         company_name: str | None,
+        skip_company_logo: bool = False,
     ) -> list[dict[str, Any]]:
         """Build enrichment targets for background enrichment jobs."""
         enrichment_targets: list[dict[str, Any]] = [
@@ -708,6 +710,7 @@ class ContactsService:
                     "client_id": str(company_id),
                     "organization_id": organization_id,
                     "client_type": "company",
+                    "skip_company_logo": skip_company_logo,
                     "payload_data": {"name": company_name or ""},
                 }
             )
@@ -982,6 +985,8 @@ class ContactsService:
             body=body,
             email=email_norm,
         )
+        company_photo = (company_data or {}).get("profile_photo_url") if company_data else None
+        skip_logo_for_company = isinstance(company_photo, str) and bool(company_photo.strip())
         enrichment_targets = self._build_enrichment_targets(
             organization_id=org_id,
             contact_id=contact_id,
@@ -989,6 +994,7 @@ class ContactsService:
             created_new_company=created_new_company,
             company_id=company_id,
             company_name=company_name,
+            skip_company_logo=skip_logo_for_company,
         )
         created_entities = self._build_created_entities(
             contact_id=contact_id,

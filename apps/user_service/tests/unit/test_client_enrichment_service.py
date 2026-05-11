@@ -331,13 +331,14 @@ async def test_bulk_enrichment_invokes_run_per_item(monkeypatch):
     """run_bulk_client_enrichment runs enrichment for each item (parallel)."""
     run_calls = []
 
-    async def capture_run(_self, client_id, organization_id, client_type, payload_data):
+    async def capture_run(_self, client_id, organization_id, client_type, payload_data, **kwargs):
         run_calls.append(
             {
                 "client_id": client_id,
                 "organization_id": organization_id,
                 "client_type": client_type,
                 "payload_data": payload_data,
+                **kwargs,
             }
         )
 
@@ -1008,6 +1009,13 @@ async def test_run_enrichment_company_calls_api_and_repo(monkeypatch):
     mock_post = AsyncMock(return_value={"request_id": "req-co-1"})
     mock_repo_update = AsyncMock()
 
+    # Avoid logo.dev + R2 when LOGO_DEV_KEY is set in env (would slow tests / hit network).
+    monkeypatch.setattr(
+        ClientEnrichmentService,
+        "_fetch_company_logo_public_url_best_effort",
+        AsyncMock(return_value=None),
+    )
+
     monkeypatch.setattr(
         "apps.user_service.app.services.client_enrichment_service.get_pool",
         AsyncMock(return_value=MagicMock()),
@@ -1042,6 +1050,12 @@ async def test_run_enrichment_uses_existing_conn(monkeypatch):
     mock_post = AsyncMock(return_value={"request_id": "req-xyz"})
     mock_repo_update = AsyncMock()
     captured_conn = {}
+
+    monkeypatch.setattr(
+        ClientEnrichmentService,
+        "_fetch_company_logo_public_url_best_effort",
+        AsyncMock(return_value=None),
+    )
 
     def fake_companies_repository(conn):
         """Capture connection passed to CompaniesRepository."""

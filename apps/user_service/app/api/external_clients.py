@@ -372,6 +372,7 @@ async def external_create_company(
             client_type=item["client_type"],
             payload_data=item.get("payload_data") or {},
             entity_table=item.get("entity_table") or "clients",
+            skip_company_logo=bool(item.get("skip_company_logo")),
         )
 
     return success_response(
@@ -500,6 +501,7 @@ async def external_create_contact(
             client_type=item["client_type"],
             payload_data=item.get("payload_data") or {},
             entity_table=item.get("entity_table") or "clients",
+            skip_company_logo=bool(item.get("skip_company_logo")),
         )
 
     return success_response(
