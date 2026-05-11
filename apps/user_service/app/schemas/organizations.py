@@ -13,13 +13,16 @@ from apps.user_service.app.schemas.auth import (
     CompanyData,
     ComplianceSecurity,
     EnterpriseFeatures,
-    PracticeArea,
     PreferredIntegration,
     Specialization,
     TeamSetup,
     User,
 )
-from apps.user_service.app.schemas.common import OrganizationAddress, Subscription
+from apps.user_service.app.schemas.common import (
+    NonEmptyStr,
+    OrganizationAddress,
+    Subscription,
+)
 from apps.user_service.app.schemas.enums import (
     DeleteRequestStatus,
     OrganizationStatus,
@@ -64,10 +67,10 @@ class OrganizationInfo(BaseModel):
     )
     member_count: int = Field(default=0, description="Number of active members in the organization")
     address: OrganizationAddress | None = Field(None, description="Organization's address")
-    primary_practice_areas: list[PracticeArea] | None = Field(
+    primary_practice_areas: list[NonEmptyStr] | None = Field(
         None, description="Organization's primary practice areas"
     )
-    secondary_practice_areas: list[PracticeArea] | None = Field(
+    secondary_practice_areas: list[NonEmptyStr] | None = Field(
         None, description="Organization's secondary practice areas"
     )
     specializations: list[Specialization] | None = Field(
@@ -391,10 +394,10 @@ class OrganizationUpdate(BaseModel):
         description="How the organization first heard about the platform",
     )
     address: OrganizationAddress | None = Field(None, description="Organization's address")
-    primary_practice_areas: list[PracticeArea] | None = Field(
+    primary_practice_areas: list[NonEmptyStr] | None = Field(
         None, description="Organization's primary practice areas"
     )
-    secondary_practice_areas: list[PracticeArea] | None = Field(
+    secondary_practice_areas: list[NonEmptyStr] | None = Field(
         None, description="Organization's secondary practice areas"
     )
     specializations: list[Specialization] | None = Field(
