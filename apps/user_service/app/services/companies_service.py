@@ -272,6 +272,7 @@ class CompaniesService:
                 client_type=item["client_type"],
                 payload_data=item.get("payload_data") or {},
                 entity_table=item.get("entity_table") or "clients",
+                skip_company_logo=bool(item.get("skip_company_logo")),
             )
 
     def __init__(
@@ -398,6 +399,7 @@ class CompaniesService:
         if body.addresses is not None:
             payload_data["addresses"] = body.addresses.model_dump(exclude_none=True)
 
+        skip_logo = "profile_photo_url" in getattr(body, "model_fields_set", set())
         background_tasks.add_task(
             enrichment_service.run_client_enrichment,
             client_id=str(company_id),
@@ -405,6 +407,7 @@ class CompaniesService:
             client_type="company",
             payload_data=payload_data,
             entity_table="companies",
+            skip_company_logo=skip_logo,
         )
 
     @staticmethod
@@ -877,6 +880,7 @@ class CompaniesService:
                 "client_id": company_id,
                 "organization_id": organization_id,
                 "client_type": "company",
+                "skip_company_logo": bool((body.profile_photo_url or "").strip()),
                 "payload_data": {
                     "name": body.name.strip(),
                     "industry": body.industry,

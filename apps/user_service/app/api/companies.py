@@ -488,6 +488,7 @@ async def enrich_company(
             "social_pages": details.get("social_pages") or [],
             "addresses": addresses_payload,
         }
+        skip_company_logo = bool((details.get("profile_photo_url") or "").strip())
 
         event_service = EventService(db_connection=db_connection)
         enrich_event = await event_service.create_lifecycle_event(
@@ -508,6 +509,7 @@ async def enrich_company(
             client_type="company",
             payload_data=payload_data,
             entity_table="companies",
+            skip_company_logo=skip_company_logo,
         )
     if enrich_event is not None:
         background_tasks.add_task(

@@ -10,11 +10,12 @@ in the Update API; never overwrites non-empty existing data with empty enrichmen
 
 import asyncio
 import ipaddress
+import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import asyncpg
 import httpx
@@ -39,7 +40,22 @@ from libs.shared_utils.logger import get_logger
 
 logger = get_logger("client_enrichment_service")
 
-_MAX_PROFILE_PHOTO_BYTES = 50 * 1024 * 1024  # 10MB safety cap
+_MAX_PROFILE_PHOTO_BYTES = 50 * 1024 * 1024  # safety cap for downloaded images
+_LOGO_DEV_IMG_PARAMS = "format=png&size=256&retina=true"
+
+
+def _public_r2_url_for_object_key(object_key: str) -> str:
+    """Return public R2 URL for a given object key."""
+    base = shared_settings.cloudflare_r2.media_url.rstrip("/")
+    return f"{base}/{object_key.lstrip('/')}"
+
+
+def _logo_dev_name_image_url(company_name: str, token: str) -> str:
+    """img.logo.dev URL keyed by company name (publishable token)."""
+    return (
+        f"https://img.logo.dev/name/{quote(company_name.strip())}"
+        f"?token={quote(token, safe='')}&{_LOGO_DEV_IMG_PARAMS}"
+    )
 
 
 def _normalize_webhook_update_payload(payload: dict[str, Any], jsonb_keys: frozenset[str]) -> None:
@@ -102,6 +118,13 @@ def _trim_nonempty_str(value: Any) -> str | None:
         return None
     trimmed = value.strip()
     return trimmed if trimmed else None
+
+
+def _slugify(value: str) -> str:
+    """Slugify a string."""
+    value = (value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return value.strip("-") or "logo"
 
 
 def _merge_dict_list_by_key(
@@ -346,6 +369,51 @@ class ClientEnrichmentService:
         """POST /enrich/company for company. Returns dict with request_id, status, message."""
         return await self._post("/enrich/company", payload)
 
+    async def _fetch_company_logo_public_url_best_effort(
+        self,
+        *,
+        company_id: str,
+        payload_data: dict[str, Any],
+    ) -> str | None:
+        """Download logo.dev by company name, upload to R2; return public URL or None.
+
+        Never raises; failures are logged. Does not persist to PostgreSQL — caller
+        should merge ``profile_photo_url`` with the enrichment status update.
+        """
+        try:
+            token = (app_settings.enrichment_service.logo_dev_key or "").strip()
+            if not token:
+                return None
+
+            company_name = _trim_nonempty_str(payload_data.get("name")) or None
+            if not company_name:
+                return None
+
+            image_url = _logo_dev_name_image_url(company_name, token)
+
+            async with httpx.AsyncClient(timeout=self._timeout) as http:
+                resp = await http.get(image_url)
+                resp.raise_for_status()
+                png = resp.content or b""
+            if len(png) > _MAX_PROFILE_PHOTO_BYTES:
+                raise ValueError("logo.dev image too large")
+
+            object_key = f"logos/companies/{company_id}-{_slugify(company_name)}.png"
+            r2_client = get_r2_client()
+            r2_client.put_object(
+                Bucket=shared_settings.cloudflare_r2.bucket_name,
+                Key=object_key,
+                Body=png,
+                ContentType="image/png",
+            )
+            return _public_r2_url_for_object_key(object_key)
+        except Exception as e:
+            logger.warning(
+                "Logo.dev profile photo step failed (non-fatal)",
+                extra={"company_id": company_id, "error": str(e)},
+            )
+            return None
+
     async def _fetch_sales_intelligence(
         self, person_info: dict[str, Any], company_info: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -532,6 +600,7 @@ class ClientEnrichmentService:
         conn: asyncpg.Connection | None = None,
         *,
         entity_table: str = "clients",
+        skip_company_logo: bool = False,
     ) -> None:
         """Run enrichment after client creation: call API, then update client with
         request_id and status. Handles exceptions internally to prevent resource leaks.
@@ -539,6 +608,9 @@ class ClientEnrichmentService:
         Runs only for client_type 'person' or 'company'. If conn is provided, uses
         the caller-managed connection (the caller is responsible for closing it);
         otherwise acquires a connection from the pool for the duration of this call.
+
+        ``skip_company_logo``: when True, do not fetch logo.dev / R2 for companies
+        (caller already set or is managing ``profile_photo_url``).
         """
         webhook_url = self._webhook_url
 
@@ -574,6 +646,21 @@ class ClientEnrichmentService:
                 )
                 return
 
+            logo_public_url: str | None = None
+            if (
+                client_type == ClientType.COMPANY.value
+                and entity_table == "companies"
+                and not skip_company_logo
+            ):
+                logo_public_url = await self._fetch_company_logo_public_url_best_effort(
+                    company_id=str(client_id),
+                    payload_data=payload_data or {},
+                )
+
+            extra_company_update: dict[str, Any] | None = None
+            if logo_public_url:
+                extra_company_update = {"profile_photo_url": logo_public_url}
+
             await self.update_client_enrichment_status(
                 client_id=client_id,
                 organization_id=organization_id,
@@ -581,6 +668,7 @@ class ClientEnrichmentService:
                 status=ClientEnrichmentStatus.REQUESTED.value,
                 conn=conn,
                 entity_table=entity_table,
+                extra_update=extra_company_update,
             )
             logger.info(
                 "Client enrichment requested and record updated",
@@ -605,16 +693,20 @@ class ClientEnrichmentService:
         conn: asyncpg.Connection | None = None,
         *,
         entity_table: str = "clients",
+        extra_update: dict[str, Any] | None = None,
     ) -> None:
         """Update client enrichment request id and status.
 
         Centralizes logic for updating enrichment_request_id/enrichment_status using an
         optional caller-managed connection or acquiring one from the pool.
+        ``extra_update`` is merged into the row update (e.g. company ``profile_photo_url``).
         """
-        update_data = {
+        update_data: dict[str, Any] = {
             "enrichment_request_id": request_id,
             "enrichment_status": status,
         }
+        if extra_update:
+            update_data.update(extra_update)
 
         if conn is not None:
             await ClientEnrichmentService._persist_enrichment_status(
@@ -670,6 +762,7 @@ class ClientEnrichmentService:
                     organization_id=item["organization_id"],
                     client_type=item["client_type"],
                     payload_data=payload_data,
+                    skip_company_logo=bool(item.get("skip_company_logo")),
                 )
                 for item in batch
             ]
