@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.common import (
+    NonEmptyStr,
     OrganizationAddress,
     OrganizationBasicDetails,
 )
@@ -20,7 +21,6 @@ from apps.user_service.app.schemas.enums import (
     EncryptionRequirement,
     ExpectedMembers,
     LoginMethod,
-    PracticeArea,
     PreferredIntegration,
     SelectOrganizationType,
     SessionStatus,
@@ -354,8 +354,12 @@ class CompanyData(BaseModel):
     logo_url: str | None = None
     address: OrganizationAddress | None = None
     referral_source: str | None = None
-    primary_practice_areas: list[PracticeArea] = Field(..., description="Primary practice areas")
-    secondary_practice_areas: list[PracticeArea] | None = None
+    primary_practice_areas: list[NonEmptyStr] = Field(
+        ...,
+        min_length=1,
+        description="Primary practice areas (each entry must be a non-empty string)",
+    )
+    secondary_practice_areas: list[NonEmptyStr] | None = None
     specializations: list[Specialization] | None = None
     team_setup: TeamSetup | None = None
     preferred_integration: list[PreferredIntegration] | None = None

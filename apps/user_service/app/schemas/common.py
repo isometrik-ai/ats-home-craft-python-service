@@ -12,13 +12,15 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from apps.user_service.app.schemas.enums import AddressType, PlanType, PracticeArea
+from apps.user_service.app.schemas.enums import AddressType, PlanType
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
+
+NonEmptyStr = Annotated[str, Field(min_length=1)]
 
 
 class OrganizationAddress(BaseModel):
@@ -69,10 +71,10 @@ class OrganizationBasicDetails(BaseModel):
     company_size: str | None = Field(None, description="Organization's company size")
     address: OrganizationAddress | None = Field(None, description="Organization's address")
     subscription: Subscription | None = Field(None, description="Organization's subscription")
-    primary_practice_areas: list[PracticeArea] | None = Field(
+    primary_practice_areas: list[NonEmptyStr] | None = Field(
         None, description="Organization's primary practice areas"
     )
-    secondary_practice_areas: list[PracticeArea] | None = Field(
+    secondary_practice_areas: list[NonEmptyStr] | None = Field(
         None, description="Organization's secondary practice areas"
     )
 
