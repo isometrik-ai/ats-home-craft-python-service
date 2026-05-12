@@ -45,6 +45,8 @@ LEADS_MANAGEMENT_EDIT = "leads_management.edit"
 LEADS_MANAGEMENT_DELETE = "leads_management.delete"
 LEADS_MANAGEMENT_VIEW_SYSTEM = "leads_management.view_system"
 
+BUSINESS_DASHBOARD_VIEW = "business.dashboard.view"
+
 USERS_MANAGEMENT_DELETE = "users_management.delete"
 
 # Audit Logs
@@ -308,6 +310,12 @@ DEFAULT_PERMISSIONS = [
         "Delete Leads",
         "Remove leads from the system",
         "leads",
+    ),
+    (
+        BUSINESS_DASHBOARD_VIEW,
+        "View Dashboard",
+        "View organization CRM dashboard metrics",
+        "dashboard",
     ),
 ]
 

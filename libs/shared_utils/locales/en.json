@@ -40,5 +40,10 @@
         "retrieved": "Retrieved successfully",
         "no_data": "No data found",
         "ok": "OK"
+    },
+    "dashboard": {
+        "success": {
+            "loaded": "Dashboard data retrieved successfully"
+        }
     }
 }
