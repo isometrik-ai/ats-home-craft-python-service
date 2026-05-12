@@ -160,6 +160,7 @@ class _FakeLeadRepository:
         start_date: date | None = None,
         end_date: date | None = None,
         search: str | None = None,
+        dropdown_filters: dict[str, list[str]] | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -171,6 +172,7 @@ class _FakeLeadRepository:
             start_date,
             end_date,
             search,
+            dropdown_filters,
             limit,
             offset,
         )
@@ -185,6 +187,7 @@ class _FakeLeadRepository:
         start_date: date | None = None,
         end_date: date | None = None,
         search: str | None = None,
+        dropdown_filters: dict[str, list[str]] | None = None,
     ) -> list[dict[str, Any]]:
         """List leads for kanban."""
         self.calls["list_leads_for_kanban"] = (
@@ -194,6 +197,7 @@ class _FakeLeadRepository:
             start_date,
             end_date,
             search,
+            dropdown_filters,
         )
         return self.list_leads_for_kanban_result
 
@@ -581,6 +585,7 @@ async def test_list_leads_list_mode():
         None,
         None,
         "lead",
+        None,
         10,
         10,
     )
@@ -661,7 +666,15 @@ async def test_list_leads_kanban_groups():
     assert groups[2]["total"] == 1
     assert groups[2]["sort_order"] == 3
     assert stage_repo.calls["list_stages_by_organization"] == ORG_ID
-    assert lead_repo.calls["list_leads_for_kanban"] == (ORG_ID, None, None, None, None, None)
+    assert lead_repo.calls["list_leads_for_kanban"] == (
+        ORG_ID,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
     assert not user_repo.calls
 
 

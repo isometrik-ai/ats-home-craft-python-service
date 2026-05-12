@@ -1,7 +1,5 @@
 """Leads API module."""
 
-from datetime import date
-
 import asyncpg
 from fastapi import (
     APIRouter,
@@ -25,6 +23,7 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.schemas.leads import (
     CreateLeadRequest,
     LeadsListQueryParams,
+    ListLeadsRequest,
     UpdateLeadRequest,
 )
 from apps.user_service.app.services.activity_service import ActivityService
@@ -232,8 +231,8 @@ async def get_lead_activity(
 
 
 @handle_api_exceptions("list leads")
-@router.get(
-    "",
+@router.post(
+    "/list",
     status_code=http_status.HTTP_200_OK,
     description="List leads (paginated list or kanban by stage)",
     summary="List leads",
@@ -245,33 +244,14 @@ async def get_lead_activity(
     },
 )
 @limiter.limit("100/minute")
-async def list_leads(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+async def list_leads(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
-    mode: LeadsListMode = Query(..., description="list or kanban"),
-    stage_id: str | None = Query(None, description="Filter by pipeline stage"),
-    owner_id: str | None = Query(None, description="Filter by owner user id"),
-    start_date: date | None = Query(None, description="Filter by created_at date (inclusive)"),
-    end_date: date | None = Query(None, description="Filter by created_at date (inclusive)"),
-    search: str | None = Query(
-        None,
-        description="Search by lead name, email, company name, contact name, or owner name",
-    ),
-    page: int = Query(1, ge=1, description="Page number (list mode)"),
-    limit: int = Query(20, ge=1, le=100, description="Page size (list mode)"),
+    body: ListLeadsRequest = Body(...),
 ):
     """List leads for the authenticated organization."""
-    params = LeadsListQueryParams(
-        mode=mode,
-        stage_id=stage_id,
-        owner_id=owner_id,
-        start_date=start_date,
-        end_date=end_date,
-        search=search,
-        page=page,
-        limit=limit,
-    )
+    params = LeadsListQueryParams.model_validate(body.model_dump(exclude={"dropdown_filters"}))
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -284,15 +264,17 @@ async def list_leads(  # pylint: disable=too-many-arguments,too-many-positional-
         organization_id=user_context.organization_id,
         db_connection=db_connection,
     )
-    effective_owner_id = owner_id if can_view_system_leads else user_context.user_id
+    effective_owner_id = body.owner_id if can_view_system_leads else user_context.user_id
 
     lead_service = LeadService(
         user_context=user_context,
         db_connection=db_connection,
     )
+    dropdown_filters = [f.model_dump(mode="json") for f in body.dropdown_filters]
     result = await lead_service.list_leads(
         params,
         owner_id=effective_owner_id,
+        dropdown_filters=dropdown_filters,
     )
 
     if params.mode == LeadsListMode.KANBAN:

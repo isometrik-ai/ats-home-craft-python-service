@@ -425,6 +425,45 @@ class CustomFieldService:
         result = [self._row_to_custom_field_response(field, children_map) for field in roots]
         return result, len(result)
 
+    @staticmethod
+    def collect_dropdown_custom_field_ids(definitions: Any) -> set[str]:
+        """Collect ids for dropdown custom field definitions (including nested ``sub_fields``)."""
+        dropdown_ids: set[str] = set()
+
+        def walk(defn: Any) -> None:
+            if not defn:
+                return
+            if (getattr(defn, "field_type", None) or "") == FieldType.DROPDOWN.value:
+                dropdown_ids.add(str(defn.id))
+            for child in getattr(defn, "sub_fields", None) or []:
+                walk(child)
+
+        for root in definitions or []:
+            walk(root)
+        return dropdown_ids
+
+    async def validate_dropdown_filters_for_entity(
+        self,
+        entity_type: EntityType,
+        parsed_filters: dict[str, list[str]],
+    ) -> None:
+        """Reject list filters that reference unknown or non-dropdown custom field ids."""
+        if not parsed_filters:
+            return
+
+        definitions, _ = await self.get_custom_fields_list(entity_type)
+        dropdown_ids = self.collect_dropdown_custom_field_ids(definitions)
+        unknown = sorted(set(parsed_filters) - dropdown_ids)
+        if unknown:
+            raise ValidationException(
+                message_key="custom_fields.errors.invalid_filter_payload",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={
+                    "details": "Non-dropdown or unknown custom field id(s).",
+                    "field_ids": unknown,
+                },
+            )
+
     def _row_to_custom_field_response(
         self,
         row: dict[str, Any],

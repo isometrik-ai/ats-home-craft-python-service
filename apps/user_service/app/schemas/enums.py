@@ -449,7 +449,7 @@ DEFAULT_ORGANIZATION_LEAD_STAGES: Final[tuple[tuple[LeadStatus, UiColor, str], .
 
 
 class LeadsListMode(str, Enum):
-    """Query mode for GET /leads: paginated list vs kanban grouped by stage."""
+    """List mode for ``POST /leads/list``: paginated list vs kanban grouped by stage."""
 
     LIST = "list"
     KANBAN = "kanban"

@@ -12,6 +12,7 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_field,
     serialize_jsonb_param,
 )
+from libs.shared_utils.custom_field_filtering import build_dropdown_jsonb_where
 
 _CONTACT_DISPLAY_NAME_SQL = """
 NULLIF(
@@ -165,35 +166,6 @@ _SQL_LEADS_LIST = f"""
     {_LEADS_FILTER_WHERE}
 """
 
-_SQL_LEADS_LIST_WITH_TOTAL = f"""
-    SELECT
-        l.id,
-        l.name,
-        l.stage_id,
-        l.deal_type,
-        l.priority,
-        l.lead_score,
-        l.close_date,
-        l.amount,
-        l.currency,
-        l.owner_id,
-        l.created_at,
-        l.updated_at,
-        {_LEAD_COMPANIES_AGG_SQL.strip()},
-        {_LEAD_CONTACTS_AGG_SQL.strip()},
-        ls.stage_name           AS stage_name,
-        ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name,
-        COUNT(*) OVER()         AS total_count
-    FROM leads l
-    {_LEADS_JOIN_DISPLAY.strip()}
-    {_LEADS_FILTER_WHERE}
-    {_LEADS_LIST_ORDER_BY}
-    LIMIT $7::int OFFSET $8::int
-"""
-
-# List body + sort (kanban + paginated list).
-_SQL_LEADS_LIST_ORDERED = f"{_SQL_LEADS_LIST.strip()}\n    {_LEADS_LIST_ORDER_BY}"
-
 _SQL_LEAD_DETAIL_BY_ID = f"""
     SELECT
         l.id,
@@ -310,8 +282,31 @@ LEAD_UPDATABLE_FIELDS: frozenset[str] = frozenset(
 
 
 def _ilike_pattern(search: str | None) -> str | None:
-    """Wrap search for optional ILIKE; None means no filter ($3 IS NULL)."""
+    """Wrap search for optional ILIKE; ``None`` means no filter (placeholder IS NULL)."""
     return f"%{search}%" if search else None
+
+
+def _leads_list_base_filter_args(
+    organization_id: str,
+    *,
+    stage_id: str | None = None,
+    owner_id: str | None = None,
+    start_date: Any = None,
+    end_date: Any = None,
+    search: str | None = None,
+) -> list[Any]:
+    """Build args bound to ``_LEADS_FILTER_WHERE`` placeholders ``$1`` … ``$6`` (in order).
+
+    Any extra predicates must extend this tuple and renumber ``_LEADS_FILTER_WHERE`` together.
+    """
+    return [
+        organization_id,
+        stage_id,
+        owner_id,
+        start_date,
+        end_date,
+        _ilike_pattern(search),
+    ]
 
 
 class LeadRepository:
@@ -459,21 +454,62 @@ class LeadRepository:
         start_date: Any = None,
         end_date: Any = None,
         search: str | None = None,
+        dropdown_filters: dict[str, list[str]] | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
         """Paginated leads (list mode) with companies, stage, and owner display columns."""
-        rows = await self.db_connection.fetch(
-            _SQL_LEADS_LIST_WITH_TOTAL,
+        args = _leads_list_base_filter_args(
             organization_id,
-            stage_id,
-            owner_id,
-            start_date,
-            end_date,
-            _ilike_pattern(search),
-            limit,
-            offset,
+            stage_id=stage_id,
+            owner_id=owner_id,
+            start_date=start_date,
+            end_date=end_date,
+            search=search,
         )
+        where_extra = ""
+        next_param_index = len(args) + 1
+        if dropdown_filters:
+            dropdown_where, dropdown_args, next_param_index = build_dropdown_jsonb_where(
+                custom_fields_column_sql="l.custom_fields",
+                filters=dropdown_filters,
+                param_start_index=next_param_index,
+            )
+            if dropdown_where:
+                where_extra = f" AND ({dropdown_where})"
+                args.extend(dropdown_args)
+
+        limit_idx = next_param_index
+        offset_idx = next_param_index + 1
+        args.extend([limit, offset])
+
+        sql = f"""
+    SELECT
+        l.id,
+        l.name,
+        l.stage_id,
+        l.deal_type,
+        l.priority,
+        l.lead_score,
+        l.close_date,
+        l.amount,
+        l.currency,
+        l.owner_id,
+        l.created_at,
+        l.updated_at,
+        {_LEAD_COMPANIES_AGG_SQL.strip()},
+        {_LEAD_CONTACTS_AGG_SQL.strip()},
+        ls.stage_name           AS stage_name,
+        ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name,
+        COUNT(*) OVER()         AS total_count
+    FROM leads l
+    {_LEADS_JOIN_DISPLAY.strip()}
+    {_LEADS_FILTER_WHERE}
+    {where_extra}
+    {_LEADS_LIST_ORDER_BY}
+    LIMIT ${limit_idx}::int OFFSET ${offset_idx}::int
+"""
+        rows = await self.db_connection.fetch(sql, *args)
         if not rows:
             return [], 0
         return [dict(r) for r in rows], int(rows[0]["total_count"])
@@ -487,17 +523,35 @@ class LeadRepository:
         start_date: Any = None,
         end_date: Any = None,
         search: str | None = None,
+        dropdown_filters: dict[str, list[str]] | None = None,
     ) -> list[dict[str, Any]]:
         """All matching leads (kanban) with companies, stage, and owner display columns."""
-        rows = await self.db_connection.fetch(
-            _SQL_LEADS_LIST_ORDERED,
+        args = _leads_list_base_filter_args(
             organization_id,
-            stage_id,
-            owner_id,
-            start_date,
-            end_date,
-            _ilike_pattern(search),
+            stage_id=stage_id,
+            owner_id=owner_id,
+            start_date=start_date,
+            end_date=end_date,
+            search=search,
         )
+        where_extra = ""
+        if dropdown_filters:
+            dropdown_where, dropdown_args, _ = build_dropdown_jsonb_where(
+                custom_fields_column_sql="l.custom_fields",
+                filters=dropdown_filters,
+                param_start_index=len(args) + 1,
+            )
+            if dropdown_where:
+                where_extra = f" AND ({dropdown_where})"
+                args.extend(dropdown_args)
+
+        sql = (
+            _SQL_LEADS_LIST.strip()
+            + (f"\n    {where_extra}" if where_extra else "")
+            + f"\n    {_LEADS_LIST_ORDER_BY}"
+        )
+
+        rows = await self.db_connection.fetch(sql, *args)
         return [dict(r) for r in rows]
 
     async def get_lead_detail_by_id(

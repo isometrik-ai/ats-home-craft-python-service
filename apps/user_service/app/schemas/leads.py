@@ -26,6 +26,7 @@ from apps.user_service.app.schemas.enums import (
     Priority,
 )
 from apps.user_service.app.schemas.lead_stages import UNSET, Unset
+from apps.user_service.app.schemas.list_filters import DropdownCustomFieldFilter
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -509,7 +510,7 @@ class UpdateLeadRequest(BaseModel):
 
 
 class LeadsListQueryParams(BaseModel):
-    """Validated query string for ``GET /leads``."""
+    """Validated filters for listing leads (list or kanban)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -551,6 +552,12 @@ class LeadsListQueryParams(BaseModel):
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         return self
+
+
+class ListLeadsRequest(LeadsListQueryParams):
+    """Request body for ``POST /leads/list``."""
+
+    dropdown_filters: list[DropdownCustomFieldFilter] = Field(default_factory=list)
 
 
 class LeadCompanyListItem(BaseModel):
@@ -596,7 +603,7 @@ class LeadListItem(BaseModel):
 
 
 class LeadKanbanStageGroup(BaseModel):
-    """One pipeline column in the kanban ``GET /leads`` response."""
+    """One pipeline column in the kanban leads list response."""
 
     stage_id: str | None = Field(
         default=None,
@@ -672,6 +679,7 @@ __all__ = [
     "CreateLeadRequest",
     "UpdateLeadRequest",
     "LeadsListQueryParams",
+    "ListLeadsRequest",
     "LeadListItem",
     "LeadKanbanStageGroup",
     "LeadDetail",
