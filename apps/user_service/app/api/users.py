@@ -13,6 +13,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.users import (
+    PatchUserRequest,
     UpdateUserEmailRequest,
     UpdateUserProfileRequest,
     UserListResponse,
@@ -208,6 +209,68 @@ async def update_user_email(
     return success_response(
         request=request,
         message_key="users.success.email_updated",
+        custom_code=CustomStatusCode.UPDATED,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("patch user")
+@router.patch(
+    "/{user_id}",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description=(
+        "Partially update an organization member. "
+        "Supported fields may grow over time; today only role assignment is applied."
+    ),
+    summary="Patch organization member",
+    responses={
+        http_status.HTTP_200_OK: {"description": "User updated successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",
+        "pii",
+        "audit_required",
+    ],
+    table_name="organization_members",
+    category="USER_PATCH",
+)
+async def patch_user(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    body: PatchUserRequest = Body(...),
+    user_id: str = Path(..., description="Organization member user id (auth user id)"),
+):
+    """Patch an org member; delegates to ``UserService.patch_organization_member``."""
+    user_context = await extract_user_context(current_user, db_connection)
+
+    request.state.audit_table = "organization_members"
+    request.state.audit_requested_id = user_id
+    request.state.audit_description = f"Organization member patch: {user_id}"
+    request.state.audit_risk_level = "medium"
+
+    user_service = UserService(user_context=user_context, db_connection=db_connection)
+    result = await user_service.patch_organization_member(user_id, body)
+
+    set_audit_old_data_from_user(request, result["current_user_data"])
+    request.state.raw_audit_new_data = result["audit_data"]
+
+    return success_response(
+        request=request,
+        message_key="users.success.member_patched",
         custom_code=CustomStatusCode.UPDATED,
         status_code=http_status.HTTP_200_OK,
     )
