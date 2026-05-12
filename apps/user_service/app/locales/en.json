@@ -265,10 +265,15 @@
       "organization_user_not_found": "The organization user you are trying to access does not exist.",
       "invalid_verification_method": "Verification method must be either 'PHONE' or 'EMAIL'",
       "two_fa_enabled_required": "two_fa_enabled must be provided when updating verification_method",
-      "no_fields_provided_for_update": "No fields provided for update"
+      "no_fields_provided_for_update": "No fields provided for update",
+      "role_not_found": "The role you are trying to assign does not exist in this organization.",
+      "cannot_change_member_role": "You do not have permission to change member roles.",
+      "cannot_change_admin_user_role": "You cannot change the role of an administrator.",
+      "cannot_change_organization_creator_role": "Only the organization creator can change this member's role."
     },
     "success": {
       "email_updated": "User email updated successfully",
+      "member_patched": "Member updated successfully",
       "user_banned": "User banned successfully",
       "user_unbanned": "User unbanned successfully",
       "user_profile_updated": "User profile updated successfully"

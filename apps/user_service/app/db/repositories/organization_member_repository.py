@@ -9,7 +9,10 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.schemas.enums import OrganizationMemberStatus
+from apps.user_service.app.schemas.enums import (
+    OrganizationMemberStatus,
+    OrganizationStatus,
+)
 from apps.user_service.app.utils.common_utils import parse_json_field
 from libs.shared_utils.logger import get_logger
 
@@ -188,6 +191,78 @@ class OrganizationMemberRepository:
         """
         row = await self.db_connection.fetchrow(query, *params)
 
+        return dict(row) if row else None
+
+    async def fetch_context_for_member_role_change(
+        self,
+        organization_id: str,
+        requester_user_id: str,
+        target_user_id: str,
+        new_role_id: str,
+    ) -> dict[str, Any] | None:
+        """Load org creator, both members, role names, and new role in one round trip.
+
+        Returns:
+            Flat dict of columns, or None if the organization row is missing or not active.
+        """
+        deleted_member = OrganizationMemberStatus.DELETED.value
+        deleted_org = OrganizationStatus.DELETED.value
+
+        query = """
+            SELECT
+                o.created_by_id,
+                om_req.user_id AS requester_user_id,
+                om_req.role_id AS requester_role_id,
+                om_req.status AS requester_status,
+                om_tgt.user_id AS target_user_id,
+                om_tgt.role_id AS target_role_id,
+                om_tgt.status AS target_status,
+                om_tgt.email AS target_email,
+                om_tgt.first_name AS target_first_name,
+                om_tgt.last_name AS target_last_name,
+                om_tgt.avatar_url AS target_avatar_url,
+                om_tgt.phone_number AS target_phone_number,
+                om_tgt.phone_isd_code AS target_phone_isd_code,
+                om_tgt.timezone AS target_timezone,
+                om_tgt.joined_at AS target_joined_at,
+                om_tgt.last_active_at AS target_last_active_at,
+                om_tgt.organization_id AS target_organization_id,
+                r_req.name AS requester_role_name,
+                r_tgt.name AS target_role_name,
+                r_new.id AS new_role_id,
+                r_new.name AS new_role_name
+            FROM organizations o
+            LEFT JOIN organization_members om_req
+                ON om_req.organization_id = o.id
+                AND om_req.user_id = $2::uuid
+                AND om_req.status != $6
+            LEFT JOIN organization_members om_tgt
+                ON om_tgt.organization_id = o.id
+                AND om_tgt.user_id = $3::uuid
+                AND om_tgt.status != $6
+            LEFT JOIN roles r_req
+                ON r_req.id = om_req.role_id
+                AND r_req.organization_id = o.id
+            LEFT JOIN roles r_tgt
+                ON r_tgt.id = om_tgt.role_id
+                AND r_tgt.organization_id = o.id
+            LEFT JOIN roles r_new
+                ON r_new.id = $4::uuid
+                AND r_new.organization_id = o.id
+            WHERE o.id = $1::uuid
+                AND o.status != $5
+            LIMIT 1
+        """
+
+        row = await self.db_connection.fetchrow(
+            query,
+            organization_id,
+            requester_user_id,
+            target_user_id,
+            new_role_id,
+            deleted_org,
+            deleted_member,
+        )
         return dict(row) if row else None
 
     async def get_user_role_id(

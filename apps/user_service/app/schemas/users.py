@@ -6,7 +6,7 @@ These schemas are used for request/response validation and API documentation.
 
 import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
@@ -264,6 +264,35 @@ class UpdateUserEmailRequest(BaseModel):
     """
 
     email: EmailStr = Field(..., description="User's New Updated email address")
+
+
+class PatchUserRequest(BaseModel):
+    """Request body for PATCH ``/users/{user_id}``."""
+
+    role_id: str | None = Field(
+        default=None,
+        description=("RBAC role UUID to assign in the organization"),
+    )
+
+    @model_validator(mode="after")
+    def require_at_least_one_patch_value(self) -> "PatchUserRequest":
+        """Reject empty bodies and all-null payloads.
+
+        Remains valid when more optional fields are added later.
+        """
+        if not self.model_fields_set or not any(
+            getattr(self, name) is not None for name in self.model_fields_set
+        ):
+            raise ValueError("At least one field must be provided in the request body.")
+        return self
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "role_id": "550e8400-e29b-41d4-a716-446655440000",
+            }
+        }
+    )
 
 
 class CreateUserRequest(BaseModel):

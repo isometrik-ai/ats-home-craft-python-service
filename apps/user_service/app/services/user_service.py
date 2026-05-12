@@ -25,6 +25,7 @@ from apps.user_service.app.schemas.enums import (
     OrganizationMemberStatus,
 )
 from apps.user_service.app.schemas.users import (
+    PatchUserRequest,
     PermissionInfo,
     RoleInfo,
     RoleInfoWithDescription,
@@ -53,7 +54,12 @@ from libs.shared_db.supabase_db.auth_repository import (
     get_user_by_id,
     update_metadata,
 )
-from libs.shared_utils.http_exceptions import BadRequestException, NotFoundException
+from libs.shared_utils.http_exceptions import (
+    BadRequestException,
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.isometrik_service import (
     get_isometrik_data_from_settings,
     login_to_isometrik,
@@ -65,7 +71,126 @@ from libs.shared_utils.status_codes import CustomStatusCode
 logger = get_logger("user_service")
 
 
-class UserService:
+def _role_name_is_builtin_admin(role_name: str | None) -> bool:
+    """True if the role name is the org built-in full-access role (seeded as ``admin``)."""
+    return bool(role_name and role_name.strip().lower() == "admin")
+
+
+def _member_role_change_context_or_raise(
+    ctx: dict[str, Any] | None,
+) -> tuple[dict[str, Any], str]:
+    """Validate fetch_context_for_member_role_change result; return ctx and role name or raise."""
+    if ctx is None:
+        raise NotFoundException(
+            message_key="organizations.errors.not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    if ctx.get("requester_user_id") is None:
+        raise NotFoundException(
+            message_key="auth.errors.user_not_member_of_organization",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    if ctx.get("target_user_id") is None:
+        raise NotFoundException(
+            message_key="users.errors.organization_user_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    if ctx.get("new_role_id") is None:
+        raise NotFoundException(
+            message_key="users.errors.role_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    new_role_name = ctx.get("new_role_name")
+    if not new_role_name:
+        raise NotFoundException(
+            message_key="users.errors.role_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    return ctx, str(new_role_name)
+
+
+def _assert_requester_may_assign_member_role(
+    ctx: dict[str, Any],
+    *,
+    requester_user_id: str,
+    target_user_id: str,
+) -> None:
+    """Raise ForbiddenException if the requester may not assign the target member's role."""
+    created_by_id = ctx.get("created_by_id")
+    requester_is_creator = bool(
+        created_by_id is not None and str(created_by_id) == str(requester_user_id)
+    )
+    target_is_creator = bool(
+        created_by_id is not None and str(created_by_id) == str(target_user_id)
+    )
+    if requester_is_creator:
+        return
+    if target_is_creator:
+        raise ForbiddenException(
+            message_key="users.errors.cannot_change_organization_creator_role",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+    if not _role_name_is_builtin_admin(ctx.get("requester_role_name")):
+        raise ForbiddenException(
+            message_key="users.errors.cannot_change_member_role",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+    if _role_name_is_builtin_admin(ctx.get("target_role_name")):
+        raise ForbiddenException(
+            message_key="users.errors.cannot_change_admin_user_role",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+
+def _current_user_data_from_role_change_ctx(
+    ctx: dict[str, Any], organization_id: str
+) -> dict[str, Any]:
+    """Build the pre-update member snapshot used for audit from role-change context."""
+    return {
+        "user_id": str(ctx["target_user_id"]),
+        "email": ctx["target_email"],
+        "first_name": ctx.get("target_first_name"),
+        "last_name": ctx.get("target_last_name"),
+        "phone_number": ctx.get("target_phone_number"),
+        "phone_isd_code": ctx.get("target_phone_isd_code"),
+        "timezone": ctx.get("target_timezone"),
+        "avatar_url": ctx.get("target_avatar_url"),
+        "status": ctx.get("target_status"),
+        "role_id": str(ctx["target_role_id"]) if ctx.get("target_role_id") else "",
+        "organization_id": str(ctx.get("target_organization_id") or organization_id),
+        "joined_at": ctx.get("target_joined_at"),
+        "last_active_at": ctx.get("target_last_active_at"),
+    }
+
+
+def _audit_payload_for_member_role_change(
+    *,
+    target_user_id: str,
+    current_user_data: dict[str, Any],
+    organization_id: str,
+    new_role_id: str,
+    new_role_name: str,
+    ctx: dict[str, Any],
+    changed_by_user_id: str,
+    changed_by_email: str | None,
+) -> dict[str, Any]:
+    """Build audit payload after a successful member role update."""
+    return {
+        "user_id": str(target_user_id),
+        "email": current_user_data.get("email", ""),
+        "first_name": current_user_data.get("first_name") or "",
+        "last_name": current_user_data.get("last_name") or "",
+        "organization_id": organization_id,
+        "role_id": str(new_role_id),
+        "role_name": new_role_name,
+        "previous_role_id": str(ctx["target_role_id"]) if ctx.get("target_role_id") else "",
+        "previous_role_name": ctx.get("target_role_name") or "",
+        "changed_by_user_id": changed_by_user_id,
+        "changed_by_email": changed_by_email,
+    }
+
+
+class UserService:  # pylint: disable=too-many-public-methods
     """Service for user business logic.
 
     Handles all business logic related to users, including validation,
@@ -216,6 +341,80 @@ class UserService:
         """
         return await self.organization_member_repository.update_user_info(
             user_id=user_id, organization_id=organization_id, update_data=update_data
+        )
+
+    async def update_organization_member_role(
+        self, target_user_id: str, new_role_id: str
+    ) -> dict[str, Any]:
+        """Assign a new RBAC role to an organization member (authorization: creator or admin).
+
+        Uses a single read (org + members + roles) then one update.
+        """
+        organization_id = self.user_context.organization_id
+        if not organization_id:
+            raise ValidationException(
+                message_key="organizations.errors.user_not_a_member_of_any_organization",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+
+        if target_user_id == self.user_context.user_id:
+            raise ForbiddenException(
+                message_key="users.errors.self_action",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+
+        ctx_raw = await self.organization_member_repository.fetch_context_for_member_role_change(
+            organization_id=organization_id,
+            requester_user_id=self.user_context.user_id,
+            target_user_id=target_user_id,
+            new_role_id=new_role_id,
+        )
+        ctx, new_role_name = _member_role_change_context_or_raise(ctx_raw)
+
+        _assert_requester_may_assign_member_role(
+            ctx,
+            requester_user_id=self.user_context.user_id,
+            target_user_id=target_user_id,
+        )
+
+        current_user_data = _current_user_data_from_role_change_ctx(ctx, organization_id)
+
+        updated = await self.organization_member_repository.update_user_info(
+            target_user_id,
+            organization_id,
+            {"role_id": new_role_id, "role": new_role_name},
+        )
+        if not updated:
+            raise NotFoundException(
+                message_key="users.errors.organization_user_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        audit_data = _audit_payload_for_member_role_change(
+            target_user_id=target_user_id,
+            current_user_data=current_user_data,
+            organization_id=organization_id,
+            new_role_id=new_role_id,
+            new_role_name=new_role_name,
+            ctx=ctx,
+            changed_by_user_id=self.user_context.user_id,
+            changed_by_email=self.user_context.email,
+        )
+
+        return {
+            "audit_data": audit_data,
+            "current_user_data": current_user_data,
+        }
+
+    async def patch_organization_member(
+        self, target_user_id: str, patch: PatchUserRequest
+    ) -> dict[str, Any]:
+        """Apply PATCH fields that are set on ``patch`` (extend with new branches over time)."""
+        if patch.role_id is not None:
+            return await self.update_organization_member_role(target_user_id, patch.role_id)
+        raise ValidationException(
+            message_key="users.errors.no_fields_provided_for_update",
+            custom_code=CustomStatusCode.INVALID_DATA,
         )
 
     async def check_user_exists(self, email: str, organization_id: str) -> bool:
