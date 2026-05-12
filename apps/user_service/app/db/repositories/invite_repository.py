@@ -6,6 +6,7 @@ transaction handling and efficient batch operations.
 """
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -17,6 +18,25 @@ from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("invite_repository")
+
+_PATCH_PENDING_INVITE_RESULT_META = frozenset({"invite_ok", "role_ok", "previous_role_id"})
+
+
+@dataclass(frozen=True)
+class PatchPendingInviteResult:
+    """Outcome of :meth:`InviteRepository.patch_pending_invitation` (one DB round-trip).
+
+    ``invite_ok`` — invitation exists, belongs to the org, and is in the given pending status.
+    ``role_ok`` — role exists for that org.
+
+    When both are true, ``updated_row`` is the post-update ``organization_invites`` row and
+    ``previous_role_id`` is the role UUID before the update (for audit diffs).
+    """
+
+    updated_row: dict[str, Any] | None
+    invite_ok: bool
+    role_ok: bool
+    previous_role_id: str | None = None
 
 
 class InviteRepository:
@@ -244,6 +264,95 @@ class InviteRepository:
         """
         row = await self.db_connection.fetchrow(query, token_hash, expires_at, invite_id)
         return dict(row) if row else None
+
+    async def patch_pending_invitation(
+        self,
+        invite_id: str,
+        organization_id: str,
+        pending_status: str,
+        *,
+        role_id: str,
+    ) -> PatchPendingInviteResult:
+        """Validate pending invite + role and update ``role_id`` in **one** statement.
+
+        Steps (single SQL, atomic):
+
+        1. ``invite_ok`` — row in ``organization_invites`` matches id, org, and pending status.
+        2. ``role_ok`` — row in ``roles`` matches id and org.
+        3. ``UPDATE`` runs only when both preconditions hold (join via CTEs); otherwise no write.
+
+        The outer ``SELECT`` returns the two flags plus the updated row (or nulls) so callers
+        can return precise errors without a second query.
+        """
+        query = """
+            WITH invite_check AS (
+                SELECT id, role_id AS previous_role_id
+                FROM organization_invites
+                WHERE id = $1::uuid
+                  AND organization_id = $2::uuid
+                  AND status = $3
+            ),
+            role_check AS (
+                SELECT id
+                FROM roles
+                WHERE id = $4::uuid
+                  AND organization_id = $2::uuid
+            ),
+            updated AS (
+                UPDATE organization_invites AS oi
+                SET
+                    role_id = $4::uuid,
+                    updated_at = CASE
+                        WHEN $4::uuid IS DISTINCT FROM oi.role_id THEN NOW()
+                        ELSE oi.updated_at
+                    END
+                FROM invite_check AS ic
+                CROSS JOIN role_check AS rc
+                WHERE oi.id = ic.id
+                RETURNING oi.*, ic.previous_role_id
+            )
+            SELECT
+                EXISTS (SELECT 1 FROM invite_check) AS invite_ok,
+                EXISTS (SELECT 1 FROM role_check) AS role_ok,
+                u.id,
+                u.organization_id,
+                u.email,
+                u.role_id,
+                u.token_hash,
+                u.invited_by,
+                u.status,
+                u.expires_at,
+                u.created_at,
+                u.updated_at,
+                u.metadata,
+                u.previous_role_id
+            FROM (SELECT 1) AS _driver
+            LEFT JOIN LATERAL (SELECT * FROM updated LIMIT 1) AS u ON TRUE
+        """
+        row = await self.db_connection.fetchrow(
+            query,
+            invite_id,
+            organization_id,
+            pending_status,
+            role_id,
+        )
+        if not row:
+            return PatchPendingInviteResult(updated_row=None, invite_ok=False, role_ok=False)
+
+        invite_ok = bool(row["invite_ok"])
+        role_ok = bool(row["role_ok"])
+        if row["id"] is None:
+            return PatchPendingInviteResult(updated_row=None, invite_ok=invite_ok, role_ok=role_ok)
+
+        prev = row["previous_role_id"]
+        prev_str = str(prev) if prev is not None else None
+        data = {k: row[k] for k in row.keys() if k not in _PATCH_PENDING_INVITE_RESULT_META}
+        return PatchPendingInviteResult(
+            updated_row=data,
+            invite_ok=invite_ok,
+            role_ok=role_ok,
+            previous_role_id=prev_str,
+        )
 
     # DELETE OPERATIONS
     async def delete_invite(self, invite_id: str, organization_id: str) -> None:

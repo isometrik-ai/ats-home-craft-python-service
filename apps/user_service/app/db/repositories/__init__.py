@@ -20,7 +20,10 @@ from apps.user_service.app.db.repositories.contact_companies_repository import (
 )
 from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
 from apps.user_service.app.db.repositories.events_repository import EventsRepository
-from apps.user_service.app.db.repositories.invite_repository import InviteRepository
+from apps.user_service.app.db.repositories.invite_repository import (
+    InviteRepository,
+    PatchPendingInviteResult,
+)
 from apps.user_service.app.db.repositories.lead_repository import LeadRepository
 from apps.user_service.app.db.repositories.lead_stage_repository import (
     LeadStageRepository,
@@ -69,6 +72,7 @@ __all__ = [
     "UserRepository",
     "VerificationCodeRepository",
     "InviteRepository",
+    "PatchPendingInviteResult",
     "EventsRepository",
     "LeadRepository",
     "LeadStageRepository",

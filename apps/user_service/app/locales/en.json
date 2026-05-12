@@ -27,13 +27,15 @@
       "organization_subscription_missing": "The organization has not subscribed to any plan.",
       "invalid_max_users": "The organization has reached the maximum member limit for the current plan.",
       "subscription_expired": "Your organization's subscription has expired. Please renew your plan.",
-      "pending_invitation_exists": "A pending invitation already exists for this email."
+      "pending_invitation_exists": "A pending invitation already exists for this email.",
+      "invitation_not_pending": "Only pending invitations can have their role changed."
     },
     "success": {
       "invitation_accepted": "Invitation accepted successfully.",
       "invitation_resent": "Invitation resent successfully.",
       "invitation_created": "Invitation created successfully.",
       "invitation_deleted": "Invitation deleted successfully.",
+      "invitation_patched": "Invitation updated successfully.",
       "link_validated": "Invite link validated successfully."
     }
   },
