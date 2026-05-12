@@ -34,6 +34,7 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_field,
 )
+from libs.shared_utils.custom_field_filtering import normalize_dropdown_filters_payload
 from libs.shared_utils.http_exceptions import (
     DuplicateValueException,
     NotFoundException,
@@ -706,6 +707,7 @@ class LeadService:
         self,
         query: LeadsListQueryParams,
         owner_id: str | None = None,
+        dropdown_filters: Any = None,
     ) -> tuple[list[dict[str, Any]], int, int] | list[dict[str, Any]]:
         """List leads: list mode returns ``(items, total, page)``; kanban returns column groups."""
         organization_id = self.user_context.organization_id
@@ -713,6 +715,13 @@ class LeadService:
         search = query.search
         start_date = query.start_date
         end_date = query.end_date
+
+        parsed_filters = normalize_dropdown_filters_payload(dropdown_filters)
+        cfs = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        await cfs.validate_dropdown_filters_for_entity(EntityType.LEAD, parsed_filters)
 
         if query.mode == LeadsListMode.LIST:
             offset = (query.page - 1) * query.limit
@@ -723,6 +732,7 @@ class LeadService:
                 owner_id=owner_id,
                 start_date=start_date,
                 end_date=end_date,
+                dropdown_filters=parsed_filters or None,
                 limit=query.limit,
                 offset=offset,
             )
@@ -736,6 +746,7 @@ class LeadService:
             owner_id=owner_id,
             start_date=start_date,
             end_date=end_date,
+            dropdown_filters=parsed_filters or None,
         )
 
         by_stage: dict[str | None, list[dict[str, Any]]] = defaultdict(list)

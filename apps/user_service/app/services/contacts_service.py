@@ -55,7 +55,6 @@ from apps.user_service.app.schemas.enums import (
     ClientEventType,
     ClientStatus,
     EntityType,
-    FieldType,
     IsometrikRole,
     KafkaTopics,
 )
@@ -1896,47 +1895,6 @@ class ContactsService:
         return out
 
     @staticmethod
-    def _collect_dropdown_custom_field_ids(definitions: Any) -> set[str]:
-        """Collect ids for dropdown custom field definitions (including nested sub_fields)."""
-        dropdown_ids: set[str] = set()
-
-        def walk(defn: Any) -> None:
-            if not defn:
-                return
-            if (getattr(defn, "field_type", None) or "") == FieldType.DROPDOWN.value:
-                dropdown_ids.add(str(defn.id))
-            for child in getattr(defn, "sub_fields", None) or []:
-                walk(child)
-
-        for root in definitions or []:
-            walk(root)
-        return dropdown_ids
-
-    async def _validate_contact_dropdown_filters(
-        self, parsed_filters: dict[str, list[str]]
-    ) -> None:
-        """Ensure filters reference only dropdown custom fields for contacts."""
-        if not parsed_filters:
-            return
-
-        cfs = CustomFieldService(
-            db_connection=self.db_connection,
-            user_context=self.user_context,
-        )
-        definitions, _ = await cfs.get_custom_fields_list(EntityType.CONTACT)
-        dropdown_ids = self._collect_dropdown_custom_field_ids(definitions)
-        unknown = sorted(set(parsed_filters) - dropdown_ids)
-        if unknown:
-            raise ValidationException(
-                message_key="custom_fields.errors.invalid_filter_payload",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-                params={
-                    "details": "Non-dropdown or unknown custom field id(s).",
-                    "field_ids": unknown,
-                },
-            )
-
-    @staticmethod
     def _normalize_contact_list_row(list_row: dict[str, Any]) -> None:
         """Normalize and coerce DB list row fields to API response shape."""
         list_row["created_at"] = format_iso_datetime(list_row.get("created_at")) or ""
@@ -1970,7 +1928,11 @@ class ContactsService:
         org_id = self.user_context.organization_id
         parsed_filters = normalize_dropdown_filters_payload(dropdown_filters)
 
-        await self._validate_contact_dropdown_filters(parsed_filters)
+        cfs = CustomFieldService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        await cfs.validate_dropdown_filters_for_entity(EntityType.CONTACT, parsed_filters)
 
         rows, total = await self.contacts_repo.list_contacts(
             organization_id=org_id,
