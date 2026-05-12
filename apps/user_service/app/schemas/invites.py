@@ -59,6 +59,24 @@ class InviteAcceptResponse(BaseModel):
     user: InvitedUserInfo
 
 
+class PatchInviteRequest(BaseModel):
+    """Body for PATCH /invite/{invite_id}: change the RBAC role on a pending invitation."""
+
+    role_id: uuid.UUID = Field(
+        ...,
+        description="RBAC role UUID for the invitee in this organization",
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "role_id": "550e8400-e29b-41d4-a716-446655440000",
+            }
+        },
+    )
+
+
 class InviteCreateRequest(BaseModel):
     """Request model for invitation creation operations."""
 

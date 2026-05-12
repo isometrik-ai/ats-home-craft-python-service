@@ -26,6 +26,7 @@ from apps.user_service.app.schemas.invites import (
     InviteStatus,
     InviteValidateLinkRequest,
     InviteValidateLinkResponse,
+    PatchInviteRequest,
 )
 
 # Service import
@@ -375,6 +376,75 @@ async def resend_invitation(
             email=result["email"],
             expires_at=str(result["expires_at"]),
         ),
+    )
+
+
+@handle_api_exceptions("patch invitation")
+@router.patch(
+    "/{invite_id}",
+    description="Update the RBAC role on a pending organization invitation.",
+    summary="Patch pending invitation (role only)",
+    status_code=http_status.HTTP_200_OK,
+    response_model=None,
+    responses={
+        http_status.HTTP_200_OK: {"description": "Invitation updated successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",
+        "pii",
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="organization_invites",
+    category="INVITATION",
+)
+async def patch_invitation(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    invite_id: str = Path(..., description="The UUID of the invitation"),
+    body: PatchInviteRequest = Body(...),
+):
+    """Patch a pending invite; body must include ``role_id`` only."""
+    request.state.audit_table = "organization_invites"
+    request.state.audit_requested_id = invite_id
+    request.state.audit_description = f"Patched invitation: {invite_id}"
+    request.state.audit_risk_level = "medium"
+
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
+    )
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
+    invite_service = InviteService(user_context=user_context, db_connection=db_connection)
+    audit_old, audit_new = await invite_service.patch_invitation(invite_id, body)
+    request.state.raw_audit_old_data = audit_old
+    request.state.raw_audit_new_data = audit_new
+
+    return success_response(
+        request=request,
+        message_key="invitations.success.invitation_patched",
+        custom_code=CustomStatusCode.UPDATED,
+        status_code=http_status.HTTP_200_OK,
     )
 
 

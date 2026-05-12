@@ -14,6 +14,7 @@ from apps.user_service.app.db.repositories import (
     InviteRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
+    PatchPendingInviteResult,
     RoleRepository,
     UserRepository,
 )
@@ -28,6 +29,7 @@ from apps.user_service.app.schemas.invites import (
     InviteAcceptResponse,
     InviteCreateRequest,
     InvitedUserInfo,
+    PatchInviteRequest,
 )
 from apps.user_service.app.services.session_management_service import (
     SessionManagementService,
@@ -759,6 +761,40 @@ class InviteService:
             "email": invitation_data["email"],
             "expires_at": new_expires_at,
         }
+
+    async def patch_invitation(
+        self, invite_id: str, body: PatchInviteRequest
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Update the RBAC role on a pending invitation (validated in one DB round-trip).
+
+        Returns ``(audit_old_data, audit_new_data)`` snapshots for ``raw_audit_*``; the HTTP
+        layer does not expose invite payload in the response.
+        """
+
+        organization_id = self.user_context.organization_id if self.user_context else None
+        new_role_id = str(body.role_id)
+
+        outcome: PatchPendingInviteResult = await self.invite_repository.patch_pending_invitation(
+            invite_id,
+            organization_id,
+            InviteStatus.PENDING.value,
+            role_id=new_role_id,
+        )
+        if outcome.updated_row is not None:
+            old_role = outcome.previous_role_id or ""
+            audit_old = {"invite_id": invite_id, "role_id": old_role}
+            audit_new = {"invite_id": invite_id, "role_id": new_role_id}
+            return audit_old, audit_new
+
+        if outcome.invite_ok and not outcome.role_ok:
+            raise NotFoundException(
+                message_key="invitations.errors.role_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        raise NotFoundException(
+            message_key="invitations.errors.invitation_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
 
     async def delete_invitation(self, invite_id: str) -> None:
         """Delete an organization invitation."""
