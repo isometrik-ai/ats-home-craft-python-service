@@ -83,6 +83,7 @@ from apps.user_service.app.utils.common_utils import (
     coerce_json_list,
     format_iso_datetime,
     generate_random_password,
+    normalize_nested_addresses_for_audit,
     parse_json_any,
     parse_json_field,
     serialize_jsonb_param,
@@ -1200,7 +1201,7 @@ class ContactsService:
         ContactsService._normalize_contact_derived_arrays(normalized)
         ContactsService._normalize_contact_ids(normalized)
         ContactsService._normalize_contact_timestamps(normalized)
-        ContactsService._normalize_contact_nested_addresses(normalized)
+        normalize_nested_addresses_for_audit(normalized, parent_fk_field="contact_id")
 
         return normalized
 
@@ -1251,30 +1252,6 @@ class ContactsService:
         for dt_field in ("created_at", "updated_at", "date_of_birth", "last_enriched_at"):
             if dt_field in normalized and normalized.get(dt_field) is not None:
                 normalized[dt_field] = format_iso_datetime(normalized.get(dt_field))
-
-    @staticmethod
-    def _normalize_contact_nested_addresses(normalized: dict[str, Any]) -> None:
-        """Normalize nested `addresses[]` rows for audit JSON serialization."""
-        addresses_value = normalized.get("addresses")
-        if not isinstance(addresses_value, list):
-            return
-        fixed: list[dict[str, Any]] = []
-        for addr in addresses_value:
-            if not isinstance(addr, dict):
-                continue
-            addr_norm = dict(addr)
-            for id_field in ("id", "contact_id"):
-                if addr_norm.get(id_field) is not None:
-                    addr_norm[id_field] = str(addr_norm[id_field])
-            for dt_field in ("created_at", "updated_at"):
-                if addr_norm.get(dt_field) is not None:
-                    addr_norm[dt_field] = format_iso_datetime(addr_norm.get(dt_field))
-            raw_address_data = addr_norm.get("address_data")
-            parsed_address_data = parse_json_any(raw_address_data, raw_address_data)
-            if isinstance(parsed_address_data, dict):
-                addr_norm["address_data"] = parsed_address_data
-            fixed.append(addr_norm)
-        normalized["addresses"] = fixed
 
     @staticmethod
     def _build_contact_scalar_update_data(*, body: UpdateContactRequest) -> dict[str, Any]:

@@ -629,6 +629,38 @@ def parse_json_any(value: Any, default: Any = None) -> Any:
     return parsed if parsed != {} else default
 
 
+def normalize_nested_addresses_for_audit(
+    normalized: dict[str, Any],
+    *,
+    parent_fk_field: str,
+) -> None:
+    """Normalize nested ``addresses`` on a contact or company audit snapshot dict.
+
+    Stringifies ``id`` and the parent FK (``contact_id`` or ``company_id``), formats
+    nested timestamps, and coerces ``address_data`` for stable audit diffs.
+    """
+    addresses_value = normalized.get("addresses")
+    if not isinstance(addresses_value, list):
+        return
+    fixed: list[dict[str, Any]] = []
+    for addr in addresses_value:
+        if not isinstance(addr, dict):
+            continue
+        addr_norm = dict(addr)
+        for id_field in ("id", parent_fk_field):
+            if addr_norm.get(id_field) is not None:
+                addr_norm[id_field] = str(addr_norm[id_field])
+        for dt_field in ("created_at", "updated_at"):
+            if addr_norm.get(dt_field) is not None:
+                addr_norm[dt_field] = format_iso_datetime(addr_norm.get(dt_field))
+        raw_address_data = addr_norm.get("address_data")
+        parsed_address_data = parse_json_any(raw_address_data, raw_address_data)
+        if isinstance(parsed_address_data, dict):
+            addr_norm["address_data"] = parsed_address_data
+        fixed.append(addr_norm)
+    normalized["addresses"] = fixed
+
+
 def extract_audit_data_value(audit_values: dict[str, Any] | None, field_path: str) -> Any:
     """Extract a changed field value from audit `{"data": ...}` payloads.
 

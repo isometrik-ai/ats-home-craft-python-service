@@ -232,12 +232,33 @@ def _merge_social_pages_by_platform(
     )
 
 
+def _address_dicts_for_country_lookup(addresses: Any) -> list[dict[str, Any]]:
+    """Normalize ``addresses`` to a list of dicts for country extraction.
+
+    Company detail payloads use a list of address rows. PATCH bodies may send an
+    ``AddressesUpdate`` shape (``add`` / ``update`` / ``remove``); indexing that
+    dict with ``0`` raises ``KeyError``.
+    """
+    if not addresses:
+        return []
+    if isinstance(addresses, list):
+        return [x for x in addresses if isinstance(x, dict)]
+    if isinstance(addresses, dict):
+        out: list[dict[str, Any]] = []
+        for key in ("add", "update"):
+            chunk = addresses.get(key)
+            if isinstance(chunk, list):
+                out.extend(x for x in chunk if isinstance(x, dict))
+        return out
+    return []
+
+
 def _first_country_from_addresses(data: dict[str, Any]) -> str | None:
     """Extract country from first address if present."""
-    addresses = data.get("addresses") or []
-    if not addresses or not isinstance(addresses[0], dict):
+    entries = _address_dicts_for_country_lookup(data.get("addresses"))
+    if not entries:
         return None
-    return (addresses[0].get("country") or "").strip() or None
+    return (entries[0].get("country") or "").strip() or None
 
 
 def _first_website_url(data: dict[str, Any]) -> str | None:
