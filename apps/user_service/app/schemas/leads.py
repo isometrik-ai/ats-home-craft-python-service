@@ -268,7 +268,7 @@ class LeadCompaniesUpdate(BaseModel):
 
 
 class CreateLeadCompany(BaseModel):
-    """Optional single company on ``POST /leads`` (at most one ``lead_companies`` row)."""
+    """Optional explicit company on ``POST /leads``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -328,11 +328,17 @@ class CreateLeadRequest(BaseModel):
     )
     company: CreateLeadCompany | None = Field(
         default=None,
-        description="Optional single company (``lead_companies``; at most one on create)",
+        description=(
+            "Optional company on create (``lead_companies``). "
+            "All companies linked to each contact via ``contact_companies`` are associated as well."
+        ),
     )
     contacts: list[LeadContactCreate] | None = Field(
         default=None,
-        description="Contacts on the lead; optional labels per association",
+        description=(
+            "Contacts on the lead; optional labels per association. "
+            "Each contact's company memberships are linked to the lead automatically."
+        ),
     )
     deal_type: DealType | None = Field(
         default=None,
@@ -568,6 +574,10 @@ class LeadCompanyListItem(BaseModel):
     company_id: str = Field(..., description="Company UUID")
     label: str | None = Field(None, description="Optional role or tag for this link")
     company_name: str = Field("", description="Resolved company display name")
+    profile_photo_url: str | None = Field(
+        default=None,
+        description="Company profile image URL",
+    )
 
 
 class LeadListItem(BaseModel):
@@ -628,6 +638,10 @@ class LeadContactDetail(BaseModel):
     contact_name: str | None = Field(None, description="Resolved person display name")
     email: str | None = Field(None, description="Email address")
     phones: list[Phone] = Field(default_factory=list, description="Phone numbers")
+    profile_photo_url: str | None = Field(
+        default=None,
+        description="Contact profile image URL",
+    )
 
 
 class LeadDetail(BaseModel):

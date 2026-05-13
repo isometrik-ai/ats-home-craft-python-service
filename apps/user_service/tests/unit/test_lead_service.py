@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.schemas.leads import (
     CreateLeadCompany,
     CreateLeadRequest,
+    LeadContactCreate,
     LeadsListQueryParams,
     UpdateLeadRequest,
 )
@@ -76,12 +77,12 @@ class _FakeLeadRepository:
         self,
         lead_row: dict[str, Any],
         contacts: list[tuple[str, str | None]] | None = None,
-        company: tuple[str, str | None] | None = None,
+        companies: list[tuple[str, str | None]] | None = None,
     ) -> dict[str, Any]:
         """Create lead."""
         self.calls["create_lead"] = lead_row
         self.calls["create_lead_contacts"] = contacts
-        self.calls["create_lead_company"] = company
+        self.calls["create_lead_companies"] = companies
         return self.create_lead_result
 
     async def get_lead_detail_by_id(
@@ -416,6 +417,94 @@ async def test_create_lead_owner_id_validation(monkeypatch):
     assert user_repo.calls["get_user_details_by_id"] == (OWNER_ID, ["id"])
     payload = lead_repo.calls["create_lead"]
     assert payload["owner_id"] == OWNER_ID
+
+
+@pytest.mark.asyncio
+async def test_create_lead_auto_associates_contact_companies(monkeypatch):
+    """Contacts on create add their contact_companies memberships to lead_companies."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    company_from_contact = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    lead_repo.lead_reference_validation_result = (
+        True,
+        {POINT_OF_CONTACT_ID},
+        {company_from_contact},
+    )
+
+    custom_calls: dict[str, Any] = {}
+    _patch_custom_field_service(monkeypatch, custom_calls)
+
+    captured: dict[str, Any] = {}
+
+    async def fake_list_distinct(
+        _self: Any,
+        *,
+        organization_id: str,
+        contact_ids: list[str],
+    ) -> list[str]:
+        captured["org"] = organization_id
+        captured["contact_ids"] = contact_ids
+        return [company_from_contact]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_service.ContactCompaniesRepository."
+        "list_distinct_company_ids_for_contacts",
+        fake_list_distinct,
+    )
+
+    body = CreateLeadRequest(
+        name="New Lead",
+        stage_id=STAGE_ID_1,
+        deal_type=DealType.NEW_BUSINESS,
+        contacts=[LeadContactCreate(contact_id=POINT_OF_CONTACT_ID, label="dm")],
+    )
+
+    await service.create_lead(body)
+
+    assert captured == {"org": ORG_ID, "contact_ids": [POINT_OF_CONTACT_ID]}
+    assert lead_repo.calls["fetch_lead_reference_validation"]["company_ids"] == [
+        company_from_contact
+    ]
+    assert lead_repo.calls["create_lead_companies"] == [(company_from_contact, None)]
+    assert lead_repo.calls["create_lead_contacts"] == [(POINT_OF_CONTACT_ID, "dm")]
+
+
+@pytest.mark.asyncio
+async def test_company_deduped_with_contact_companies(monkeypatch):
+    """Explicit body.company wins label when the same id appears from contact memberships."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    lead_repo.lead_reference_validation_result = (True, {POINT_OF_CONTACT_ID}, {CLIENT_ID})
+
+    custom_calls: dict[str, Any] = {}
+    _patch_custom_field_service(monkeypatch, custom_calls)
+
+    async def fake_list_distinct(
+        _self: Any,
+        *,
+        organization_id: str,
+        contact_ids: list[str],
+    ) -> list[str]:
+        _ = organization_id
+        _ = contact_ids
+        return [CLIENT_ID]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_service.ContactCompaniesRepository."
+        "list_distinct_company_ids_for_contacts",
+        fake_list_distinct,
+    )
+
+    body = CreateLeadRequest(
+        name="New Lead",
+        stage_id=STAGE_ID_1,
+        deal_type=DealType.NEW_BUSINESS,
+        company=CreateLeadCompany(company_id=CLIENT_ID, label="buyer"),
+        contacts=[LeadContactCreate(contact_id=POINT_OF_CONTACT_ID)],
+    )
+
+    await service.create_lead(body)
+
+    assert lead_repo.calls["fetch_lead_reference_validation"]["company_ids"] == [CLIENT_ID]
+    assert lead_repo.calls["create_lead_companies"] == [(CLIENT_ID, "buyer")]
 
 
 @pytest.mark.asyncio

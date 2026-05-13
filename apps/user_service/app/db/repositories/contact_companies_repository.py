@@ -119,6 +119,35 @@ class ContactCompaniesRepository:
         )
         return str(created_id) if created_id else None
 
+    async def list_distinct_company_ids_for_contacts(
+        self,
+        *,
+        organization_id: str,
+        contact_ids: list[str],
+    ) -> list[str]:
+        """Company ids linked to any of the contacts via ``contact_companies``.
+
+        Returns distinct ids sorted for stable ordering. Empty ``contact_ids`` yields an empty.
+        """
+        if not contact_ids:
+            return []
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT cc.company_id::text AS company_id
+            FROM contact_companies cc
+            INNER JOIN companies co
+              ON co.id = cc.company_id
+             AND co.organization_id = cc.organization_id
+             AND co.status != 'deleted'
+            WHERE cc.organization_id = $1::uuid
+              AND cc.contact_id = ANY($2::uuid[])
+            ORDER BY company_id
+            """,
+            organization_id,
+            contact_ids,
+        )
+        return [str(r["company_id"]) for r in rows]
+
     async def apply_contacts_update_delta(
         self,
         *,

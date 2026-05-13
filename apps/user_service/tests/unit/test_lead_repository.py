@@ -242,6 +242,51 @@ async def test_create_lead_with_contacts_inserts_after_lead():
 
 
 @pytest.mark.asyncio
+async def test_create_lead_with_companies_batch_then_contacts():
+    """create_lead with companies: lead row, batch lead_companies, then lead_contacts."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {"id": "lead-1", "organization_id": "org-1"}
+    repo = LeadRepository(db_connection=conn)
+
+    row = {
+        "organization_id": "org-1",
+        "name": "L",
+        "stage_id": "22222222-2222-2222-2222-222222222222",
+        "lead_source": None,
+        "referral_source": None,
+        "lead_score": None,
+        "deal_type": "new_business",
+        "priority": None,
+        "close_date": None,
+        "amount": None,
+        "description": None,
+        "notes": [],
+        "custom_fields": [],
+        "owner_id": None,
+    }
+    await repo.create_lead(
+        row,
+        contacts=[("33333333-3333-3333-3333-333333333333", None)],
+        companies=[
+            ("11111111-1111-1111-1111-111111111111", "primary"),
+            ("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", None),
+        ],
+    )
+
+    assert len(conn.fetchrow_calls) == 1
+    assert len(conn.execute_calls) == 2
+    companies_sql, companies_args = conn.execute_calls[0]
+    assert "INSERT INTO lead_companies" in companies_sql
+    assert "unnest" in companies_sql
+    assert companies_args[-2:] == (
+        ["11111111-1111-1111-1111-111111111111", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+        ["primary", None],
+    )
+    contacts_sql, _ = conn.execute_calls[1]
+    assert "INSERT INTO lead_contacts" in contacts_sql
+
+
+@pytest.mark.asyncio
 async def test_update_lead_calls_fetchrow():
     """update_lead builds UPDATE scoped by organization and returns the row."""
     conn = _FakeConn()

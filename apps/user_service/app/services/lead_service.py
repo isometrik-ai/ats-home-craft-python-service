@@ -7,6 +7,9 @@ from typing import Any
 import asyncpg
 from asyncpg import UniqueViolationError
 
+from apps.user_service.app.db.repositories.contact_companies_repository import (
+    ContactCompaniesRepository,
+)
 from apps.user_service.app.db.repositories.lead_repository import LeadRepository
 from apps.user_service.app.db.repositories.lead_stage_repository import (
     LeadStageRepository,
@@ -106,8 +109,27 @@ class LeadService:
         return ordered, rows
 
     @staticmethod
+    def _build_create_lead_company_rows(
+        body: CreateLeadRequest,
+        contact_company_ids: list[str],
+    ) -> list[tuple[str, str | None]]:
+        """Explicit ``body.company`` first"""
+        rows: list[tuple[str, str | None]] = []
+        seen: set[str] = set()
+        if body.company is not None and body.company.company_id is not None:
+            cid = body.company.company_id
+            if cid not in seen:
+                seen.add(cid)
+                rows.append((cid, body.company.label))
+        for cid in contact_company_ids:
+            if cid not in seen:
+                seen.add(cid)
+                rows.append((cid, None))
+        return rows
+
+    @staticmethod
     def _raise_if_stage_missing(stage_id: str | None, stage_ok: bool | None) -> None:
-        """No-op when ``stage_id`` is omitted; raise when a requested stage does not exist."""
+        """`stage_id`` is omitted; raise when a requested stage does not exist."""
         if stage_id is None or stage_ok is None:
             return
         if not stage_ok:
@@ -205,17 +227,21 @@ class LeadService:
         }
 
     async def create_lead(self, body: CreateLeadRequest, external: bool = False) -> dict[str, Any]:
-        """Create a lead; optional single company (``lead_companies``) and ``lead_contacts``."""
+        """Create a lead; optional companies (``lead_companies``) and ``lead_contacts``."""
         organization_id = self.user_context.organization_id
         user_id = self.user_context.user_id
 
         contact_ids_ordered, contact_rows = LeadService._parse_create_contacts(body)
 
-        company_ids: list[str] = []
-        company_tuple: tuple[str, str | None] | None = None
-        if body.company is not None and body.company.company_id is not None:
-            company_ids = [body.company.company_id]
-            company_tuple = (body.company.company_id, body.company.label)
+        contact_company_ids: list[str] = []
+        if contact_ids_ordered:
+            cc_repo = ContactCompaniesRepository(self.db_connection)
+            contact_company_ids = await cc_repo.list_distinct_company_ids_for_contacts(
+                organization_id=organization_id,
+                contact_ids=contact_ids_ordered,
+            )
+        company_rows = LeadService._build_create_lead_company_rows(body, contact_company_ids)
+        company_ids = [c for c, _ in company_rows]
 
         await self._fetch_and_validate_lead_references(
             organization_id,
@@ -232,7 +258,7 @@ class LeadService:
             return await self.lead_repository.create_lead(
                 lead_row,
                 contacts=contact_rows,
-                company=company_tuple,
+                companies=company_rows if company_rows else None,
             )
         except UniqueViolationError as exc:
             cname = getattr(exc, "constraint_name", "") or ""
@@ -593,6 +619,7 @@ class LeadService:
                     company_id=str(cid),
                     label=item.get("label"),
                     company_name=(item.get("company_name") or "") or "",
+                    profile_photo_url=item.get("profile_photo_url"),
                 )
             )
         return out
@@ -613,6 +640,9 @@ class LeadService:
                     contact_id=str(cid),
                     label=item.get("label"),
                     contact_name=item.get("contact_name"),
+                    email=item.get("email"),
+                    phones=item.get("phones") if isinstance(item.get("phones"), list) else [],
+                    profile_photo_url=item.get("profile_photo_url"),
                 )
             )
         return out
@@ -673,7 +703,8 @@ class LeadService:
                 label=c.get("label"),
                 contact_name=c.get("contact_name"),
                 email=c.get("email"),
-                phones=c.get("phones"),
+                phones=c.get("phones") or [],
+                profile_photo_url=c.get("profile_photo_url"),
             )
             for c in contacts
         ]
