@@ -257,6 +257,12 @@ async def patch_user(
     """Patch an org member; delegates to ``UserService.patch_organization_member``."""
     user_context = await extract_user_context(current_user, db_connection)
 
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
     request.state.audit_table = "organization_members"
     request.state.audit_requested_id = user_id
     request.state.audit_description = f"Organization member patch: {user_id}"
@@ -323,6 +329,12 @@ async def ban_user(
         organization_id=user_context.organization_id,
         db_connection=db_connection,
     )
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Set audit context
     request.state.audit_risk_level = "high"
@@ -395,6 +407,12 @@ async def unban_user(
         organization_id=user_context.organization_id,
         db_connection=db_connection,
     )
+
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
 
     # Set audit context
     request.state.audit_table = "organization_members"

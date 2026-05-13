@@ -43,6 +43,7 @@ from apps.user_service.app.utils.common_utils import (
     require_organization_creator,
     require_permission,
     require_super_admin,
+    set_audit_old_data_from_user,
 )
 
 # Permission imports
@@ -706,6 +707,18 @@ async def process_delete_request(
     },
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=[
+        "gdpr",
+        "pii",
+        "soc2_audit",
+        "audit_required",
+    ],
+    table_name="organization_members",
+    category="ORG_MEMBER_REMOVE",
+)
 async def delete_organization_member(
     request: Request,
     member_user_id: UUID = Path(..., description="The UUID of the organization member to delete"),
@@ -737,11 +750,23 @@ async def delete_organization_member(
             organization_id=user_context.organization_id,
         )
 
+    request.state.audit_table = "organization_members"
+    request.state.audit_requested_id = str(member_user_id)
+    request.state.audit_description = f"Removed organization member: {member_user_id}"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+
     # Create service with user context and delegate to service
     organization_service = OrganizationService(
         user_context=user_context, db_connection=db_connection
     )
-    await organization_service.delete_organization_member(member_user_id)
+    delete_audit = await organization_service.delete_organization_member(str(member_user_id))
+    set_audit_old_data_from_user(request, delete_audit["current_user_data"])
+    request.state.raw_audit_new_data = delete_audit["audit_new"]
 
     return success_response(
         request=request,

@@ -144,6 +144,17 @@ async def accept_and_set_password_invitation(
     )
     outcome = await invite_service.accept_and_set_password(body)
 
+    audit_ctx = getattr(outcome, "audit_user_context", None)
+    if audit_ctx:
+        request.state.audit_user_context = audit_ctx
+        request.state.audit_requested_id = getattr(outcome, "audit_record_id", "") or ""
+        raw_old = getattr(outcome, "audit_old", None)
+        raw_new = getattr(outcome, "audit_new", None)
+        if raw_old is not None:
+            request.state.raw_audit_old_data = raw_old
+        if raw_new is not None:
+            request.state.raw_audit_new_data = raw_new
+
     return success_response(
         request=request,
         message_key=outcome.message_key,
