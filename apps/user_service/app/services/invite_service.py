@@ -637,9 +637,9 @@ class InviteService:
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
-        # Check for existing pending invitation
+        # for the same email (e.g. a previously deleted member) must not block re-invites.
         existing_invite = await self.invite_repository.check_existing_invite(
-            organization_id, body.email
+            organization_id, body.email, status=InviteStatus.PENDING.value
         )
         if existing_invite:
             raise ConflictException(
