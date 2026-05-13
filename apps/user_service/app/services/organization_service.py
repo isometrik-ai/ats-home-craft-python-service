@@ -1232,7 +1232,7 @@ class OrganizationService:
             "reviewed_at": format_iso_datetime(updated_request.get("reviewed_at")) or "",
         }
 
-    async def delete_organization_member(self, member_user_id: str) -> None:
+    async def delete_organization_member(self, member_user_id: str) -> dict[str, Any]:
         """Delete an organization member.
 
         Business Rules:
@@ -1243,14 +1243,17 @@ class OrganizationService:
         Args:
             member_user_id: Organization member user ID
 
+        Returns:
+            Dict with ``current_user_data`` (pre-delete profile) and ``audit_new`` for HTTP audit.
+
         Raises:
             NotFoundException: If member not found
             BadRequestException: If member is organization owner
         """
-        member_exists = await self.organization_member_repository.check_user_membership_by_user_id(
+        profile = await self.organization_member_repository.get_user_profile_by_id(
             member_user_id, self.user_context.organization_id
         )
-        if not member_exists:
+        if not profile:
             raise NotFoundException(
                 message_key="auth.errors.user_not_member_of_organization",
                 custom_code=CustomStatusCode.NOT_FOUND,
@@ -1276,3 +1279,26 @@ class OrganizationService:
         await self.team_repository.delete_user_from_all_teams(
             user_id=member_user_id, organization_id=self.user_context.organization_id
         )
+
+        audit_new: dict[str, Any] = {
+            "user_id": str(profile["user_id"]),
+            "email": profile["email"],
+            "first_name": profile.get("first_name"),
+            "last_name": profile.get("last_name"),
+            "phone_number": profile.get("phone_number"),
+            "phone_isd_code": profile.get("phone_isd_code"),
+            "timezone": profile.get("timezone"),
+            "avatar_url": profile.get("avatar_url"),
+            "status": OrganizationMemberStatus.DELETED.value,
+            "role_id": str(profile.get("role_id", "")),
+            "organization_id": str(profile["organization_id"]),
+            "deleted_by_user_id": self.user_context.user_id,
+            "deleted_by_email": self.user_context.email,
+            "removed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if profile.get("joined_at"):
+            audit_new["joined_at"] = format_iso_datetime(profile["joined_at"])
+        if profile.get("last_active_at"):
+            audit_new["last_active_at"] = format_iso_datetime(profile["last_active_at"])
+
+        return {"current_user_data": profile, "audit_new": audit_new}

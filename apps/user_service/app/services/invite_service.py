@@ -62,11 +62,40 @@ from libs.shared_utils.isometrik_service import create_isometrik_user
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
+def _invite_row_audit_fields(invitation_data: dict[str, Any]) -> dict[str, Any]:
+    """JSON-friendly snapshot of invite row fields for audit (no raw token)."""
+
+    def _iso(val: Any) -> Any:
+        if val is None:
+            return None
+        if hasattr(val, "isoformat"):
+            return val.isoformat()
+        return val
+
+    return {
+        "invite_id": str(invitation_data["id"]),
+        "organization_id": str(invitation_data["organization_id"]),
+        "email": invitation_data.get("email"),
+        "role_id": str(invitation_data["role_id"]) if invitation_data.get("role_id") else None,
+        "status": invitation_data.get("status"),
+        "invited_by": str(invitation_data["invited_by"])
+        if invitation_data.get("invited_by")
+        else None,
+        "expires_at": _iso(invitation_data.get("expires_at")),
+        "created_at": _iso(invitation_data.get("created_at")),
+        "updated_at": _iso(invitation_data.get("updated_at")),
+    }
+
+
 class InviteAcceptOutcome(NamedTuple):
     """Result of accepting an invite: payload and the success message key for the API layer."""
 
     response: InviteAcceptResponse
     message_key: str
+    audit_user_context: dict[str, str]
+    audit_old: dict[str, Any]
+    audit_new: dict[str, Any]
+    audit_record_id: str
 
 
 class InviteService:
@@ -436,6 +465,7 @@ class InviteService:
             token_hash, for_update=True
         )
         invitation_data = self._validate_invitation_for_acceptance(invitation_data)
+        audit_old = _invite_row_audit_fields(invitation_data)
 
         # Check if user is already a member
         existing_member = await self.invite_repository.check_user_membership(
@@ -522,7 +552,29 @@ class InviteService:
             organization_id=str(invitation_data["organization_id"]),
         )
         message_key = INVITE_ACCEPT_SUCCESS_MESSAGE_KEYS[auth_kind]
-        return InviteAcceptOutcome(response=response, message_key=message_key)
+
+        user_email = (getattr(user, "email", None) or invitation_data.get("email") or "").strip()
+        if not user_email:
+            user_email = str(invitation_data["email"])
+
+        audit_user_context = {
+            "user_id": str(user.id),
+            "user_email": user_email,
+            "organization_id": str(invitation_data["organization_id"]),
+        }
+        audit_new = {
+            **_invite_row_audit_fields(invitation_data),
+            "status": InviteStatus.ACCEPTED.value,
+            "accepted_by_user_id": str(user.id),
+        }
+        return InviteAcceptOutcome(
+            response=response,
+            message_key=message_key,
+            audit_user_context=audit_user_context,
+            audit_old=audit_old,
+            audit_new=audit_new,
+            audit_record_id=str(invitation_data["id"]),
+        )
 
     async def validate_invite_link(self, token: str) -> dict[str, bool]:
         """Validate invite link and check if user is existing.
