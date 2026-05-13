@@ -1,5 +1,7 @@
 """Integration tests for invite endpoints."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from apps.user_service.app.utils.common_utils import UserContext
@@ -14,7 +16,10 @@ async def test_accept_and_set_password_invitation(monkeypatch, client):
         del self
         assert body.token == "tok123"
         assert body.password == "NewPass123!"
-        return {"access_token": "atk", "refresh_token": "rtk"}
+        return SimpleNamespace(
+            response={"access_token": "atk", "refresh_token": "rtk"},
+            message_key="invitations.success.invitation_accepted_new_account",
+        )
 
     monkeypatch.setattr(
         "apps.user_service.app.services.invite_service.InviteService.accept_and_set_password",
@@ -27,6 +32,9 @@ async def test_accept_and_set_password_invitation(monkeypatch, client):
     )
     body = assert_success(res, 202)
     assert body["data"]["access_token"] == "atk"
+    assert body["message"] == (
+        "Your account has been created, and you have been added to the organization."
+    )
 
 
 @pytest.mark.asyncio
@@ -37,7 +45,10 @@ async def test_accept_invitation_password_optional(monkeypatch, client):
         del self
         assert body.token == "tok123"
         assert body.password is None
-        return {"access_token": "atk", "refresh_token": "rtk"}
+        return SimpleNamespace(
+            response={"access_token": "atk", "refresh_token": "rtk"},
+            message_key="invitations.success.invitation_accepted_signed_in",
+        )
 
     monkeypatch.setattr(
         "apps.user_service.app.services.invite_service.InviteService.accept_and_set_password",
@@ -50,6 +61,7 @@ async def test_accept_invitation_password_optional(monkeypatch, client):
     )
     body = assert_success(res, 202)
     assert body["data"]["access_token"] == "atk"
+    assert body["message"] == "You have been signed in and added to the organization."
 
 
 @pytest.mark.asyncio
