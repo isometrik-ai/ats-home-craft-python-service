@@ -18,6 +18,7 @@ from apps.user_service.app.services.typesense_index_service import (
     index_companies_background,
     index_contacts_background,
 )
+from apps.user_service.app.services.webhook_service import WebhookService
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -171,4 +172,36 @@ async def email_notifications_webhook(
         message_key="webhooks.success.received",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("whatsapp notifications webhook")
+@router.post(
+    "/whatsapp-notifications",
+    status_code=http_status.HTTP_200_OK,
+    summary="WhatsApp notifications webhook",
+    description=(
+        "Accepts a JSON object (e.g. Timelines.ai message:new webhook). The payload is "
+        "serialized to a string and sent as the Isometrik workflow ``query``."
+    ),
+    responses={
+        http_status.HTTP_200_OK: {"description": "Workflow executed"},
+        http_status.HTTP_502_BAD_GATEWAY: {"description": "Upstream request failed"},
+    },
+)
+async def whatsapp_notifications_webhook(
+    request: Request,
+    body: dict[str, Any] = Body(...),
+):
+    """Forward webhook JSON to Isometrik: payload dict is stringified and sent as workflow query."""
+    webhook_service = WebhookService()
+    workflow_result = await webhook_service.execute_isometrik_whatsapp_workflow(
+        webhook_payload=body,
+    )
+    return success_response(
+        request=request,
+        message_key="webhooks.success.received",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=workflow_result,
     )
