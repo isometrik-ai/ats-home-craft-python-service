@@ -70,6 +70,7 @@ from apps.user_service.app.utils.common_utils import (
     UserContext,
     coerce_json_list,
     format_iso_datetime,
+    normalize_nested_addresses_for_audit,
     parse_json_field,
     serialize_jsonb_param,
 )
@@ -1218,14 +1219,21 @@ class CompaniesService:
             organization_id=org_id,
             update_data=update_data,
         )
-        await self._apply_company_side_effect_deltas(company_id=company_id, body=body)
-        contacts_delta = await self._maybe_apply_contacts_update_delta(
-            company_id=company_id, body=body
-        )
-        # Build a post-update snapshot for audit logs without relying on stale nested data.
+        # Derive the post-update snapshot in-memory (no extra DB read).
         new_snapshot: dict[str, Any] = dict(current)
         if isinstance(updated_row, dict):
             new_snapshot.update(updated_row)
+
+        updated_addresses = await self._apply_company_addresses_delta(
+            company_id=company_id,
+            addresses=body.addresses,
+            existing_addresses=coerce_json_list(current.get("addresses")),
+        )
+        new_snapshot["addresses"] = updated_addresses
+
+        contacts_delta = await self._maybe_apply_contacts_update_delta(
+            company_id=company_id, body=body
+        )
         if contacts_delta is not None:
             new_snapshot["contacts"] = coerce_json_list(
                 await self.cc_repo.get_company_contacts_snapshot(
@@ -1257,6 +1265,7 @@ class CompaniesService:
         _normalize_company_additional_data(normalized)
         _normalize_company_detail_contacts(normalized)
         _normalize_company_detail_timestamps(normalized)
+        normalize_nested_addresses_for_audit(normalized, parent_fk_field="company_id")
         return normalized
 
     async def _build_company_update_data(
@@ -1382,20 +1391,6 @@ class CompaniesService:
             update_data=update_data,
         )
 
-    async def _apply_company_side_effect_deltas(
-        self,
-        *,
-        company_id: str,
-        body: UpdateCompanyRequest,
-    ) -> None:
-        """Apply side effect deltas for a company update."""
-        # Addresses delta: parity with v1 can follow once delta semantics are fixed upstream.
-        if body.addresses is not None:
-            await self._apply_company_addresses_delta(
-                company_id=company_id,
-                addresses=body.addresses,
-            )
-
     async def _maybe_apply_contacts_update_delta(
         self,
         *,
@@ -1410,32 +1405,111 @@ class CompaniesService:
             delta=body.contact_association,
         )
 
-    async def _apply_company_addresses_delta(self, *, company_id: str, addresses: Any) -> None:
-        """Apply AddressesUpdate to `company_addresses` table."""
+    async def _apply_company_addresses_delta(
+        self,
+        *,
+        company_id: str,
+        addresses: Any,
+        existing_addresses: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """Apply AddressesUpdate to `company_addresses` and return updated address snapshot."""
+        current_list = existing_addresses if isinstance(existing_addresses, list) else []
+        result_list: list[dict[str, Any]] = [
+            dict(addr) for addr in current_list if isinstance(addr, dict)
+        ]
+
         if addresses is None:
-            return
-        # remove
-        if addresses.remove:
-            await self.companies_repo.delete_company_addresses(
+            return result_list
+
+        result_list = await self._apply_company_addresses_remove(
+            company_id=company_id,
+            addresses=addresses,
+            result_list=result_list,
+        )
+        result_list = await self._apply_company_addresses_update(
+            company_id=company_id,
+            addresses=addresses,
+            result_list=result_list,
+        )
+        result_list = await self._apply_company_addresses_add(
+            company_id=company_id,
+            addresses=addresses,
+            result_list=result_list,
+        )
+
+        # Keep ordering consistent with `get_company_for_update`: primary first then created_at.
+        result_list.sort(key=ContactsService._contact_address_sort_key)
+        return result_list
+
+    async def _apply_company_addresses_remove(
+        self,
+        *,
+        company_id: str,
+        addresses: Any,
+        result_list: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Apply address removals and return updated in-memory snapshot."""
+        if not getattr(addresses, "remove", None):
+            return result_list
+        remove_set = {str(x) for x in (addresses.remove or [])}
+        if not remove_set:
+            return result_list
+        await self.companies_repo.delete_company_addresses(
+            company_id=company_id,
+            address_ids=list(remove_set),
+        )
+        return [row for row in result_list if str(row.get("id")) not in remove_set]
+
+    async def _apply_company_addresses_update(
+        self,
+        *,
+        company_id: str,
+        addresses: Any,
+        result_list: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Apply address updates (RETURNING rows) to the in-memory snapshot."""
+        if not getattr(addresses, "update", None):
+            return result_list
+
+        for item in addresses.update or []:
+            updated_row = await self.companies_repo.update_company_address(
                 company_id=company_id,
-                address_ids=addresses.remove,
+                address_id=item.id,
+                update_data=item.model_dump(exclude={"id"}, exclude_none=True),
             )
-        # update
-        if addresses.update:
-            for item in addresses.update:
-                await self.companies_repo.update_company_address(
-                    company_id=company_id,
-                    address_id=item.id,
-                    update_data=item.model_dump(exclude={"id"}, exclude_none=True),
-                )
-        # add
-        if addresses.add:
-            await self.companies_repo.create_company_addresses(
-                [
-                    {"company_id": company_id, **addr.model_dump(exclude_none=True)}
-                    for addr in addresses.add
-                ]
-            )
+            if not updated_row:
+                continue
+            updated_id = str(updated_row.get("id"))
+            for idx, existing in enumerate(result_list):
+                if str(existing.get("id")) == updated_id:
+                    result_list[idx] = dict(updated_row)
+                    break
+            else:
+                result_list.append(dict(updated_row))
+
+        return result_list
+
+    async def _apply_company_addresses_add(
+        self,
+        *,
+        company_id: str,
+        addresses: Any,
+        result_list: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Apply address inserts (RETURNING rows) to the in-memory snapshot."""
+        if not getattr(addresses, "add", None):
+            return result_list
+
+        inserted = await self.companies_repo.create_company_addresses(
+            [
+                {"company_id": company_id, **addr.model_dump(exclude_none=True)}
+                for addr in addresses.add
+            ]
+        )
+        for row in inserted or []:
+            if isinstance(row, dict):
+                result_list.append(dict(row))
+        return result_list
 
     @staticmethod
     def _ensure_list_item_ids(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
