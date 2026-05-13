@@ -35,8 +35,30 @@ class OrganizationMemberRepository:
         status = member_data.get("status") or OrganizationMemberStatus.ACTIVE.value
         member_id = member_data.get("id")
 
+        # Upsert on (user_id, organization_id) so a previously soft-deleted member
+        # is reactivated rather than triggering a unique-constraint violation when
+        # they're re-invited and accept again.
+        on_conflict_clause = """
+            ON CONFLICT (user_id, organization_id) DO UPDATE SET
+                isometrik_user_id = EXCLUDED.isometrik_user_id,
+                email = EXCLUDED.email,
+                role_id = EXCLUDED.role_id,
+                role = EXCLUDED.role,
+                member_role = EXCLUDED.member_role,
+                status = EXCLUDED.status,
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                phone_number = EXCLUDED.phone_number,
+                phone_isd_code = EXCLUDED.phone_isd_code,
+                timezone = EXCLUDED.timezone,
+                salutation = EXCLUDED.salutation,
+                invited_by = EXCLUDED.invited_by,
+                joined_at = NOW(),
+                updated_at = NOW()
+        """
+
         if member_id:
-            query = """
+            query = f"""
                 INSERT INTO organization_members (
                     id,
                     user_id,
@@ -63,6 +85,7 @@ class OrganizationMemberRepository:
                     $9, NOW(), NOW(), NOW(),
                     $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16
                 )
+                {on_conflict_clause}
                 RETURNING *
             """
             row = await self.db_connection.fetchrow(
@@ -85,7 +108,7 @@ class OrganizationMemberRepository:
                 member_data.get("invited_by"),
             )
         else:
-            query = """
+            query = f"""
                 INSERT INTO organization_members (
                     user_id,
                     isometrik_user_id,
@@ -111,6 +134,7 @@ class OrganizationMemberRepository:
                     $8, NOW(), NOW(), NOW(),
                     $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15
                 )
+                {on_conflict_clause}
                 RETURNING *
             """
             row = await self.db_connection.fetchrow(
