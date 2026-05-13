@@ -1196,7 +1196,7 @@ class AuthService:
 
         if not is_valid:
             raise BadRequestException(
-                message_key="auth.errors.authentication_failed",
+                message_key="auth.errors.current_password_incorrect",
                 custom_code=CustomStatusCode.BAD_REQUEST,
             )
 

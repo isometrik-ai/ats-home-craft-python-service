@@ -89,6 +89,7 @@
       "account_not_active": "Account is not active. Please verify your email and try again.",
       "user_not_found": "User not found in our system. Please check your email and try again.",
       "new_password_must_be_different_from_current_password": "New password must be different from current password",
+      "current_password_incorrect": "The current password you entered is incorrect. Please check it and try again.",
       "invalid_credentials": "Invalid email or password. Please check your credentials and try again.",
       "invalid_refresh_token": "Invalid or expired refresh token. Please login again.",
       "authentication_service_unavailable": "Authentication service is temporarily unavailable.",
