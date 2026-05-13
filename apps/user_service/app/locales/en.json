@@ -31,12 +31,14 @@
       "invitation_not_pending": "Only pending invitations can have their role changed."
     },
     "success": {
-      "invitation_accepted": "Invitation accepted successfully.",
+      "invitation_accepted": "The invitation has been accepted successfully.",
+      "invitation_accepted_new_account": "Your account has been created, and you have been added to the organization.",
+      "invitation_accepted_signed_in": "You have been signed in and added to the organization.",
       "invitation_resent": "Invitation resent successfully.",
       "invitation_created": "Invitation created successfully.",
       "invitation_deleted": "Invitation deleted successfully.",
       "invitation_patched": "Invitation updated successfully.",
-      "link_validated": "Invite link validated successfully."
+      "link_validated": "Invitation link validated successfully."
     }
   },
   "organizations": {

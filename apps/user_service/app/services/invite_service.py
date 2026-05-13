@@ -3,7 +3,7 @@
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import uuid4
 
 import asyncpg
@@ -20,6 +20,8 @@ from apps.user_service.app.db.repositories import (
 )
 from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.schemas.enums import (
+    INVITE_ACCEPT_SUCCESS_MESSAGE_KEYS,
+    InviteAcceptAuthKind,
     InviteStatus,
     OrganizationMemberRole,
     OrganizationMemberStatus,
@@ -58,6 +60,13 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.isometrik_service import create_isometrik_user
 from libs.shared_utils.status_codes import CustomStatusCode
+
+
+class InviteAcceptOutcome(NamedTuple):
+    """Result of accepting an invite: payload and the success message key for the API layer."""
+
+    response: InviteAcceptResponse
+    message_key: str
 
 
 class InviteService:
@@ -331,7 +340,7 @@ class InviteService:
         inv_meta: dict[str, Any],
         phone_number: str | None,
         phone_isd_code: str | None,
-    ) -> Any:  # Returns auth result
+    ) -> tuple[Any, InviteAcceptAuthKind]:
         """Authenticate existing user or create new user account.
 
         Args:
@@ -342,7 +351,7 @@ class InviteService:
             phone_isd_code: Phone ISD code
 
         Returns:
-            Auth result from Supabase
+            Auth result from Supabase and which auth path was used (for API messaging).
         """
         # Check if user already exists in the auth system
         existing_auth_user = await self.user_repository.get_auth_user_by_email(email)
@@ -356,17 +365,19 @@ class InviteService:
                         custom_code=CustomStatusCode.BAD_REQUEST,
                     )
                 # User already exists, authenticate them with the provided password
-                return await self._authenticate_existing_user(email, password)
+                auth_result = await self._authenticate_existing_user(email, password)
+                return auth_result, InviteAcceptAuthKind.EXISTING_WITH_PASSWORD
 
             if not self.supabase_admin_client or not self.supabase_anon_client:
                 raise ServiceUnavailableException(
                     message_key="errors.service_unavailable",
                     custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
                 )
-            return await generate_magiclink_and_exchange_for_session(
+            auth_result = await generate_magiclink_and_exchange_for_session(
                 admin_client=self.supabase_admin_client,
                 email=email,
             )
+            return auth_result, InviteAcceptAuthKind.EXISTING_PASSWORDLESS
 
         # User doesn't exist, create a new account
         if not password:
@@ -377,7 +388,8 @@ class InviteService:
         signup_request = self._build_signup_request_from_invite(
             email, password, inv_meta, phone_number, phone_isd_code
         )
-        return await self._signup_new_user(signup_request)
+        auth_result = await self._signup_new_user(signup_request)
+        return auth_result, InviteAcceptAuthKind.NEW_SIGNUP
 
     def _build_invite_accept_response(
         self,
@@ -416,7 +428,7 @@ class InviteService:
 
     async def accept_and_set_password(
         self, body: InviteAcceptBySettingPasswordRequest
-    ) -> InviteAcceptResponse:
+    ) -> InviteAcceptOutcome:
         """Accept an organization invitation by setting password."""
         # Get invitation details by token with row locking for atomic acceptance
         token_hash = hash_token(body.token)
@@ -454,7 +466,7 @@ class InviteService:
 
         # Authenticate existing user or create new user account
         # This allows existing users to accept invitations from new organizations
-        auth_result = await self._authenticate_or_signup_user(
+        auth_result, auth_kind = await self._authenticate_or_signup_user(
             email=invitation_data["email"],
             password=body.password,
             inv_meta=inv_meta,
@@ -503,12 +515,14 @@ class InviteService:
         org_id = invitation_data["organization_id"]
         await self.organization_repository.update_subscription_users(org_id)
 
-        return self._build_invite_accept_response(
+        response = self._build_invite_accept_response(
             session=session,
             user=user,
             user_metadata=user_metadata,
             organization_id=str(invitation_data["organization_id"]),
         )
+        message_key = INVITE_ACCEPT_SUCCESS_MESSAGE_KEYS[auth_kind]
+        return InviteAcceptOutcome(response=response, message_key=message_key)
 
     async def validate_invite_link(self, token: str) -> dict[str, bool]:
         """Validate invite link and check if user is existing.

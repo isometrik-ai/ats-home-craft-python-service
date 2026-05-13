@@ -56,7 +56,7 @@ router = APIRouter(prefix="/invite", tags=["Organization Invitations"])
     responses={
         http_status.HTTP_200_OK: {
             "model": InviteValidateLinkResponse,
-            "description": "Invite link validated successfully",
+            "description": "Invitation link validated successfully",
         },
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
         http_status.HTTP_404_NOT_FOUND: {"description": "Invitation not found or expired"},
@@ -142,14 +142,14 @@ async def accept_and_set_password_invitation(
         sb_admin_client=sb_admin_client,
         sb_anon_client=sb_anon_client,
     )
-    result = await invite_service.accept_and_set_password(body)
+    outcome = await invite_service.accept_and_set_password(body)
 
     return success_response(
         request=request,
-        message_key="invitations.success.invitation_accepted",
+        message_key=outcome.message_key,
         custom_code=CustomStatusCode.ACCEPTED,
         status_code=http_status.HTTP_202_ACCEPTED,
-        data=result,
+        data=outcome.response,
     )
 
 

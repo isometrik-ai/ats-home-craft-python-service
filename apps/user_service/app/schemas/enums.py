@@ -113,6 +113,24 @@ class InviteStatus(str, Enum):
     ACCEPTED = "accepted"
 
 
+class InviteAcceptAuthKind(str, Enum):
+    """How the invitee was authenticated when accepting an organization invitation."""
+
+    NEW_SIGNUP = "new_signup"
+    EXISTING_WITH_PASSWORD = "existing_with_password"
+    EXISTING_PASSWORDLESS = "existing_passwordless"
+
+
+INVITE_ACCEPT_MSG_KEY_NEW_ACCOUNT = "invitations.success.invitation_accepted_new_account"
+INVITE_ACCEPT_MSG_KEY_SIGNED_IN = "invitations.success.invitation_accepted_signed_in"
+
+INVITE_ACCEPT_SUCCESS_MESSAGE_KEYS: dict[InviteAcceptAuthKind, str] = {
+    InviteAcceptAuthKind.NEW_SIGNUP: INVITE_ACCEPT_MSG_KEY_NEW_ACCOUNT,
+    InviteAcceptAuthKind.EXISTING_WITH_PASSWORD: INVITE_ACCEPT_MSG_KEY_SIGNED_IN,
+    InviteAcceptAuthKind.EXISTING_PASSWORDLESS: INVITE_ACCEPT_MSG_KEY_SIGNED_IN,
+}
+
+
 # ============================================================================
 # ADMIN ACCESS MANAGEMENT ENUMS
 # ============================================================================
