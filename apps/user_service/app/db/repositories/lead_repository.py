@@ -97,7 +97,8 @@ COALESCE(
             json_build_object(
                 'company_id', lc.company_id::text,
                 'label', lc.label,
-                'company_name', COALESCE(co.name, '')
+                'company_name', COALESCE(co.name, ''),
+                'profile_photo_url', co.profile_photo_url
             )
             ORDER BY lc.created_at ASC
         )
@@ -119,7 +120,8 @@ COALESCE(
             json_build_object(
                 'contact_id', lc.contact_id::text,
                 'label', lc.label,
-                'contact_name', ({_CONTACT_DISPLAY_NAME_SQL.strip()})
+                'contact_name', ({_CONTACT_DISPLAY_NAME_SQL.strip()}),
+                'profile_photo_url', ct.profile_photo_url
             )
             ORDER BY lc.created_at ASC
         )
@@ -225,7 +227,8 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
         lc.label AS label,
         ({_CONTACT_DISPLAY_NAME_SQL.strip()}) AS contact_name,
         cu.email::text AS contact_email,
-        ct.phones AS contact_phones
+        ct.phones AS contact_phones,
+        ct.profile_photo_url AS contact_profile_photo_url
     FROM leads l
     {_LEADS_JOIN_DISPLAY.strip()}
     LEFT JOIN lead_contacts lc
@@ -386,11 +389,11 @@ class LeadRepository:
         self,
         row: dict[str, Any],
         contacts: list[tuple[str, str | None]] | None = None,
-        company: tuple[str, str | None] | None = None,
+        companies: list[tuple[str, str | None]] | None = None,
     ) -> dict[str, Any]:
-        """Insert a lead; optional ``lead_companies``
-        (at most one on create) and ``lead_contacts``."""
+        """Insert a lead; optional ``lead_companies`` and ``lead_contacts``."""
         pairs = contacts or []
+        company_rows = companies or []
 
         values: list[Any] = []
         placeholders: list[str] = []
@@ -413,17 +416,20 @@ class LeadRepository:
         lead_id = created["id"]
         org_id = created["organization_id"]
 
-        if company is not None:
-            cid, lab = company
+        if company_rows:
+            cids = [c for c, _ in company_rows]
+            labs = [lab for _, lab in company_rows]
             await self.db_connection.execute(
                 """
                 INSERT INTO lead_companies (lead_id, organization_id, company_id, label)
-                VALUES ($1::uuid, $2::uuid, $3::uuid, $4::text)
+                SELECT $1::uuid, $2::uuid, u.company_id, u.label
+                FROM unnest($3::uuid[], $4::text[])
+                    AS u(company_id, label)
                 """,
                 lead_id,
                 org_id,
-                cid,
-                lab,
+                cids,
+                labs,
             )
 
         if not pairs:
@@ -597,6 +603,7 @@ class LeadRepository:
         payload.pop("contact_name", None)
         payload.pop("contact_email", None)
         payload.pop("contact_phones", None)
+        payload.pop("contact_profile_photo_url", None)
 
         contacts: list[dict[str, Any]] = []
         for row in rows:
@@ -610,6 +617,7 @@ class LeadRepository:
                     "contact_name": row["contact_name"],
                     "email": row.get("contact_email"),
                     "phones": parse_json_field(row.get("contact_phones")) or [],
+                    "profile_photo_url": row.get("contact_profile_photo_url"),
                 }
             )
 
@@ -855,7 +863,8 @@ class LeadRepository:
                                     json_build_object(
                                         'company_id', d.company_id::text,
                                         'label', d.label,
-                                        'company_name', COALESCE(co.name, '')
+                                        'company_name', COALESCE(co.name, ''),
+                                        'profile_photo_url', co.profile_photo_url
                                     )
                                     ORDER BY coalesce(d.company_id::text, '') ASC
                                 )
@@ -877,7 +886,8 @@ class LeadRepository:
                                     json_build_object(
                                         'contact_id', d.contact_id::text,
                                         'label', d.label,
-                                        'contact_name', ({_CONTACT_DISPLAY_NAME_SQL.strip()})
+                                        'contact_name', ({_CONTACT_DISPLAY_NAME_SQL.strip()}),
+                                        'profile_photo_url', ct.profile_photo_url
                                     )
                                     ORDER BY coalesce(d.contact_id::text, '') ASC
                                 )
