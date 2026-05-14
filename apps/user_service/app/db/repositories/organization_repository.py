@@ -386,6 +386,46 @@ class OrganizationRepository:
         )
         return dict(row) if row else None
 
+    async def get_organization_with_owner_for_impersonation(
+        self,
+        organization_id: str,
+    ) -> dict[str, Any] | None:
+        """Non-deleted organization and first owner member with email (one query)."""
+        owner_role = OrganizationMemberRole.OWNER.value
+        deleted_member = OrganizationMemberStatus.DELETED.value
+        deleted_org = OrganizationStatus.DELETED.value
+
+        query = """
+            SELECT
+                o.id,
+                o.name,
+                ow.user_id::text AS owner_user_id,
+                ow.email AS owner_email
+            FROM organizations o
+            LEFT JOIN LATERAL (
+                SELECT om.user_id, om.email
+                FROM organization_members om
+                WHERE om.organization_id = o.id
+                  AND om.member_role = $2
+                  AND om.status <> $3
+                  AND om.email IS NOT NULL
+                  AND TRIM(om.email) <> ''
+                ORDER BY om.created_at ASC
+                LIMIT 1
+            ) ow ON true
+            WHERE o.id = $1
+              AND o.status <> $4
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(
+            query,
+            organization_id,
+            owner_role,
+            deleted_member,
+            deleted_org,
+        )
+        return dict(row) if row else None
+
     async def get_organization_details(
         self,
         organization_id: str,

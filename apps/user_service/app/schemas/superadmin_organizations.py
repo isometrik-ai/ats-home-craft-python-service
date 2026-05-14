@@ -1,5 +1,7 @@
 """Schemas for superadmin organization APIs."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.user_service.app.schemas.enums import (
@@ -66,4 +68,47 @@ class SuperadminOrganizationListQueryParams(BaseModel):
     order: SuperadminOrganizationListSortOrder = Field(
         default=SuperadminOrganizationListSortOrder.DESC,
         description="Sort direction",
+    )
+
+
+class SuperadminImpersonationResponse(BaseModel):
+    """Session for the organization owner after superadmin impersonation.
+
+    Token timing fields mirror ``AuthService.login`` / ``AuthResponse`` (``session.expires_in``,
+    ``session.expires_at``) for consistent client handling with ``POST /v1/auth/login``.
+    """
+
+    access_token: str = Field(..., description="Bearer access token for the owner session")
+    refresh_token: str | None = Field(
+        None, description="Refresh token when issued by auth provider"
+    )
+    expires_in: int | None = Field(
+        None,
+        description="Access token lifetime in seconds (same as login: session.expires_in)",
+    )
+    expires_at: datetime | None = Field(
+        None,
+        description="Access token expiry (same as login: session.expires_at)",
+    )
+    token_type: str = Field(default="bearer", description="OAuth token type")
+    organization_id: str = Field(..., description="Organization UUID acted on")
+    organization_name: str | None = Field(None, description="Organization display name")
+    impersonated_user_id: str | None = Field(
+        None,
+        description="Auth user id of the organization owner whose session was issued",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "access_token": "eyJ...",
+                "refresh_token": "v1...",
+                "expires_in": 3600,
+                "expires_at": "2026-01-15T12:00:00",
+                "token_type": "bearer",
+                "organization_id": "550e8400-e29b-41d4-a716-446655440000",
+                "organization_name": "Acme Legal",
+                "impersonated_user_id": "660e8400-e29b-41d4-a716-446655440001",
+            }
+        }
     )

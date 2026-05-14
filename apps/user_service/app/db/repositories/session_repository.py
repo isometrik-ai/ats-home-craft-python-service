@@ -478,6 +478,22 @@ class SessionRepository:
         """
         await self.db_connection.execute("DELETE FROM auth.sessions WHERE id = $1", session_id)
 
+    async def delete_auth_session(self, session_id: str) -> str | None:
+        """Delete a row from ``auth.sessions`` by id (Supabase session revocation).
+
+        ``session_id`` should come from a JWT already validated by auth middleware.
+
+        Returns:
+            Deleted session id as string, or ``None`` if no row was deleted.
+        """
+        query = """
+            DELETE FROM auth.sessions s
+            WHERE s.id = $1
+            RETURNING s.id::text
+        """
+        row = await self.db_connection.fetchrow(query, session_id)
+        return str(row["id"]) if row else None
+
     async def revoke_org_sessions_for_user(self, user_id: str, organization_id: str) -> None:
         """Revoke sessions for a user **scoped to one organization**.
 
