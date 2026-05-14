@@ -21,6 +21,9 @@ from apps.user_service.app.api.presigned_url import router as presigned_url_rout
 from apps.user_service.app.api.projects import router as projects_router
 from apps.user_service.app.api.roles import router as roles_router
 from apps.user_service.app.api.sessions import router as sessions_router
+from apps.user_service.app.api.superadmin_organizations import (
+    router as superadmin_organizations_router,
+)
 from apps.user_service.app.api.teams import router as teams_router
 from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.api.verification_codes import (
@@ -32,6 +35,7 @@ router = APIRouter(prefix="/v1")
 
 router.include_router(auth_router)
 router.include_router(organization_router)
+router.include_router(superadmin_organizations_router)
 router.include_router(users_router)
 router.include_router(roles_router)
 router.include_router(sessions_router)
