@@ -73,6 +73,10 @@ class IsometrikSettings(BaseSettings):
     client_name: str = config("ISOMETRIK_CLIENT_NAME")
     region_id: str = config("ISOMETRIK_REGION_ID")
     auth_token: str = config("ISOMETRIK_AUTH_TOKEN")
+    whatsapp_workflow_id: str = config(
+        "ISOMETRIK_WHATSAPP_WORKFLOW_ID",
+        default="6a056642da7550b8dd2632a1",
+    )
 
 
 class CloudflareR2Settings(BaseSettings):
