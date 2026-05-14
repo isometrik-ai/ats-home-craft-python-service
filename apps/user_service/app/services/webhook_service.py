@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
+from libs.shared_config.app_settings import shared_settings
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("webhook_service")
@@ -25,7 +26,6 @@ _ISOMETRIK_USER_TOKEN = (
     "SFMyNTY.g2gDbQAAABg2YTA0NjlmMWRhYmJhYjAwMDE5NTkyYTduBgD4jmYhngFiAAFRgA.KuiD3kOBbcUzTEU7S"
     "8a7ENLSyXqMz_ZyPk4OahmatZs"
 )
-_ISOMETRIK_WORKFLOW_ID = "6a047406da7550b8dd2631f9"
 _HTTP_TIMEOUT = httpx.Timeout(30.0)
 
 
@@ -45,7 +45,10 @@ class WebhookService:
             "projectid": _ISOMETRIK_PROJECT_ID,
             "usertoken": _ISOMETRIK_USER_TOKEN,
         }
-        payload = {"workflow_id": _ISOMETRIK_WORKFLOW_ID, "query": query}
+        payload = {
+            "workflow_id": shared_settings.isometrik.whatsapp_workflow_id,
+            "query": query,
+        }
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as http_client:
             try:
                 response = await http_client.post(
