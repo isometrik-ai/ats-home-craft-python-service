@@ -101,6 +101,29 @@ class OrganizationMemberRole(str, Enum):
     MEMBER = "member"
 
 
+class SuperadminOrganizationListStatus(str, Enum):
+    """Derived / filter status for superadmin organization listing."""
+
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    PENDING_DELETION = "pending_deletion"
+
+
+class SuperadminOrganizationListSortField(str, Enum):
+    """Allowed sort columns for superadmin organization list."""
+
+    CREATED_AT = "created_at"
+    NAME = "name"
+    MEMBER_COUNT = "member_count"
+
+
+class SuperadminOrganizationListSortOrder(str, Enum):
+    """Sort direction for superadmin organization list."""
+
+    ASC = "asc"
+    DESC = "desc"
+
+
 # ============================================================================
 # INVITE ENUMS
 # ============================================================================

@@ -9,15 +9,26 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.schemas.enums import OrganizationMemberStatus
-from apps.user_service.app.schemas.organizations import (
+from apps.user_service.app.schemas.enums import (
+    DeleteRequestStatus,
+    OrganizationMemberRole,
+    OrganizationMemberStatus,
     OrganizationStatus,
+    PlanType,
+    SuperadminOrganizationListStatus,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("organization_repository")
+
+
+_SUPERADMIN_ORG_SORT_SQL = {
+    "created_at": "o.created_at",
+    "name": "o.name",
+    "member_count": "COALESCE(mc.member_count, 0)",
+}
 
 
 class OrganizationRepository:
@@ -154,6 +165,181 @@ class OrganizationRepository:
         """
 
         return await self.db_connection.fetchval(query, *params) or 0
+
+    def _build_superadmin_organization_list_where(
+        self,
+        search: str | None,
+        plan_type: str | None,
+        list_status: str | None,
+    ) -> tuple[str, list[Any]]:
+        """WHERE clause for superadmin org list (excludes deleted orgs). Uses `ow` lateral alias."""
+        deleted_org = OrganizationStatus.DELETED.value
+        conditions: list[str] = ["o.status <> $1"]
+        params: list[Any] = [deleted_org]
+        idx = 2
+
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            owner_display_ilike = (
+                "TRIM(CONCAT(COALESCE(ow.first_name, ''), ' ', "
+                "COALESCE(ow.last_name, ''))) ILIKE "
+                f"${idx}"
+            )
+            conditions.append(
+                f"""(
+                    o.name ILIKE ${idx}
+                    OR ow.email ILIKE ${idx}
+                    OR {owner_display_ilike}
+                )"""
+            )
+            params.append(term)
+            idx += 1
+
+        if plan_type:
+            conditions.append(f"COALESCE(o.subscription::jsonb->>'plan_type', '') = ${idx}")
+            params.append(plan_type)
+            idx += 1
+
+        pending_literal = DeleteRequestStatus.PENDING.value
+        pending_exists = (
+            "EXISTS (SELECT 1 FROM organization_delete_requests odr "
+            "WHERE odr.organization_id = o.id AND odr.status = "
+            f"'{pending_literal}')"
+        )
+        not_pending = (
+            "NOT EXISTS (SELECT 1 FROM organization_delete_requests odr "
+            "WHERE odr.organization_id = o.id AND odr.status = "
+            f"'{pending_literal}')"
+        )
+
+        if list_status == SuperadminOrganizationListStatus.PENDING_DELETION.value:
+            conditions.append(pending_exists)
+        elif list_status == SuperadminOrganizationListStatus.SUSPENDED.value:
+            conditions.append(not_pending)
+            conditions.append(f"o.status = ${idx}")
+            params.append(OrganizationStatus.SUSPENDED.value)
+            idx += 1
+        elif list_status == SuperadminOrganizationListStatus.ACTIVE.value:
+            conditions.append(not_pending)
+            conditions.append(f"o.status IN (${idx}, ${idx + 1})")
+            params.append(OrganizationStatus.ACTIVE.value)
+            params.append(OrganizationStatus.TRIAL.value)
+            idx += 2
+
+        return " AND ".join(conditions), params
+
+    async def get_superadmin_organizations_list(
+        self,
+        *,
+        search: str | None = None,
+        plan_type: str | None = None,
+        list_status: str | None = None,
+        sort_field: str = "created_at",
+        sort_order: str = "desc",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated superadmin org list + total count in one round-trip.
+
+        Uses ROW_NUMBER over the filtered set and a total CTE so an out-of-range page
+        still returns the correct total (one sentinel row with null org columns).
+        """
+        where_sql, where_params = self._build_superadmin_organization_list_where(
+            search, plan_type, list_status
+        )
+        owner_role = OrganizationMemberRole.OWNER.value
+        deleted_member = OrganizationMemberStatus.DELETED.value
+
+        order_sql = _SUPERADMIN_ORG_SORT_SQL.get(sort_field, "o.created_at")
+        direction = "ASC" if (sort_order or "").lower() == "asc" else "DESC"
+
+        base_idx = len(where_params)
+        owner_role_idx = base_idx + 1
+        deleted_mem_idx = base_idx + 2
+        offset_idx = base_idx + 3
+        end_rn_idx = base_idx + 4
+        end_rn = offset + limit
+
+        params = [
+            *where_params,
+            owner_role,
+            deleted_member,
+            offset,
+            end_rn,
+        ]
+
+        query = f"""
+            WITH base AS (
+                SELECT
+                    o.id,
+                    o.name,
+                    o.created_at,
+                    COALESCE(mc.member_count, 0)::int AS member_count,
+                    ow.user_id::text AS owner_user_id,
+                    ow.email AS owner_email,
+                    ow.first_name AS owner_first_name,
+                    ow.last_name AS owner_last_name,
+                    COALESCE(
+                        o.subscription::jsonb->>'plan_type',
+                        '{PlanType.TRIAL.value}'
+                    ) AS plan_type,
+                    CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM organization_delete_requests odr
+                            WHERE odr.organization_id = o.id
+                              AND odr.status = '{DeleteRequestStatus.PENDING.value}'
+                        ) THEN '{SuperadminOrganizationListStatus.PENDING_DELETION.value}'
+                        WHEN o.status = '{OrganizationStatus.SUSPENDED.value}'
+                        THEN '{SuperadminOrganizationListStatus.SUSPENDED.value}'
+                        ELSE '{SuperadminOrganizationListStatus.ACTIVE.value}'
+                    END AS list_status,
+                    ROW_NUMBER() OVER (
+                        ORDER BY {order_sql} {direction}, o.id ASC
+                    ) AS rn
+                FROM organizations o
+                LEFT JOIN LATERAL (
+                    SELECT om.user_id, om.email, om.first_name, om.last_name
+                    FROM organization_members om
+                    WHERE om.organization_id = o.id
+                      AND om.member_role = ${owner_role_idx}
+                      AND om.status <> ${deleted_mem_idx}
+                    ORDER BY om.created_at ASC
+                    LIMIT 1
+                ) ow ON true
+                LEFT JOIN (
+                    SELECT organization_id, COUNT(*)::int AS member_count
+                    FROM organization_members
+                    WHERE status <> ${deleted_mem_idx}
+                    GROUP BY organization_id
+                ) mc ON mc.organization_id = o.id
+                WHERE {where_sql}
+            ),
+            tot AS (SELECT COUNT(*)::int AS c FROM base)
+            SELECT
+                t.c::int AS _total_count,
+                b.id,
+                b.name,
+                b.created_at,
+                b.member_count,
+                b.owner_user_id,
+                b.owner_email,
+                b.owner_first_name,
+                b.owner_last_name,
+                b.plan_type,
+                b.list_status
+            FROM tot t
+            LEFT JOIN base b ON b.rn > ${offset_idx} AND b.rn <= ${end_rn_idx}
+        """
+
+        rows = await self.db_connection.fetch(query, *params)
+        total = int(rows[0]["_total_count"])
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            if row["id"] is not None:
+                item = dict(row)
+                item.pop("_total_count", None)
+                items.append(item)
+        return items, total
 
     async def get_organization_by_id(
         self,
