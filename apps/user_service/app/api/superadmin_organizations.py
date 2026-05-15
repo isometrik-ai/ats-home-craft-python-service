@@ -22,7 +22,6 @@ from apps.user_service.app.services.superadmin_organization_service import (
     SuperadminOrganizationService,
 )
 from apps.user_service.app.utils.common_utils import (
-    extract_user_context,
     handle_api_exceptions,
     require_super_admin,
 )
@@ -107,27 +106,31 @@ async def superadmin_exit_impersonation(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """End impersonation by revoking the impersonated user's auth session."""
-    user_context = await extract_user_context(current_user, db_connection)
-    request.state.audit_table = "organizations"
-    request.state.audit_requested_id = str(current_user.get("session_id") or "")
-    request.state.audit_description = (
-        "Impersonation ended: auth session revoked for user "
-        f"{user_context.user_id} (session_id={current_user.get('session_id')})"
-    )
-    request.state.audit_risk_level = "high"
-    request.state.raw_audit_new_data = {
-        "session_id": str(current_user.get("session_id") or ""),
-        "user_id": user_context.user_id,
-    }
-    org_id = user_context.organization_id or "no_organization"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": org_id,
-    }
+    user_id = str(current_user.get("sub") or "")
+    user_email = str(current_user.get("email") or "")
+    session_id = str(current_user.get("session_id") or "")
 
     service = SuperadminOrganizationService(db_connection=db_connection)
     data = await service.exit_impersonation_session(current_user=current_user)
+
+    org_id = data["organization_id"]
+    request.state.audit_table = "organizations"
+    request.state.audit_requested_id = org_id
+    request.state.audit_description = (
+        "Impersonation ended: auth session revoked for user "
+        f"{user_id} (session_id={session_id}, organization_id={org_id})"
+    )
+    request.state.audit_risk_level = "high"
+    request.state.raw_audit_new_data = {
+        "session_id": session_id,
+        "user_id": user_id,
+        "organization_id": org_id,
+    }
+    request.state.audit_user_context = {
+        "user_id": user_id,
+        "user_email": user_email,
+        "organization_id": org_id,
+    }
 
     return success_response(
         request=request,
@@ -145,7 +148,9 @@ async def superadmin_exit_impersonation(
     summary="Impersonate organization owner (superadmin)",
     description=(
         "Issues a Supabase session for the organization's primary owner member via "
-        "admin magic-link exchange. Rate-limited; audited as high risk."
+        "admin magic-link exchange, links the session to the target organization, and "
+        "returns select-org context (isometrik details) like set-password. "
+        "Rate-limited; audited as high risk."
     ),
 )
 @limiter.limit("10/minute")

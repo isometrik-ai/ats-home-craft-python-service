@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from apps.user_service.app.schemas.auth import SelectOrganizationResponse
 from apps.user_service.app.schemas.enums import (
     PlanType,
     SuperadminOrganizationListSortField,
@@ -96,6 +97,13 @@ class SuperadminImpersonationResponse(BaseModel):
     impersonated_user_id: str | None = Field(
         None,
         description="Auth user id of the organization owner whose session was issued",
+    )
+    select_organization: SelectOrganizationResponse | None = Field(
+        None,
+        description=(
+            "Organization context for the impersonated session (same shape as "
+            "POST /v1/auth/select-org and set-password carry-over)"
+        ),
     )
 
     model_config = ConfigDict(

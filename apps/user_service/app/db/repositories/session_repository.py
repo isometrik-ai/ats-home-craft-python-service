@@ -478,21 +478,29 @@ class SessionRepository:
         """
         await self.db_connection.execute("DELETE FROM auth.sessions WHERE id = $1", session_id)
 
-    async def delete_auth_session(self, session_id: str) -> str | None:
-        """Delete a row from ``auth.sessions`` by id (Supabase session revocation).
+    async def delete_auth_session(self, session_id: str, user_id: str) -> dict[str, str] | None:
+        """Delete ``auth.sessions`` row joined to ``user_sessions`` (Supabase revocation).
 
-        ``session_id`` should come from a JWT already validated by auth middleware.
+        ``session_id`` / ``user_id`` should come from a JWT already validated by auth middleware.
 
         Returns:
-            Deleted session id as string, or ``None`` if no row was deleted.
+            Dict with ``session_id`` and ``organization_id``, or ``None`` if no row was deleted.
         """
         query = """
             DELETE FROM auth.sessions s
-            WHERE s.id = $1
-            RETURNING s.id::text
+            USING public.user_sessions us
+            WHERE us.id = s.id
+              AND s.id = $1
+              AND us.user_id = $2
+            RETURNING s.id::text AS session_id, us.organization_id::text AS organization_id
         """
-        row = await self.db_connection.fetchrow(query, session_id)
-        return str(row["id"]) if row else None
+        row = await self.db_connection.fetchrow(query, session_id, user_id)
+        if not row:
+            return None
+        return {
+            "session_id": str(row["session_id"]),
+            "organization_id": str(row["organization_id"]),
+        }
 
     async def revoke_org_sessions_for_user(self, user_id: str, organization_id: str) -> None:
         """Revoke sessions for a user **scoped to one organization**.

@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
 import asyncpg
 from supabase import AsyncClient
 
+from apps.user_service.app.db.repositories import OrganizationMemberRepository
 from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.session_repository import SessionRepository
+from apps.user_service.app.schemas.auth import SelectOrganizationResponse
 from apps.user_service.app.schemas.enums import (
     PlanType,
     SuperadminOrganizationListSortField,
@@ -26,15 +29,21 @@ from apps.user_service.app.schemas.superadmin_organizations import (
     SuperadminOrgOwnerAdmin,
 )
 from apps.user_service.app.services.organization_service import OrganizationService
+from apps.user_service.app.services.session_management_service import (
+    SessionManagementService,
+)
 from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
 )
+from apps.user_service.app.utils.user_utils import get_isometrik_details
 from libs.shared_db.supabase_db.auth_repository import (
     generate_magiclink_and_exchange_for_session,
 )
 from libs.shared_utils.http_exceptions import BadRequestException, NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.super_admin_utils import is_system_super_admin
+
+logger = logging.getLogger(__name__)
 
 
 class SuperadminOrganizationService:
@@ -148,6 +157,22 @@ class SuperadminOrganizationService:
         auth_user_id = getattr(user, "id", None) if user is not None else None
         impersonated_id = str(auth_user_id) if auth_user_id else str(row.get("owner_user_id") or "")
 
+        select_organization: SelectOrganizationResponse | None = None
+        if impersonated_id:
+            session_manager = SessionManagementService(db_connection=self._org_repo.db_connection)
+            impersonation_session_id = await session_manager._extract_session_id(
+                session, supabase_admin_client
+            )
+            await session_manager.update_session_organization_context(
+                session_id=impersonation_session_id,
+                user_id=impersonated_id,
+                organization_id=organization_id,
+            )
+            select_organization = await self._build_select_organization_response(
+                user_id=impersonated_id,
+                organization_id=organization_id,
+            )
+
         return SuperadminImpersonationResponse(
             access_token=session.access_token,
             refresh_token=getattr(session, "refresh_token", None),
@@ -157,7 +182,35 @@ class SuperadminOrganizationService:
             organization_id=str(row["id"]),
             organization_name=row.get("name"),
             impersonated_user_id=impersonated_id or None,
+            select_organization=select_organization,
         )
+
+    async def _build_select_organization_response(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+    ) -> SelectOrganizationResponse | None:
+        """Build select-org payload after linking the impersonation session."""
+        try:
+            org_member_repo = OrganizationMemberRepository(
+                db_connection=self._org_repo.db_connection
+            )
+            isometrik_details = await get_isometrik_details(
+                user_id=user_id,
+                organization_id=organization_id,
+                organization_repository=self._org_repo,
+                organization_member_repository=org_member_repo,
+            )
+            return SelectOrganizationResponse(isometrik_details=isometrik_details)
+        except Exception as exc:
+            logger.warning(
+                "Failed to build select-organization response for impersonation user %s org %s: %s",
+                user_id,
+                organization_id,
+                str(exc),
+            )
+            return None
 
     async def exit_impersonation_session(self, *, current_user: dict) -> dict[str, Any]:
         """Revoke the current Supabase auth session (impersonated user Bearer token).
@@ -178,10 +231,13 @@ class SuperadminOrganizationService:
                 custom_code=CustomStatusCode.BAD_REQUEST,
             )
         session_repo = SessionRepository(db_connection=self._org_repo.db_connection)
-        revoked_session_id = await session_repo.delete_auth_session(session_id=str(session_id))
-        if not revoked_session_id:
+        revoked = await session_repo.delete_auth_session(
+            session_id=str(session_id),
+            user_id=str(user_id),
+        )
+        if not revoked:
             raise NotFoundException(
                 message_key="organizations.errors.exit_impersonation_session_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return {"session_id": revoked_session_id}
+        return revoked
