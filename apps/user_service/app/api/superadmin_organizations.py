@@ -1,13 +1,20 @@
-"""Superadmin organization API (system_super_admin JWT only)."""
+"""Superadmin organization API.
+
+Most routes require ``system_super_admin`` JWT. ``POST /impersonate/exit`` is an exception:
+it must be called with the **impersonated user's** Bearer token to revoke that session.
+"""
 
 from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, Path, Request
 from fastapi import status as http_status
+from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.superadmin_organizations import (
     SuperadminOrganizationListQueryParams,
 )
@@ -18,7 +25,7 @@ from apps.user_service.app.utils.common_utils import (
     handle_api_exceptions,
     require_super_admin,
 )
-from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_middleware.jwt_auth import extract_user_data, get_user_from_auth
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -71,6 +78,128 @@ async def superadmin_list_organizations(
         page_size=params.page_size,
         status_code=http_status.HTTP_200_OK,
         custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("superadmin exit impersonation")
+@router.post(
+    "/impersonate/exit",
+    status_code=http_status.HTTP_200_OK,
+    summary="Exit impersonation (revoke impersonated session)",
+    description=(
+        "Revokes the **current** Supabase auth session. Call with the **impersonated user's** "
+        "Bearer access token (the session returned from impersonate), not the superadmin token. "
+        "Invalidates the session in the database (same pattern as session revoke); no Redis."
+    ),
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="organizations",
+    category="SUPERADMIN_IMPERSONATION_END",
+)
+async def superadmin_exit_impersonation(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """End impersonation by revoking the impersonated user's auth session."""
+    user_id = str(current_user.get("sub") or "")
+    user_email = str(current_user.get("email") or "")
+    session_id = str(current_user.get("session_id") or "")
+
+    service = SuperadminOrganizationService(db_connection=db_connection)
+    data = await service.exit_impersonation_session(current_user=current_user)
+
+    org_id = data["organization_id"]
+    request.state.audit_table = "organizations"
+    request.state.audit_requested_id = org_id
+    request.state.audit_description = (
+        "Impersonation ended: auth session revoked for user "
+        f"{user_id} (session_id={session_id}, organization_id={org_id})"
+    )
+    request.state.audit_risk_level = "high"
+    request.state.raw_audit_new_data = {
+        "session_id": session_id,
+        "user_id": user_id,
+        "organization_id": org_id,
+    }
+    request.state.audit_user_context = {
+        "user_id": user_id,
+        "user_email": user_email,
+        "organization_id": org_id,
+    }
+
+    return success_response(
+        request=request,
+        message_key="organizations.success.impersonation_session_ended",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=data,
+    )
+
+
+@handle_api_exceptions("superadmin impersonate organization owner")
+@router.post(
+    "/{organization_id}/impersonate",
+    status_code=http_status.HTTP_200_OK,
+    summary="Impersonate organization owner (superadmin)",
+    description=(
+        "Issues a Supabase session for the organization's primary owner member via "
+        "admin magic-link exchange, links the session to the target organization, and "
+        "returns select-org context (isometrik details) like set-password. "
+        "Rate-limited; audited as high risk."
+    ),
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="confidential",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="organizations",
+    category="SUPERADMIN_IMPERSONATION",
+)
+async def superadmin_impersonate_organization_owner(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    supabase_admin: AsyncClient = Depends(supabase_service),
+    current_user: dict = Depends(get_user_from_auth),
+    organization_id: UUID = Path(..., description="Organization UUID"),
+):
+    """Create an owner session for support / superadmin workflows."""
+    await require_super_admin(current_user)
+    service = SuperadminOrganizationService(db_connection=db_connection)
+    data = await service.impersonate_organization_owner(
+        organization_id=str(organization_id),
+        supabase_admin_client=supabase_admin,
+    )
+
+    actor_id, _, _ = extract_user_data(current_user)
+    user_id = actor_id or str(current_user.get("sub") or "")
+    request.state.audit_table = "organizations"
+    request.state.audit_requested_id = str(organization_id)
+    request.state.audit_description = (
+        "Superadmin impersonation: session issued for organization owner "
+        f"(organization_id={organization_id}, impersonated_user_id={data.impersonated_user_id})"
+    )
+    request.state.audit_risk_level = "critical"
+    request.state.raw_audit_new_data = {
+        "organization_id": str(organization_id),
+        "impersonated_user_id": data.impersonated_user_id,
+    }
+    request.state.audit_user_context = {
+        "user_id": user_id,
+        "organization_id": str(organization_id),
+    }
+
+    return success_response(
+        request=request,
+        message_key="organizations.success.impersonation_session_created",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=data.model_dump(exclude_none=False),
     )
 
 
