@@ -19,6 +19,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
 from apps.user_service.app.db.repositories.session_repository import SessionRepository
 from apps.user_service.app.schemas.auth import SelectOrganizationResponse
 from apps.user_service.app.schemas.enums import (
+    OrganizationStatus,
     PlanType,
     SuperadminOrganizationListSortField,
     SuperadminOrganizationListSortOrder,
@@ -145,6 +146,42 @@ class SuperadminOrganizationService:
             db_connection=self._org_repo.db_connection,
         )
         return await org_service.create_organization_for_owner(body=body)
+
+    async def suspend_organization(self, organization_id: str) -> None:
+        """Set organization status to suspended (platform superadmin)."""
+        validate_uuid_format(organization_id, "organization_id")
+        updated = await self._org_repo.update_organization(
+            organization_id,
+            {"status": OrganizationStatus.SUSPENDED.value},
+        )
+        if not updated.get("id"):
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    async def reactivate_organization(self, organization_id: str) -> None:
+        """Restore a suspended organization to active (platform superadmin).
+
+        Trial billing lives on ``subscription.plan_type``; ``organizations.status``
+        only allows values enforced by ``organizations_status_check`` (e.g. active).
+        """
+        validate_uuid_format(organization_id, "organization_id")
+        org = await self._org_repo.get_organization_by_id(organization_id)
+        if not org or str(org.get("status") or "") != OrganizationStatus.SUSPENDED.value:
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        updated = await self._org_repo.update_organization(
+            organization_id,
+            {"status": OrganizationStatus.ACTIVE.value},
+        )
+        if not updated.get("id"):
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
 
     async def permanently_delete_organization(
         self,

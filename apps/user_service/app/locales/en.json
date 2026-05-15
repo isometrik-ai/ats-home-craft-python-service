@@ -62,7 +62,9 @@
       "impersonation_failed": "Could not create an impersonation session. Please try again later.",
       "exit_impersonation_use_owner_token": "Send the impersonated user's access token on this endpoint, not the superadmin token.",
       "exit_impersonation_invalid_token": "This token cannot be used to exit impersonation (missing session or user id).",
-      "exit_impersonation_session_not_found": "That session is no longer active or could not be revoked."
+      "exit_impersonation_session_not_found": "That session is no longer active or could not be revoked.",
+      "organization_already_suspended": "This organization is already suspended.",
+      "organization_not_suspended": "Only suspended organizations can be reactivated."
     },
     "success": {
       "organization_created": "Organization created successfully.",
@@ -73,7 +75,9 @@
       "delete_request_rejected": "Delete request rejected successfully. Organization remains active.",
       "member_deleted": "Organization member deleted successfully.",
       "impersonation_session_created": "Impersonation session created for the organization owner.",
-      "impersonation_session_ended": "Impersonation session ended; the impersonated auth session was revoked."
+      "impersonation_session_ended": "Impersonation session ended; the impersonated auth session was revoked.",
+      "organization_suspended": "Organization suspended successfully.",
+      "organization_reactivated": "Organization reactivated successfully."
     }
   },
   "auth": {
