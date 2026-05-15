@@ -170,7 +170,7 @@ class AuditLogRepository:
 
         list_fields_aliased = AUDIT_LOG_LIST_FIELDS_ALIASED.replace(
             "al.user_email AS user_email",
-            "au.email AS user_email",
+            "COALESCE(au.email, al.user_email, '') AS user_email",
         )
 
         query = f"""
