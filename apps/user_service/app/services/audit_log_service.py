@@ -234,6 +234,13 @@ class AuditLogService:
         return default
 
     @staticmethod
+    def _format_user_email(user_email: Any) -> str:
+        """Normalize user email for API responses."""
+        if user_email is None:
+            return ""
+        return str(user_email)
+
+    @staticmethod
     def _format_ip_address(ip_address: Any) -> str:
         """Convert IP address to string format.
 
@@ -261,7 +268,7 @@ class AuditLogService:
             id=str(audit_log_data["id"]),
             organization_id=str(audit_log_data["organization_id"]),
             user_id=str(audit_log_data["user_id"]),
-            user_email=audit_log_data["user_email"],
+            user_email=AuditLogService._format_user_email(audit_log_data.get("user_email")),
             user_role=audit_log_data["user_role"],
             action_type=audit_log_data["action_type"],
             data_classification=audit_log_data["data_classification"],
@@ -300,7 +307,7 @@ class AuditLogService:
             id=str(audit_log_data["id"]),
             organization_id=str(audit_log_data["organization_id"]),
             user_id=str(audit_log_data["user_id"]),
-            user_email=audit_log_data["user_email"],
+            user_email=AuditLogService._format_user_email(audit_log_data.get("user_email")),
             user_role=audit_log_data["user_role"],
             action_type=audit_log_data["action_type"],
             data_classification=audit_log_data["data_classification"],
