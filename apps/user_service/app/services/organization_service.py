@@ -230,6 +230,69 @@ class OrganizationService:
             "role_name": "admin",
         }
 
+    async def create_organization_for_owner(
+        self,
+        body: NewOrganizationBody,
+        slug: str | None = None,
+    ) -> dict:
+        """Create an organization for ``user_context`` without session linking.
+
+        Used by superadmin-driven creation; reuses the same internal setup as
+        ``create_organization`` but skips session validation and context updates.
+        """
+        if self.user_context.user_id is None:
+            raise ForbiddenException(
+                message_key="organizations.errors.forbidden",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+
+        organization_id = str(uuid.uuid4())
+        validate_uuid_format(organization_id, "organization_id")
+
+        resolved_slug = slug or self._generate_slug(
+            body.company_data.company_name, AccountType.BUSINESS.value
+        )
+        await self._validate_slug_unique(resolved_slug)
+
+        subscription = self._build_subscription(body)
+        settings = self._build_settings(body)
+        isometrik_details = await self._create_isometrik_application_if_enabled(body)
+
+        org_payload = self._build_organization_payload(
+            organization_id=organization_id,
+            resolved_slug=resolved_slug,
+            body=body,
+            subscription=subscription,
+            settings=settings,
+            isometrik_details=isometrik_details,
+        )
+
+        created = await self.organization_repository.create_organization(org_payload)
+
+        await self.lead_stage_repository.bulk_insert_default_stages_for_organization(
+            organization_id
+        )
+
+        permission_ids = await self.permissions_repository.create_default_permissions(
+            organization_id=organization_id
+        )
+        super_admin_role_id = await self._create_super_admin_role(organization_id, permission_ids)
+        await self._add_requesting_user_as_member(
+            organization_id=organization_id,
+            role_id=super_admin_role_id,
+            body=body,
+            isometrik_creds=isometrik_details,
+        )
+
+        return {
+            "organization_id": organization_id,
+            "organization_name": created["name"],
+            "slug": created["slug"],
+            "user_id": self.user_context.user_id,
+            "user_email": self.user_context.email,
+            "role_name": "admin",
+        }
+
     async def update_organization(
         self, organization_id: str, update_data: OrganizationAdminUpdate
     ) -> dict:
@@ -1104,6 +1167,62 @@ class OrganizationService:
             delete_request=delete_request,
             reason=reason,
         )
+
+    async def _permanently_delete_organization_data(self, organization_id: str) -> list[str]:
+        """Remove org-related rows and soft-delete the organization.
+
+        Collects member emails before deletion for notification. Same cascade order
+        as delete-request approval.
+        """
+        members = await self.organization_member_repository.get_all_members_by_organization_id(
+            organization_id
+        )
+        member_emails = [member.get("email") for member in members if member.get("email")]
+
+        await self.team_repository.delete_all_teams_by_organization_id(organization_id)
+        await self.role_repository.delete_all_roles_by_organization_id(organization_id)
+        await self.permissions_repository.delete_all_permissions_by_organization_id(organization_id)
+        await self.organization_member_repository.delete_all_members_by_organization_id(
+            organization_id
+        )
+        await self.organization_repository.delete_organization(organization_id)
+
+        return member_emails
+
+    @staticmethod
+    def _notify_members_of_organization_deletion(
+        member_emails: list[str],
+        organization_name: str,
+    ) -> None:
+        """Send deletion-approved emails to all former members."""
+        for email in member_emails:
+            send_organization_deletion_approved_email(
+                email=email,
+                organization_name=organization_name,
+            )
+
+    async def permanently_delete_organization(self, organization_id: str) -> dict[str, Any]:
+        """Permanently delete an organization and related data (no delete request).
+
+        Same data removal and member notifications as approving a delete request.
+        """
+        validate_uuid_format(organization_id, "organization_id")
+
+        organization = await self.organization_repository.get_organization_by_id(organization_id)
+        if not organization:
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        organization_name = organization.get("name") or ""
+        member_emails = await self._permanently_delete_organization_data(organization_id)
+        self._notify_members_of_organization_deletion(member_emails, organization_name)
+
+        return {
+            "organization_id": organization_id,
+            "organization_name": organization_name,
+        }
 
     async def _approve_delete_request(
         self,

@@ -9,7 +9,10 @@ from typing import Any
 import asyncpg
 from supabase import AsyncClient
 
-from apps.user_service.app.db.repositories import OrganizationMemberRepository
+from apps.user_service.app.db.repositories import (
+    OrganizationMemberRepository,
+    UserRepository,
+)
 from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
@@ -21,7 +24,10 @@ from apps.user_service.app.schemas.enums import (
     SuperadminOrganizationListSortOrder,
     SuperadminOrganizationListStatus,
 )
-from apps.user_service.app.schemas.organizations import OrganizationInfo
+from apps.user_service.app.schemas.organizations import (
+    NewOrganizationBody,
+    OrganizationInfo,
+)
 from apps.user_service.app.schemas.superadmin_organizations import (
     SuperadminImpersonationResponse,
     SuperadminOrganizationListItem,
@@ -33,7 +39,9 @@ from apps.user_service.app.services.session_management_service import (
     SessionManagementService,
 )
 from apps.user_service.app.utils.common_utils import (
+    UserContext,
     format_iso_datetime,
+    validate_uuid_format,
 )
 from apps.user_service.app.utils.user_utils import get_isometrik_details
 from libs.shared_db.supabase_db.auth_repository import (
@@ -111,6 +119,46 @@ class SuperadminOrganizationService:
             total_pages=total_pages,
             message=message,
         )
+
+    async def create_organization(
+        self,
+        *,
+        owner_user_id: str,
+        body: NewOrganizationBody,
+    ) -> dict[str, Any]:
+        """Create an organization owned by an existing auth user (no session linking)."""
+        validate_uuid_format(owner_user_id, "owner_user_id")
+        user_repo = UserRepository(db_connection=self._org_repo.db_connection)
+        owner = await user_repo.get_user_details_by_id(
+            owner_user_id, select_columns=["id", "email"]
+        )
+        email = (owner.get("email") or "").strip() if owner else ""
+        if not owner or not email:
+            raise NotFoundException(
+                message_key="organizations.errors.owner_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        owner_context = UserContext(user_id=str(owner["id"]), email=email)
+        org_service = OrganizationService(
+            user_context=owner_context,
+            db_connection=self._org_repo.db_connection,
+        )
+        return await org_service.create_organization_for_owner(body=body)
+
+    async def permanently_delete_organization(
+        self,
+        organization_id: str,
+        *,
+        actor_user_id: str,
+        actor_email: str,
+    ) -> dict[str, Any]:
+        """Direct org deletion: same cascade and member emails as delete-request approval."""
+        org_service = OrganizationService(
+            user_context=UserContext(user_id=actor_user_id, email=actor_email),
+            db_connection=self._org_repo.db_connection,
+        )
+        return await org_service.permanently_delete_organization(organization_id)
 
     async def get_organization_detail(self, organization_id: str) -> OrganizationInfo:
         """Get organization detail for superadmin"""

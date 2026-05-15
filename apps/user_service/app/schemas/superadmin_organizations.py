@@ -11,6 +11,7 @@ from apps.user_service.app.schemas.enums import (
     SuperadminOrganizationListSortOrder,
     SuperadminOrganizationListStatus,
 )
+from apps.user_service.app.schemas.organizations import NewOrganizationBody
 
 
 class SuperadminOrgOwnerAdmin(BaseModel):
@@ -47,6 +48,18 @@ class SuperadminOrganizationListResult(BaseModel):
     page_size: int
     total_pages: int
     message: str
+
+
+class SuperadminCreateOrganizationBody(NewOrganizationBody):
+    """Superadmin org create: same payload as normal create plus optional target owner."""
+
+    owner_user_id: str | None = Field(
+        None,
+        description=(
+            "Auth user id of the organization owner. When omitted, the calling "
+            "superadmin is created as owner."
+        ),
+    )
 
 
 class SuperadminOrganizationListQueryParams(BaseModel):

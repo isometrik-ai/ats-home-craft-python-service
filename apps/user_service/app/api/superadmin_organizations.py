@@ -7,15 +7,17 @@ it must be called with the **impersonated user's** Bearer token to revoke that s
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi import status as http_status
 from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
-from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_service
+from apps.user_service.app.schemas.organizations import NewOrganizationBody
 from apps.user_service.app.schemas.superadmin_organizations import (
+    SuperadminCreateOrganizationBody,
     SuperadminOrganizationListQueryParams,
 )
 from apps.user_service.app.services.superadmin_organization_service import (
@@ -78,6 +80,71 @@ async def superadmin_list_organizations(
         page_size=params.page_size,
         status_code=http_status.HTTP_200_OK,
         custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("superadmin create organization")
+@router.post(
+    "",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Create organization (superadmin)",
+    description=(
+        "Creates an organization for an existing auth user as owner. "
+        "Omit ``owner_user_id`` to create the org for the calling superadmin. "
+        "Same setup as the standard create flow but does not link the superadmin session."
+    ),
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="confidential",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="organizations",
+    category="SUPERADMIN_ORGANIZATION",
+)
+async def superadmin_create_organization(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: SuperadminCreateOrganizationBody = Body(...),
+):
+    """Create an organization on behalf of an existing user (platform superadmin)."""
+    await require_super_admin(current_user)
+    actor_id, actor_email, _ = extract_user_data(current_user)
+    owner_user_id = (body.owner_user_id or "").strip() or (
+        actor_id or str(current_user.get("sub") or "")
+    )
+
+    org_body = NewOrganizationBody(user_data=body.user_data, company_data=body.company_data)
+    service = SuperadminOrganizationService(db_connection=db_connection)
+    result = await service.create_organization(
+        owner_user_id=owner_user_id,
+        body=org_body,
+    )
+
+    request.state.audit_table = "organizations"
+    request.state.audit_requested_id = str(result.get("organization_id", ""))
+    request.state.audit_description = (
+        f"Superadmin created organization: {result.get('organization_name')} "
+        f"(owner_user_id={owner_user_id})"
+    )
+    request.state.audit_risk_level = "high"
+    request.state.raw_audit_new_data = {
+        "organization_id": result.get("organization_id"),
+        "owner_user_id": owner_user_id,
+    }
+    request.state.audit_user_context = {
+        "user_id": actor_id or str(current_user.get("sub") or ""),
+        "user_email": actor_email or str(current_user.get("email") or ""),
+        "organization_id": str(result.get("organization_id", "")),
+    }
+
+    return success_response(
+        request=request,
+        message_key="organizations.success.organization_created",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=result,
     )
 
 
@@ -200,6 +267,64 @@ async def superadmin_impersonate_organization_owner(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=data.model_dump(exclude_none=False),
+    )
+
+
+@handle_api_exceptions("superadmin delete organization")
+@router.delete(
+    "/{organization_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Delete organization (superadmin)",
+    description=(
+        "Permanently removes an organization and related data (teams, roles, permissions, "
+        "members) and notifies members—the same outcome as approving a delete request, "
+        "without a pending delete request."
+    ),
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="confidential",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="organizations",
+    category="SUPERADMIN_ORGANIZATION",
+)
+async def superadmin_delete_organization(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    organization_id: UUID = Path(..., description="Organization UUID"),
+):
+    """Directly delete an organization (platform superadmin)."""
+    await require_super_admin(current_user)
+    actor_id, actor_email, _ = extract_user_data(current_user)
+
+    service = SuperadminOrganizationService(db_connection=db_connection)
+    result = await service.permanently_delete_organization(
+        str(organization_id),
+        actor_user_id=actor_id or str(current_user.get("sub") or ""),
+        actor_email=actor_email or str(current_user.get("email") or ""),
+    )
+
+    request.state.audit_table = "organizations"
+    request.state.audit_requested_id = str(organization_id)
+    request.state.audit_description = (
+        f"Superadmin deleted organization: {result.get('organization_name')} ({organization_id})"
+    )
+    request.state.audit_risk_level = "critical"
+    request.state.raw_audit_new_data = result
+    request.state.audit_user_context = {
+        "user_id": actor_id or str(current_user.get("sub") or ""),
+        "user_email": actor_email or str(current_user.get("email") or ""),
+        "organization_id": str(organization_id),
+    }
+
+    return success_response(
+        request=request,
+        message_key="organizations.success.organization_deleted",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=result,
     )
 
 
