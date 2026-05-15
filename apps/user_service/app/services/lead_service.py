@@ -2,6 +2,7 @@
 
 import json
 from collections import defaultdict
+from collections.abc import Iterable
 from typing import Any
 
 import asyncpg
@@ -356,23 +357,50 @@ class LeadService:
         )
         return contacts_changed, contacts_payload, contact_ids_for_batch
 
-    def _prepare_lead_patch_companies(
+    async def _prepare_lead_patch_companies(
         self,
+        organization_id: str,
         current: dict[str, Any],
         body: UpdateLeadRequest,
     ) -> tuple[bool, list[dict[str, Any]] | None, list[str]]:
-        """Resolve PATCH companies into sync payload and ids for reference validation."""
+        """Resolve PATCH companies and auto-link companies for newly added contacts."""
         companies_changed = body.companies_update is not None
         companies_payload: list[dict[str, Any]] | None = None
         company_ids_for_batch: list[str] = []
 
-        if not companies_changed:
-            return companies_changed, companies_payload, company_ids_for_batch
+        if companies_changed:
+            companies_payload, company_ids_for_batch = self._apply_company_delta(
+                current=current,
+                delta=body.companies_update,
+            )
 
-        companies_payload, company_ids_for_batch = self._apply_company_delta(
-            current=current,
-            delta=body.companies_update,
-        )
+        added_contact_ids: list[str] = []
+        if body.contacts_update is not None:
+            added_contact_ids = [
+                item.contact_id for item in (body.contacts_update.add_associations or [])
+            ]
+        if added_contact_ids:
+            cc_repo = ContactCompaniesRepository(self.db_connection)
+            contact_company_ids = await cc_repo.list_distinct_company_ids_for_contacts(
+                organization_id=organization_id,
+                contact_ids=added_contact_ids,
+            )
+            if contact_company_ids:
+                base = (
+                    companies_payload
+                    if companies_changed
+                    else self._existing_company_links(current)
+                )
+                companies_payload, new_company_ids = self._append_missing_company_links(
+                    base,
+                    contact_company_ids,
+                )
+                if new_company_ids:
+                    companies_changed = True
+                    company_ids_for_batch = sorted(
+                        set(company_ids_for_batch) | set(new_company_ids)
+                    )
+
         return companies_changed, companies_payload, company_ids_for_batch
 
     @staticmethod
@@ -406,6 +434,27 @@ class LeadService:
             ordered_ids.append(id_str)
             by_id[id_str] = {id_key: id_str, "label": item.get("label")}
         return ordered_ids, by_id
+
+    @staticmethod
+    def _append_missing_company_links(
+        company_links: list[dict[str, Any]],
+        company_ids: Iterable[str],
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Append companies not already linked; return (payload, newly added ids)."""
+        ordered_ids, by_id = LeadService._build_ordered_link_map(
+            existing=company_links,
+            id_key="company_id",
+        )
+        new_ids: list[str] = []
+        for company_id in company_ids:
+            if company_id in by_id:
+                continue
+            by_id[company_id] = {"company_id": company_id, "label": ""}
+            ordered_ids.append(company_id)
+            new_ids.append(company_id)
+        if not new_ids:
+            return company_links, []
+        return [by_id[cid] for cid in ordered_ids if cid in by_id], new_ids
 
     @staticmethod
     def _apply_removals(
@@ -541,9 +590,11 @@ class LeadService:
         contacts_changed, contacts_payload, contact_ids_for_batch = (
             self._prepare_lead_patch_contacts(current, body)
         )
-        companies_changed, companies_payload, company_ids_for_batch = (
-            self._prepare_lead_patch_companies(current, body)
-        )
+        (
+            companies_changed,
+            companies_payload,
+            company_ids_for_batch,
+        ) = await self._prepare_lead_patch_companies(organization_id, current, body)
         stage_id_to_validate = self._stage_id_for_lead_update_validation(body)
 
         needs_ref_fetch = bool(company_ids_for_batch or contact_ids_for_batch) or (
