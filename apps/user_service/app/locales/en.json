@@ -57,6 +57,7 @@
       "session_already_linked": "You are currently logged in with an organization. Please logout and login again to create a new organization.",
       "owner_cannot_be_deleted": "The organization owner cannot be deleted.",
       "invalid_isometrik_project_id": "Invalid Isometrik project ID received from external service.",
+      "owner_not_found": "The specified owner user does not exist or has no email on file.",
       "owner_not_available_for_impersonation": "This organization has no owner member with an email on file, so impersonation is not available.",
       "impersonation_failed": "Could not create an impersonation session. Please try again later.",
       "exit_impersonation_use_owner_token": "Send the impersonated user's access token on this endpoint, not the superadmin token.",
