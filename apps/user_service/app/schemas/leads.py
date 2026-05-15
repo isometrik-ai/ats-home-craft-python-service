@@ -442,7 +442,9 @@ class UpdateLeadRequest(BaseModel):
         default=None,
         description=(
             "Delta operations for lead_contacts (add/remove/update labels). "
-            "Omit to leave contacts unchanged."
+            "Omit to leave contacts unchanged. "
+            "Companies linked to newly added contacts are associated automatically; "
+            "unlinking contacts does not remove lead companies."
         ),
     )
     companies_update: LeadCompaniesUpdate | None = Field(

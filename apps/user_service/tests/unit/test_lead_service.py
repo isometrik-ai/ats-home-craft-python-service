@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.leads import (
     CreateLeadCompany,
     CreateLeadRequest,
     LeadContactCreate,
+    LeadContactsUpdate,
     LeadsListQueryParams,
     UpdateLeadRequest,
 )
@@ -505,6 +506,102 @@ async def test_company_deduped_with_contact_companies(monkeypatch):
 
     assert lead_repo.calls["fetch_lead_reference_validation"]["company_ids"] == [CLIENT_ID]
     assert lead_repo.calls["create_lead_companies"] == [(CLIENT_ID, "buyer")]
+
+
+@pytest.mark.asyncio
+async def test_update_lead_auto_associates_contact_companies(monkeypatch):
+    """Adding contacts on edit appends their contact_companies to lead_companies."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    company_from_contact = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    lead_repo.get_lead_detail_by_id_result = {
+        "id": LEAD_ID,
+        "contacts": [],
+        "companies": [],
+    }
+    lead_repo.lead_reference_validation_result = (
+        True,
+        {POINT_OF_CONTACT_ID},
+        {company_from_contact},
+    )
+    lead_repo.update_lead_result = {"id": LEAD_ID}
+
+    captured: dict[str, Any] = {}
+
+    async def fake_list_distinct(
+        _self: Any,
+        *,
+        organization_id: str,
+        contact_ids: list[str],
+    ) -> list[str]:
+        captured["org"] = organization_id
+        captured["contact_ids"] = contact_ids
+        return [company_from_contact]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_service.ContactCompaniesRepository."
+        "list_distinct_company_ids_for_contacts",
+        fake_list_distinct,
+    )
+
+    await service.update_lead(
+        LEAD_ID,
+        UpdateLeadRequest(
+            contacts_update=LeadContactsUpdate(
+                add_associations=[LeadContactCreate(contact_id=POINT_OF_CONTACT_ID, label="dm")]
+            )
+        ),
+    )
+
+    assert captured == {"org": ORG_ID, "contact_ids": [POINT_OF_CONTACT_ID]}
+    assoc = lead_repo.calls["update_lead_with_associations"]
+    assert assoc[3] == [{"contact_id": POINT_OF_CONTACT_ID, "label": "dm"}]
+    assert assoc[4] == [{"company_id": company_from_contact, "label": ""}]
+    assert lead_repo.calls["fetch_lead_reference_validation"]["company_ids"] == [
+        company_from_contact
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_lead_does_not_remove_companies_removed(monkeypatch):
+    """Unlinking a contact leaves existing lead_companies unchanged."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    company_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    lead_repo.get_lead_detail_by_id_result = {
+        "id": LEAD_ID,
+        "contacts": [{"contact_id": POINT_OF_CONTACT_ID, "label": None}],
+        "companies": [{"company_id": company_id, "label": None}],
+    }
+    lead_repo.lead_reference_validation_result = (True, set(), set())
+    lead_repo.update_lead_result = {"id": LEAD_ID}
+
+    async def fake_list_distinct(
+        _self: Any,
+        *,
+        organization_id: str,
+        contact_ids: list[str],
+    ) -> list[str]:
+        _ = organization_id
+        _ = contact_ids
+        raise AssertionError("should not resolve companies when only removing contacts")
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_service.ContactCompaniesRepository."
+        "list_distinct_company_ids_for_contacts",
+        fake_list_distinct,
+    )
+
+    await service.update_lead(
+        LEAD_ID,
+        UpdateLeadRequest(
+            contacts_update=LeadContactsUpdate(
+                remove_associations=[POINT_OF_CONTACT_ID],
+            )
+        ),
+    )
+
+    assoc = lead_repo.calls["update_lead_with_associations"]
+    assert assoc[3] == []
+    assert assoc[4] is None
 
 
 @pytest.mark.asyncio
