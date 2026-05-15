@@ -328,6 +328,106 @@ async def superadmin_delete_organization(
     )
 
 
+@handle_api_exceptions("superadmin suspend organization")
+@router.post(
+    "/{organization_id}/suspend",
+    status_code=http_status.HTTP_200_OK,
+    summary="Suspend organization (superadmin)",
+    description=(
+        "Sets ``organizations.status`` to ``suspended``. Blocks product access for the org "
+        "(e.g. Isometrik / select-org). Deleted orgs are not found."
+    ),
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="organizations",
+    category="SUPERADMIN_ORGANIZATION",
+)
+async def superadmin_suspend_organization(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    organization_id: UUID = Path(..., description="Organization UUID"),
+):
+    """Suspend an organization (platform superadmin)."""
+    await require_super_admin(current_user)
+    actor_id, actor_email, _ = extract_user_data(current_user)
+
+    service = SuperadminOrganizationService(db_connection=db_connection)
+    await service.suspend_organization(str(organization_id))
+
+    request.state.audit_table = "organizations"
+    request.state.audit_requested_id = str(organization_id)
+    request.state.audit_description = f"Superadmin suspended organization ({organization_id})"
+    request.state.audit_risk_level = "high"
+    request.state.raw_audit_new_data = {"organization_id": str(organization_id)}
+    request.state.audit_user_context = {
+        "user_id": actor_id or str(current_user.get("sub") or ""),
+        "user_email": actor_email or str(current_user.get("email") or ""),
+        "organization_id": str(organization_id),
+    }
+
+    return success_response(
+        request=request,
+        message_key="organizations.success.organization_suspended",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("superadmin reactivate organization")
+@router.post(
+    "/{organization_id}/reactivate",
+    status_code=http_status.HTTP_200_OK,
+    summary="Reactivate organization (superadmin)",
+    description=(
+        "Restores a suspended organization to ``active``. Trial plans remain on "
+        "``subscription.plan_type``. Only orgs currently ``suspended`` are accepted."
+    ),
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="confidential",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="organizations",
+    category="SUPERADMIN_ORGANIZATION",
+)
+async def superadmin_reactivate_organization(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    organization_id: UUID = Path(..., description="Organization UUID"),
+):
+    """Reactivate a suspended organization (platform superadmin)."""
+    await require_super_admin(current_user)
+    actor_id, actor_email, _ = extract_user_data(current_user)
+
+    service = SuperadminOrganizationService(db_connection=db_connection)
+    await service.reactivate_organization(str(organization_id))
+
+    request.state.audit_table = "organizations"
+    request.state.audit_requested_id = str(organization_id)
+    request.state.audit_description = f"Superadmin reactivated organization ({organization_id})"
+    request.state.audit_risk_level = "high"
+    request.state.raw_audit_new_data = {"organization_id": str(organization_id)}
+    request.state.audit_user_context = {
+        "user_id": actor_id or str(current_user.get("sub") or ""),
+        "user_email": actor_email or str(current_user.get("email") or ""),
+        "organization_id": str(organization_id),
+    }
+
+    return success_response(
+        request=request,
+        message_key="organizations.success.organization_reactivated",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
 @handle_api_exceptions("superadmin get organization")
 @router.get(
     "/{organization_id}",
