@@ -200,6 +200,10 @@ class UserProfileData(BaseModel):
     member_role: OrganizationMemberRole | None = Field(
         None, description="Organization member role (owner, member)"
     )
+    is_superadmin: bool = Field(
+        default=False,
+        description="Whether the user is a platform superadmin",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

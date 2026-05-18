@@ -67,6 +67,7 @@ from libs.shared_utils.isometrik_service import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+from libs.shared_utils.super_admin_utils import is_system_super_admin
 
 logger = get_logger("user_service")
 
@@ -614,12 +615,16 @@ class UserService:  # pylint: disable=too-many-public-methods
         )
 
     async def get_user_profile_with_metadata(
-        self, user_id: str, organization_id: str | None = None
+        self,
+        user_id: str,
+        organization_id: str | None = None,
+        current_user: dict | None = None,
     ) -> dict[str, Any]:
         """Get complete user profile merged with Supabase Auth metadata.
         Args:
             user_id: User ID
             organization_id: Organization ID
+            current_user: Current user data
         Returns:
             dict[str, Any]: User profile data
         """
@@ -679,12 +684,17 @@ class UserService:  # pylint: disable=too-many-public-methods
             organization_details = None
             isometrik_details = None
 
+        is_superadmin = (
+            await is_system_super_admin(current_user) if current_user is not None else False
+        )
+
         profile_data = self._create_user_profile_data(
             user_profile=user_profile,
             role_info=role_info,
             permissions=permissions,
             organization_details=organization_details,
             isometrik_details=isometrik_details,
+            is_superadmin=is_superadmin,
         )
 
         profile_response = profile_data.model_dump(exclude_none=True)
@@ -1366,6 +1376,7 @@ class UserService:  # pylint: disable=too-many-public-methods
         permissions: list[PermissionInfo] | None = None,
         organization_details: OrganizationBasicDetails | None = None,
         isometrik_details: IsometrikDetails | None = None,
+        is_superadmin: bool = False,
     ) -> UserProfileData:
         """Creates a UserProfileData object from user profile data.
         This is the single source of truth for creating user profile responses.
@@ -1376,6 +1387,7 @@ class UserService:  # pylint: disable=too-many-public-methods
             permissions: Optional list of permissions
             organization_details: Optional organization details
             isometrik_details: Optional Isometrik integration details
+            is_superadmin: Whether the user is a platform superadmin
 
         Returns:
             UserProfileData object with formatted user profile
@@ -1427,6 +1439,7 @@ class UserService:  # pylint: disable=too-many-public-methods
             organization_details=organization_details,
             isometrik_details=isometrik_details,
             member_role=user_profile.get("member_role"),
+            is_superadmin=is_superadmin,
         )
 
     async def _update_isometrik_user_if_needed(

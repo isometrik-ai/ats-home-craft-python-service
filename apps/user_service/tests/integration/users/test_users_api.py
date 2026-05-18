@@ -52,10 +52,14 @@ async def test_get_user_profile(monkeypatch, client):
         del current_user, db_connection
         return _ctx()
 
-    async def fake_get_profile(self, user_id, organization_id):
-        del self, user_id, organization_id
+    async def fake_get_profile(self, user_id, organization_id, current_user=None):
+        del self, user_id, organization_id, current_user
         return {
-            "profile_data": {"user_id": "u1", "email": "u1@example.com"},
+            "profile_data": {
+                "user_id": "u1",
+                "email": "u1@example.com",
+                "is_superadmin": False,
+            },
             "audit_data": {"user_id": "u1"},
         }
 
