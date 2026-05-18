@@ -138,7 +138,9 @@ async def get_user_profile(
         user_context=user_context, db_connection=db_connection, sb_client=sb_client
     )
     result = await user_service.get_user_profile_with_metadata(
-        user_context.user_id, user_context.organization_id
+        user_context.user_id,
+        user_context.organization_id,
+        current_user=current_user,
     )
 
     # Set audit data from service
