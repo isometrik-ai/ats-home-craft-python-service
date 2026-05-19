@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -52,11 +52,21 @@ class DashboardService:
         self._user_id = user_id
         self._repo = DashboardRepository(db_connection)
 
-    async def get_dashboard(self) -> DashboardResponse:
+    async def get_dashboard(
+        self,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        leads_start_date: date | None = None,
+        leads_end_date: date | None = None,
+    ) -> DashboardResponse:
         """Get dashboard data for the organization and user."""
         row = await self._repo.fetch_dashboard(
             self._organization_id,
             self._user_id,
+            start_date=start_date,
+            end_date=end_date,
+            leads_start_date=leads_start_date,
+            leads_end_date=leads_end_date,
         )
 
         timezone_name = str(row.get("user_timezone") or "UTC")

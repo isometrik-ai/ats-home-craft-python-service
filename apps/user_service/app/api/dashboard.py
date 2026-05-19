@@ -8,6 +8,7 @@ from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.schemas.dashboard import DashboardQueryParams
 from apps.user_service.app.services.dashboard_service import DashboardService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     401: {"description": "Unauthorized (missing/invalid JWT)."},
     403: {"description": "Forbidden (insufficient permissions)."},
+    400: {"description": "Bad request (invalid date range)."},
     422: {"description": "Validation error."},
     429: {"description": "Too many requests (rate limited)."},
     500: {"description": "Internal server error."},
@@ -42,10 +44,12 @@ async def get_dashboard(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    params: DashboardQueryParams = Depends(),
 ):
     """Return CRM overview, weekly lead activity, pipeline counts, and my projects.
 
-    Week boundaries and charts use ``organization_members.timezone`` (falls back to UTC).
+    ``weekly_activity`` follows ``start_date``/``end_date`` when set, else ``leads_*`` dates,
+    else the last 7 local days.
     """
     user_context = await check_permissions(
         current_user=current_user,
@@ -58,7 +62,12 @@ async def get_dashboard(
         organization_id=user_context.organization_id,
         user_id=user_context.user_id,
     )
-    data = await service.get_dashboard()
+    data = await service.get_dashboard(
+        start_date=params.start_date,
+        end_date=params.end_date,
+        leads_start_date=params.leads_start_date,
+        leads_end_date=params.leads_end_date,
+    )
     return success_response(
         request=request,
         message_key="dashboard.success.loaded",
