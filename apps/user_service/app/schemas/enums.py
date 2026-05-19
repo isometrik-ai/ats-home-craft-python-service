@@ -397,6 +397,24 @@ class ClientEventType(str, Enum):
     ENRICHMENT_REQUESTED = "clients.enrichment_requested"
 
 
+class ContactEventType(str, Enum):
+    """Kafka event type names emitted for contact lifecycle changes."""
+
+    CREATED = "contacts.created"
+    UPDATED = "contacts.updated"
+    DELETED = "contacts.deleted"
+    ENRICHMENT_REQUESTED = "contacts.enrichment_requested"
+
+
+class CompanyEventType(str, Enum):
+    """Kafka event type names emitted for company lifecycle changes."""
+
+    CREATED = "companies.created"
+    UPDATED = "companies.updated"
+    DELETED = "companies.deleted"
+    ENRICHMENT_REQUESTED = "companies.enrichment_requested"
+
+
 class LeadEventType(str, Enum):
     """Kafka event type names emitted for lead lifecycle changes."""
 

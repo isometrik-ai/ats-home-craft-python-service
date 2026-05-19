@@ -24,8 +24,9 @@ from apps.user_service.app.schemas.contacts import (
     UpdateContactRequest,
 )
 from apps.user_service.app.schemas.enums import (
-    ClientEventType,
     ClientStatus,
+    CompanyEventType,
+    ContactEventType,
     KafkaTopics,
 )
 from apps.user_service.app.services.activity_service import ActivityService
@@ -555,7 +556,7 @@ async def update_contact(
         request.state.raw_audit_old_data = result.get("old_data")
         request.state.raw_audit_new_data = result.get("new_data")
         update_event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.UPDATED.value,
+            event_type=ContactEventType.UPDATED.value,
             aggregate_id=contact_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
@@ -574,15 +575,15 @@ async def update_contact(
             company_event_items = [
                 {
                     "event_type": (
-                        ClientEventType.CREATED.value
+                        CompanyEventType.CREATED.value
                         if created_cid_s is not None and cid_s == created_cid_s
-                        else ClientEventType.UPDATED.value
+                        else CompanyEventType.UPDATED.value
                     ),
                     "aggregate_id": cid_s,
                     "organization_id": org_id,
                     "actor_user_id": actor,
                     "payload": {
-                        "module": "contacts",
+                        "module": "companies",
                         "action": (
                             "company_created_with_contact"
                             if created_cid_s is not None and cid_s == created_cid_s
@@ -623,11 +624,11 @@ async def update_contact(
 @handle_api_exceptions("enrich contact")
 @router.post(
     "/{contact_id}/enrich",
-    status_code=http_status.HTTP_200_OK,
+    status_code=http_status.HTTP_202_ACCEPTED,
     summary="Trigger contact enrichment",
     description=(
         "Triggers enrichment for a contact using the latest persisted data. "
-        "This mirrors the legacy client enrichment trigger flow but is scoped to contacts."
+        "Emits `contacts.enrichment_requested` on the CRM events topic."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -646,42 +647,53 @@ async def enrich_contact(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Trigger enrichment for a contact (best-effort async).
+    """Trigger enrichment for a contact (best-effort async)."""
+    enrich_event: dict | None = None
+    organization_id: str | None = None
+    async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        )
+        request.state.audit_table = "contacts"
+        request.state.audit_requested_id = contact_id
+        request.state.audit_description = f"Triggered enrichment for contact: {contact_id}"
+        request.state.audit_risk_level = "medium"
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        organization_id = user_context.organization_id
+        event_service = EventService(db_connection=db_connection)
+        enrich_event = await event_service.create_lifecycle_event(
+            event_type=ContactEventType.ENRICHMENT_REQUESTED.value,
+            aggregate_id=contact_id,
+            organization_id=organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={"module": "contacts", "action": "enrich"},
+            topics=CLIENT_KAFKA_TOPICS,
+        )
 
-    Args:
-        request: FastAPI request (audit context).
-        background_tasks: Schedules enrichment work after the response.
-        contact_id: Contact identifier.
-        db_connection: PostgreSQL connection (request-scoped).
-        current_user: Authenticated user claims from JWT.
-
-    Returns:
-        Success response envelope when the enrichment task is queued.
-    """
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_EDIT,
-    )
-    request.state.audit_table = "contacts"
-    request.state.audit_requested_id = contact_id
-    request.state.audit_description = f"Triggered enrichment for contact: {contact_id}"
-    request.state.audit_risk_level = "medium"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-    background_tasks.add_task(
-        ContactsService.trigger_enrichment_background,
-        contact_id,
-        user_context.organization_id,
-    )
+    if organization_id is not None:
+        background_tasks.add_task(
+            ContactsService.trigger_enrichment_background,
+            contact_id,
+            organization_id,
+        )
+    if enrich_event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=enrich_event,
+            key=contact_id,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
     return success_response(
         request=request,
         message_key="contacts.success.contact_enrichment_requested",
         custom_code=CustomStatusCode.SUCCESS,
-        status_code=http_status.HTTP_200_OK,
+        status_code=http_status.HTTP_202_ACCEPTED,
     )
 
 
@@ -759,7 +771,7 @@ async def delete_contact(
         request.state.raw_audit_old_data = deleted.get("old_data")
         request.state.raw_audit_new_data = deleted.get("new_data")
         event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.DELETED.value,
+            event_type=ContactEventType.DELETED.value,
             aggregate_id=contact_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,

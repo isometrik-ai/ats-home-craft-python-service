@@ -24,8 +24,9 @@ from apps.user_service.app.schemas.companies import (
     UpdateCompanyRequest,
 )
 from apps.user_service.app.schemas.enums import (
-    ClientEventType,
     ClientStatus,
+    CompanyEventType,
+    ContactEventType,
     KafkaTopics,
 )
 from apps.user_service.app.services.activity_service import ActivityService
@@ -492,7 +493,7 @@ async def enrich_company(
 
         event_service = EventService(db_connection=db_connection)
         enrich_event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.ENRICHMENT_REQUESTED.value,
+            event_type=CompanyEventType.ENRICHMENT_REQUESTED.value,
             aggregate_id=company_id,
             organization_id=organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
@@ -602,7 +603,7 @@ async def update_company(
         request.state.raw_audit_old_data = result.get("old_data")
         request.state.raw_audit_new_data = result.get("new_data")
         update_event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.UPDATED.value,
+            event_type=CompanyEventType.UPDATED.value,
             aggregate_id=company_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
@@ -625,15 +626,15 @@ async def update_company(
             contact_event_items = [
                 {
                     "event_type": (
-                        ClientEventType.CREATED.value
+                        ContactEventType.CREATED.value
                         if created_cid_s is not None and cid_s == created_cid_s
-                        else ClientEventType.UPDATED.value
+                        else ContactEventType.UPDATED.value
                     ),
                     "aggregate_id": cid_s,
                     "organization_id": org_id,
                     "actor_user_id": actor,
                     "payload": {
-                        "module": "companies",
+                        "module": "contacts",
                         "action": (
                             "contact_created_with_company"
                             if created_cid_s is not None and cid_s == created_cid_s
@@ -727,7 +728,7 @@ async def delete_company(
         request.state.raw_audit_old_data = deleted.get("old_data")
         request.state.raw_audit_new_data = deleted.get("new_data")
         event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.DELETED.value,
+            event_type=CompanyEventType.DELETED.value,
             aggregate_id=company_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
