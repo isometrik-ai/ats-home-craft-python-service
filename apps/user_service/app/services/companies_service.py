@@ -40,8 +40,9 @@ from apps.user_service.app.schemas.companies import (
 )
 from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import (
-    ClientEventType,
     ClientStatus,
+    CompanyEventType,
+    ContactEventType,
     EntityType,
     KafkaTopics,
 )
@@ -201,6 +202,13 @@ class CompaniesService:
     CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
     @staticmethod
+    def _created_entity_lifecycle_type_and_module(entity: dict) -> tuple[str, str]:
+        """Map a ``created_entities`` row to Kafka event type and payload module."""
+        if (entity.get("entity_table") or "").strip().lower() == "contacts":
+            return ContactEventType.CREATED.value, "contacts"
+        return CompanyEventType.CREATED.value, "companies"
+
+    @staticmethod
     async def create_lifecycle_events_for_created_entities(
         *,
         event_service: EventService,
@@ -214,12 +222,13 @@ class CompaniesService:
             entity_id = entity.get("entity_id")
             if not entity_id:
                 continue
+            event_type, module = CompaniesService._created_entity_lifecycle_type_and_module(entity)
             lifecycle_event = await event_service.create_lifecycle_event(
-                event_type=ClientEventType.CREATED.value,
+                event_type=event_type,
                 aggregate_id=str(entity_id),
                 organization_id=organization_id,
                 actor_user_id=actor_user_id,
-                payload={"module": "companies", "action": entity.get("action") or "create"},
+                payload={"module": module, "action": entity.get("action") or "create"},
                 topics=CompaniesService.CLIENT_KAFKA_TOPICS,
             )
             if lifecycle_event is not None:

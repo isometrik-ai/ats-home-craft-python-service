@@ -45,8 +45,9 @@ from apps.user_service.app.schemas.contacts_imports import (
     RetryContactsImportJobResponse,
 )
 from apps.user_service.app.schemas.enums import (
-    ClientEventType,
     ClientStatus,
+    CompanyEventType,
+    ContactEventType,
     KafkaTopics,
 )
 from apps.user_service.app.schemas.external_clients import (
@@ -307,20 +308,12 @@ async def external_create_company(
             None,
         )
         lead_id = None
-        for entity in created_entities:
-            entity_id = entity.get("entity_id")
-            if not entity_id:
-                continue
-            lifecycle_event = await event_service.create_lifecycle_event(
-                event_type=ClientEventType.CREATED.value,
-                aggregate_id=str(entity_id),
-                organization_id=user_context.organization_id,
-                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-                payload={"module": "companies", "action": entity.get("action") or "create"},
-                topics=CLIENT_KAFKA_TOPICS,
-            )
-            if lifecycle_event is not None:
-                created_events.append((lifecycle_event, str(entity_id)))
+        created_events = await CompaniesService.create_lifecycle_events_for_created_entities(
+            event_service=event_service,
+            created_entities=created_entities,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+        )
 
     request.state.audit_table = "clients"
     request.state.audit_requested_id = str(company_id) if company_id else ""
@@ -338,13 +331,10 @@ async def external_create_company(
         "result": result or {},
     }
 
-    for lifecycle_event, event_publish_key in created_events:
-        background_tasks.add_task(
-            EventService.publish_event_background,
-            event=lifecycle_event,
-            key=event_publish_key,
-            topics=CLIENT_KAFKA_TOPICS,
-        )
+    CompaniesService.schedule_lifecycle_event_publishes(
+        background_tasks=background_tasks,
+        created_events=created_events,
+    )
 
     # Typesense indexing (best-effort)
     background_tasks.add_task(
@@ -439,20 +429,12 @@ async def external_create_contact(
         contact_id = str(result["contact_id"])
         company_id = str(result["company_id"]) if result.get("company_id") else None
         lead_id = None
-        for entity in result.get("created_entities") or []:
-            entity_id = entity.get("entity_id")
-            if not entity_id:
-                continue
-            lifecycle_event = await event_service.create_lifecycle_event(
-                event_type=ClientEventType.CREATED.value,
-                aggregate_id=str(entity_id),
-                organization_id=user_context.organization_id,
-                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-                payload={"module": "contacts", "action": entity.get("action") or "create"},
-                topics=CLIENT_KAFKA_TOPICS,
-            )
-            if lifecycle_event is not None:
-                created_events.append((lifecycle_event, str(entity_id)))
+        created_events = await ContactsService.create_lifecycle_events_for_created_entities(
+            event_service=event_service,
+            created_entities=result.get("created_entities"),
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+        )
 
     request.state.audit_table = "clients"
     request.state.audit_requested_id = str(contact_id) if contact_id else ""
@@ -470,13 +452,10 @@ async def external_create_contact(
         "result": result or {},
     }
 
-    for lifecycle_event, event_publish_key in created_events:
-        background_tasks.add_task(
-            EventService.publish_event_background,
-            event=lifecycle_event,
-            key=event_publish_key,
-            topics=CLIENT_KAFKA_TOPICS,
-        )
+    ContactsService.schedule_lifecycle_event_publishes(
+        background_tasks=background_tasks,
+        created_events=created_events,
+    )
 
     background_tasks.add_task(
         index_contacts_background,
@@ -737,7 +716,7 @@ async def external_update_company(
         update_result = await service.update_company(company_id=client_id, body=body)
         changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
         update_event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.UPDATED.value,
+            event_type=CompanyEventType.UPDATED.value,
             aggregate_id=client_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
@@ -762,15 +741,15 @@ async def external_update_company(
             contact_event_items = [
                 {
                     "event_type": (
-                        ClientEventType.CREATED.value
+                        ContactEventType.CREATED.value
                         if created_cid_s is not None and cid_s == created_cid_s
-                        else ClientEventType.UPDATED.value
+                        else ContactEventType.UPDATED.value
                     ),
                     "aggregate_id": cid_s,
                     "organization_id": org_id,
                     "actor_user_id": actor,
                     "payload": {
-                        "module": "companies",
+                        "module": "contacts",
                         "action": (
                             "contact_created_with_company"
                             if created_cid_s is not None and cid_s == created_cid_s
@@ -871,7 +850,7 @@ async def external_update_contact(
         update_result = await service.update_contact(contact_id=client_id, body=body)
         changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
         update_event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.UPDATED.value,
+            event_type=ContactEventType.UPDATED.value,
             aggregate_id=client_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
@@ -892,15 +871,15 @@ async def external_update_contact(
             company_event_items = [
                 {
                     "event_type": (
-                        ClientEventType.CREATED.value
+                        CompanyEventType.CREATED.value
                         if created_cid_s is not None and cid_s == created_cid_s
-                        else ClientEventType.UPDATED.value
+                        else CompanyEventType.UPDATED.value
                     ),
                     "aggregate_id": cid_s,
                     "organization_id": org_id,
                     "actor_user_id": actor,
                     "payload": {
-                        "module": "contacts",
+                        "module": "companies",
                         "action": (
                             "company_created_with_contact"
                             if created_cid_s is not None and cid_s == created_cid_s
@@ -998,7 +977,7 @@ async def external_delete_company(
         request.state.raw_audit_old_data = deleted.get("old_data")
         request.state.raw_audit_new_data = deleted.get("new_data")
         event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.DELETED.value,
+            event_type=CompanyEventType.DELETED.value,
             aggregate_id=client_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
@@ -1082,7 +1061,7 @@ async def external_delete_contact(
         request.state.raw_audit_old_data = deleted.get("old_data")
         request.state.raw_audit_new_data = deleted.get("new_data")
         event = await event_service.create_lifecycle_event(
-            event_type=ClientEventType.DELETED.value,
+            event_type=ContactEventType.DELETED.value,
             aggregate_id=client_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,

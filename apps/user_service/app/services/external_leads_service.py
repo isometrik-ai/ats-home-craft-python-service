@@ -170,12 +170,16 @@ class ExternalLeadsService:
             created_contact_id,
             created_company_id,
         ) = await self._create_or_reuse_contact(contact.model_copy(deep=True))
-        contact_created_events = await ContactsService.create_lifecycle_events_for_created_entities(
-            event_service=self.event_service,
-            created_entities=contact_result.get("created_entities") if contact_result else None,
-            organization_id=self.organization_id,
-            actor_user_id=actor_user_id,
-        )
+        contact_created_events: list[tuple[dict, str]] = []
+        if contact_result and not contact_result.get("reused_existing"):
+            contact_created_events = (
+                await ContactsService.create_lifecycle_events_for_created_entities(
+                    event_service=self.event_service,
+                    created_entities=contact_result.get("created_entities"),
+                    organization_id=self.organization_id,
+                    actor_user_id=actor_user_id,
+                )
+            )
         self._ensure_lead_linked_to_contact(
             lead_payload,
             created_contact_id=created_contact_id,

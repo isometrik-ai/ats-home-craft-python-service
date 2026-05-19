@@ -230,6 +230,8 @@ async def external_create_lead(
             lead_contact_label=body.created_contact_label,
             create_company=body.lead.create_company,
             lead_company_label=body.lead.created_company_label,
+            external=True,
+            actor_user_id=None,
         )
         ExternalLeadsService.apply_create_audit_state(
             request,
