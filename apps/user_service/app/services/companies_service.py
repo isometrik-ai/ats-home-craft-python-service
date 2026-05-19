@@ -167,6 +167,16 @@ def _normalize_company_additional_data(details: dict[str, Any]) -> None:
         details["additional_data"] = {}
 
 
+def _normalize_company_sales_intelligence(details: dict[str, Any]) -> None:
+    """Parse sales_intelligence when asyncpg returns JSONB as a string."""
+    sales_intel = details.get("sales_intelligence")
+    if isinstance(sales_intel, str):
+        parsed = parse_json_field(sales_intel)
+        details["sales_intelligence"] = parsed if isinstance(parsed, dict) else None
+    elif sales_intel is not None and not isinstance(sales_intel, dict):
+        details["sales_intelligence"] = None
+
+
 def _normalize_company_detail_contacts(details: dict[str, Any]) -> None:
     """Normalize nested contact rows embedded in company detail payloads."""
     for contact in details.get("contacts") or []:
@@ -1112,6 +1122,7 @@ class CompaniesService:
         _coerce_company_detail_json_lists(details)
         _normalize_company_billing_preferences(details)
         _normalize_company_additional_data(details)
+        _normalize_company_sales_intelligence(details)
         _normalize_company_detail_contacts(details)
         _normalize_company_detail_timestamps(details)
         return details
@@ -1263,6 +1274,7 @@ class CompaniesService:
         _coerce_company_detail_json_lists(normalized)
         _normalize_company_billing_preferences(normalized)
         _normalize_company_additional_data(normalized)
+        _normalize_company_sales_intelligence(normalized)
         _normalize_company_detail_contacts(normalized)
         _normalize_company_detail_timestamps(normalized)
         normalize_nested_addresses_for_audit(normalized, parent_fk_field="company_id")
