@@ -616,7 +616,7 @@ class CompaniesService:
                     else None
                 )
             )
-            _ = await lead_service.create_lead(
+            created_lead = await lead_service.create_lead(
                 CreateLeadRequest(
                     name=body.name.strip(),
                     stage_id=body.lead.stage_id,
@@ -626,9 +626,17 @@ class CompaniesService:
                     contacts=contacts_list,
                 )
             )
+            created_lead_id = (
+                str(created_lead["id"])
+                if isinstance(created_lead, dict) and created_lead.get("id") is not None
+                else None
+            )
+        else:
+            created_lead_id = None
 
         return {
             "company_id": company_id,
+            "created_lead_id": created_lead_id,
             "old_data": None,
             "new_data": company,
             "enrichment_targets": enrichment_targets,
