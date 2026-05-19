@@ -385,9 +385,13 @@ class CompanyDetailsResponse(BaseModel):
     websites: list[dict[str, Any]] = Field(default_factory=list)
     billing_preferences: dict[str, Any] | None = None
     social_pages: list[dict[str, Any]] = Field(default_factory=list)
+    linked_pages: list[dict[str, Any]] = Field(default_factory=list)
+    products: list[dict[str, Any]] = Field(default_factory=list)
+    key_people: list[dict[str, Any]] = Field(default_factory=list)
 
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     additional_data: dict[str, Any] = Field(default_factory=dict)
+    sales_intelligence: dict[str, Any] | None = None
     notes: list[NoteItem] = Field(default_factory=list)
 
     target_market_segments: list[str] = Field(default_factory=list)
