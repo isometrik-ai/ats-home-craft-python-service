@@ -285,6 +285,8 @@ async def external_create_company(
     user_context = _external_user_context(organization_id=organization_id, actor_email=actor_email)
     created_events: list[tuple[dict, str]] = []
     result: dict | None = None
+    lead_created_event: dict | None = None
+    lead_event_key: str | None = None
     async with db_connection.transaction():
         service = CompaniesService(
             db_connection=db_connection,
@@ -307,13 +309,21 @@ async def external_create_company(
             ),
             None,
         )
-        lead_id = None
+        lead_id = result.get("created_lead_id")
         created_events = await CompaniesService.create_lifecycle_events_for_created_entities(
             event_service=event_service,
             created_entities=created_entities,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
         )
+        if lead_id:
+            lead_created_event = await event_service.create_lead_created_lifecycle_event(
+                lead_id=str(lead_id),
+                organization_id=user_context.organization_id,
+                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            lead_event_key = str(lead_id)
 
     request.state.audit_table = "clients"
     request.state.audit_requested_id = str(company_id) if company_id else ""
@@ -335,6 +345,13 @@ async def external_create_company(
         background_tasks=background_tasks,
         created_events=created_events,
     )
+    if lead_created_event is not None and lead_event_key is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=lead_created_event,
+            key=lead_event_key,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
 
     # Typesense indexing (best-effort)
     background_tasks.add_task(
@@ -418,6 +435,8 @@ async def external_create_contact(
     user_context = _external_user_context(organization_id=organization_id, actor_email=actor_email)
     created_events: list[tuple[dict, str]] = []
     result: dict | None = None
+    lead_created_event: dict | None = None
+    lead_event_key: str | None = None
     async with db_connection.transaction():
         service = ContactsService(
             db_connection=db_connection,
@@ -428,13 +447,21 @@ async def external_create_contact(
         result = await service.create_contact(body)
         contact_id = str(result["contact_id"])
         company_id = str(result["company_id"]) if result.get("company_id") else None
-        lead_id = None
+        lead_id = result.get("created_lead_id")
         created_events = await ContactsService.create_lifecycle_events_for_created_entities(
             event_service=event_service,
             created_entities=result.get("created_entities"),
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
         )
+        if lead_id:
+            lead_created_event = await event_service.create_lead_created_lifecycle_event(
+                lead_id=str(lead_id),
+                organization_id=user_context.organization_id,
+                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            lead_event_key = str(lead_id)
 
     request.state.audit_table = "clients"
     request.state.audit_requested_id = str(contact_id) if contact_id else ""
@@ -456,6 +483,13 @@ async def external_create_contact(
         background_tasks=background_tasks,
         created_events=created_events,
     )
+    if lead_created_event is not None and lead_event_key is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=lead_created_event,
+            key=lead_event_key,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
 
     background_tasks.add_task(
         index_contacts_background,

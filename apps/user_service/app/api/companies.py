@@ -119,6 +119,8 @@ async def create_company(
     """
     created_events: list[tuple[dict, str]] = []
     company_id: str | None = None
+    lead_created_event: dict | None = None
+    lead_event_key: str | None = None
     async with db_connection.transaction():
         user_context = await check_permissions(
             current_user=current_user,
@@ -151,11 +153,27 @@ async def create_company(
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
         )
+        created_lead_id = result.get("created_lead_id")
+        if created_lead_id:
+            lead_created_event = await event_service.create_lead_created_lifecycle_event(
+                lead_id=str(created_lead_id),
+                organization_id=user_context.organization_id,
+                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            lead_event_key = str(created_lead_id)
 
     CompaniesService.schedule_lifecycle_event_publishes(
         background_tasks=background_tasks,
         created_events=created_events,
     )
+    if lead_created_event is not None and lead_event_key is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=lead_created_event,
+            key=lead_event_key,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
     CompaniesService.schedule_typesense_indexing_for_created_entities(
         background_tasks=background_tasks,
         company_id=company_id,

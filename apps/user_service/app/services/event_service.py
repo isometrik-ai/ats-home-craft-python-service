@@ -10,7 +10,12 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.db.repositories.events_repository import EventsRepository
-from apps.user_service.app.schemas.enums import ClientEventType, ClientType, KafkaTopics
+from apps.user_service.app.schemas.enums import (
+    ClientEventType,
+    ClientType,
+    KafkaTopics,
+    LeadEventType,
+)
 from apps.user_service.app.services.kafka_event_service import get_kafka_event_service
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_utils.logger import get_logger
@@ -122,6 +127,24 @@ class EventService:
         )
         await self.store_event(event=event, topics=topics, status="pending")
         return event
+
+    async def create_lead_created_lifecycle_event(
+        self,
+        *,
+        lead_id: str,
+        organization_id: str,
+        actor_user_id: str | None,
+        topics: list[KafkaTopic],
+    ) -> dict[str, Any]:
+        """Build and persist ``leads.created`` for lead creation from contact/company create."""
+        return await self.create_lifecycle_event(
+            event_type=LeadEventType.CREATED.value,
+            aggregate_id=lead_id,
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+            payload={"module": "leads", "action": "create"},
+            topics=topics,
+        )
 
     async def create_lifecycle_events(
         self,

@@ -972,7 +972,7 @@ class ContactsService:
                 CreateLeadCompany(company_id=str(company_id)) if company_id is not None else None
             )
             contacts_list = [LeadContactCreate(contact_id=str(contact_id))] if contact_id else None
-            _ = await lead_service.create_lead(
+            created_lead = await lead_service.create_lead(
                 CreateLeadRequest(
                     name=lead_name,
                     stage_id=lead_payload.stage_id,
@@ -982,6 +982,13 @@ class ContactsService:
                     contacts=contacts_list,
                 )
             )
+            created_lead_id = (
+                str(created_lead["id"])
+                if isinstance(created_lead, dict) and created_lead.get("id") is not None
+                else None
+            )
+        else:
+            created_lead_id = None
 
         self._maybe_send_contact_creation_email(
             portal_access=bool(body.portal_access),
@@ -1014,6 +1021,7 @@ class ContactsService:
         return {
             "contact_id": contact_id,
             "company_id": company_id,
+            "created_lead_id": created_lead_id,
             "old_data": None,
             "new_data": contact_row,
             "enrichment_targets": enrichment_targets,
