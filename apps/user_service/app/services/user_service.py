@@ -1017,6 +1017,7 @@ class UserService:  # pylint: disable=too-many-public-methods
                 ),
                 last_active_at=format_iso_datetime(u.get("last_active_at")),
                 permissions_count=permissions_count_map.get(str(u.get("role_id")), 0),
+                isometrik_user_id=u.get("isometrik_user_id"),
             )
             for u in users_data
         ]

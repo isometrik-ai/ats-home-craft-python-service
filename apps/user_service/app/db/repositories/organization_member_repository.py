@@ -501,6 +501,7 @@ class OrganizationMemberRepository:
                 om.created_at,
                 om.updated_at,
                 om.last_active_at,
+                om.isometrik_user_id,
                 COALESCE(au.raw_user_meta_data->'alternate_emails', '[]'::jsonb) AS alternate_emails
             FROM organization_members om
             LEFT JOIN auth.users au ON au.id = om.user_id

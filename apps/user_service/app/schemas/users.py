@@ -433,6 +433,9 @@ class UserListItem(BaseModel):
     member_role: OrganizationMemberRole = Field(
         ..., description="Organization member role (owner, member)"
     )
+    isometrik_user_id: str | None = Field(
+        None, description="Isometrik chat user ID for this organization member"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -449,6 +452,7 @@ class UserListItem(BaseModel):
                 "permissions_count": 10,
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "member_role": OrganizationMemberRole.OWNER.value,
+                "isometrik_user_id": "isometrik-user-123",
             }
         }
     )
