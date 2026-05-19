@@ -14,7 +14,11 @@ from apps.user_service.app.schemas.enums import (
     KafkaTopics,
     LeadEventType,
 )
-from apps.user_service.app.schemas.leads import CreateLeadRequest, LeadContactCreate
+from apps.user_service.app.schemas.leads import (
+    CreateLeadCompany,
+    CreateLeadRequest,
+    LeadContactCreate,
+)
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.lead_service import LeadService
@@ -48,6 +52,7 @@ class ExternalLeadsService:
         and `lead.contacts` (if any) are preserved
     - optionally creating a contact (and related entities)
     - linking the created/reused contact to the lead payload (without overwriting existing links)
+    - linking a company created with the inline contact to the lead (``lead.company``)
     - creating lifecycle events (DB rows) for created entities
     """
 
@@ -158,6 +163,25 @@ class ExternalLeadsService:
             )
         lead_payload.contacts = existing_contacts or None
 
+    def _ensure_lead_linked_to_company(
+        self,
+        lead_payload: CreateLeadRequest,
+        *,
+        created_company_id: str,
+    ) -> None:
+        """Ensure the lead is linked to the company created with the inline contact."""
+        company_id = (created_company_id or "").strip()
+        if not company_id:
+            return
+        existing = lead_payload.company
+        if existing is not None:
+            existing_id = (existing.company_id or "").strip()
+            if existing_id == company_id:
+                return
+            if existing_id:
+                return
+        lead_payload.company = CreateLeadCompany(company_id=company_id)
+
     async def _create_lead_created_lifecycle_event(
         self, created: dict[str, Any]
     ) -> tuple[dict | None, str | None]:
@@ -210,6 +234,11 @@ class ExternalLeadsService:
                 created_contact_id=created_contact_id,
                 lead_contact_label=lead_contact_label,
             )
+            if created_company_id:
+                self._ensure_lead_linked_to_company(
+                    lead_payload,
+                    created_company_id=created_company_id,
+                )
 
         created = await self.lead_service.create_lead(lead_payload, external=True)
 
