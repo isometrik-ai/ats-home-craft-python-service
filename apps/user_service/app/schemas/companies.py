@@ -125,6 +125,44 @@ class CreateCompanyRequest(BaseModel):
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
 
 
+class CreateCompanyRequestStandalone(BaseModel):
+    """Create a company without nested lead or contact association blocks.
+
+    Used when another endpoint owns lead creation (e.g. lead create with inline company)
+    and the company should be linked on the lead only (``lead_companies``), not via
+    ``contact_companies``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., max_length=200)
+    industry: str | None = Field(None, max_length=100)
+    profile_photo_url: str | None = Field(None, max_length=500)
+    portal_access: bool = False
+    email: str | None = Field(None, max_length=320)
+    phones: list[Phone] = Field(default_factory=list, max_length=20)
+
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    websites: list[Website] = Field(default_factory=list, max_length=10)
+    billing_preferences: BillingPreferences | None = Field(
+        default_factory=BillingPreferences,
+        description="Billing preferences (defaults to empty preferences).",
+    )
+    social_pages: list[SocialPage] = Field(default_factory=list, max_length=20)
+
+    target_market_segments: list[str] = Field(default_factory=list, max_length=50)
+    current_tech_stack: list[str] = Field(default_factory=list, max_length=50)
+    preferred_communication_channels: list[str] = Field(default_factory=list, max_length=20)
+    industry_specific_terminologies: list[str] = Field(default_factory=list, max_length=100)
+    description: str | None = Field(None, max_length=10000)
+
+    custom_fields: list[dict[str, Any]] = Field(default_factory=list)
+    additional_data: dict[str, Any] = Field(default_factory=dict)
+    notes: list[NoteItem] = Field(default_factory=list, description="Structured notes")
+
+    addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
+
+
 class CompanyContactAssociationAdd(BaseModel):
     """Add an existing contact membership for a company."""
 

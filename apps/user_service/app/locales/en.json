@@ -409,7 +409,9 @@
       "duplicate_company": "This company is already linked to the lead.",
       "contact_not_linked": "This contact is not currently linked to the lead.",
       "company_not_linked": "This company is not currently linked to the lead.",
-      "external_lead_contact_label_requires_contact": "`created_contact_label` can only be provided when `create_contact` is set."
+      "external_lead_contact_label_requires_contact": "`created_contact_label` can only be provided when `create_contact` is set.",
+      "contact_required": "At least one contact must be linked when creating a lead via the integration API.",
+      "company_link_or_create_only": "Provide either `company.company_id` (link existing) OR `create_company` (create new), but not both."
     },
     "success": {
       "lead_created": "Lead created successfully.",

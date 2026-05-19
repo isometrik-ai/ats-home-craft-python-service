@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from apps.user_service.app.schemas.common import NoteItem, Phone
+from apps.user_service.app.schemas.companies import CreateCompanyRequestStandalone
 from apps.user_service.app.schemas.contacts import CreateContactRequestStandalone
 from apps.user_service.app.schemas.enums import (
     DealType,
@@ -363,13 +364,44 @@ class CreateLeadRequest(BaseModel):
         max_length=255,
         alias="lead_contact_label",
     )
+    create_company: CreateCompanyRequestStandalone | None = Field(
+        default=None,
+        description=(
+            "Optional inline company create linked on the lead only (``lead_companies``). "
+            "Does not create a ``contact_companies`` row."
+        ),
+    )
+    created_company_label: str | None = Field(
+        default=None,
+        max_length=255,
+        alias="lead_company_label",
+        description=(
+            "Optional label for the inline-created company on the lead (lead_companies.label)."
+        ),
+    )
 
     def to_lead_payload(self) -> "CreateLeadRequest":
-        """Lead fields only (omit inline contact create inputs)."""
+        """Lead fields only (omit inline contact/company create inputs)."""
         return self.model_copy(
-            update={"create_contact": None, "created_contact_label": None},
+            update={
+                "create_contact": None,
+                "created_contact_label": None,
+                "create_company": None,
+                "created_company_label": None,
+            },
             deep=True,
         )
+
+    @model_validator(mode="after")
+    def validate_company_link_vs_create(self) -> "CreateLeadRequest":
+        """``company.company_id`` and inline ``create_company`` are mutually exclusive."""
+        has_link = self.company is not None and (self.company.company_id or "").strip()
+        if has_link and self.create_company is not None:
+            raise ValidationException(
+                message_key="leads.errors.company_link_or_create_only",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
     @field_validator("lead_source", "referral_source", "lead_score", "description")
     @classmethod

@@ -11,8 +11,6 @@ The decoded ``projectId`` is mapped to our internal ``organization_id`` and all
 operations are scoped to that organization.
 """
 
-from typing import Any
-
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
@@ -227,9 +225,11 @@ async def external_create_lead(
         )
 
         result = await external_service.create_lead_with_optional_contact(
-            lead=body.lead.model_copy(deep=True),
+            lead=body.lead.to_lead_payload(),
             contact=body.create_contact,
             lead_contact_label=body.created_contact_label,
+            create_company=body.lead.create_company,
+            lead_company_label=body.lead.created_company_label,
         )
         ExternalLeadsService.apply_create_audit_state(
             request,
@@ -245,21 +245,12 @@ async def external_create_lead(
         lead_kafka_topics=LEAD_KAFKA_TOPICS,
     )
 
-    created = result.created
-    response_data: dict[str, Any] = (
-        {"lead_id": str(created.get("id"))} if isinstance(created, dict) else {}
-    )
-
-    if result.created_contact_id is not None:
-        response_data["contact_id"] = result.created_contact_id
-    if result.created_company_id is not None:
-        response_data["company_id"] = result.created_company_id
     return success_response(
         request=request,
         message_key="leads.success.lead_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
-        data=response_data or None,
+        data=ExternalLeadsService.build_create_response_data(result) or None,
     )
 
 
