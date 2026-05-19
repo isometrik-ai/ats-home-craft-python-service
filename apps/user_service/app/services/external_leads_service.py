@@ -9,22 +9,22 @@ import asyncpg
 from fastapi import BackgroundTasks, Request
 from supabase import AsyncClient
 
-from apps.user_service.app.schemas.contacts import CreateContactRequestStandalone
-from apps.user_service.app.schemas.enums import (
-    ClientEventType,
-    KafkaTopics,
-    LeadEventType,
+from apps.user_service.app.schemas.companies import (
+    CreateCompanyRequest,
+    CreateCompanyRequestStandalone,
 )
+from apps.user_service.app.schemas.contacts import CreateContactRequestStandalone
+from apps.user_service.app.schemas.enums import KafkaTopics, LeadEventType
 from apps.user_service.app.schemas.leads import (
     CreateLeadCompany,
     CreateLeadRequest,
     LeadContactCreate,
 )
+from apps.user_service.app.services.companies_service import CompaniesService
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.lead_service import LeadService
 from apps.user_service.app.services.typesense_index_service import (
-    index_companies_background,
     index_contacts_background,
 )
 from apps.user_service.app.utils.common_utils import UserContext
@@ -40,10 +40,12 @@ class ExternalLeadCreateResult:
     lead_payload: CreateLeadRequest
     created_contact_id: str | None
     created_company_id: str | None
+    lead_company_id: str | None
     contact_created_events: list[tuple[dict, str]]
     lead_created_event: dict | None
     lead_event_key: str | None
     contact_result: dict[str, Any] | None
+    company_result: dict[str, Any] | None
 
 
 class ExternalLeadsService:
@@ -58,6 +60,8 @@ class ExternalLeadsService:
     - optionally creating a contact (and related entities)
     - linking the created/reused contact to the lead payload (without overwriting existing links)
     - linking a company created with the inline contact to the lead (``lead.company``)
+    - optionally creating a company linked on the lead only
+      (``create_company`` → ``lead_companies``)
     - creating lifecycle events (DB rows) for created entities
     """
 
@@ -83,6 +87,11 @@ class ExternalLeadsService:
             db_connection=db_connection,
         )
         self.contacts_service = ContactsService(
+            db_connection=db_connection,
+            user_context=user_context,
+            supabase_client=supabase_client,
+        )
+        self.companies_service = CompaniesService(
             db_connection=db_connection,
             user_context=user_context,
             supabase_client=supabase_client,
@@ -129,30 +138,6 @@ class ExternalLeadsService:
                 None,
             )
 
-    async def _create_contact_lifecycle_events(
-        self,
-        contact_result: dict[str, Any] | None,
-        *,
-        actor_user_id: str | None = None,
-    ) -> list[tuple[dict, str]]:
-        """Create lifecycle events for contact creation."""
-        contact_created_events: list[tuple[dict, str]] = []
-        for entity in (contact_result.get("created_entities") or []) if contact_result else []:
-            entity_id = entity.get("entity_id")
-            if not entity_id:
-                continue
-            lifecycle_event = await self.event_service.create_lifecycle_event(
-                event_type=ClientEventType.CREATED.value,
-                aggregate_id=str(entity_id),
-                organization_id=self.organization_id,
-                actor_user_id=actor_user_id,
-                payload={"module": "contacts", "action": entity.get("action") or "create"},
-                topics=self.client_kafka_topics,
-            )
-            if lifecycle_event is not None:
-                contact_created_events.append((lifecycle_event, str(entity_id)))
-        return contact_created_events
-
     def _ensure_lead_linked_to_contact(
         self,
         lead_payload: CreateLeadRequest,
@@ -185,8 +170,10 @@ class ExternalLeadsService:
             created_contact_id,
             created_company_id,
         ) = await self._create_or_reuse_contact(contact.model_copy(deep=True))
-        contact_created_events = await self._create_contact_lifecycle_events(
-            contact_result,
+        contact_created_events = await ContactsService.create_lifecycle_events_for_created_entities(
+            event_service=self.event_service,
+            created_entities=contact_result.get("created_entities") if contact_result else None,
+            organization_id=self.organization_id,
             actor_user_id=actor_user_id,
         )
         self._ensure_lead_linked_to_contact(
@@ -197,28 +184,58 @@ class ExternalLeadsService:
         if created_company_id:
             self._ensure_lead_linked_to_company(
                 lead_payload,
-                created_company_id=created_company_id,
+                company_id=created_company_id,
             )
         return contact_result, created_contact_id, created_company_id, contact_created_events
+
+    async def _prepare_lead_only_company_create(
+        self,
+        lead_payload: CreateLeadRequest,
+        *,
+        company: CreateCompanyRequestStandalone,
+        lead_company_label: str | None,
+        actor_user_id: str | None,
+    ) -> tuple[str, dict[str, Any], list[tuple[dict, str]]]:
+        """Create a company and link it on the lead only (no ``contact_companies`` row)."""
+        company_body = CreateCompanyRequest.model_validate(company.model_dump())
+        company_result = await self.companies_service.create_company(company_body)
+        lead_company_id = str(company_result["company_id"])
+        company_events = await CompaniesService.create_lifecycle_events_for_created_entities(
+            event_service=self.event_service,
+            created_entities=company_result.get("created_entities"),
+            organization_id=self.organization_id,
+            actor_user_id=actor_user_id,
+        )
+        # Lead-only company: set explicit ``lead.company`` (may differ from a
+        # contact-linked company, still on lead via ``contact_companies`` auto-link).
+        lead_payload.company = CreateLeadCompany(
+            company_id=lead_company_id,
+            label=(lead_company_label.strip() if lead_company_label else None),
+        )
+        return lead_company_id, company_result, company_events
 
     def _ensure_lead_linked_to_company(
         self,
         lead_payload: CreateLeadRequest,
         *,
-        created_company_id: str,
+        company_id: str,
+        label: str | None = None,
     ) -> None:
-        """Ensure the lead is linked to the company created with the inline contact."""
-        company_id = (created_company_id or "").strip()
-        if not company_id:
+        """Ensure the lead is linked to a company (``lead_companies`` only)."""
+        normalized_id = (company_id or "").strip()
+        if not normalized_id:
             return
         existing = lead_payload.company
         if existing is not None:
             existing_id = (existing.company_id or "").strip()
-            if existing_id == company_id:
+            if existing_id == normalized_id:
                 return
             if existing_id:
                 return
-        lead_payload.company = CreateLeadCompany(company_id=company_id)
+        lead_payload.company = CreateLeadCompany(
+            company_id=normalized_id,
+            label=(label.strip() if label else None),
+        )
 
     async def _create_lead_created_lifecycle_event(
         self,
@@ -256,13 +273,17 @@ class ExternalLeadsService:
         request.state.audit_requested_id = (
             str(created.get("id", "")) if isinstance(created, dict) else ""
         )
-        request.state.audit_description = (
-            f"Created lead with new contact: {lead_payload.name!r}"
-            if result.created_contact_id is not None
-            else f"Created lead: {lead_payload.name!r}"
-        )
+        if result.created_contact_id is not None:
+            audit_description = f"Created lead with new contact: {lead_payload.name!r}"
+        elif result.lead_company_id is not None:
+            audit_description = f"Created lead with new company: {lead_payload.name!r}"
+        else:
+            audit_description = f"Created lead: {lead_payload.name!r}"
+        request.state.audit_description = audit_description
         request.state.audit_risk_level = (
-            "high" if result.created_contact_id is not None else "medium"
+            "high"
+            if result.created_contact_id is not None or result.lead_company_id is not None
+            else "medium"
         )
         request.state.audit_user_context = {
             "user_id": (
@@ -276,12 +297,54 @@ class ExternalLeadsService:
             if isinstance(created, dict)
             else created
         )
-        if result.created_contact_id is not None:
+        if result.created_contact_id is not None or result.lead_company_id is not None:
             request.state.raw_audit_new_data = {
                 "lead": request.state.raw_audit_new_data,
                 "created_contact_id": result.created_contact_id,
                 "created_company_id": result.created_company_id,
+                "lead_company_id": result.lead_company_id,
             }
+
+    @staticmethod
+    def _collect_created_entities(result: ExternalLeadCreateResult) -> list[dict[str, Any]]:
+        """Merge ``created_entities`` from inline contact and lead-only company creates."""
+        entities: list[dict[str, Any]] = []
+        if result.contact_result:
+            entities.extend(result.contact_result.get("created_entities") or [])
+        if result.company_result:
+            entities.extend(result.company_result.get("created_entities") or [])
+        return entities
+
+    @staticmethod
+    def _collect_enrichment_targets(result: ExternalLeadCreateResult) -> list[dict[str, Any]]:
+        """Merge enrichment targets from contact and lead-only company creates."""
+        targets: list[dict[str, Any]] = []
+        if result.contact_result:
+            targets.extend(result.contact_result.get("enrichment_targets") or [])
+        if result.company_result:
+            targets.extend(result.company_result.get("enrichment_targets") or [])
+        return targets
+
+    @staticmethod
+    def build_create_response_data(result: ExternalLeadCreateResult) -> dict[str, Any]:
+        """Build optional response ids for lead create (external API)."""
+        created = result.created
+        response_data: dict[str, Any] = (
+            {"lead_id": str(created.get("id"))} if isinstance(created, dict) else {}
+        )
+        if result.created_contact_id is not None:
+            response_data["contact_id"] = result.created_contact_id
+        if result.lead_company_id is not None:
+            response_data["company_id"] = result.lead_company_id
+        elif result.created_company_id is not None:
+            response_data["company_id"] = result.created_company_id
+        if (
+            result.created_company_id is not None
+            and result.lead_company_id is not None
+            and result.created_company_id != result.lead_company_id
+        ):
+            response_data["contact_company_id"] = result.created_company_id
+        return response_data
 
     @staticmethod
     def schedule_create_post_commit(
@@ -292,6 +355,8 @@ class ExternalLeadsService:
         lead_kafka_topics: list[KafkaTopics],
     ) -> None:
         """Publish lifecycle events and run indexing/enrichment after commit."""
+        created_entities = ExternalLeadsService._collect_created_entities(result)
+
         ContactsService.schedule_lifecycle_event_publishes(
             background_tasks=background_tasks,
             created_events=result.contact_created_events,
@@ -303,20 +368,25 @@ class ExternalLeadsService:
                 key=result.lead_event_key,
                 topics=lead_kafka_topics,
             )
-        if result.created_contact_id:
+        ContactsService.schedule_typesense_indexing_for_created_entities(
+            background_tasks=background_tasks,
+            created_entities=created_entities or None,
+            organization_id=organization_id,
+        )
+        if result.created_contact_id and not any(
+            e.get("entity_table") == "contacts" and e.get("entity_id") == result.created_contact_id
+            for e in created_entities
+        ):
             background_tasks.add_task(
                 index_contacts_background,
                 [(result.created_contact_id, organization_id)],
             )
-        if result.created_company_id:
-            background_tasks.add_task(
-                index_companies_background,
-                [(result.created_company_id, organization_id)],
+        enrichment_targets = ExternalLeadsService._collect_enrichment_targets(result)
+        if enrichment_targets:
+            ContactsService.schedule_enrichment(
+                background_tasks=background_tasks,
+                enrichment_targets=enrichment_targets,
             )
-        ContactsService.schedule_enrichment(
-            background_tasks=background_tasks,
-            enrichment_targets=(result.contact_result or {}).get("enrichment_targets"),
-        )
 
     async def create_lead_with_optional_contact(
         self,
@@ -324,6 +394,8 @@ class ExternalLeadsService:
         lead: CreateLeadRequest,
         contact: CreateContactRequestStandalone | None,
         lead_contact_label: str | None,
+        create_company: CreateCompanyRequestStandalone | None = None,
+        lead_company_label: str | None = None,
         external: bool = True,
         require_linked_contact: bool = True,
         actor_user_id: str | None = None,
@@ -331,8 +403,10 @@ class ExternalLeadsService:
         """Create a lead with an optional contact."""
         created_contact_id: str | None = None
         created_company_id: str | None = None
+        lead_company_id: str | None = None
         contact_created_events: list[tuple[dict, str]] = []
         contact_result: dict[str, Any] | None = None
+        company_result: dict[str, Any] | None = None
 
         lead_payload = lead.model_copy(deep=True)
 
@@ -351,6 +425,19 @@ class ExternalLeadsService:
                 actor_user_id=actor_user_id,
             )
 
+        if create_company is not None:
+            (
+                lead_company_id,
+                company_result,
+                company_events,
+            ) = await self._prepare_lead_only_company_create(
+                lead_payload,
+                company=create_company,
+                lead_company_label=lead_company_label,
+                actor_user_id=actor_user_id,
+            )
+            contact_created_events.extend(company_events)
+
         created = await self.lead_service.create_lead(lead_payload, external=external)
 
         lead_created_event, lead_event_key = await self._create_lead_created_lifecycle_event(
@@ -363,8 +450,10 @@ class ExternalLeadsService:
             lead_payload=lead_payload,
             created_contact_id=created_contact_id,
             created_company_id=created_company_id,
+            lead_company_id=lead_company_id,
             contact_created_events=contact_created_events,
             lead_created_event=lead_created_event,
             lead_event_key=lead_event_key,
             contact_result=contact_result,
+            company_result=company_result,
         )

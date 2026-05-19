@@ -109,6 +109,8 @@ async def create_lead(
             lead=body.to_lead_payload(),
             contact=body.create_contact,
             lead_contact_label=body.created_contact_label,
+            create_company=body.create_company,
+            lead_company_label=body.created_company_label,
             external=False,
             require_linked_contact=False,
             actor_user_id=actor_user_id,
@@ -117,6 +119,7 @@ async def create_lead(
             request,
             result=result,
             user_context=user_context,
+            external_actor=False,
         )
 
     ExternalLeadsService.schedule_create_post_commit(
@@ -126,11 +129,13 @@ async def create_lead(
         lead_kafka_topics=LEAD_KAFKA_TOPICS,
     )
 
+    response_data = ExternalLeadsService.build_create_response_data(result)
     return success_response(
         request=request,
         message_key="leads.success.lead_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
+        data=response_data or None,
     )
 
 
