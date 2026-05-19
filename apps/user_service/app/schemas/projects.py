@@ -8,7 +8,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.enums import (
     BillingType,
@@ -373,6 +373,120 @@ class IntegrationsUpdate(BaseModel):
     remove: str | None = Field(None, min_length=1, description="Integration record ID to remove")
 
 
+class ProjectCompanyCreate(BaseModel):
+    """Company linked to a project (``project_companies``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    company_id: str = Field(..., description="Company UUID")
+    label: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional role or tag for this association",
+    )
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        """Strip whitespace; blank becomes ``None``."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class ProjectCompanyAssociationUpdate(BaseModel):
+    """Update per-company attributes for a project relationship (currently label only)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    company_id: str = Field(..., description="Existing company id to update relationship for")
+    label: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional role or tag for this association (null clears label)",
+    )
+
+    @field_validator("company_id", mode="before")
+    @classmethod
+    def normalize_company_id(cls, value: Any) -> Any:
+        """Strip whitespace from company id when provided as a string."""
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def normalize_label(cls, value: Any) -> Any:
+        """Strip whitespace; treat blank strings as unset (``None``)."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+
+class ProjectCompaniesUpdate(BaseModel):
+    """Batch company association changes for a project (delta updates).
+
+    Supports in one request:
+    - remove association with N companies
+    - add association with N existing companies (optionally setting label per company)
+    - update label for N existing company relationships without unlinking
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    remove_associations: list[str] = Field(
+        default_factory=list,
+        description="Company ids to unlink from the project",
+    )
+    add_associations: list[ProjectCompanyCreate] = Field(
+        default_factory=list,
+        description="Associate the project with existing companies (by id)",
+    )
+    update_associations: list[ProjectCompanyAssociationUpdate] = Field(
+        default_factory=list,
+        description="Update label per company without unlinking",
+    )
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> "ProjectCompaniesUpdate":
+        """Normalize ids and validate at least one delta operation is provided."""
+        remove_ids = [c.strip() for c in (self.remove_associations or []) if (c or "").strip()]
+        self.remove_associations = remove_ids
+
+        normalized_add: list[ProjectCompanyCreate] = []
+        for item in self.add_associations or []:
+            cid = (item.company_id or "").strip()
+            if not cid:
+                raise ValueError("add_associations.company_id is required.")
+            normalized_add.append(ProjectCompanyCreate(company_id=cid, label=item.label))
+        self.add_associations = normalized_add
+
+        normalized_update: list[ProjectCompanyAssociationUpdate] = []
+        for item in self.update_associations or []:
+            cid = (item.company_id or "").strip()
+            if not cid:
+                raise ValueError("update_associations.company_id is required.")
+            normalized_update.append(
+                ProjectCompanyAssociationUpdate(company_id=cid, label=item.label)
+            )
+        self.update_associations = normalized_update
+
+        if (
+            not self.remove_associations
+            and not self.add_associations
+            and not self.update_associations
+        ):
+            raise ValueError("Provide at least one operation in company_association.")
+
+        return self
+
+
 class UpdateProjectRequest(BaseModel):
     """Request model for updating a project.
     All fields optional; only provided fields are updated."""
@@ -413,6 +527,13 @@ class UpdateProjectRequest(BaseModel):
     )
     documents: DocumentsUpdate | None = Field(
         None, description="Single documents operation: add, update, remove, or replace"
+    )
+    company_association: ProjectCompaniesUpdate | None = Field(
+        default=None,
+        description=(
+            "Delta operations for project_companies (add/remove/update labels). "
+            "Omit to leave companies unchanged."
+        ),
     )
 
     @model_validator(mode="after")
@@ -480,6 +601,11 @@ class CreateProjectRequest(BaseModel):
         None,
         max_length=10,
         description="Integrations",
+    )
+    companies: list[ProjectCompanyCreate] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Companies to link via project_companies",
     )
     documents: list[ProjectDocument] = Field(
         default_factory=list,
@@ -648,6 +774,42 @@ class RepositoryInfo(BaseModel):
     updated_at: str = Field(..., description="Updated timestamp")
 
 
+class ProjectCompanyContactItem(BaseModel):
+    """Contact linked to a company on project detail."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(..., description="Contact UUID")
+    first_name: str | None = Field(None, description="First name")
+    last_name: str | None = Field(None, description="Last name")
+    title: str | None = Field(None, description="Job title")
+    email: str | None = Field(None, description="Email address")
+    phones: list[dict[str, Any]] = Field(default_factory=list, description="Phone numbers")
+    is_primary: bool = Field(
+        default=False, description="Whether this is the company primary contact"
+    )
+
+
+class ProjectCompanyListItem(BaseModel):
+    """Company row on a project (list/detail)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    company_id: str = Field(..., description="Company UUID")
+    label: str | None = Field(None, description="Optional role or tag for this link")
+    name: str = Field("", description="Company display name")
+    company_name: str = Field("", description="Alias for name (backward compatible)")
+    email: str | None = Field(None, description="Company email")
+    profile_photo_url: str | None = Field(
+        default=None,
+        description="Company profile image URL",
+    )
+    contacts: list[ProjectCompanyContactItem] = Field(
+        default_factory=list,
+        description="Contacts linked to this company via contact_companies",
+    )
+
+
 class IntegrationInfo(BaseModel):
     """Integration information in project detail."""
 
@@ -714,6 +876,10 @@ class ProjectDetailData(BaseModel):
     is_billable: bool = Field(..., description="Is billable")
     is_internal: bool = Field(..., description="Is internal")
     team: TeamInfo | None = Field(None, description="Team information")
+    companies: list[ProjectCompanyListItem] = Field(
+        default_factory=list,
+        description="Companies linked via project_companies",
+    )
     repositories: list[RepositoryInfo] = Field(default_factory=list, description="Repositories")
     integrations: list[IntegrationInfo] = Field(default_factory=list, description="Integrations")
     created_at: str = Field(..., description="Created timestamp")

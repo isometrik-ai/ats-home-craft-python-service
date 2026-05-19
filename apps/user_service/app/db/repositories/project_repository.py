@@ -10,11 +10,93 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.schemas.enums import ProjectStatus, TeamRoles
+from apps.user_service.app.schemas.enums import ClientStatus, ProjectStatus, TeamRoles
 from apps.user_service.app.schemas.projects import (
     PROJECT_JSONB_COLUMNS,
     ProjectListQueryParams,
 )
+from apps.user_service.app.utils.common_utils import (
+    json_dumps_or_none,
+    serialize_jsonb_param,
+)
+
+_PROJECT_COMPANY_CONTACTS_JSON_SQL = """
+COALESCE(
+    (
+        SELECT json_agg(
+            json_build_object(
+                'id', ct.id::text,
+                'first_name', ct.first_name,
+                'last_name', ct.last_name,
+                'title', ct.title,
+                'email', NULLIF(au.email::text, ''),
+                'phones', COALESCE(ct.phones, '[]'::jsonb),
+                'is_primary', (
+                    co.primary_contact_id IS NOT NULL
+                    AND co.primary_contact_id = ct.id
+                )
+            )
+            ORDER BY (
+                co.primary_contact_id IS NOT NULL
+                AND co.primary_contact_id = ct.id
+            ) DESC,
+            ct.created_at ASC
+        )
+        FROM contact_companies cc
+        INNER JOIN contacts ct
+            ON ct.id = cc.contact_id
+           AND ct.organization_id = co.organization_id
+           AND ct.status != 'deleted'
+        LEFT JOIN auth.users au
+            ON au.id = ct.user_id
+        WHERE cc.organization_id = co.organization_id
+          AND cc.company_id = co.id
+    ),
+    '[]'::json
+)
+"""
+
+_PROJECT_COMPANY_JSON_OBJECT_SQL = f"""
+json_build_object(
+    'company_id', pc.company_id::text,
+    'label', pc.label,
+    'name', COALESCE(co.name, ''),
+    'company_name', COALESCE(co.name, ''),
+    'email', co.email,
+    'profile_photo_url', co.profile_photo_url,
+    'contacts', ({_PROJECT_COMPANY_CONTACTS_JSON_SQL.strip()})
+)
+"""
+
+_PROJECT_COMPANIES_AGG_SQL = f"""
+COALESCE(
+    (
+        SELECT json_agg(
+            {_PROJECT_COMPANY_JSON_OBJECT_SQL}
+            ORDER BY pc.created_at ASC
+        )
+        FROM project_companies pc
+        INNER JOIN companies co
+            ON co.id = pc.company_id
+           AND co.organization_id = pc.organization_id
+        WHERE pc.project_id = p.id
+          AND pc.organization_id = p.organization_id
+    ),
+    '[]'::json
+) AS companies
+"""
+
+_PROJECT_COMPANY_JSON_FROM_CO_ALIAS_SQL = f"""
+json_build_object(
+    'company_id', d.company_id::text,
+    'label', d.label,
+    'name', COALESCE(co.name, ''),
+    'company_name', COALESCE(co.name, ''),
+    'email', co.email,
+    'profile_photo_url', co.profile_photo_url,
+    'contacts', ({_PROJECT_COMPANY_CONTACTS_JSON_SQL.strip()})
+)
+"""
 
 
 class ProjectRepository:
@@ -38,11 +120,39 @@ class ProjectRepository:
             return json.dumps(value)
         return value
 
-    async def create_project(self, project_data: dict) -> dict:
-        """Create a new project record.
+    async def fetch_company_ids_exist(
+        self,
+        organization_id: str,
+        company_ids: list[str],
+    ) -> set[str]:
+        """Return company ids that exist in the org and are not deleted."""
+        normed = [cid for cid in (company_ids or []) if str(cid or "").strip()]
+        if not normed:
+            return set()
+        rows = await self.db_connection.fetch(
+            """
+            SELECT co.id::text AS id
+            FROM companies co
+            WHERE co.organization_id = $1::uuid
+              AND co.id = ANY($2::uuid[])
+              AND co.status != $3::text
+            """,
+            organization_id,
+            normed,
+            ClientStatus.DELETED.value,
+        )
+        return {str(row["id"]) for row in rows}
+
+    async def create_project(
+        self,
+        project_data: dict,
+        companies: list[tuple[str, str | None]] | None = None,
+    ) -> dict:
+        """Create a new project record and optional company links in one round trip.
 
         Args:
             project_data: Dictionary containing project fields
+            companies: Optional ``(company_id, label)`` rows for ``project_companies``
 
         Returns:
             dict: Created project record
@@ -106,13 +216,37 @@ class ProjectRepository:
                 values.append(project_data[field])
                 param_index += 1
 
-        query = f"""
-            INSERT INTO projects ({", ".join(fields)})
-            VALUES ({", ".join(placeholders)})
-            RETURNING *
-        """
+        company_rows = companies or []
+        if not company_rows:
+            query = f"""
+                INSERT INTO projects ({", ".join(fields)})
+                VALUES ({", ".join(placeholders)})
+                RETURNING *
+            """
+            row = await self.db_connection.fetchrow(query, *values)
+            return dict(row)
 
-        row = await self.db_connection.fetchrow(query, *values)
+        cids = [company_id for company_id, _ in company_rows]
+        labels = [label for _, label in company_rows]
+        companies_param = param_index
+        labels_param = param_index + 1
+        query = f"""
+            WITH ins AS (
+                INSERT INTO projects ({", ".join(fields)})
+                VALUES ({", ".join(placeholders)})
+                RETURNING *
+            ),
+            companies_ins AS (
+                INSERT INTO project_companies (project_id, organization_id, company_id, label)
+                SELECT ins.id, ins.organization_id, u.company_id, u.label
+                FROM ins
+                CROSS JOIN unnest(${companies_param}::uuid[], ${labels_param}::text[])
+                    AS u(company_id, label)
+                RETURNING 1
+            )
+            SELECT * FROM ins
+        """
+        row = await self.db_connection.fetchrow(query, *values, cids, labels)
         return dict(row)
 
     async def create_project_repositories(
@@ -484,7 +618,7 @@ class ProjectRepository:
         total_count = await self.db_connection.fetchval(count_query, *params)
         return [dict(row) for row in rows], int(total_count) if total_count is not None else 0
 
-    async def check_project_exists(self, project_id: str, organization_id: str) -> bool:
+    async def _check_project_exists(self, project_id: str, organization_id: str) -> bool:
         """Lightweight check if project exists.
 
         Minimal query that only checks existence without fetching any data.
@@ -517,10 +651,11 @@ class ProjectRepository:
             project_id: Project UUID or human-readable ID
             organization_id: Organization UUID
         """
-        query = """
+        query = f"""
             SELECT
                 p.id, p.project_id, p.project_title, p.status,
-                p.team_id
+                p.team_id,
+                {_PROJECT_COMPANIES_AGG_SQL}
             FROM projects p
             WHERE (p.id::text = $1 OR p.project_id = $1)
               AND p.organization_id = $2::uuid
@@ -533,8 +668,8 @@ class ProjectRepository:
     async def get_project_details(
         self, project_id: str, organization_id: str
     ) -> dict[str, Any] | None:
-        """Get project details (no client association)."""
-        query = """
+        """Get project details including linked companies."""
+        query = f"""
             SELECT
                 p.id, p.organization_id, p.project_id, p.project_title, p.project_description,
                 p.status, p.priority, p.project_category, p.practice_areas,
@@ -542,7 +677,8 @@ class ProjectRepository:
                 p.total_billed, p.total_hours, p.tech_stack, p.project_goals, p.success_criteria,
                 p.additional_ai_context, p.primary_pm_tool, p.primary_repo_url, p.tags,
                 p.custom_fields, p.documents, p.is_billable, p.is_internal, p.created_at, p.updated_at,
-                p.created_by, p.updated_by
+                p.created_by, p.updated_by,
+                {_PROJECT_COMPANIES_AGG_SQL}
             FROM projects p
             WHERE (p.id::text = $1 OR p.project_id = $1)
               AND p.organization_id = $2::uuid
@@ -610,15 +746,29 @@ class ProjectRepository:
         return [dict(row) for row in rows]
 
     async def update_project(
-        self, project_id: str, organization_id: str, data: dict[str, Any]
+        self,
+        project_id: str,
+        organization_id: str,
+        data: dict[str, Any],
+        *,
+        companies_payload: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
-        """Partially update a project. Only keys present in data are updated.
+        """Partially update a project; optionally sync ``project_companies`` in one query.
 
         Args:
             project_id: Project UUID
             organization_id: Organization UUID
             data: Field names and values to update (must not include project_id)
+            companies_payload: When not ``None``, replace-sync company links to this list.
         """
+        if companies_payload is not None:
+            return await self._update_project_and_sync_companies(
+                organization_id=organization_id,
+                project_id=project_id,
+                update_data=data,
+                companies_payload=companies_payload,
+            )
+
         if not data:
             return None
 
@@ -639,6 +789,120 @@ class ProjectRepository:
         values.extend([project_id, organization_id])
         where = f"WHERE id = ${idx} AND organization_id = ${idx + 1} AND status != 'archived'"
         query = f"UPDATE projects SET {', '.join(set_parts)} {where} RETURNING *"
+        row = await self.db_connection.fetchrow(query, *values)
+        return dict(row) if row else None
+
+    async def _update_project_and_sync_companies(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        update_data: dict[str, Any],
+        companies_payload: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Single-query project scalar update + ``project_companies`` sync + companies snapshot."""
+        filtered: dict[str, Any] = {
+            k: v for k, v in update_data.items() if k not in ("project_id", "id", "organization_id")
+        }
+
+        companies_payload_json = json_dumps_or_none(companies_payload)
+
+        set_clauses: list[str] = []
+        values: list[Any] = [organization_id, project_id]
+        param_index = 3
+        for field, value in filtered.items():
+            serialized = serialize_jsonb_param(field, value, PROJECT_JSONB_COLUMNS)
+            set_clauses.append(f"{field} = ${param_index}")
+            values.append(serialized)
+            param_index += 1
+
+        companies_param = f"${param_index}"
+        values.append(companies_payload_json)
+
+        scalar_set_sql = ", ".join(set_clauses)
+        scalar_update_sql = (
+            f"UPDATE projects SET {scalar_set_sql}, updated_at = NOW()"
+            if scalar_set_sql
+            else "UPDATE projects SET updated_at = updated_at"
+        )
+
+        query = f"""
+            WITH locked AS (
+                SELECT id
+                FROM projects
+                WHERE organization_id = $1
+                  AND id = $2::uuid
+                  AND status != 'archived'
+                FOR UPDATE
+            ),
+            input_payloads AS (
+                SELECT {companies_param}::jsonb AS companies_payload
+            ),
+            p AS (
+                {scalar_update_sql}
+                WHERE organization_id = $1
+                  AND id = $2::uuid
+                  AND EXISTS (SELECT 1 FROM locked)
+                RETURNING *
+            ),
+            desired_companies AS (
+                SELECT
+                    (e.value->>'company_id')::uuid AS company_id,
+                    NULLIF(e.value->>'label', '')::text AS label
+                FROM input_payloads ip
+                CROSS JOIN LATERAL jsonb_array_elements(COALESCE(ip.companies_payload, '[]'::jsonb)) AS e(value)
+            ),
+            companies_deleted AS (
+                DELETE FROM project_companies pc
+                USING input_payloads ip
+                WHERE pc.organization_id = $1
+                  AND pc.project_id = $2::uuid
+                  AND NOT EXISTS (
+                      SELECT 1 FROM desired_companies d WHERE d.company_id = pc.company_id
+                  )
+                RETURNING 1
+            ),
+            companies_updated AS (
+                UPDATE project_companies pc
+                SET label = d.label, updated_at = NOW()
+                FROM desired_companies d
+                WHERE pc.organization_id = $1
+                  AND pc.project_id = $2::uuid
+                  AND pc.company_id = d.company_id
+                  AND pc.label IS DISTINCT FROM d.label
+                RETURNING 1
+            ),
+            companies_inserted AS (
+                INSERT INTO project_companies (project_id, organization_id, company_id, label)
+                SELECT $2::uuid, $1::uuid, d.company_id, d.label
+                FROM desired_companies d
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM project_companies pc
+                    WHERE pc.organization_id = $1
+                      AND pc.project_id = $2::uuid
+                      AND pc.company_id = d.company_id
+                )
+                RETURNING 1
+            )
+            SELECT
+                p.*,
+                COALESCE(
+                    (
+                        SELECT json_agg(
+                            {_PROJECT_COMPANY_JSON_FROM_CO_ALIAS_SQL}
+                            ORDER BY coalesce(d.company_id::text, '') ASC
+                        )
+                        FROM desired_companies d
+                        INNER JOIN companies co
+                            ON co.id = d.company_id
+                           AND co.organization_id = $1
+                    ),
+                    '[]'::json
+                ) AS companies
+            FROM p
+            LIMIT 1
+        """
         row = await self.db_connection.fetchrow(query, *values)
         return dict(row) if row else None
 

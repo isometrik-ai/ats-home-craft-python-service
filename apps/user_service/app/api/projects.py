@@ -241,7 +241,11 @@ async def get_project_details(
         message_key="projects.success.project_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
-        data=project_detail.model_dump(mode="json", exclude_none=False),
+        data=project_detail.model_dump(
+            mode="json",
+            exclude_none=False,
+            exclude_defaults=False,
+        ),
     )
 
 
