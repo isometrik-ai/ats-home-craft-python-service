@@ -204,6 +204,7 @@ class OrganizationMemberRepository:
                 om.last_active_at,
                 om.joined_at,
                 om.organization_id,
+                om.isometrik_user_id,
                 CASE
                     WHEN au.encrypted_password IS NOT NULL AND au.encrypted_password <> '' THEN TRUE
                     ELSE FALSE

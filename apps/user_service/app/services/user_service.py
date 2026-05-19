@@ -676,6 +676,10 @@ class UserService:  # pylint: disable=too-many-public-methods
                 organization_repository=self.organization_repository,
                 organization_member_repository=self.organization_member_repository,
             )
+            if isometrik_details is not None:
+                isometrik_details = isometrik_details.model_copy(
+                    update={"user_id": user_profile.get("isometrik_user_id")}
+                )
         else:
             # No organization context
             permissions_data = []
