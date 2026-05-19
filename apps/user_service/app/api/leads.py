@@ -11,10 +11,12 @@ from fastapi import (
     Request,
 )
 from fastapi import status as http_status
+from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.enums import (
     KafkaTopics,
     LeadEventType,
@@ -28,6 +30,7 @@ from apps.user_service.app.schemas.leads import (
 )
 from apps.user_service.app.services.activity_service import ActivityService
 from apps.user_service.app.services.event_service import EventService
+from apps.user_service.app.services.external_leads_service import ExternalLeadsService
 from apps.user_service.app.services.lead_service import LeadService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -46,6 +49,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/leads", tags=["Leads"])
 LEAD_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
+CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
 
 @handle_api_exceptions("create lead")
@@ -80,54 +84,47 @@ async def create_lead(
     background_tasks: BackgroundTasks,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
     body: CreateLeadRequest = Body(...),
 ):
     """Create a lead for the authenticated organization."""
-    create_event: dict | None = None
-    event_key: str | None = None
     async with db_connection.transaction():
         user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
             permission_codes=LEADS_MANAGEMENT_CREATE,
         )
+        organization_id = user_context.organization_id
+        actor_user_id = str(user_context.user_id) if user_context.user_id else None
 
-        request.state.audit_table = "leads"
-        request.state.audit_description = f"Created lead: {body.name!r}"
-        request.state.audit_risk_level = "medium"
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id,
-        }
-
-        lead_service = LeadService(
-            user_context=user_context,
+        service = ExternalLeadsService(
             db_connection=db_connection,
+            user_context=user_context,
+            supabase_client=sb_client,
+            client_kafka_topics=CLIENT_KAFKA_TOPICS,
+            lead_kafka_topics=LEAD_KAFKA_TOPICS,
+            organization_id=organization_id,
         )
-        event_service = EventService(db_connection=db_connection)
-        created = await lead_service.create_lead(body)
-        # Ensure CREATE audit logs can be linked back to this lead in the activity feed.
-        request.state.audit_requested_id = str(created.get("id", ""))
-        create_event = await event_service.create_lifecycle_event(
-            event_type=LeadEventType.CREATED.value,
-            aggregate_id=str(created["id"]),
-            organization_id=user_context.organization_id,
-            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-            payload={"module": "leads", "action": "create"},
-            topics=LEAD_KAFKA_TOPICS,
+        result = await service.create_lead_with_optional_contact(
+            lead=body.to_lead_payload(),
+            contact=body.create_contact,
+            lead_contact_label=body.created_contact_label,
+            external=False,
+            require_linked_contact=False,
+            actor_user_id=actor_user_id,
         )
-        event_key = str(created["id"])
-        # Normalize audit snapshot so association keys are always present.
-        request.state.raw_audit_new_data = LeadService._normalize_lead_audit_snapshot(created)
+        ExternalLeadsService.apply_create_audit_state(
+            request,
+            result=result,
+            user_context=user_context,
+        )
 
-    if create_event is not None and event_key is not None:
-        background_tasks.add_task(
-            EventService.publish_event_background,
-            event=create_event,
-            key=event_key,
-            topics=LEAD_KAFKA_TOPICS,
-        )
+    ExternalLeadsService.schedule_create_post_commit(
+        background_tasks,
+        result=result,
+        organization_id=organization_id,
+        lead_kafka_topics=LEAD_KAFKA_TOPICS,
+    )
 
     return success_response(
         request=request,

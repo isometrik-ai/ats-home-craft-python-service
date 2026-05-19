@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from apps.user_service.app.schemas.common import NoteItem, Phone
+from apps.user_service.app.schemas.contacts import CreateContactRequestStandalone
 from apps.user_service.app.schemas.enums import (
     DealType,
     LeadCurrency,
@@ -294,7 +295,7 @@ class CreateLeadCompany(BaseModel):
 class CreateLeadRequest(BaseModel):
     """Request body for ``POST /leads`` (``public.leads`` + junctions)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str = Field(..., min_length=1, description="Lead display title")
     stage_id: str = Field(
@@ -353,6 +354,22 @@ class CreateLeadRequest(BaseModel):
             "Do not send instance_id or type."
         ),
     )
+    create_contact: CreateContactRequestStandalone | None = Field(
+        default=None,
+        alias="contact",
+    )
+    created_contact_label: str | None = Field(
+        default=None,
+        max_length=255,
+        alias="lead_contact_label",
+    )
+
+    def to_lead_payload(self) -> "CreateLeadRequest":
+        """Lead fields only (omit inline contact create inputs)."""
+        return self.model_copy(
+            update={"create_contact": None, "created_contact_label": None},
+            deep=True,
+        )
 
     @field_validator("lead_source", "referral_source", "lead_score", "description")
     @classmethod

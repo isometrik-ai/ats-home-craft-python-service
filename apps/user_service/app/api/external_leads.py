@@ -30,20 +30,12 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.schemas.external_leads import ExternalCreateLeadRequest
 from apps.user_service.app.schemas.leads import (
-    CreateLeadRequest,
     LeadsListQueryParams,
     UpdateLeadRequest,
-)
-from apps.user_service.app.services.client_enrichment_service import (
-    ClientEnrichmentService,
 )
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.external_leads_service import ExternalLeadsService
 from apps.user_service.app.services.lead_service import LeadService
-from apps.user_service.app.services.typesense_index_service import (
-    index_companies_background,
-    index_contacts_background,
-)
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     handle_api_exceptions,
@@ -224,14 +216,6 @@ async def external_create_lead(
         email=actor_email,
         organization_id=organization_id,
     )
-    created_contact_id: str | None = None
-    created_company_id: str | None = None
-    contact_created_events: list[tuple[dict, str]] = []
-    create_event: dict | None = None
-    event_key: str | None = None
-    contact_result: dict[str, Any] | None = None
-    lead_payload: CreateLeadRequest | None = None
-    created: dict[str, Any] | None = None
     async with db_connection.transaction():
         external_service = ExternalLeadsService(
             db_connection=db_connection,
@@ -242,106 +226,34 @@ async def external_create_lead(
             organization_id=organization_id,
         )
 
-        internal_lead = body.lead.model_copy(deep=True)
         result = await external_service.create_lead_with_optional_contact(
-            lead=internal_lead,
+            lead=body.lead.model_copy(deep=True),
             contact=body.create_contact,
             lead_contact_label=body.created_contact_label,
         )
-        created = result.created
-        lead_payload = result.lead_payload
-        created_contact_id = result.created_contact_id
-        created_company_id = result.created_company_id
-        contact_created_events = result.contact_created_events
-        create_event = result.lead_created_event
-        event_key = result.lead_event_key
-        contact_result = result.contact_result
-
-        created_id = str(created.get("id", "")) if isinstance(created, dict) else ""
-
-        request.state.audit_table = "leads"
-        # Ensure CREATE audit logs can be linked back to this lead in the activity feed.
-        request.state.audit_requested_id = created_id
-        request.state.audit_description = (
-            f"Created lead: {lead_payload.name!r}"
-            if lead_payload is not None
-            else "Created lead"
-            if created_contact_id is None
-            else (
-                f"Created lead with new contact: {lead_payload.name!r}"
-                if lead_payload is not None
-                else "Created lead with new contact"
-            )
-        )
-        request.state.audit_risk_level = "high" if created_contact_id is not None else "medium"
-        request.state.audit_user_context = {
-            "user_id": "00000000-0000-0000-0000-000000000000",
-            "user_email": actor_email,
-            "organization_id": organization_id,
-        }
-        # Normalize audit snapshot so association keys are always present.
-        request.state.raw_audit_new_data = (
-            LeadService._normalize_lead_audit_snapshot(created)
-            if isinstance(created, dict)
-            else created
-        )
-        if created_contact_id is not None:
-            # Attach created entities to the audit snapshot for easier tracing.
-            request.state.raw_audit_new_data = {
-                "lead": request.state.raw_audit_new_data,
-                "created_contact_id": created_contact_id,
-                "created_company_id": created_company_id,
-            }
-
-    # Publish contact lifecycle events after commit.
-    for lifecycle_event, event_publish_key in contact_created_events:
-        background_tasks.add_task(
-            EventService.publish_event_background,
-            event=lifecycle_event,
-            key=event_publish_key,
-            topics=CLIENT_KAFKA_TOPICS,
+        ExternalLeadsService.apply_create_audit_state(
+            request,
+            result=result,
+            user_context=user_context,
+            external_actor=True,
         )
 
-    if create_event is not None and event_key is not None:
-        background_tasks.add_task(
-            EventService.publish_event_background,
-            event=create_event,
-            key=event_key,
-            topics=LEAD_KAFKA_TOPICS,
-        )
+    ExternalLeadsService.schedule_create_post_commit(
+        background_tasks,
+        result=result,
+        organization_id=organization_id,
+        lead_kafka_topics=LEAD_KAFKA_TOPICS,
+    )
 
-    # Typesense indexing + enrichment (best-effort) after commit for newly created contact/company.
-    if created_contact_id:
-        background_tasks.add_task(
-            index_contacts_background,
-            [(created_contact_id, organization_id)],
-        )
-    if created_company_id:
-        background_tasks.add_task(
-            index_companies_background,
-            [(created_company_id, organization_id)],
-        )
-    if contact_result is not None:
-        enrichment_service = ClientEnrichmentService.from_settings()
-        for item in (contact_result or {}).get("enrichment_targets") or []:
-            background_tasks.add_task(
-                enrichment_service.run_client_enrichment,
-                client_id=item["client_id"],
-                organization_id=item["organization_id"],
-                client_type=item["client_type"],
-                payload_data=item.get("payload_data") or {},
-                entity_table=item.get("entity_table") or "clients",
-                skip_company_logo=bool(item.get("skip_company_logo")),
-            )
-
+    created = result.created
     response_data: dict[str, Any] = (
         {"lead_id": str(created.get("id"))} if isinstance(created, dict) else {}
     )
 
-    if created_contact_id is not None:
-        response_data["contact_id"] = created_contact_id
-    if created_company_id is not None:
-        response_data["company_id"] = created_company_id
+    if result.created_contact_id is not None:
+        response_data["contact_id"] = result.created_contact_id
+    if result.created_company_id is not None:
+        response_data["company_id"] = result.created_company_id
     return success_response(
         request=request,
         message_key="leads.success.lead_created",
