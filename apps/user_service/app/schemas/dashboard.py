@@ -3,13 +3,61 @@
 from __future__ import annotations
 
 from datetime import date as date_type
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from apps.user_service.app.schemas.enums import ProjectStatus
+from libs.shared_utils.http_exceptions import BadRequestException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 _DASHBOARD_SCHEMA_VERSION = 1
+
+
+class DashboardQueryParams(BaseModel):
+    """Query parameters for GET /dashboard."""
+
+    start_date: date_type | None = Field(None, description="Inclusive overall range start.")
+    end_date: date_type | None = Field(None, description="Inclusive overall range end.")
+    leads_start_date: date_type | None = Field(None, description="Inclusive leads range start.")
+    leads_end_date: date_type | None = Field(None, description="Inclusive leads range end.")
+
+    @model_validator(mode="after")
+    def validate_date_ranges(self) -> Self:
+        """Reject inverted overall or leads date ranges."""
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.end_date < self.start_date
+        ):
+            raise BadRequestException(
+                message_key="dashboard.errors.end_before_start",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+                errors=[
+                    {
+                        "field": "query.end_date",
+                        "type": "bad_request",
+                        "msg": "end_date must be on or after start_date",
+                    }
+                ],
+            )
+        if (
+            self.leads_start_date is not None
+            and self.leads_end_date is not None
+            and self.leads_end_date < self.leads_start_date
+        ):
+            raise BadRequestException(
+                message_key="dashboard.errors.leads_end_before_start",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+                errors=[
+                    {
+                        "field": "query.leads_end_date",
+                        "type": "bad_request",
+                        "msg": "leads_end_date must be on or after leads_start_date",
+                    }
+                ],
+            )
+        return self
 
 
 class MetricWithWeeklyDelta(BaseModel):
