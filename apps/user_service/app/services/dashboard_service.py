@@ -54,8 +54,6 @@ class DashboardService:
 
     async def get_dashboard(
         self,
-        start_date: date | None = None,
-        end_date: date | None = None,
         leads_start_date: date | None = None,
         leads_end_date: date | None = None,
     ) -> DashboardResponse:
@@ -63,8 +61,6 @@ class DashboardService:
         row = await self._repo.fetch_dashboard(
             self._organization_id,
             self._user_id,
-            start_date=start_date,
-            end_date=end_date,
             leads_start_date=leads_start_date,
             leads_end_date=leads_end_date,
         )

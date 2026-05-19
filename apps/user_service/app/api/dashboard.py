@@ -48,8 +48,8 @@ async def get_dashboard(
 ):
     """Return CRM overview, weekly lead activity, pipeline counts, and my projects.
 
-    ``weekly_activity`` follows ``start_date``/``end_date`` when set, else ``leads_*`` dates,
-    else the last 7 local days.
+    Optional ``leads_start_date`` / ``leads_end_date`` filter the leads chart, pipeline, and
+    lead ``new_*`` metrics only. All other sections use default calendar-week behavior.
     """
     user_context = await check_permissions(
         current_user=current_user,
@@ -63,8 +63,6 @@ async def get_dashboard(
         user_id=user_context.user_id,
     )
     data = await service.get_dashboard(
-        start_date=params.start_date,
-        end_date=params.end_date,
         leads_start_date=params.leads_start_date,
         leads_end_date=params.leads_end_date,
     )

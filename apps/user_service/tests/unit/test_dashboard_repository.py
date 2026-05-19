@@ -9,10 +9,8 @@ from apps.user_service.app.db.repositories.dashboard_repository import (
     CLOSED_LEAD_STAGE_KEYS,
     DashboardRepository,
 )
-from apps.user_service.app.schemas.dashboard import DashboardQueryParams
 from apps.user_service.app.schemas.enums import ProjectStatus
 from apps.user_service.app.utils.dashboard_utils import serialize_my_project_row
-from libs.shared_utils.http_exceptions import BadRequestException
 
 
 class _FakeConn:
@@ -96,14 +94,7 @@ async def test_fetch_dashboard_timezone_then_aggregate():
     assert agg_args[4] == ProjectStatus.ARCHIVED.value
     assert agg_args[5] == "user-uuid"
     assert agg_args[6] == 25
-    assert len(agg_args) == 17
-
-
-def test_query_params_rejects_inverted_range():
-    """DashboardQueryParams raises BadRequestException when end_date is before start_date."""
-    with pytest.raises(BadRequestException) as exc_info:
-        DashboardQueryParams(start_date=date(2026, 5, 10), end_date=date(2026, 5, 1))
-    assert exc_info.value.message_key == "dashboard.errors.end_before_start"
+    assert len(agg_args) == 13
 
 
 def test_dashboard_utils_serialize_my_project_health():

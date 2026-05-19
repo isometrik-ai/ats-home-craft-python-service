@@ -3,8 +3,8 @@
 ``fetch_dashboard`` reads IANA timezone from ``organization_members.timezone``, validates it
 in Python (invalid values fall back to UTC), then runs the dashboard aggregate query.
 
-Indexes: ``leads (organization_id, created_at DESC)`` can help weekly/daily facets; add if
-``EXPLAIN`` shows seq scans.
+Optional ``leads_start_date`` / ``leads_end_date`` filter leads chart, pipeline, and lead
+``new_*`` counts only (inclusive local calendar dates).
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ import asyncpg
 from apps.user_service.app.schemas.dashboard import validate_iana_timezone
 from apps.user_service.app.schemas.enums import ProjectStatus
 
-# Terminal pipeline keys (see ``LeadStatus`` / default lead stages).
 CLOSED_LEAD_STAGE_KEYS: frozenset[str] = frozenset({"converted", "lost"})
 
 _ACTIVE_PIPELINE_PROJECT_STATUSES: tuple[str, ...] = (
@@ -30,7 +29,7 @@ _ACTIVE_PIPELINE_PROJECT_STATUSES: tuple[str, ...] = (
 
 _DEFAULT_MY_PROJECTS_LIMIT = 50
 
-# $1–$7 base; $8–$11 overall dates; $12–$15 leads dates; $16–$17 chart dates (inclusive).
+# $1–$7 base; $8–$11 leads period; $12–$13 chart span (inclusive dates).
 
 _CTE_BOUNDS = dedent("""
     bounds AS (
@@ -56,8 +55,8 @@ _CTE_DAILY_LEADS = dedent("""
                COUNT(*)::int AS leads_count
         FROM leads l
         WHERE l.organization_id = $1::uuid
-          AND (l.created_at AT TIME ZONE $2::text)::date >= $16
-          AND (l.created_at AT TIME ZONE $2::text)::date <= $17
+          AND (l.created_at AT TIME ZONE $2::text)::date >= $12
+          AND (l.created_at AT TIME ZONE $2::text)::date <= $13
         GROUP BY 1
     )
 """).strip()
@@ -66,7 +65,7 @@ _CTE_WEEKLY_SERIES = dedent("""
     weekly_series AS (
         SELECT gs.d::date AS day,
                COALESCE(dl.leads_count, 0)::int AS leads_count
-        FROM generate_series($16::date, $17::date, interval '1 day') AS gs(d)
+        FROM generate_series($12::date, $13::date, interval '1 day') AS gs(d)
         LEFT JOIN daily_leads dl ON dl.d = gs.d::date
     )
 """).strip()
@@ -83,10 +82,10 @@ _CTE_PIPELINE_ROWS = dedent("""
           ON l.stage_id = ls.id
          AND l.organization_id = ls.organization_id
          AND (
-           $12::date IS NULL
+           $8::date IS NULL
            OR (
-             (l.created_at AT TIME ZONE $2::text)::date >= $12
-             AND (l.created_at AT TIME ZONE $2::text)::date <= $13
+             (l.created_at AT TIME ZONE $2::text)::date >= $8
+             AND (l.created_at AT TIME ZONE $2::text)::date <= $9
            )
          )
         WHERE ls.organization_id = $1::uuid
@@ -110,28 +109,21 @@ _CTE_MY_PROJECT_ROWS = dedent("""
           ON tm.team_id = p.team_id AND tm.user_id = $6::uuid
         WHERE p.organization_id = $1::uuid
           AND p.status <> $5::text
-          AND (
-            $8::date IS NULL
-            OR (
-              (p.created_at AT TIME ZONE $2::text)::date >= $8
-              AND (p.created_at AT TIME ZONE $2::text)::date <= $9
-            )
-          )
         ORDER BY p.created_at DESC
         LIMIT $7::int
     )
 """).strip()
 
-_CREATED_IN_CURRENT = """(
-    ($f::date IS NULL AND {a}.created_at >= b.week_start AND {a}.created_at < b.next_week_start)
-    OR ($f::date IS NOT NULL AND ({a}.created_at AT TIME ZONE $2::text)::date >= $f
-        AND ({a}.created_at AT TIME ZONE $2::text)::date <= $e)
+_LEADS_CREATED_CURRENT = """(
+    ({start}::date IS NULL AND l.created_at >= b.week_start AND l.created_at < b.next_week_start)
+    OR ({start}::date IS NOT NULL AND (l.created_at AT TIME ZONE $2::text)::date >= {start}
+        AND (l.created_at AT TIME ZONE $2::text)::date <= {end})
 )"""
 
-_CREATED_IN_PREVIOUS = """(
-    ($p::date IS NULL AND {a}.created_at >= b.prev_week_start AND {a}.created_at < b.week_start)
-    OR ($p::date IS NOT NULL AND ({a}.created_at AT TIME ZONE $2::text)::date >= $p
-        AND ({a}.created_at AT TIME ZONE $2::text)::date <= $pe)
+_LEADS_CREATED_PREVIOUS = """(
+    ({prev_start}::date IS NULL AND l.created_at >= b.prev_week_start AND l.created_at < b.week_start)
+    OR ({prev_start}::date IS NOT NULL AND (l.created_at AT TIME ZONE $2::text)::date >= {prev_start}
+        AND (l.created_at AT TIME ZONE $2::text)::date <= {prev_end})
 )"""
 
 _SELECT_DASHBOARD_OUTER = dedent(f"""
@@ -162,44 +154,40 @@ _SELECT_DASHBOARD_OUTER = dedent(f"""
          WHERE p.organization_id = $1::uuid
            AND p.status = ANY ($4::text[])
            AND p.start_date IS NOT NULL
-           AND (
-             ($8::date IS NULL
-              AND p.start_date > (CURRENT_TIMESTAMP AT TIME ZONE $2::text)::date
-              AND p.start_date <= (CURRENT_TIMESTAMP AT TIME ZONE $2::text)::date + 14)
-             OR ($8::date IS NOT NULL AND p.start_date >= $8 AND p.start_date <= $9)
-           )
+           AND p.start_date > (CURRENT_TIMESTAMP AT TIME ZONE $2::text)::date
+           AND p.start_date <= (CURRENT_TIMESTAMP AT TIME ZONE $2::text)::date + 14
         ) AS launching_soon,
         (SELECT COUNT(*)::int FROM contacts c, bounds b
          WHERE c.organization_id = $1::uuid AND c.status <> 'deleted'
-           AND {_CREATED_IN_CURRENT.format(a="c", f="$8", e="$9")}
+           AND c.created_at >= b.week_start AND c.created_at < b.next_week_start
         ) AS contacts_new_this_week,
         (SELECT COUNT(*)::int FROM contacts c, bounds b
          WHERE c.organization_id = $1::uuid AND c.status <> 'deleted'
-           AND {_CREATED_IN_PREVIOUS.format(a="c", p="$10", pe="$11")}
+           AND c.created_at >= b.prev_week_start AND c.created_at < b.week_start
         ) AS contacts_new_prev_week,
         (SELECT COUNT(*)::int FROM companies c, bounds b
          WHERE c.organization_id = $1::uuid AND c.status <> 'deleted'
-           AND {_CREATED_IN_CURRENT.format(a="c", f="$8", e="$9")}
+           AND c.created_at >= b.week_start AND c.created_at < b.next_week_start
         ) AS companies_new_this_week,
         (SELECT COUNT(*)::int FROM companies c, bounds b
          WHERE c.organization_id = $1::uuid AND c.status <> 'deleted'
-           AND {_CREATED_IN_PREVIOUS.format(a="c", p="$10", pe="$11")}
+           AND c.created_at >= b.prev_week_start AND c.created_at < b.week_start
         ) AS companies_new_prev_week,
         (SELECT COUNT(*)::int FROM leads l, bounds b
          WHERE l.organization_id = $1::uuid
-           AND {_CREATED_IN_CURRENT.format(a="l", f="$12", e="$13")}
+           AND {_LEADS_CREATED_CURRENT.format(start="$8", end="$9")}
         ) AS leads_new_this_week,
         (SELECT COUNT(*)::int FROM leads l, bounds b
          WHERE l.organization_id = $1::uuid
-           AND {_CREATED_IN_PREVIOUS.format(a="l", p="$14", pe="$15")}
+           AND {_LEADS_CREATED_PREVIOUS.format(prev_start="$10", prev_end="$11")}
         ) AS leads_new_prev_week,
         (SELECT COUNT(*)::int FROM projects p, bounds b
          WHERE p.organization_id = $1::uuid AND p.status <> $5::text
-           AND {_CREATED_IN_CURRENT.format(a="p", f="$8", e="$9")}
+           AND p.created_at >= b.week_start AND p.created_at < b.next_week_start
         ) AS projects_new_this_week,
         (SELECT COUNT(*)::int FROM projects p, bounds b
          WHERE p.organization_id = $1::uuid AND p.status <> $5::text
-           AND {_CREATED_IN_PREVIOUS.format(a="p", p="$10", pe="$11")}
+           AND p.created_at >= b.prev_week_start AND p.created_at < b.week_start
         ) AS projects_new_prev_week,
         COALESCE(
             (SELECT json_agg(
@@ -250,7 +238,6 @@ _FETCH_DASHBOARD_SQL = "\n".join(
     )
 )
 
-
 _MEMBER_TIMEZONE_SQL = dedent("""
     SELECT COALESCE(NULLIF(TRIM(timezone::text), ''), 'UTC') AS tz
     FROM organization_members
@@ -266,7 +253,7 @@ def _inclusive_range(
     end: date | None,
     today: date,
 ) -> tuple[date | None, date | None, date | None, date | None]:
-    """Return current + previous inclusive local dates, or four Nones for SQL defaults."""
+    """Return current + previous inclusive local dates, or four Nones for SQL week defaults."""
     if start is None and end is None:
         return None, None, None, None
     end_d = end or today
@@ -296,8 +283,6 @@ class DashboardRepository:
         self,
         organization_id: str,
         user_id: str,
-        start_date: date | None = None,
-        end_date: date | None = None,
         leads_start_date: date | None = None,
         leads_end_date: date | None = None,
         my_projects_limit: int = _DEFAULT_MY_PROJECTS_LIMIT,
@@ -305,11 +290,8 @@ class DashboardRepository:
         """Dashboard aggregates; timezone from member row (validated), then one aggregate query."""
         timezone_name = await self._resolve_dashboard_timezone(organization_id, user_id)
         today = datetime.now(ZoneInfo(timezone_name)).date()
-        overall_range = _inclusive_range(start_date, end_date, today)
         leads_range = _inclusive_range(leads_start_date, leads_end_date, today)
-        if start_date is not None or end_date is not None:
-            chart_start, chart_end = overall_range[0], overall_range[1]
-        elif leads_start_date is not None or leads_end_date is not None:
+        if leads_start_date is not None or leads_end_date is not None:
             chart_start, chart_end = leads_range[0], leads_range[1]
         else:
             chart_start = today - timedelta(days=6)
@@ -324,7 +306,6 @@ class DashboardRepository:
             ProjectStatus.ARCHIVED.value,
             user_id,
             my_projects_limit,
-            *overall_range,
             *leads_range,
             chart_start,
             chart_end,
