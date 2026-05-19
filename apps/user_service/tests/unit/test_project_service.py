@@ -89,10 +89,15 @@ class _FakeProjectRepo:
         self.calls["check_project_id_unique"] = (project_id, organization_id, exclude_id)
         return self.project_id_unique
 
-    async def create_project(self, project_data):
+    async def create_project(self, project_data, companies=None):
         """Create project and return result."""
-        self.calls["create_project"] = project_data
+        self.calls["create_project"] = {"project_data": project_data, "companies": companies}
         return self.project_result
+
+    async def fetch_company_ids_exist(self, organization_id, company_ids):
+        """Validate company ids."""
+        self.calls["fetch_company_ids_exist"] = (organization_id, company_ids)
+        return set(company_ids or [])
 
     async def create_project_repositories(
         self,
@@ -148,9 +153,14 @@ class _FakeProjectRepo:
         self.calls["get_project_integrations"] = (project_id, organization_id)
         return self.integrations_result
 
-    async def update_project(self, project_id, organization_id, data):
+    async def update_project(self, project_id, organization_id, data, *, companies_payload=None):
         """Update project."""
-        self.calls["update_project"] = (project_id, organization_id, data)
+        self.calls["update_project"] = {
+            "project_id": project_id,
+            "organization_id": organization_id,
+            "data": data,
+            "companies_payload": companies_payload,
+        }
         return None
 
     async def update_project_repository(self, project_id, organization_id, repository_id, data):
@@ -850,7 +860,9 @@ async def test_create_project_success(monkeypatch):
     await service.create_project(request_data)
 
     assert "create_project" in fake_project_repo.calls
-    assert fake_project_repo.calls["create_project"]["project_title"] == "New Project"
+    assert (
+        fake_project_repo.calls["create_project"]["project_data"]["project_title"] == "New Project"
+    )
 
 
 @pytest.mark.asyncio
@@ -892,7 +904,7 @@ async def test_create_project_with_team_members(monkeypatch):
     assert "create_team" in fake_team_repo.calls
     assert fake_team_repo.calls["create_team"].name == "Project With Team"
     assert "create_project" in fake_project_repo.calls
-    assert fake_project_repo.calls["create_project"]["team_id"] == "team-1"
+    assert fake_project_repo.calls["create_project"]["project_data"]["team_id"] == "team-1"
 
 
 @pytest.mark.asyncio
@@ -1386,9 +1398,9 @@ async def test_update_project_success_with_scalar_fields(monkeypatch):
     assert "old_data" in result
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
-    assert call[0] == "project-1"
-    assert call[2]["project_title"] == "Updated Title"
-    assert call[2]["status"] == ProjectStatus.ON_HOLD.value
+    assert call["project_id"] == "project-1"
+    assert call["data"]["project_title"] == "Updated Title"
+    assert call["data"]["status"] == ProjectStatus.ON_HOLD.value
 
 
 @pytest.mark.asyncio
@@ -1418,7 +1430,7 @@ async def test_update_project_success_with_team_member_add(monkeypatch):
     assert "update_project" in fake_project_repo.calls
     # Verify team_id is set in project update
     call = fake_project_repo.calls["update_project"]
-    assert call[2]["team_id"] == "new-team-1"
+    assert call["data"]["team_id"] == "new-team-1"
 
 
 @pytest.mark.asyncio
@@ -1587,7 +1599,7 @@ async def test_apply_project_row_sets_primary_from_add(monkeypatch):
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
-    assert call[2]["primary_repo_url"] == "https://github.com/org/new-repo"
+    assert call["data"]["primary_repo_url"] == "https://github.com/org/new-repo"
 
 
 @pytest.mark.asyncio
@@ -1608,7 +1620,7 @@ async def test_apply_project_row_sets_primary_from_update(monkeypatch):
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
-    assert call[2]["primary_repo_url"] == "https://github.com/org/updated-repo"
+    assert call["data"]["primary_repo_url"] == "https://github.com/org/updated-repo"
 
 
 @pytest.mark.asyncio
@@ -1626,7 +1638,7 @@ async def test_apply_project_row_fetches_primary_not_in_req(monkeypatch):
     assert fake_project_repo.calls["get_project_repositories"][2] is True
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
-    assert call[2]["primary_repo_url"] == "https://github.com/org/existing"
+    assert call["data"]["primary_repo_url"] == "https://github.com/org/existing"
 
 
 @pytest.mark.asyncio
@@ -1640,7 +1652,7 @@ async def test_apply_project_row_handles_no_primary_repo(monkeypatch):
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
-    assert call[2]["primary_repo_url"] is None
+    assert call["data"]["primary_repo_url"] is None
 
 
 @pytest.mark.asyncio
@@ -1653,7 +1665,7 @@ async def test_apply_project_row_skips_no_repos_request(monkeypatch):
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
-    assert "primary_repo_url" not in call[2]
+    assert "primary_repo_url" not in call["data"]
 
 
 @pytest.mark.asyncio
@@ -1666,7 +1678,7 @@ async def test_apply_project_row_update_sets_team_id(monkeypatch):
 
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
-    assert call[2]["team_id"] == "new-team-1"
+    assert call["data"]["team_id"] == "new-team-1"
 
 
 @pytest.mark.asyncio
@@ -1837,8 +1849,8 @@ async def test_apply_project_row_update_with_only_updated_by(monkeypatch):
     # updated_by is always included, so update_project is called
     assert "update_project" in fake_project_repo.calls
     call = fake_project_repo.calls["update_project"]
-    assert call[2]["updated_by"] == service.user_context.user_id
-    assert len(call[2]) == 1  # Only updated_by
+    assert call["data"]["updated_by"] == service.user_context.user_id
+    assert len(call["data"]) == 1  # Only updated_by
 
 
 # Delete Project Tests

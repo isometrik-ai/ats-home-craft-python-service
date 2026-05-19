@@ -315,7 +315,10 @@
       "repository_not_found": "Repository not found.",
       "integration_not_found": "Integration not found.",
       "document_not_found": "Document not found.",
-      "document_id_already_exists": "A document with this id already exists in the project."
+      "document_id_already_exists": "A document with this id already exists in the project.",
+      "company_not_linked": "Company is not linked to this project.",
+      "companies_duplicate": "One or more companies are already linked to this project.",
+      "duplicate_company": "This company is already linked to the project."
     },
     "success": {
       "project_created": "Project created successfully.",

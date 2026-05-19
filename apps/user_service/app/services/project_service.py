@@ -10,6 +10,7 @@ from decimal import Decimal
 from typing import Any
 
 import asyncpg
+from asyncpg.exceptions import UniqueViolationError
 
 from apps.user_service.app.db.repositories import (
     ProjectRepository,
@@ -19,6 +20,9 @@ from apps.user_service.app.schemas.enums import EntityType, TeamRoles
 from apps.user_service.app.schemas.projects import (
     BillingInfo,
     CreateProjectRequest,
+    ProjectCompaniesUpdate,
+    ProjectCompanyContactItem,
+    ProjectCompanyListItem,
     ProjectDetailData,
     ProjectListItem,
     ProjectListQueryParams,
@@ -30,13 +34,16 @@ from apps.user_service.app.schemas.teams import MemberData, TeamDbDelete, TeamDb
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    coerce_json_list,
     format_iso_datetime,
     parse_json_field,
 )
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     ConflictException,
+    DuplicateValueException,
     NotFoundException,
+    ValidationException,
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -484,8 +491,18 @@ class ProjectService:
         project_data = self._prepare_project_data(request_data, project_id, team_id)
         await self._apply_custom_fields_for_create(project_data, request_data)
 
-        # Create project
-        project_record = await self.project_repository.create_project(project_data)
+        company_rows = [(item.company_id, item.label) for item in (request_data.companies or [])]
+        if company_rows:
+            await self._validate_company_ids([company_id for company_id, _ in company_rows])
+
+        # Create project (+ company links in the same DB round trip when provided)
+        try:
+            project_record = await self.project_repository.create_project(
+                project_data,
+                companies=company_rows or None,
+            )
+        except UniqueViolationError as exc:
+            self._raise_duplicate_project_company(exc)
         project_uuid = str(project_record["id"])
 
         # Create repositories if provided
@@ -907,6 +924,174 @@ class ProjectService:
                 id_conflict_message_key="projects.errors.document_id_already_exists",
             )
 
+    @staticmethod
+    def _existing_company_links(current: dict[str, Any]) -> list[dict[str, Any]]:
+        """Parse ``companies`` list from a repository row."""
+        return coerce_json_list(current.get("companies"))
+
+    @staticmethod
+    def _build_ordered_company_link_map(
+        existing: list[dict[str, Any]],
+    ) -> tuple[list[str], dict[str, dict[str, Any]]]:
+        """Build (ordered_ids, by_id) from existing company association rows."""
+        ordered_ids: list[str] = []
+        by_id: dict[str, dict[str, Any]] = {}
+        for item in existing:
+            if not isinstance(item, dict):
+                continue
+            raw_id = item.get("company_id")
+            if raw_id is None:
+                continue
+            id_str = str(raw_id)
+            if id_str in by_id:
+                continue
+            ordered_ids.append(id_str)
+            by_id[id_str] = {"company_id": id_str, "label": item.get("label")}
+        return ordered_ids, by_id
+
+    @staticmethod
+    def _apply_company_removals(
+        *,
+        ordered_ids: list[str],
+        by_id: dict[str, dict[str, Any]],
+        ids: list[str],
+    ) -> None:
+        """Remove company ids from both the map and the order list."""
+        for remove_id in ids or []:
+            by_id.pop(remove_id, None)
+            if remove_id in ordered_ids:
+                ordered_ids.remove(remove_id)
+
+    async def _validate_company_ids(self, company_ids: list[str]) -> None:
+        """Ensure all company ids exist in the organization."""
+        if not company_ids:
+            return
+        found = await self.project_repository.fetch_company_ids_exist(
+            self.user_context.organization_id,
+            company_ids,
+        )
+        missing = set(company_ids) - found
+        if missing:
+            raise NotFoundException(
+                message_key="companies.errors.company_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    def _apply_company_association_delta(
+        self,
+        *,
+        current: dict[str, Any],
+        delta: ProjectCompaniesUpdate,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Apply company delta and return (sync payload, ids to validate)."""
+        existing = self._existing_company_links(current)
+        ordered_ids, by_id = self._build_ordered_company_link_map(existing)
+        self._apply_company_removals(
+            ordered_ids=ordered_ids,
+            by_id=by_id,
+            ids=delta.remove_associations,
+        )
+
+        ids_to_validate: set[str] = set()
+
+        for item in delta.update_associations or []:
+            cid = item.company_id
+            ids_to_validate.add(cid)
+            if cid not in by_id:
+                raise ValidationException(
+                    message_key="projects.errors.company_not_linked",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            by_id[cid]["label"] = item.label
+
+        for item in delta.add_associations or []:
+            cid = item.company_id
+            ids_to_validate.add(cid)
+            if cid in by_id:
+                raise ValidationException(
+                    message_key="projects.errors.companies_duplicate",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            by_id[cid] = {"company_id": cid, "label": item.label}
+            ordered_ids.append(cid)
+
+        payload = [by_id[cid] for cid in ordered_ids if cid in by_id]
+        return payload, sorted(ids_to_validate)
+
+    def _prepare_company_association_patch(
+        self,
+        current: dict[str, Any],
+        request_data: UpdateProjectRequest,
+    ) -> tuple[bool, list[dict[str, Any]] | None, list[str]]:
+        """Resolve PATCH company_association into a sync payload when provided."""
+        if request_data.company_association is None:
+            return False, None, []
+        payload, ids_to_validate = self._apply_company_association_delta(
+            current=current,
+            delta=request_data.company_association,
+        )
+        return True, payload, ids_to_validate
+
+    @staticmethod
+    def _map_project_company_contacts(raw: Any) -> list[ProjectCompanyContactItem]:
+        """Map nested contact JSON on a project company row."""
+        contacts: list[ProjectCompanyContactItem] = []
+        for entry in coerce_json_list(raw):
+            if not isinstance(entry, dict):
+                continue
+            contact_id = str(entry.get("id") or "").strip()
+            if not contact_id:
+                continue
+            phones_raw = entry.get("phones")
+            phones = phones_raw if isinstance(phones_raw, list) else []
+            contacts.append(
+                ProjectCompanyContactItem(
+                    id=contact_id,
+                    first_name=entry.get("first_name"),
+                    last_name=entry.get("last_name"),
+                    title=entry.get("title"),
+                    email=entry.get("email") or None,
+                    phones=phones,
+                    is_primary=bool(entry.get("is_primary")),
+                )
+            )
+        return contacts
+
+    @staticmethod
+    def _map_project_companies(raw: Any) -> list[ProjectCompanyListItem]:
+        """Map aggregated company JSON to response models."""
+        items: list[ProjectCompanyListItem] = []
+        for row in coerce_json_list(raw):
+            if not isinstance(row, dict):
+                continue
+            company_id = str(row.get("company_id") or "").strip()
+            if not company_id:
+                continue
+            name = str(row.get("name") or row.get("company_name") or "")
+            items.append(
+                ProjectCompanyListItem(
+                    company_id=company_id,
+                    label=row.get("label"),
+                    name=name,
+                    company_name=name,
+                    email=row.get("email"),
+                    profile_photo_url=row.get("profile_photo_url"),
+                    contacts=ProjectService._map_project_company_contacts(row.get("contacts")),
+                )
+            )
+        return items
+
+    @staticmethod
+    def _raise_duplicate_project_company(exc: UniqueViolationError) -> None:
+        """Map a unique violation on project_companies to a client-facing error."""
+        cname = getattr(exc, "constraint_name", "") or ""
+        if "uq_project_company" in cname or "project_companies" in cname:
+            raise DuplicateValueException(
+                message_key="projects.errors.duplicate_company",
+                custom_code=CustomStatusCode.DUPLICATE_ENTRY,
+            ) from exc
+        raise exc
+
     async def _apply_project_row_update(
         self,
         project_uuid: str,
@@ -914,6 +1099,8 @@ class ProjectService:
         current: dict[str, Any],
         request_data: UpdateProjectRequest,
         new_team_id: str | None,
+        *,
+        companies_payload: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         """Build project update dict; set primary_repo if needed."""
         user_id = self.user_context.user_id
@@ -950,10 +1137,16 @@ class ProjectService:
                 primary_repo_url = primary_repo["repository_url"] if primary_repo else None
 
             project_data["primary_repo_url"] = primary_repo_url
-        if project_data:
-            return await self.project_repository.update_project(
-                project_uuid, organization_id, project_data
-            )
+        if project_data or companies_payload is not None:
+            try:
+                return await self.project_repository.update_project(
+                    project_uuid,
+                    organization_id,
+                    project_data,
+                    companies_payload=companies_payload,
+                )
+            except UniqueViolationError as exc:
+                self._raise_duplicate_project_company(exc)
         return None
 
     async def update_project(
@@ -1001,6 +1194,12 @@ class ProjectService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
+        companies_changed, companies_payload, company_ids_for_batch = (
+            self._prepare_company_association_patch(project, request_data)
+        )
+        if company_ids_for_batch:
+            await self._validate_company_ids(company_ids_for_batch)
+
         if team_id:
             await self._apply_team_members_changes(
                 team_id, request_data, skip_add=(new_team_id is not None)
@@ -1008,10 +1207,16 @@ class ProjectService:
         await self._apply_repositories_changes(project_uuid, organization_id, user_id, request_data)
         await self._apply_integrations_changes(project_uuid, organization_id, user_id, request_data)
         updated_row = await self._apply_project_row_update(
-            project_uuid, organization_id, project, request_data, new_team_id
+            project_uuid,
+            organization_id,
+            project,
+            request_data,
+            new_team_id,
+            companies_payload=companies_payload if companies_changed else None,
         )
         old_data = self._format_project_for_audit(project)
-        new_data = self._format_project_for_audit(updated_row or project)
+        new_row = updated_row or project
+        new_data = self._format_project_for_audit(new_row)
         return {"old_data": old_data, "new_data": new_data}
 
     async def delete_project(self, project_id: str) -> dict[str, Any]:
@@ -1339,6 +1544,7 @@ class ProjectService:
             is_billable=project.get("is_billable", True),
             is_internal=project.get("is_internal", False),
             team=team_info,
+            companies=self._map_project_companies(coerce_json_list(project.get("companies"))),
             repositories=[self._map_repository_to_detail(r) for r in repositories],
             integrations=[self._map_integration_to_detail(i) for i in integrations],
             created_at=format_iso_datetime(project.get("created_at")) or "",
