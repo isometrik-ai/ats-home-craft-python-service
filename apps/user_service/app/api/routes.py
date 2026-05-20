@@ -16,6 +16,9 @@ from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.lead_stages import router as lead_stages_router
 from apps.user_service.app.api.leads import router as leads_router
 from apps.user_service.app.api.organization import router as organization_router
+from apps.user_service.app.api.organization_memory import (
+    router as organization_memory_router,
+)
 from apps.user_service.app.api.permissions import router as permissions_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
 from apps.user_service.app.api.projects import router as projects_router
@@ -35,6 +38,7 @@ router = APIRouter(prefix="/v1")
 
 router.include_router(auth_router)
 router.include_router(organization_router)
+router.include_router(organization_memory_router)
 router.include_router(superadmin_organizations_router)
 router.include_router(users_router)
 router.include_router(roles_router)

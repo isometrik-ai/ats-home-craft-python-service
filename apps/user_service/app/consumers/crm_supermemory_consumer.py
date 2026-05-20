@@ -4,7 +4,11 @@ Subscribes to ``KafkaTopics.CRM_EVENTS`` with a dedicated consumer group
 (``SUPERMEMORY_CONSUMER_GROUP_ID``) so other services consuming the same topic
 are unaffected.
 
-Run as a standalone worker::
+Run with the bulk-upload worker (recommended)::
+
+    python -m apps.user_service.app.consumers.contacts_import_consumer
+
+This module can still be run alone for local debugging::
 
     python -m apps.user_service.app.consumers.crm_supermemory_consumer
 """
@@ -88,7 +92,7 @@ class CrmSupermemoryConsumer:
             "client_id": f"{self._kafka_settings.producer_name}-crm-supermemory-consumer",
             "group_id": self._group_id,
             "enable_auto_commit": False,
-            "auto_offset_reset": "earliest",
+            "auto_offset_reset": "latest",
             "security_protocol": self._kafka_settings.security_protocol,
             "max_poll_interval_ms": _MAX_POLL_INTERVAL_MS,
             "session_timeout_ms": _SESSION_TIMEOUT_MS,

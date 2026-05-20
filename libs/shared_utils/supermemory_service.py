@@ -11,6 +11,7 @@ Design decisions
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -23,6 +24,23 @@ logger = get_logger("supermemory_service")
 
 _RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
 _ENTITY_CONTEXT_MAX_LEN: Final[int] = 1500
+
+
+def container_tag_for_organization(organization_id: str) -> str:
+    """Supermemory container tag that scopes documents to one CRM tenant.
+
+    Must match the value used when upserting via ``POST /v3/documents``.
+    """
+    return f"org_{organization_id}"
+
+
+@dataclass(slots=True)
+class SupermemorySearchHit:
+    """One row from Supermemory hybrid search (memory fact or document chunk)."""
+
+    id: str
+    text: str
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -162,6 +180,38 @@ class SupermemoryService:
             json_body=payload,
         )
 
+    async def search_hybrid(
+        self,
+        *,
+        query: str,
+        container_tag: str,
+        limit: int,
+        filters: dict[str, Any] | None = None,
+    ) -> list[SupermemorySearchHit]:
+        """Semantic + chunk search scoped to one container (``POST /v4/search``).
+
+        Hybrid mode returns ``memory`` and/or ``chunk`` text per hit per Supermemory docs.
+        """
+        if not self.is_configured:
+            logger.warning("supermemory_search_skipped_not_configured")
+            return []
+
+        payload: dict[str, Any] = {
+            "q": query,
+            "containerTag": container_tag,
+            "searchMode": "hybrid",
+            "limit": max(1, min(limit, 100)),
+        }
+        if filters is not None:
+            payload["filters"] = filters
+
+        data = await self._request_json(
+            method="POST",
+            path="/v4/search",
+            json_body=payload,
+        )
+        return _parse_search_hits(data)
+
     async def _request_json(
         self,
         *,
@@ -207,3 +257,29 @@ class SupermemoryService:
         if last_error is not None:
             raise last_error
         raise RuntimeError("supermemory_request_failed")
+
+
+def _parse_search_hits(data: dict[str, Any]) -> list[SupermemorySearchHit]:
+    """Normalize Supermemory search JSON to ``SupermemorySearchHit`` rows."""
+    raw = data.get("results")
+    if not isinstance(raw, list):
+        return []
+    hits: list[SupermemorySearchHit] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        hit_id = str(item.get("id") or "").strip()
+        memory = item.get("memory")
+        chunk = item.get("chunk")
+        if isinstance(memory, str) and memory.strip():
+            text = memory.strip()
+        elif isinstance(chunk, str) and chunk.strip():
+            text = chunk.strip()
+        else:
+            continue
+        meta = item.get("metadata")
+        metadata = meta if isinstance(meta, dict) else None
+        if not hit_id:
+            hit_id = hashlib.sha256(text.encode("utf-8")).hexdigest()[:20]
+        hits.append(SupermemorySearchHit(id=hit_id, text=text, metadata=metadata))
+    return hits

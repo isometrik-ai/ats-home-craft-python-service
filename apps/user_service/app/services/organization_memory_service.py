@@ -1,8 +1,4 @@
-"""Per-organization Supermemory feature flag.
-
-Reads ``organizations.settings.organization_memory`` (boolean). When false or
-missing, the CRM Supermemory consumer skips sync for that tenant.
-"""
+"""Per-organization Supermemory feature flag and org-memory query access checks."""
 
 from __future__ import annotations
 
@@ -14,10 +10,24 @@ import asyncpg
 from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
-from apps.user_service.app.utils.common_utils import parse_json_field
+from apps.user_service.app.utils.common_utils import UserContext, parse_json_field
+from libs.shared_middleware.jwt_auth import check_user_access_async
+from libs.shared_utils.common_query import (
+    COMPANIES_MANAGEMENT_VIEW,
+    CONTACTS_MANAGEMENT_VIEW,
+    LEADS_MANAGEMENT_VIEW,
+)
+from libs.shared_utils.http_exceptions import ForbiddenException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 ORGANIZATION_MEMORY_SETTINGS_KEY = "organization_memory"
 _CACHE_TTL_SECONDS = 60.0
+
+_CRM_MEMORY_VIEW_PERMISSIONS: tuple[str, ...] = (
+    CONTACTS_MANAGEMENT_VIEW,
+    COMPANIES_MANAGEMENT_VIEW,
+    LEADS_MANAGEMENT_VIEW,
+)
 
 # organization_id -> (enabled, monotonic_timestamp)
 _flag_cache: dict[str, tuple[bool, float]] = {}
@@ -61,3 +71,32 @@ def _parse_organization_memory_flag(org_row: dict[str, Any] | None) -> bool:
     if not isinstance(settings, dict):
         return False
     return settings.get(ORGANIZATION_MEMORY_SETTINGS_KEY) is True
+
+
+async def require_org_memory_query_access(
+    *,
+    db_connection: asyncpg.Connection,
+    user_context: UserContext,
+) -> None:
+    """Require session org + at least one CRM view permission before a memory query.
+
+    Raises:
+        ForbiddenException: No organization on session, or no qualifying CRM permission.
+    """
+    org_id = user_context.organization_id
+    if org_id is None:
+        raise ForbiddenException(
+            message_key="organizations.errors.user_not_a_member_of_any_organization",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+    has_access = await check_user_access_async(
+        list(_CRM_MEMORY_VIEW_PERMISSIONS),
+        user_context.user_id,
+        org_id,
+        db_connection,
+    )
+    if not has_access:
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )

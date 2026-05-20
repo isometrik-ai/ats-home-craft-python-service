@@ -45,7 +45,10 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_field,
 )
 from libs.shared_utils.logger import get_logger
-from libs.shared_utils.supermemory_service import SupermemoryService
+from libs.shared_utils.supermemory_service import (
+    SupermemoryService,
+    container_tag_for_organization,
+)
 
 logger = get_logger("supermemory_sync_service")
 
@@ -80,11 +83,6 @@ _EVENT_TYPE_TO_ENTITY: dict[str, EntityType] = {
     },
     **{event.value: "lead" for event in LeadEventType},
 }
-
-
-def container_tag_for_organization(organization_id: str) -> str:
-    """Supermemory container tag isolating memories per organization."""
-    return f"org_{organization_id}"
 
 
 def custom_id_for_entity(entity_type: EntityType, entity_id: str) -> str:

@@ -15,10 +15,10 @@ from apps.user_service.app.services.supermemory_sync_service import (
     _optional_kv_line,
     _prepare_contact_row,
     _tags_csv,
-    container_tag_for_organization,
     custom_id_for_entity,
     resolve_sync_targets,
 )
+from libs.shared_utils.supermemory_service import container_tag_for_organization
 
 
 def test_container_tag_for_organization() -> None:
