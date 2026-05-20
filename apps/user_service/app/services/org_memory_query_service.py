@@ -24,42 +24,91 @@ _INTENT_MAX_TOKENS = 600
 _SYNTH_MAX_TOKENS = 4096
 _SYNTH_CONTEXT_CHAR_LIMIT = 14_000
 _LOOKUP_SEARCH_LIMIT = 25
-_AGGREGATION_SEARCH_LIMIT = 50
+_AGGREGATION_SEARCH_LIMIT = 5
 _MAX_SYNTH_ENTITY_SNIPPETS = 5
 _ENTITY_HEADER_RE = re.compile(r"^#\s*(Contact|Company|Lead):\s*(.+)", re.MULTILINE | re.IGNORECASE)
-
+SYNTH_SYSTEM_PROMPT = (
+    "You write a single AI-generated overview of a CRM entity. "
+    "Your output must read like a professionally written bio or company summary.\n\n"
+    "EXAMPLE INPUT — fragments about Rohit Marthak across multiple notes:\n"
+    "Contact: Rohit Marthak. Title: Python AI Engineer. Company: Appscrip. "
+    "Email: rohitmarthak@appscrip.co. Phone: +919823929922. "
+    "Address: 54 RBI Colony, Bengaluru. LinkedIn: https://in.linkedin.com/in/rohitmarthak. "
+    "Health checkup: No. Insurance: Policy Bazaar. "
+    "Notes: Met at Reva College, Bengaluru. Follow up next Friday. "
+    "updated_at: 2026-05-20T07:44:57. "
+    "Contact: Rohit Marthak. Title: Python AI Engineer. Company: Appscrip. "
+    "Email: rohitmarthak@appscrip.co. Tags: AI engineer, Homespark.\n\n"
+    "EXAMPLE OUTPUT:\n"
+    "Rohit Marthak is a Python AI Engineer at Appscrip, based in Bengaluru, Karnataka. "
+    "He can be reached at rohitmarthak@appscrip.co and +919823929922, "
+    "and his LinkedIn profile is at https://in.linkedin.com/in/rohitmarthak. "
+    "His insurance is through Policy Bazaar. "
+    "He was initially met at Reva College, Bengaluru, with a follow-up scheduled for "
+    "the following Friday.\n\n"
+    "EXAMPLE INPUT — fragments about Appscrip:\n"
+    "Company: Appscrip. Industry: Technology. Location: Bengaluru, Karnataka, India. "
+    "Status: active. Website: appscrip.co. "
+    "Contacts: Rohit Marthak, Avinash Singh. updated_at: 2026-05-20T09:00:00.\n\n"
+    "EXAMPLE OUTPUT:\n"
+    "Appscrip is an active technology company headquartered in Bengaluru, Karnataka, India. "
+    "Its website is appscrip.co. "
+    "Key contacts at the company include Rohit Marthak and Avinash Singh, "
+    "both Python AI Engineers.\n\n"
+    "END OF EXAMPLES.\n\n"
+    "RULES:\n"
+    "1. Output exactly one paragraph for a single entity query. "
+    "If multiple entities are requested, one paragraph per entity, separated by a blank line.\n"
+    "2. Never write about the same entity twice. "
+    "If the notes repeat the same person or company, merge everything silently into "
+    "one paragraph.\n"
+    "3. Every fact appears exactly once. Never repeat a name, field, or detail.\n"
+    "4. First sentence: name, title, company, location. "
+    "Second sentence: email and phone together. "
+    "Remaining sentences: LinkedIn, education, notes context, custom fields — grouped naturally.\n"
+    "5. Write flowing prose. Never list fields mechanically one per sentence.\n"
+    "6. Omit fields with no value. Never mention they are missing.\n"
+    "7. Use pronouns after first mention: He, She, They for people. The company for companies.\n"
+    "8. Convert notes into natural context: "
+    "'He was met at Reva College' not 'Notes: Met at Reva College'.\n"
+    "9. Convert custom fields into natural prose: "
+    "'his insurance is through ICICI' not 'Insurance Company: ICICI'.\n"
+    "10. Ignore and never output: raw timestamps, ISO datetime strings, updated_at values, "
+    "last updated dates, database IDs, internal system fields.\n"
+    "11. Ignore and never output: any URL or domain containing 'example.com'.\n"
+    "12. Never explain what you omitted, skipped, or ignored.\n"
+    "13. Never mention the domain rule, the CRM, the notes, the records, or the database.\n"
+    "14. Never start with 'I', 'Here', 'Based on', or 'According to'.\n"
+    "15. Never end with an offer to help, a closing sentence, or a question.\n"
+    "16. Stop writing immediately after the last sentence of the last entity."
+)
 INTENT_SYSTEM_PROMPT = (
-    "You are a CRM query planner. Parse the user's natural language query "
-    "and return a JSON object.\n\n"
-    "Return ONLY valid JSON, no markdown, no explanation.\n\n"
+    "You are a CRM query planner. Parse the user query and return ONLY valid JSON. "
+    "No markdown. No explanation.\n\n"
     "JSON shape:\n"
     "{\n"
     '  "is_aggregation": true | false,\n'
     '  "search_queries": ["<query1>", "<query2>"],\n'
-    '  "synthesize_instruction": "<what to do with the retrieved memories>"\n'
+    '  "synthesize_instruction": "<instruction>"\n'
     "}\n\n"
-    "Rules:\n"
-    '- For counts or full lists ("how many companies"), set is_aggregation: true\n'
-    "- Produce 1–3 search_queries with different phrasings for better recall"
-)
-
-SYNTH_SYSTEM_PROMPT = (
-    "You answer questions about CRM contacts, companies, and leads for a business user.\n"
-    "Write one or two flowing paragraphs in plain conversational English.\n"
-    "Include every relevant fact from the CRM notes (role, company, email, phone, "
-    "addresses, tags, custom fields, social links) — do not omit fields that are present.\n\n"
-    "Strict rules:\n"
-    "- Use ONLY facts that appear in the CRM notes; quote labels and values faithfully.\n"
-    "- Do NOT infer or rephrase (Status: active ≠ 'active user'; "
-    "Preferred language: English ≠ 'English-speaking').\n"
-    "- State full URLs, emails, and phone numbers from the notes; never say "
-    "'the link you provided' or refer to the question.\n"
-    "- Do NOT offer to draft messages, reach out, or do tasks.\n"
-    "- Do NOT use bullet lists unless the user asked for a list.\n"
-    "- You may skip stating obvious placeholder domains (example.com) but still "
-    "mention other real fields.\n"
-    "- If notes conflict, prefer sections under '# Contact:' or '# Company:'.\n"
-    "- If a fact is missing from the notes, do not mention it."
+    "RULES:\n"
+    "- is_aggregation: true only for counts or full-list requests.\n"
+    "- search_queries: 2 to 3 phrasings. Include the entity name verbatim in at least one.\n"
+    "- synthesize_instruction: exactly one sentence. "
+    "Must end with: 'Write only one paragraph total. No repetition. No commentary.'\n\n"
+    "synthesize_instruction EXAMPLES:\n"
+    "- 'Tell me everything about X' → "
+    "'Write one flowing paragraph with every meaningful detail about this person: "
+    "role, company, location, contact info, education, notes, and custom fields. "
+    "Write only one paragraph total. No repetition. No commentary.'\n"
+    "- 'Who is X' → "
+    "'Write one paragraph identifying this person with their role, company, and key details. "
+    "Write only one paragraph total. No repetition. No commentary.'\n"
+    "- 'Describe this company' → "
+    "'Write one paragraph describing this company with all available details. "
+    "Write only one paragraph total. No repetition. No commentary.'\n"
+    "- 'List contacts at Appscrip' → "
+    "'Write one short paragraph per contact. No repetition. No commentary.'"
 )
 
 
@@ -271,15 +320,15 @@ class OrgMemoryQueryService:
                 scope_line = f"Answer only about this CRM {entity_type} (id {entity_id}).\n\n"
             synth_user = (
                 f"{scope_line}"
-                f"The user asked: {user_message}\n\n"
+                f"Question: {user_message}\n\n"
                 f"CRM notes:\n{notes}\n\n"
-                f"{plan.synthesize_instruction}"
+                f"Instruction: {plan.synthesize_instruction}"
             )
         else:
             synth_user = (
-                f"The user asked: {user_message}\n\n"
-                "No CRM notes were found for this question. "
-                "Tell the user politely that you do not have that information."
+                f"Question: {user_message}\n\n"
+                "No matching CRM notes were retrieved. "
+                "Reply in one short neutral sentence that the information is not available."
             )
 
         answer = (
@@ -290,14 +339,14 @@ class OrgMemoryQueryService:
                     {"role": "user", "content": synth_user},
                 ],
                 max_completion_tokens=_SYNTH_MAX_TOKENS,
-                reasoning_effort="minimal",
+                reasoning_effort="low",
             )
         ).strip()
         if not answer:
             answer = (
-                "I don't have enough information in your CRM to answer that yet."
+                "No matching information is available."
                 if not notes
-                else "I wasn't able to put together an answer from your CRM data."
+                else "No answer could be formed from the available records."
             )
 
         return answer

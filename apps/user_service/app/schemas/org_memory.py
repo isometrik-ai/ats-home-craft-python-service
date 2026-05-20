@@ -49,8 +49,9 @@ class OrgMemoryIntentPlan(BaseModel):
     is_aggregation: bool = False
     search_queries: list[str] = Field(default_factory=list)
     synthesize_instruction: str = (
-        "Answer fully in conversational prose using all relevant facts in the CRM notes. "
-        "Do not infer or offer to help with tasks."
+        "Answer the question with concise factual prose. "
+        "Include all present fields for each record. "
+        "One paragraph per record."
     )
 
     @field_validator("search_queries", mode="before")
