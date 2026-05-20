@@ -349,6 +349,42 @@ class OrganizationMemberRepository:
         )
         return row is not None
 
+    async def get_active_membership_isometrik_user_id(
+        self,
+        user_id: str,
+        organization_id: str,
+        disallow_suspended: bool = False,
+    ) -> tuple[bool, str | None]:
+        """Return membership status with ``isometrik_user_id`` from the same row (one query).
+
+        When the row qualifies under the status rules, returns ``(True, isometrik_user_id)``
+        where ``isometrik_user_id`` may be ``None``. Otherwise ``(False, None)``.
+        """
+        where_status = "AND status != $3"
+        params: list[object] = [
+            user_id,
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+        ]
+        if disallow_suspended:
+            where_status += " AND status != $4"
+            params.append(OrganizationMemberStatus.SUSPENDED.value)
+
+        query = f"""
+            SELECT isometrik_user_id
+            FROM organization_members
+            WHERE user_id = $1
+                AND organization_id = $2
+                {where_status}
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(query, *params)
+        if not row:
+            return False, None
+        raw_iso = row.get("isometrik_user_id")
+        iso_uid = str(raw_iso) if raw_iso is not None else None
+        return True, iso_uid
+
     async def check_user_membership_by_user_id(
         self,
         user_id: str,
@@ -365,27 +401,12 @@ class OrganizationMemberRepository:
         Returns:
             bool: True if user is a member, False otherwise
         """
-        where_status = "AND status != $3"
-        params: list[object] = [
-            user_id,
-            organization_id,
-            OrganizationMemberStatus.DELETED.value,
-        ]
-        if disallow_suspended:
-            where_status += " AND status != $4"
-            params.append(OrganizationMemberStatus.SUSPENDED.value)
-
-        query = f"""
-            SELECT EXISTS(
-                SELECT 1
-                FROM organization_members
-                WHERE user_id = $1
-                    AND organization_id = $2
-                    {where_status}
-            )
-        """
-        exists = await self.db_connection.fetchval(query, *params)
-        return bool(exists)
+        is_member, _ = await self.get_active_membership_isometrik_user_id(
+            user_id=user_id,
+            organization_id=organization_id,
+            disallow_suspended=disallow_suspended,
+        )
+        return is_member
 
     async def get_member_id_by_user_id(self, user_id: str, organization_id: str) -> str | None:
         """Get organization_members.id (member_id) for a given auth user_id.
