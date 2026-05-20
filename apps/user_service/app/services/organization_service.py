@@ -345,6 +345,13 @@ class OrganizationService:
             organization_id=organization_id, update_data=db_payload
         )
 
+        if "organization_memory" in update_payload:
+            from apps.user_service.app.services.organization_memory_service import (
+                invalidate_organization_memory_cache,
+            )
+
+            invalidate_organization_memory_cache(organization_id)
+
         # Format old data for audit logging before returning
         old_data = self._format_organization_for_audit(existing)
 
@@ -432,6 +439,7 @@ class OrganizationService:
             "preferred_integration",
             "need_help_importing_data",
             "need_migration_assistance",
+            "organization_memory",
         }
 
         # Practice area fields (replaced entirely, not merged)
@@ -600,6 +608,7 @@ class OrganizationService:
             "preferred_integration": settings.get("preferred_integration"),
             "need_help_importing_data": settings.get("need_help_importing_data"),
             "need_migration_assistance": settings.get("need_migration_assistance"),
+            "organization_memory": settings.get("organization_memory"),
             "compliance_security": settings.get("compliance_security"),
             "enterprise_features": settings.get("enterprise_features"),
             "team_setup": settings.get("team_setup"),
@@ -648,6 +657,9 @@ class OrganizationService:
             "need_migration_assistance": (
                 existing_settings.get("need_migration_assistance") if is_settings_dict else None
             ),
+            "organization_memory": (
+                existing_settings.get("organization_memory") if is_settings_dict else None
+            ),
             "compliance_security": (
                 existing_settings.get("compliance_security") if is_settings_dict else None
             ),
@@ -691,6 +703,7 @@ class OrganizationService:
             preferred_integration=settings_fields["preferred_integration"],
             need_help_importing_data=settings_fields["need_help_importing_data"],
             need_migration_assistance=settings_fields["need_migration_assistance"],
+            organization_memory=settings_fields["organization_memory"],
             compliance_security=settings_fields["compliance_security"],
             enterprise_features=settings_fields["enterprise_features"],
             team_setup=settings_fields["team_setup"],

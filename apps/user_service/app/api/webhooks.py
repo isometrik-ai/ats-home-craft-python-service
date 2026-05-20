@@ -9,7 +9,11 @@ from fastapi import status as http_status
 
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.external_auth import get_organization_context
-from apps.user_service.app.schemas.enums import KafkaTopics
+from apps.user_service.app.schemas.enums import (
+    CompanyEventType,
+    ContactEventType,
+    KafkaTopics,
+)
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
@@ -92,7 +96,7 @@ async def enrichment_webhook(
             enriched_profile=None,
         )
 
-    # Schedule Typesense reindex using entity ref from enrichment processing (no extra DB call).
+    # Schedule Typesense reindex and CRM event for Supermemory consumer.
     if client_ref:
         entity_id, organization_id = client_ref
         if has_company_payload:
@@ -100,11 +104,31 @@ async def enrichment_webhook(
                 index_companies_background,
                 [(entity_id, organization_id)],
             )
+            enrichment_event = EventService().build_event(
+                event_type=CompanyEventType.UPDATED.value,
+                aggregate_id=entity_id,
+                organization_id=organization_id,
+                actor_user_id=None,
+                payload={"module": "companies", "action": "enrichment_applied"},
+            )
         else:
             background_tasks.add_task(
                 index_contacts_background,
                 [(entity_id, organization_id)],
             )
+            enrichment_event = EventService().build_event(
+                event_type=ContactEventType.UPDATED.value,
+                aggregate_id=entity_id,
+                organization_id=organization_id,
+                actor_user_id=None,
+                payload={"module": "contacts", "action": "enrichment_applied"},
+            )
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=enrichment_event,
+            key=entity_id,
+            topics=[KafkaTopics.CRM_EVENTS],
+        )
 
     return success_response(
         request=request,

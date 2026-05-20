@@ -89,6 +89,27 @@ class CloudflareR2Settings(BaseSettings):
     media_url: str = config("R2_MEDIA_URL")
 
 
+class SupermemorySettings(BaseSettings):
+    """Supermemory API configuration for CRM entity memory sync."""
+
+    api_key: str = config("SUPERMEMORY_API_KEY", default="")
+    enabled: bool = config("SUPERMEMORY_ENABLED", default=False)
+    base_url: str = config("SUPERMEMORY_BASE_URL", default="https://api.supermemory.ai")
+    consumer_group_id: str = config(
+        "SUPERMEMORY_CONSUMER_GROUP_ID",
+        default="crm-supermemory-sync",
+    )
+    request_timeout_seconds: float = config(
+        "SUPERMEMORY_REQUEST_TIMEOUT_SECONDS",
+        default=30.0,
+    )
+    num_retries: int = config("SUPERMEMORY_NUM_RETRIES", default=3)
+    retry_interval_seconds: float = config(
+        "SUPERMEMORY_RETRY_INTERVAL_SECONDS",
+        default=1.0,
+    )
+
+
 class TypesenseSettings(BaseSettings):
     """Typesense cluster and API key configuration."""
 
@@ -129,6 +150,7 @@ class SharedAppSettings(BaseSettings):
     isometrik: IsometrikSettings = IsometrikSettings()
     cloudflare_r2: CloudflareR2Settings = CloudflareR2Settings()
     typesense: TypesenseSettings = TypesenseSettings()
+    supermemory: SupermemorySettings = SupermemorySettings()
     environment: EnvironmentOption = config("ENVIRONMENT", default=EnvironmentOption.LOCAL)
     log_level: LogLevelOption = config("LOG_LEVEL", default=LogLevelOption.INFO.value)
     website_url: str = config("WEBSITE_URL")
