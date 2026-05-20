@@ -7,6 +7,10 @@ This module is intentionally lean and focuses on:
 
 The actual per-row CSV/XLSX parsing and mapping is expected to be handled
 in a separate utility or pipeline that yields normalized contact payloads.
+
+Worker entrypoint (bulk upload + CRM→Supermemory sync in one process)::
+
+    python -m apps.user_service.app.consumers.contacts_import_consumer
 """
 
 from __future__ import annotations
@@ -115,7 +119,7 @@ class ContactsImportConsumer:
             "client_id": f"{self._settings.producer_name}-contacts-import-consumer",
             "group_id": "contacts-import-consumers",
             "enable_auto_commit": False,  # we commit manually after processing
-            "auto_offset_reset": "earliest",
+            "auto_offset_reset": "latest",
             "security_protocol": self._settings.security_protocol,
             "sasl_mechanism": self._settings.sasl_mechanism,
             "sasl_plain_username": self._settings.sasl_username,
@@ -405,10 +409,12 @@ async def run_contacts_import_consumer(batch_size: int = 1000) -> None:
 
 
 def main() -> None:
-    """CLI entrypoint."""
+    """CLI entrypoint: contacts import + CRM Supermemory consumers."""
     logging.basicConfig(level=logging.INFO)
     try:
-        asyncio.run(run_contacts_import_consumer())
+        from apps.user_service.app.consumers.kafka_workers import run_kafka_workers
+
+        asyncio.run(run_kafka_workers())
     except KeyboardInterrupt:
         logger.info("contacts_import_consumer_interrupted")
 

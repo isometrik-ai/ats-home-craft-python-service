@@ -64,7 +64,8 @@
       "exit_impersonation_invalid_token": "This token cannot be used to exit impersonation (missing session or user id).",
       "exit_impersonation_session_not_found": "That session is no longer active or could not be revoked.",
       "organization_already_suspended": "This organization is already suspended.",
-      "organization_not_suspended": "Only suspended organizations can be reactivated."
+      "organization_not_suspended": "Only suspended organizations can be reactivated.",
+      "organization_memory_disabled": "Organization memory is not enabled for this workspace. An admin can turn it on in organization settings."
     },
     "success": {
       "organization_created": "Organization created successfully.",

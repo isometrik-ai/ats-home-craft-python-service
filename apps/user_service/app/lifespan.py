@@ -12,6 +12,14 @@ from fastapi import FastAPI
 from apps.user_service.app.dependencies.audit_logs.audit_logger import audit_logger
 from libs.shared_db.drivers.asyncpg_client import close_pool, get_pool
 from libs.shared_utils.logger import app_logger
+from libs.shared_utils.openai_chat_service import (
+    close_openai_http_client,
+    init_openai_http_client,
+)
+from libs.shared_utils.supermemory_service import (
+    close_supermemory_http_client,
+    init_supermemory_http_client,
+)
 from libs.shared_utils.typesense_service import (
     close_typesense_http_client,
     get_typesense_http_client,
@@ -38,11 +46,22 @@ async def lifespan(app: FastAPI):
     await get_typesense_http_client()
     app_logger.info("Typesense HTTP client initialized successfully")
 
+    # Initialize Supermemory HTTP client when enabled (connection pooled)
+    await init_supermemory_http_client()
+    app_logger.info("Supermemory HTTP client startup complete")
+
+    await init_openai_http_client()
+    app_logger.info("OpenAI HTTP client startup complete")
+
     try:
         yield
     finally:
         # Shutdown (if needed)
         app_logger.info("Shutting down user service application")
+        await close_openai_http_client()
+        app_logger.info("OpenAI HTTP client closed successfully")
+        await close_supermemory_http_client()
+        app_logger.info("Supermemory HTTP client closed successfully")
         await close_typesense_http_client()
         app_logger.info("Typesense HTTP client closed successfully")
         await close_pool()
