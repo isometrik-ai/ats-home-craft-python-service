@@ -1829,13 +1829,17 @@ class ContactsService:
 
         return value
 
-    def _normalize_contact_details(self, details: dict[str, Any]) -> dict[str, Any]:
-        """Normalize DB contact details to the API response shape."""
+    @staticmethod
+    def _stringify_contact_detail_uuids(details: dict[str, Any]) -> None:
+        """Normalize UUID columns on a contact detail dict to strings for JSON responses."""
         for uuid_field_name in ("id", "organization_id", "user_id"):
             field_value = details.get(uuid_field_name)
             if field_value is not None and not isinstance(field_value, str):
                 details[uuid_field_name] = str(field_value)
 
+    @staticmethod
+    def _coerce_contact_detail_json_lists(details: dict[str, Any]) -> None:
+        """Coerce JSON-backed list fields on contact details to Python lists."""
         json_list_fields = (
             "phones",
             "notes",
@@ -1847,22 +1851,46 @@ class ContactsService:
         )
         for field_name in json_list_fields:
             raw_field_value = details.get(field_name)
-            if isinstance(raw_field_value, str):
+            if field_name == "notes":
+                details[field_name] = ContactsService._normalize_notes_for_detail(raw_field_value)
+            elif field_name in ("work_history", "educational_history"):
+                details[field_name] = coerce_json_list(raw_field_value)
+            elif isinstance(raw_field_value, str):
                 details[field_name] = parse_json_field(raw_field_value) or []
             elif raw_field_value is None:
                 details[field_name] = []
 
-        details["notes"] = self._normalize_notes_for_detail(details.get("notes"))
+    @staticmethod
+    def _normalize_contact_detail_scalar_arrays(details: dict[str, Any]) -> None:
+        """Normalize scalar array-ish fields (e.g. tags/skills) on contact details."""
+        for scalar_array_field in ("tags", "skills"):
+            raw_value = details.get(scalar_array_field)
+            parsed = parse_json_any(raw_value, raw_value)
+            details[scalar_array_field] = parsed if isinstance(parsed, list) else []
 
+    @staticmethod
+    def _normalize_contact_detail_additional_data(details: dict[str, Any]) -> None:
+        """Ensure ``additional_data`` is a dict after optional string JSON parsing."""
         additional_raw = details.get("additional_data")
         if isinstance(additional_raw, str):
             details["additional_data"] = parse_json_field(additional_raw) or {}
         elif additional_raw is None:
             details["additional_data"] = {}
 
+    @staticmethod
+    def _normalize_contact_detail_timestamps(details: dict[str, Any]) -> None:
+        """Normalize datetime-like fields on contact details to ISO strings."""
         details["created_at"] = format_iso_datetime(details.get("created_at")) or ""
         details["updated_at"] = format_iso_datetime(details.get("updated_at")) or ""
         details["last_enriched_at"] = format_iso_datetime(details.get("last_enriched_at"))
+
+    def _normalize_contact_details(self, details: dict[str, Any]) -> dict[str, Any]:
+        """Normalize DB contact details to the API response shape."""
+        self._stringify_contact_detail_uuids(details)
+        self._coerce_contact_detail_json_lists(details)
+        self._normalize_contact_detail_scalar_arrays(details)
+        self._normalize_contact_detail_additional_data(details)
+        self._normalize_contact_detail_timestamps(details)
         return details
 
     @staticmethod

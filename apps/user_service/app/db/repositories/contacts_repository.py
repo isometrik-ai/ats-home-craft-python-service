@@ -579,7 +579,9 @@ class ContactsRepository(BaseRepository):
         if not fetched_row:
             return None
         result = dict(fetched_row)
-        return self._coerce_jsonb_array_fields(result, ("companies", "leads", "addresses"))
+        return self._coerce_jsonb_array_fields(
+            result, ("companies", "leads", "addresses", "work_history", "educational_history")
+        )
 
     async def get_contact_for_update_by_enrichment_request_id(
         self,
@@ -824,7 +826,9 @@ class ContactsRepository(BaseRepository):
         if not fetched_row:
             return None
         result = dict(fetched_row)
-        return self._coerce_jsonb_array_fields(result, ("companies", "leads", "addresses"))
+        return self._coerce_jsonb_array_fields(
+            result, ("companies", "leads", "addresses", "work_history", "educational_history")
+        )
 
     async def get_contact_details_by_phone(
         self,
@@ -930,7 +934,9 @@ class ContactsRepository(BaseRepository):
         if not fetched_row:
             return None
         result = dict(fetched_row)
-        return self._coerce_jsonb_array_fields(result, ("companies", "leads", "addresses"))
+        return self._coerce_jsonb_array_fields(
+            result, ("companies", "leads", "addresses", "work_history", "educational_history")
+        )
 
     async def list_contacts(
         self,
