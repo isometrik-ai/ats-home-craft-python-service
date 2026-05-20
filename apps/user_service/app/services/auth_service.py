@@ -1325,6 +1325,7 @@ class AuthService:
             InternalServerErrorException: For internal server errors
         """
         session_repository = SessionRepository(db_connection=self.db_connection)
+        org_member_isometrik_user_id: str | None = None
 
         if user_type == SelectOrganizationType.CLIENT:
             contacts_repository = ContactsRepository(db_connection=self.db_connection)
@@ -1337,7 +1338,10 @@ class AuthService:
                 db_connection=self.db_connection
             )
             # For select-org, suspended members should be treated as non-members.
-            is_member = await organization_member_repository.check_user_membership_by_user_id(
+            (
+                is_member,
+                org_member_isometrik_user_id,
+            ) = await organization_member_repository.get_active_membership_isometrik_user_id(
                 user_id=user_id,
                 organization_id=organization_id,
                 disallow_suspended=True,
@@ -1385,5 +1389,11 @@ class AuthService:
             if user_type != SelectOrganizationType.CLIENT
             else None,
         )
+
+        # Match profile API: expose organization_members.isometrik_user_id as user_id.
+        if user_type != SelectOrganizationType.CLIENT and isometrik_details is not None:
+            isometrik_details = isometrik_details.model_copy(
+                update={"user_id": org_member_isometrik_user_id}
+            )
 
         return SelectOrganizationResponse(isometrik_details=isometrik_details)
