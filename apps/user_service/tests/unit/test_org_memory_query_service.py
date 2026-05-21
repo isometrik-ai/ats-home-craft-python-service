@@ -50,8 +50,30 @@ def test_drop_deleted_and_empty() -> None:
     assert kept[0].id == "1"
 
 
-def test_collapse_hits_by_entity_merges_fragments() -> None:
-    """Fragments for the same contact are merged, not replaced by a single short line."""
+def test_collapse_hits_prefers_authoritative_snapshot() -> None:
+    """Stale extracted memories are dropped when a full CRM snapshot is present."""
+    hits = [
+        SupermemorySearchHit(
+            id="a",
+            text="Rohit Marthak works at Appscrip",
+            metadata={"entity_type": "contact", "entity_id": "c1", "updated_at": 1},
+        ),
+        SupermemorySearchHit(
+            id="b",
+            text=(
+                "# Contact: Rohit Marthak\n## Profile\n- Email: rohit@tcs.co\n## Companies\n- TCS\n"
+            ),
+            metadata={"entity_type": "contact", "entity_id": "c1", "updated_at": 99},
+        ),
+    ]
+    collapsed = _collapse_hits_by_entity(hits)
+    assert len(collapsed) == 1
+    assert "TCS" in collapsed[0].text
+    assert "works at Appscrip" not in collapsed[0].text
+
+
+def test_collapse_hits_merges_when_no_snapshot() -> None:
+    """Short fragments still merge when no authoritative CRM snapshot exists."""
     hits = [
         SupermemorySearchHit(
             id="a",
@@ -60,11 +82,11 @@ def test_collapse_hits_by_entity_merges_fragments() -> None:
         ),
         SupermemorySearchHit(
             id="b",
-            text="# Contact: Rohit Marthak\nEmail: rohit@appscrip.co\nTitle: Python AI Engineer",
+            text="Email: rohit@appscrip.co",
             metadata={"entity_type": "contact", "entity_id": "c1"},
         ),
     ]
     collapsed = _collapse_hits_by_entity(hits)
     assert len(collapsed) == 1
-    assert "Title: Python AI Engineer" in collapsed[0].text
     assert "works at Appscrip" in collapsed[0].text
+    assert "rohit@appscrip.co" in collapsed[0].text

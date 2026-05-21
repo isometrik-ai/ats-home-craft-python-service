@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Final
+from urllib.parse import quote
 
 import httpx
 
@@ -154,9 +155,12 @@ class SupermemoryService:
         metadata: dict[str, str | int | float | bool],
         entity_context: str | None = None,
     ) -> dict[str, Any] | None:
-        """Upsert a document via ``POST /v3/documents``.
+        """Upsert a CRM snapshot with full content replacement.
 
-        The same ``custom_id`` replaces existing content (Supermemory deduplication).
+        Supermemory treats ``POST /v3/documents`` with an existing ``customId`` as an
+        incremental merge (diff-only processing). Canonical CRM state must fully replace
+        the prior document, so we ``PATCH`` first and ``POST`` only when the document
+        does not exist yet (see Supermemory ingesting docs: "Replace entire document").
 
         Returns:
             Parsed JSON response, or ``None`` when Supermemory is not configured.
@@ -165,6 +169,48 @@ class SupermemoryService:
             logger.warning("supermemory_add_skipped_not_configured custom_id=%s", custom_id)
             return None
 
+        payload = self._document_upsert_payload(
+            content=content,
+            container_tag=container_tag,
+            custom_id=custom_id,
+            metadata=metadata,
+            entity_context=entity_context,
+        )
+
+        try:
+            return await self._request_json(
+                method="PATCH",
+                path=self._document_path(custom_id),
+                json_body=payload,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+            logger.info(
+                "supermemory_document_create_after_missing custom_id=%s",
+                custom_id,
+            )
+            return await self._request_json(
+                method="POST",
+                path="/v3/documents",
+                json_body=payload,
+            )
+
+    @staticmethod
+    def _document_path(custom_id: str) -> str:
+        """URL path for document get/update/delete (accepts ``customId`` or internal id)."""
+        return f"/v3/documents/{quote(custom_id, safe='')}"
+
+    @staticmethod
+    def _document_upsert_payload(
+        *,
+        content: str,
+        container_tag: str,
+        custom_id: str,
+        metadata: dict[str, str | int | float | bool],
+        entity_context: str | None,
+    ) -> dict[str, Any]:
+        """Build the JSON body shared by create (POST) and replace (PATCH)."""
         payload: dict[str, Any] = {
             "content": content,
             "containerTag": container_tag,
@@ -173,12 +219,7 @@ class SupermemoryService:
         }
         if entity_context:
             payload["entityContext"] = entity_context[:_ENTITY_CONTEXT_MAX_LEN]
-
-        return await self._request_json(
-            method="POST",
-            path="/v3/documents",
-            json_body=payload,
-        )
+        return payload
 
     async def search_hybrid(
         self,
