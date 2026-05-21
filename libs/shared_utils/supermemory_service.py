@@ -196,6 +196,59 @@ class SupermemoryService:
                 json_body=payload,
             )
 
+    async def get_document_content(
+        self,
+        *,
+        custom_id: str,
+        organization_id: str | None = None,
+    ) -> str | None:
+        """Return stored document ``content`` for *custom_id*, or ``None`` if missing.
+
+        When *organization_id* is provided, documents whose metadata carries a
+        different ``organization_id`` are ignored (tenant guard).
+        """
+        if not self.is_configured:
+            return None
+        try:
+            data = await self._request_json(
+                method="GET",
+                path=self._document_path(custom_id),
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+        if organization_id and not self._document_matches_organization(
+            data, organization_id=organization_id, custom_id=custom_id
+        ):
+            return None
+        content = data.get("content")
+        return content.strip() if isinstance(content, str) and content.strip() else None
+
+    @staticmethod
+    def _document_matches_organization(
+        data: dict[str, Any],
+        *,
+        organization_id: str,
+        custom_id: str,
+    ) -> bool:
+        """Return False when document metadata belongs to another organization."""
+        metadata = data.get("metadata")
+        if not isinstance(metadata, dict):
+            return True
+        doc_org = str(metadata.get("organization_id") or "").strip()
+        if not doc_org:
+            return True
+        if doc_org == organization_id:
+            return True
+        logger.warning(
+            "supermemory_document_org_mismatch custom_id=%s expected=%s found=%s",
+            custom_id,
+            organization_id,
+            doc_org,
+        )
+        return False
+
     @staticmethod
     def _document_path(custom_id: str) -> str:
         """URL path for document get/update/delete (accepts ``customId`` or internal id)."""
@@ -258,7 +311,7 @@ class SupermemoryService:
         *,
         method: str,
         path: str,
-        json_body: dict[str, Any],
+        json_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute an HTTP request with retries on transient failures."""
         client = await get_supermemory_http_client(self._root_settings)
@@ -266,7 +319,10 @@ class SupermemoryService:
 
         for attempt in range(self._settings.num_retries):
             try:
-                response = await client.request(method, path, json=json_body)
+                request_kwargs: dict[str, Any] = {}
+                if json_body is not None:
+                    request_kwargs["json"] = json_body
+                response = await client.request(method, path, **request_kwargs)
                 if response.status_code in _RETRYABLE_STATUS_CODES:
                     raise httpx.HTTPStatusError(
                         f"retryable status {response.status_code}",
@@ -293,7 +349,10 @@ class SupermemoryService:
 
         logger.exception(
             "supermemory_request_failed",
-            extra={"path": path, "custom_id": json_body.get("customId")},
+            extra={
+                "path": path,
+                "custom_id": (json_body or {}).get("customId"),
+            },
         )
         if last_error is not None:
             raise last_error

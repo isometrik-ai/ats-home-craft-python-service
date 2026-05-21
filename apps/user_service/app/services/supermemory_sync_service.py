@@ -44,6 +44,10 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_field,
 )
+from apps.user_service.app.utils.inbound_email_memory import (
+    INBOUND_EMAILS_HEADING,
+    extract_inbound_emails_section,
+)
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.supermemory_service import (
     SupermemoryService,
@@ -1009,6 +1013,20 @@ class SupermemorySyncService:
                         entity_id=str(cid),
                     )
 
+    async def load_contact_snapshot(
+        self,
+        db_connection: asyncpg.Connection,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> tuple[str, dict[str, str | int | float | bool]] | None:
+        """Load contact Supermemory content and metadata from canonical CRM state."""
+        return await self._load_contact_snapshot(
+            db_connection,
+            organization_id=organization_id,
+            contact_id=contact_id,
+        )
+
     async def sync_entity(
         self,
         db_connection: asyncpg.Connection,
@@ -1116,6 +1134,11 @@ class SupermemorySyncService:
             prepared,
             custom_field_lines=custom_field_lines,
         )
+        content = await self._merge_preserved_inbound_emails(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            base_content=content,
+        )
         metadata = self._base_metadata(
             entity_type="contact",
             entity_id=contact_id,
@@ -1128,6 +1151,28 @@ class SupermemorySyncService:
             tags=_tags_csv(contact_tags),
         )
         return content, metadata
+
+    async def _merge_preserved_inbound_emails(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        base_content: str,
+    ) -> str:
+        """Keep ``## Inbound emails`` from the existing contact document on CRM resync."""
+        if not self._supermemory.is_configured:
+            return base_content
+        custom_id = custom_id_for_entity("contact", contact_id)
+        existing = await self._supermemory.get_document_content(
+            custom_id=custom_id,
+            organization_id=organization_id,
+        )
+        if not existing:
+            return base_content
+        inbound_body = extract_inbound_emails_section(existing)
+        if not inbound_body:
+            return base_content
+        return f"{base_content.rstrip()}\n\n{INBOUND_EMAILS_HEADING}\n\n{inbound_body}\n"
 
     async def _load_company_snapshot(
         self,

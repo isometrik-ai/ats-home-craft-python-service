@@ -17,6 +17,9 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
 )
+from apps.user_service.app.services.email_notification_service import (
+    EmailNotificationService,
+)
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service import (
     index_companies_background,
@@ -143,7 +146,10 @@ async def enrichment_webhook(
     "/email-notifications",
     status_code=http_status.HTTP_200_OK,
     summary="Email notifications webhook",
-    description="Receives email notification events and publishes a Kafka event.",
+    description=(
+        "Receives inbound email events, stores content on the matching contact, "
+        "and publishes Kafka lifecycle events."
+    ),
     responses={
         http_status.HTTP_200_OK: {"description": "Webhook received"},
         http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
@@ -157,30 +163,45 @@ async def email_notifications_webhook(
     organization_id: str = Depends(get_organization_context),
     body: dict[str, Any] = Body(...),
 ):
-    """Handle POST from email notifications webhook;
-    process email notification events and publish a Kafka event.
+    """Handle POST from email notifications webhook.
 
-    This webhook is used to receive email notification events from external providers
-    and publish a Kafka event.
+    Resolves the sender to a CRM contact, stores the message in Supermemory, and persists
+    a lifecycle event.
     """
-    # Provider-agnostic: we store and publish the raw payload without assuming a schema.
     aggregate_id = str(body.get("event_id") or uuid.uuid4())
+    email_service = EmailNotificationService(db_connection=db_connection)
 
-    # Store the raw webhook payload and emit a Kafka event with:
-    # - module: "email"
-    # - aggregate_id: best-effort (event_id or UUID fallback)
     event_service = EventService(db_connection=db_connection)
+    contact_id: str | None = None
+    email_stored = False
     async with db_connection.transaction():
+        process_result = await email_service.process_message_received(
+            organization_id=organization_id,
+            webhook_body=body,
+        )
+        contact_id = process_result.contact_id
+        email_stored = process_result.stored
+
+        event_payload: dict[str, Any] = {
+            "module": "email",
+            "action": "received",
+            "raw_event": body,
+            "contact_id": contact_id,
+            "stored_in_supermemory": email_stored,
+        }
+        if process_result.skipped_reason:
+            event_payload["skipped_reason"] = process_result.skipped_reason
+        if process_result.supermemory_document_ids:
+            event_payload["supermemory_document_ids"] = list(
+                process_result.supermemory_document_ids
+            )
+
         event = await event_service.create_lifecycle_event(
             event_type="email.notification.received",
             aggregate_id=aggregate_id,
             organization_id=organization_id,
             actor_user_id=None,
-            payload={
-                "module": "email",
-                "action": "received",
-                "raw_event": body,
-            },
+            payload=event_payload,
             topics=[KafkaTopics.CRM_EVENTS],
         )
 
