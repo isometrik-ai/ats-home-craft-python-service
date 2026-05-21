@@ -171,7 +171,7 @@ class SharedAppSettings(BaseSettings):
     )
     company_terms_url: str = config("COMPANY_TERMS_URL", default="https://houseofapps.ai/terms")
     openai_api_key: str = config("OPENAI_API_KEY")
-    org_memory_llm_model: str = config("ORG_MEMORY_LLM_MODEL", default="gpt-5-nano")
+    org_memory_llm_model: str = config("ORG_MEMORY_LLM_MODEL", default="gpt-4.1-mini")
 
 
 shared_settings = SharedAppSettings()

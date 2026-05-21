@@ -6,9 +6,35 @@ from apps.user_service.app.services.org_memory_query_service import (
     _collapse_hits_by_entity,
     _dedupe_hits,
     _drop_deleted_and_empty,
+    _flatten_answer_for_response,
     _parse_intent,
+    _prioritize_intel_sections_in_snapshot,
 )
 from libs.shared_utils.supermemory_service import SupermemorySearchHit
+
+
+def test_prioritize_sections_sales_first() -> None:
+    """Notes, linked leads, and companies precede profile/skills in synth context."""
+    raw = (
+        "# Contact: Preet Morbia\n"
+        "## Profile\n- Email: preet@example.com\n"
+        "## Skills\n- Python\n"
+        "## Linked leads\n- Kommerce — stage: Proposal — amount: 50000\n"
+        "## Companies\n- Infosys (primary)\n"
+        "## Notes\n- Interested in Kommerce project\n"
+    )
+    ordered = _prioritize_intel_sections_in_snapshot(raw)
+    assert ordered.index("## Notes") < ordered.index("## Linked leads")
+    assert ordered.index("## Linked leads") < ordered.index("## Companies")
+    assert ordered.index("## Companies") < ordered.index("## Profile")
+    assert ordered.index("## Profile") < ordered.index("## Skills")
+
+
+def test_flatten_answer_for_response_removes_newlines() -> None:
+    """API answers are returned as a single line."""
+    raw = "Line one.\n\nLine two.\nLine three."
+    assert _flatten_answer_for_response(raw) == "Line one. Line two. Line three."
+    assert "\n" not in _flatten_answer_for_response(raw)
 
 
 def test_parse_intent_strips_json_fence() -> None:
@@ -70,6 +96,34 @@ def test_collapse_hits_prefers_authoritative_snapshot() -> None:
     assert len(collapsed) == 1
     assert "TCS" in collapsed[0].text
     assert "works at Appscrip" not in collapsed[0].text
+
+
+def test_collapse_hits_merges_chunked_snapshots() -> None:
+    """Multiple chunks from the same sync generation are combined, not truncated to one."""
+    hits = [
+        SupermemorySearchHit(
+            id="chunk-profile",
+            text="# Contact: Preet Morbia\n## Profile\n- Email: preet@hexwireless.com",
+            metadata={"entity_type": "contact", "entity_id": "c1", "updated_at": 100},
+        ),
+        SupermemorySearchHit(
+            id="chunk-notes",
+            text="## Notes\n- Met at conference\n## Work history\n- Infosys 2020-2024",
+            metadata={"entity_type": "contact", "entity_id": "c1", "updated_at": 100},
+        ),
+        SupermemorySearchHit(
+            id="stale-memory",
+            text="Preet Morbia works at Appscrip",
+            metadata={"entity_type": "contact", "entity_id": "c1", "updated_at": 1},
+        ),
+    ]
+    collapsed = _collapse_hits_by_entity(hits)
+    assert len(collapsed) == 1
+    text = collapsed[0].text
+    assert "preet@hexwireless.com" in text
+    assert "Met at conference" in text
+    assert "Work history" in text
+    assert "works at Appscrip" not in text
 
 
 def test_collapse_hits_merges_when_no_snapshot() -> None:
