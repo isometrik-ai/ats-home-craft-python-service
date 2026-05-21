@@ -27,6 +27,8 @@ _LOOKUP_SEARCH_LIMIT = 25
 _AGGREGATION_SEARCH_LIMIT = 5
 _MAX_SYNTH_ENTITY_SNIPPETS = 5
 _ENTITY_HEADER_RE = re.compile(r"^#\s*(Contact|Company|Lead):\s*(.+)", re.MULTILINE | re.IGNORECASE)
+# Full CRM markdown snapshots from sync (entity header + structured sections).
+_AUTHORITATIVE_SNAPSHOT_MIN_SCORE = 10_000
 SYNTH_SYSTEM_PROMPT = (
     "You write a single AI-generated overview of a CRM entity. "
     "Your output must read like a professionally written bio or company summary.\n\n"
@@ -192,6 +194,31 @@ def _hit_quality_score(hit: SupermemorySearchHit) -> int:
     return score
 
 
+def _is_authoritative_crm_snapshot(hit: SupermemorySearchHit) -> bool:
+    """True when the hit is a full sync snapshot, not a short extracted memory line."""
+    return _hit_quality_score(hit) >= _AUTHORITATIVE_SNAPSHOT_MIN_SCORE
+
+
+def _metadata_updated_at(hit: SupermemorySearchHit) -> int:
+    """Unix ``updated_at`` from sync metadata (0 when missing)."""
+    meta = hit.metadata or {}
+    raw = meta.get("updated_at")
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return int(raw)
+    return 0
+
+
+def _pick_authoritative_snapshot(hits: list[SupermemorySearchHit]) -> SupermemorySearchHit | None:
+    """Return the newest full CRM snapshot for one entity, if any."""
+    snapshots = [hit for hit in hits if _is_authoritative_crm_snapshot(hit)]
+    if not snapshots:
+        return None
+    return max(
+        snapshots,
+        key=lambda hit: (_metadata_updated_at(hit), _hit_quality_score(hit), len(hit.text)),
+    )
+
+
 def _metadata_filters_for_entity(
     entity_type: str,
     entity_id: str,
@@ -206,7 +233,15 @@ def _metadata_filters_for_entity(
 
 
 def _merge_entity_snippets(hits: list[SupermemorySearchHit]) -> str:
-    """Combine all search fragments for one CRM record (richest snapshot first)."""
+    """Combine search fragments for one CRM record.
+
+    When a full sync snapshot exists, use only the newest snapshot so stale extracted
+    memories (e.g. removed company associations) are not merged back into summaries.
+    """
+    authoritative = _pick_authoritative_snapshot(hits)
+    if authoritative is not None:
+        return authoritative.text.strip()
+
     ordered = sorted(hits, key=_hit_quality_score, reverse=True)
     seen: set[str] = set()
     parts: list[str] = []

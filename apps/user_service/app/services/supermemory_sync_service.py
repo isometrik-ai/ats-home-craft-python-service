@@ -1,8 +1,8 @@
 """Build CRM entity snapshots and upsert them into Supermemory.
 
 Kafka lifecycle events are triggers only: each sync reloads the canonical entity
-from Postgres (contacts, companies, leads with associations) and replaces the
-matching Supermemory document via a stable ``customId``.
+from Postgres (contacts, companies, leads with associations) and fully replaces the
+matching Supermemory document (PATCH by stable ``customId``, POST on first create).
 """
 
 from __future__ import annotations
@@ -862,6 +862,55 @@ class SupermemorySyncService:
                     organization_id=organization_id,
                     lead_id=entity_id,
                 )
+
+        await self._sync_association_targets_from_payload(
+            db_connection,
+            organization_id=organization_id,
+            payload=payload_dict,
+        )
+
+    async def _sync_association_targets_from_payload(
+        self,
+        db_connection: asyncpg.Connection,
+        *,
+        organization_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Re-sync entities named in the event payload (e.g. unlinked companies/contacts).
+
+        Association deltas emit separate lifecycle events, but including affected ids on the
+        primary event lets one consumer pass refresh removed sides even if a follow-up event
+        is delayed or dropped.
+        """
+        seen: set[tuple[EntityType, str]] = set()
+        for company_id in payload.get("affected_company_ids") or []:
+            cid = str(company_id or "").strip()
+            if not cid:
+                continue
+            key = ("company", cid)
+            if key in seen:
+                continue
+            seen.add(key)
+            await self.sync_entity(
+                db_connection,
+                organization_id=organization_id,
+                entity_type="company",
+                entity_id=cid,
+            )
+        for contact_id in payload.get("affected_contact_ids") or []:
+            cid = str(contact_id or "").strip()
+            if not cid:
+                continue
+            key = ("contact", cid)
+            if key in seen:
+                continue
+            seen.add(key)
+            await self.sync_entity(
+                db_connection,
+                organization_id=organization_id,
+                entity_type="contact",
+                entity_id=cid,
+            )
 
     async def _cascade_contact_associations(
         self,

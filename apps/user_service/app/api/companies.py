@@ -620,22 +620,26 @@ async def update_company(
         changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
         request.state.raw_audit_old_data = result.get("old_data")
         request.state.raw_audit_new_data = result.get("new_data")
+        contacts_delta = (result.get("contacts_delta") or {}) if isinstance(result, dict) else {}
+        raw_affected = contacts_delta.get("affected_contact_ids") or []
+        affected_contact_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
+
+        company_payload: dict[str, Any] = {
+            "module": "companies",
+            "action": "update",
+            "changed_fields": changed_fields,
+        }
+        if affected_contact_ids:
+            company_payload["affected_contact_ids"] = affected_contact_ids
+
         update_event = await event_service.create_lifecycle_event(
             event_type=CompanyEventType.UPDATED.value,
             aggregate_id=company_id,
             organization_id=user_context.organization_id,
             actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-            payload={
-                "module": "companies",
-                "action": "update",
-                "changed_fields": changed_fields,
-            },
+            payload=company_payload,
             topics=CLIENT_KAFKA_TOPICS,
         )
-
-        contacts_delta = (result.get("contacts_delta") or {}) if isinstance(result, dict) else {}
-        raw_affected = contacts_delta.get("affected_contact_ids") or []
-        affected_contact_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
         created_cid = contacts_delta.get("created_contact_id")
         created_cid_s = str(created_cid) if created_cid else None
         if affected_contact_ids:

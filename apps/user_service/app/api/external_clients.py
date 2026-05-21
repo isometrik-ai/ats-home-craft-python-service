@@ -749,24 +749,28 @@ async def external_update_company(
         event_service = EventService(db_connection=db_connection)
         update_result = await service.update_company(company_id=client_id, body=body)
         changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
-        update_event = await event_service.create_lifecycle_event(
-            event_type=CompanyEventType.UPDATED.value,
-            aggregate_id=client_id,
-            organization_id=user_context.organization_id,
-            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-            payload={
-                "module": "companies",
-                "action": "update",
-                "changed_fields": changed_fields,
-            },
-            topics=CLIENT_KAFKA_TOPICS,
-        )
-
         contacts_delta = (
             (update_result.get("contacts_delta") or {}) if isinstance(update_result, dict) else {}
         )
         raw_affected = contacts_delta.get("affected_contact_ids") or []
         affected_contact_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
+
+        company_payload: dict[str, Any] = {
+            "module": "companies",
+            "action": "update",
+            "changed_fields": changed_fields,
+        }
+        if affected_contact_ids:
+            company_payload["affected_contact_ids"] = affected_contact_ids
+
+        update_event = await event_service.create_lifecycle_event(
+            event_type=CompanyEventType.UPDATED.value,
+            aggregate_id=client_id,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload=company_payload,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
         created_cid = contacts_delta.get("created_contact_id")
         created_cid_s = str(created_cid) if created_cid else None
         if affected_contact_ids:
@@ -883,20 +887,28 @@ async def external_update_contact(
         event_service = EventService(db_connection=db_connection)
         update_result = await service.update_contact(contact_id=client_id, body=body)
         changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
-        update_event = await event_service.create_lifecycle_event(
-            event_type=ContactEventType.UPDATED.value,
-            aggregate_id=client_id,
-            organization_id=user_context.organization_id,
-            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
-            payload={"module": "contacts", "action": "update", "changed_fields": changed_fields},
-            topics=CLIENT_KAFKA_TOPICS,
-        )
-
         companies_delta = (
             (update_result.get("companies_delta") or {}) if isinstance(update_result, dict) else {}
         )
         raw_affected = companies_delta.get("affected_company_ids") or []
         affected_company_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
+
+        contact_payload: dict[str, Any] = {
+            "module": "contacts",
+            "action": "update",
+            "changed_fields": changed_fields,
+        }
+        if affected_company_ids:
+            contact_payload["affected_company_ids"] = affected_company_ids
+
+        update_event = await event_service.create_lifecycle_event(
+            event_type=ContactEventType.UPDATED.value,
+            aggregate_id=client_id,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload=contact_payload,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
         created_cid = companies_delta.get("created_company_id")
         created_cid_s = str(created_cid) if created_cid else None
         if affected_company_ids:
