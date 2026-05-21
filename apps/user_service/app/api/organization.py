@@ -423,6 +423,8 @@ async def update_organization(
         "organization_name": result["organization_name"],
         "slug": result["slug"],
     }
+    if "organization_memory" in result:
+        response_data["organization_memory"] = result["organization_memory"]
 
     return success_response(
         request=request,

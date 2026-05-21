@@ -85,8 +85,8 @@ class OrganizationInfo(BaseModel):
     need_migration_assistance: bool | None = Field(
         None, description="Organization's need migration assistance"
     )
-    organization_memory: bool | None = Field(
-        None,
+    organization_memory: bool = Field(
+        default=True,
         description="When true, sync CRM entities to Supermemory for AI agent context",
     )
     compliance_security: ComplianceSecurity | None = Field(
@@ -419,7 +419,10 @@ class OrganizationUpdate(BaseModel):
     team_setup: TeamSetup | None = Field(None, description="Organization's team setup")
     organization_memory: bool | None = Field(
         None,
-        description="When true, sync CRM entities to Supermemory for AI agent context",
+        description=(
+            "Toggle Supermemory CRM sync. Send true or false to change; omit to leave "
+            "unchanged. When not stored in settings, memory is enabled by default."
+        ),
     )
 
     timezone: str | None = Field(

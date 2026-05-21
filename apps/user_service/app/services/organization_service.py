@@ -35,6 +35,9 @@ from apps.user_service.app.schemas.organizations import (
     OrganizationInfo,
     OrganizationListResponse,
 )
+from apps.user_service.app.services.organization_memory_service import (
+    effective_organization_memory_enabled,
+)
 from apps.user_service.app.services.session_management_service import (
     SessionManagementService,
 )
@@ -355,12 +358,17 @@ class OrganizationService:
         # Format old data for audit logging before returning
         old_data = self._format_organization_for_audit(existing)
 
-        return {
+        result: dict[str, Any] = {
             "organization_id": organization_id,
             "organization_name": updated.get("name", existing.get("name")),
             "slug": updated.get("slug", existing.get("slug")),
             "old_data": old_data,
         }
+        if "organization_memory" in update_payload:
+            updated_settings = parse_json_field(updated.get("settings"))
+            result["organization_memory"] = effective_organization_memory_enabled(updated_settings)
+
+        return result
 
     async def delete_organization(self, organization_id: str) -> None:
         """Soft delete organization."""
@@ -544,8 +552,9 @@ class OrganizationService:
 
         # Build settings object if any settings fields are being updated
         if nested_settings_updates or simple_settings_updates or practice_areas_updates:
-            # Start with existing settings to preserve fields not being updated
-            merged_settings = existing_settings.copy()
+            # Start with existing settings (or empty dict when settings/key never set)
+            base_settings = existing_settings if isinstance(existing_settings, dict) else {}
+            merged_settings = base_settings.copy()
 
             # Apply partial updates to nested JSON objects (deep merge subfields)
             self._merge_nested_settings(merged_settings, nested_settings_updates)
@@ -608,7 +617,7 @@ class OrganizationService:
             "preferred_integration": settings.get("preferred_integration"),
             "need_help_importing_data": settings.get("need_help_importing_data"),
             "need_migration_assistance": settings.get("need_migration_assistance"),
-            "organization_memory": settings.get("organization_memory"),
+            "organization_memory": effective_organization_memory_enabled(settings),
             "compliance_security": settings.get("compliance_security"),
             "enterprise_features": settings.get("enterprise_features"),
             "team_setup": settings.get("team_setup"),
@@ -657,9 +666,7 @@ class OrganizationService:
             "need_migration_assistance": (
                 existing_settings.get("need_migration_assistance") if is_settings_dict else None
             ),
-            "organization_memory": (
-                existing_settings.get("organization_memory") if is_settings_dict else None
-            ),
+            "organization_memory": effective_organization_memory_enabled(existing_settings),
             "compliance_security": (
                 existing_settings.get("compliance_security") if is_settings_dict else None
             ),
@@ -762,24 +769,28 @@ class OrganizationService:
         provided_settings = getattr(body.company_data, "settings", None)
         if provided_settings:
             # Convert Pydantic models to dicts if settings are provided
-            return serialize_pydantic_models(provided_settings)
+            settings = serialize_pydantic_models(provided_settings)
+        else:
+            settings = {
+                "practice_areas": {
+                    "primary": body.company_data.primary_practice_areas,
+                    "secondary": body.company_data.secondary_practice_areas,
+                    "specializations": body.company_data.specializations,
+                },
+                "preferred_integration": body.company_data.preferred_integration,
+                "need_help_importing_data": body.company_data.need_help_importing_data,
+                "need_migration_assistance": body.company_data.need_migration_assistance,
+                "compliance_security": body.company_data.compliance_security,
+                "enterprise_features": body.company_data.enterprise_features,
+                "team_setup": body.company_data.team_setup,
+                "address": body.company_data.address,
+            }
+            settings = serialize_pydantic_models(settings)
 
-        settings = {
-            "practice_areas": {
-                "primary": body.company_data.primary_practice_areas,
-                "secondary": body.company_data.secondary_practice_areas,
-                "specializations": body.company_data.specializations,
-            },
-            "preferred_integration": body.company_data.preferred_integration,
-            "need_help_importing_data": body.company_data.need_help_importing_data,
-            "need_migration_assistance": body.company_data.need_migration_assistance,
-            "compliance_security": body.company_data.compliance_security,
-            "enterprise_features": body.company_data.enterprise_features,
-            "team_setup": body.company_data.team_setup,
-            "address": body.company_data.address,
-        }
-        # Convert any Pydantic models to dicts for JSON serialization
-        return serialize_pydantic_models(settings)
+        if not isinstance(settings, dict):
+            settings = {}
+        settings["organization_memory"] = True
+        return settings
 
     async def _create_isometrik_application_if_enabled(
         self, body: NewOrganizationBody

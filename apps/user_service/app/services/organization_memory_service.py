@@ -33,6 +33,21 @@ _CRM_MEMORY_VIEW_PERMISSIONS: tuple[str, ...] = (
 _flag_cache: dict[str, tuple[bool, float]] = {}
 
 
+def effective_organization_memory_enabled(settings: Any = None) -> bool:
+    """Return whether organization memory is on for the given settings payload.
+
+    Missing ``organization_memory`` (or null settings) defaults to enabled so legacy
+    orgs and new orgs behave consistently until an admin explicitly disables it.
+    """
+    parsed = settings if isinstance(settings, dict) else parse_json_field(settings)
+    if not isinstance(parsed, dict):
+        return True
+    value = parsed.get(ORGANIZATION_MEMORY_SETTINGS_KEY)
+    if value is None:
+        return True
+    return value is True
+
+
 def invalidate_organization_memory_cache(organization_id: str) -> None:
     """Drop the cached flag for an organization.
 
@@ -67,10 +82,7 @@ def _parse_organization_memory_flag(org_row: dict[str, Any] | None) -> bool:
     """Parse ``settings.organization_memory`` from a repository row."""
     if not org_row:
         return False
-    settings = parse_json_field(org_row.get("settings"))
-    if not isinstance(settings, dict):
-        return False
-    return settings.get(ORGANIZATION_MEMORY_SETTINGS_KEY) is True
+    return effective_organization_memory_enabled(org_row.get("settings"))
 
 
 async def require_org_memory_query_access(
