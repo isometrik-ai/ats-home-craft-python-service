@@ -89,6 +89,14 @@ class CloudflareR2Settings(BaseSettings):
     media_url: str = config("R2_MEDIA_URL")
 
 
+class AgentMailSettings(BaseSettings):
+    """AgentMail API configuration for inbound attachment downloads."""
+
+    api_key: str = config("AGENTMAIL_API_KEY", default="")
+    base_url: str = config("AGENTMAIL_BASE_URL", default="https://api.agentmail.to")
+    request_timeout_seconds: float = config("AGENTMAIL_REQUEST_TIMEOUT_SECONDS", default=30.0)
+
+
 class SupermemorySettings(BaseSettings):
     """Supermemory API configuration for CRM entity memory sync."""
 
@@ -150,6 +158,7 @@ class SharedAppSettings(BaseSettings):
     isometrik: IsometrikSettings = IsometrikSettings()
     cloudflare_r2: CloudflareR2Settings = CloudflareR2Settings()
     typesense: TypesenseSettings = TypesenseSettings()
+    agentmail: AgentMailSettings = AgentMailSettings()
     supermemory: SupermemorySettings = SupermemorySettings()
     environment: EnvironmentOption = config("ENVIRONMENT", default=EnvironmentOption.LOCAL)
     log_level: LogLevelOption = config("LOG_LEVEL", default=LogLevelOption.INFO.value)
