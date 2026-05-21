@@ -145,7 +145,6 @@ def _build_chat_completion_payload(
     messages: list[dict[str, str]],
     max_completion_tokens: int,
     response_format: dict[str, str] | None,
-    reasoning_effort: str | None,
 ) -> dict[str, Any]:
     """Build JSON body for ``POST /chat/completions``."""
     payload: dict[str, Any] = {
@@ -155,8 +154,6 @@ def _build_chat_completion_payload(
     }
     if response_format is not None:
         payload["response_format"] = response_format
-    if reasoning_effort is not None:
-        payload["reasoning_effort"] = reasoning_effort
     return payload
 
 
@@ -171,6 +168,13 @@ async def _post_chat_completion(
             f"retryable status {response.status_code}",
             request=response.request,
             response=response,
+        )
+    if response.status_code >= 400:
+        logger.error(
+            "openai_chat_request_error status=%s model=%s body=%s",
+            response.status_code,
+            payload.get("model"),
+            response.text[:2000],
         )
     response.raise_for_status()
     data = response.json()
@@ -213,7 +217,6 @@ async def create_chat_completion(
     messages: list[dict[str, str]],
     max_completion_tokens: int,
     response_format: dict[str, str] | None = None,
-    reasoning_effort: str | None = None,
     settings: SharedAppSettings | None = None,
 ) -> str:
     """POST ``/chat/completions`` and return assistant message text."""
@@ -225,7 +228,6 @@ async def create_chat_completion(
         messages=messages,
         max_completion_tokens=max_completion_tokens,
         response_format=response_format,
-        reasoning_effort=reasoning_effort,
     )
     client = await get_openai_http_client(settings)
     return await _post_chat_completion_with_retries(client, payload)
