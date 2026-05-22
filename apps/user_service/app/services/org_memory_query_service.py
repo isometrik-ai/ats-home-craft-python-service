@@ -18,8 +18,6 @@ from libs.shared_utils.supermemory_service import (
 logger = get_logger("org_memory_query_service")
 
 _INTENT_MAX_TOKENS = 2048
-# gpt-5-nano bills reasoning + visible output against max_completion_tokens;
-# 900 was too low when CRM notes are large (reasoning consumed the whole budget).
 _SYNTH_MAX_TOKENS = 4096
 _SYNTH_CONTEXT_CHAR_LIMIT = 14_000
 _LOOKUP_SEARCH_LIMIT = 25
@@ -31,267 +29,92 @@ _ENTITY_HEADER_PREFIXES: tuple[tuple[str, str], ...] = (
     ("# Lead:", "lead"),
 )
 _STRUCTURED_SECTION_MARKERS = ("## Profile", "## Companies")
-# Tail appended to every synthesize_instruction to enforce recency and omission rules.
-_SYNTH_INSTRUCTION_REQUIRED_LEAD = (
-    "Open with every CRM note verbatim, then lead amounts, pipeline, and company deal context"
-)
-_SYNTH_INSTRUCTION_REQUIRED_TAIL = (
-    "Prioritize notes, then lead/deal amounts and company associations, then emails, "
-    "over profile, skills, education, and addresses. "
-    "Use only the latest data for each fact. Omit any field that has no value."
-)
-_SYNTH_USER_ANSWER_ORDER = (
-    "Answer order: all notes verbatim first; then every deal with stage, amount, and "
-    "company associations on the deal; then email signals; then brief identity and contact "
-    "channels; then profile/skills/education last."
+
+# ---------------------------------------------------------------------------
+# Hardcoded search query templates
+# ---------------------------------------------------------------------------
+# Three queries per lookup give broad semantic coverage:
+#   1. Identity recall — who the entity is
+#   2. Notes / email signals — what has been said and committed
+#   3. Leads / company associations — pipeline and org context
+# {name} is substituted at runtime with the entity display name or user message.
+_HARDCODED_QUERY_TEMPLATES: tuple[str, str, str] = (
+    "{name}",
+    "{name} notes emails follow-up objections interests business",
+    "{name} pipeline stage company association lead",
 )
 
-INTENT_SYSTEM_PROMPT = (
-    "You are a CRM sales intelligence query planner. "
-    "Parse the user query and return ONLY valid JSON. No markdown. No explanation.\n\n"
-    "JSON shape:\n"
-    "{\n"
-    '  "is_aggregation": true | false,\n'
-    '  "search_queries": ["<query1>", "<query2>", "<query3>"],\n'
-    '  "synthesize_instruction": "<instruction>"\n'
-    "}\n\n"
-    "SEARCH QUERY RULES:\n"
-    "- Always produce exactly 3 search queries to maximize recall across all data types.\n"
-    "- Query 1: entity name verbatim (e.g. 'Rohit Marthak').\n"
-    "- Query 2: entity name + notes and email context "
-    "(e.g. 'Rohit Marthak notes emails follow-up objections').\n"
-    "- Query 3: entity name + deals and relationships "
-    "(e.g. 'Rohit Marthak pipeline stage company association').\n"
-    "- For company queries, also search for associated contacts and leads "
-    "(e.g. 'Appscrip contacts leads pipeline deals').\n"
-    "- For lead queries, search for stage, amount, and all involved parties "
-    "(e.g. 'deal opportunity stage contacts companies involved notes').\n\n"
-    "is_aggregation RULES:\n"
-    "- true only for counts or full-list requests "
-    "('how many', 'list all', 'show all', 'which contacts', 'all leads in stage').\n"
-    "- false for all entity detail queries.\n\n"
-    "synthesize_instruction RULES:\n"
-    "- Exactly one sentence describing what to produce.\n"
-    "- Must always end with this exact phrase: "
-    "'Prioritize notes, then lead/deal amounts and company associations, then emails, "
-    "over profile, skills, education, and addresses. "
-    "Use only the latest data for each fact. Omit any field that has no value.'\n\n"
-    "synthesize_instruction EXAMPLES:\n"
-    "- 'Tell me everything about Rohit Marthak' → "
-    "'Write a sales intelligence summary covering identity, all associated companies, "
-    "all deals with stage and amount, email context, and all notes in full. "
-    "Prioritize notes, then lead/deal amounts and company associations, then emails, "
-    "over profile, skills, education, and addresses. "
-    "Use only the latest data for each fact. Omit any field that has no value.'\n\n"
-    "- 'Who is Rohit Marthak' → "
-    "'Write a professional profile with role, company, contact details, "
-    "current deal involvement, and notes. "
-    "Prioritize notes, then lead/deal amounts and company associations, then emails, "
-    "over profile, skills, education, and addresses. "
-    "Use only the latest data for each fact. Omit any field that has no value.'\n\n"
-    "- 'Tell me about Appscrip' → "
-    "'Write a company intelligence summary covering firmographics, all linked contacts, "
-    "all associated deals, email context, and all notes in full. "
-    "Prioritize notes, then lead/deal amounts and company associations, then emails, "
-    "over profile, skills, education, and addresses. "
-    "Use only the latest data for each fact. Omit any field that has no value.'\n\n"
-    "- 'Tell me about the Acme renewal deal' → "
-    "'Write a deal summary covering stage, value, all contacts and companies involved, "
-    "deal notes in full, and email context. "
-    "Prioritize notes, then lead/deal amounts and company associations, then emails, "
-    "over profile, skills, education, and addresses. "
-    "Use only the latest data for each fact. Omit any field that has no value.'\n\n"
-    "- 'List all contacts at Appscrip' → "
-    "'Write one short paragraph per contact with name, role, and deal involvement. "
-    "Prioritize notes, then lead/deal amounts and company associations, then emails, "
-    "over profile, skills, education, and addresses. "
-    "Use only the latest data for each fact. Omit any field that has no value.'\n\n"
-    "- 'How many leads are in Qualified stage' → "
-    "'Count distinct leads in Qualified stage and state the number in one sentence. "
-    "Prioritize notes, then lead/deal amounts and company associations, then emails, "
-    "over profile, skills, education, and addresses. "
-    "Use only the latest data for each fact. Omit any field that has no value.'"
-)
-
+# ---------------------------------------------------------------------------
+# Synthesis prompt
+# ---------------------------------------------------------------------------
 SYNTH_SYSTEM_PROMPT = (
-    "You are a sales intelligence assistant writing authoritative entity briefings "
-    "for a senior sales team. "
-    "Your output reads like a seasoned account executive briefing their manager — "
-    "commercially sharp, fully associated, and grounded entirely in the provided data.\n\n"
-    # ── Data priority ──────────────────────────────────────────────────────────
-    "DATA PRIORITY — when the same field appears more than once with different values, "
-    "always use the most recent entry. Never mention that older data was discarded. "
-    "Apply this order when writing the answer (first sentences = highest priority):\n"
-    "1. Notes (contact, company, lead) — always open with these when present. "
-    "Include every note verbatim or near-verbatim. Never compress, summarize, or omit them.\n"
-    "2. Lead and deal sales data — right after notes when present: deal name, stage, "
-    "amount with currency, close date, priority, deal type, lead source; "
-    "every company on the deal (name, industry, label); linked leads and pipeline for contacts.\n"
-    "3. Company associations — all companies the person or account is linked to, "
-    "primary contact status, and firmographics that affect the sale.\n"
-    "4. Email content and thread context — commitments, objections, decisions, follow-ups, "
-    "buying signals.\n"
-    "5. Identity and contact channels — name, title, location, status, email, phone, LinkedIn "
-    "(skip example.com URLs).\n"
-    "6. Profile and enrichment last — education, work history, skills, custom fields, "
-    "addresses.\n\n"
-    # ── Structure ──────────────────────────────────────────────────────────────
-    "OUTPUT ORDER — one continuous line, sections in this sequence:\n\n"
-    "FOR A CONTACT:\n"
-    "First — all notes verbatim.\n"
-    "Second — linked leads and every deal (name, stage, amount, close date, label, priority) "
-    "and all associated companies with values only.\n"
-    "Third — email business signals.\n"
-    "Fourth — brief identity: name, title, location, status, email, phone, LinkedIn.\n"
-    "Last — education, skills, work history, custom fields only when they add sales context.\n\n"
-    "FOR A COMPANY:\n"
-    "First — all notes verbatim.\n"
-    "Second — every deal (stage, amount, close date, priority) and linked company context.\n"
-    "Third — key people (primary contact first, then all others), then email signals.\n"
-    "Fourth — firmographics (name, industry, location, status, website).\n"
-    "Last — tech stack, billing, and other intelligence fields.\n\n"
-    "FOR A LEAD:\n"
-    "First — all lead notes verbatim.\n"
-    "Second — deal snapshot (stage, amount with currency, close date, priority, source, deal type) "
-    "and every company on the deal with name, industry, and label.\n"
-    "Third — contacts on the deal with roles and labels, then email signals.\n"
-    "Last — any extra profile context only if relevant to closing the deal.\n\n"
-    # ── Examples ───────────────────────────────────────────────────────────────
-    "EXAMPLE INPUT — repeated fragments about Rohit Marthak with a duplicate entry "
-    "and a timestamp:\n"
-    "Contact: Rohit Marthak. Title: Python AI Engineer. Companies: Appscrip, Hex Wireless. "
-    "Email: rohitmarthak@appscrip.co. Phone: +919823929922. "
-    "LinkedIn: https://in.linkedin.com/in/rohitmarthak. Status: active. "
-    "Location: Bengaluru, Karnataka, India. "
-    "Deals: Appscrip Platform Renewal — stage Proposal — amount INR 450000 — "
-    "close 2026-07-31 — label Decision Maker — priority high. "
-    "Hex Q3 Retainer — stage Qualified — label Technical Lead — priority medium. "
-    "Notes: Met at Reva College Bengaluru on initial intake. "
-    "Follow up scheduled for next Friday. "
-    "Interested in enterprise tier but wants custom SLA clause reviewed before signing. "
-    "Insurance: Policy Bazaar. Preferred language: English. "
-    "updated_at: 2026-05-20T07:44:57. "
-    "Contact: Rohit Marthak. Title: Python AI Engineer. Company: Appscrip. "
-    "Email: rohitmarthak@appscrip.co. Tags: AI engineer.\n\n"
-    "EXAMPLE OUTPUT:\n"
-    "He was met at Reva College, Bengaluru, on initial intake, "
-    "with a follow-up scheduled for the following Friday. "
-    "He has expressed interest in the enterprise tier but wants a custom SLA clause "
-    "reviewed before signing. "
-    "On the Appscrip Platform Renewal in Proposal he is Decision Maker; "
-    "the deal is INR 450,000 targeting 31 July 2026, high priority, with Appscrip as the account. "
-    "On the Hex Q3 Retainer in Qualified he is Technical Lead, medium priority, with Hex Wireless. "
-    "Rohit Marthak is a Python AI Engineer in Bengaluru, Karnataka, India, "
-    "reachable at rohitmarthak@appscrip.co and +919823929922. "
-    "He prefers communication in English and his insurance is through Policy Bazaar.\n\n"
-    "END OF CONTACT EXAMPLE.\n\n"
-    "EXAMPLE INPUT — Appscrip company fragments:\n"
-    "Company: Appscrip. Industry: Technology. Location: Bengaluru, Karnataka, India. "
-    "Status: active. Website: appscrip.co. "
-    "Primary contact: Rohit Marthak — Python AI Engineer — rohitmarthak@appscrip.co. "
-    "Other contacts: Avinash Singh (Python AI Engineer), Preet Morbia (Full Stack Developer). "
-    "Deals: Appscrip Platform Renewal — stage Proposal — amount INR 450000 — "
-    "close 2026-07-31 — label Client — priority high. "
-    "Appscrip Onboarding — stage Consultation — priority medium. "
-    "Notes: Key decision maker is the CTO. "
-    "Procurement requires a three-quote process. Legal review of MSA is pending. "
-    "updated_at: 2026-05-20T09:00:00.\n\n"
-    "EXAMPLE OUTPUT:\n"
-    "The key decision maker at Appscrip is the CTO. "
-    "Procurement requires a three-quote process and legal review of the MSA is pending. "
-    "The Appscrip Platform Renewal is in Proposal, INR 450,000, closing 31 July 2026, "
-    "high priority. "
-    "The Appscrip Onboarding is in Consultation, medium priority. "
-    "Appscrip is an active technology company in Bengaluru, Karnataka, India (appscrip.co). "
-    "Primary contact Rohit Marthak, Python AI Engineer, rohitmarthak@appscrip.co; "
-    "also Avinash Singh and Preet Morbia on the team.\n\n"
-    "END OF COMPANY EXAMPLE.\n\n"
-    "EXAMPLE INPUT — lead fragments:\n"
-    "Lead: Appscrip Platform Renewal. Stage: Proposal. Priority: high. "
-    "Deal type: Existing Business. Amount: INR 450000. Close date: 2026-07-31. "
-    "Lead source: Referral. "
-    "Contacts: Rohit Marthak — Python AI Engineer — rohitmarthak@appscrip.co "
-    "— label Decision Maker. "
-    "Avinash Singh — Python AI Engineer — avinashsingh@appscrip.co — label Technical Lead. "
-    "Companies: Appscrip — Technology — label Client. "
-    "Notes: Proposal sent on 15 May. Client requested a 10 percent discount on the setup fee. "
-    "Follow up on SLA terms before end of month. "
-    "Email context: Rohit confirmed in email dated 18 May that legal will revert by 25 May.\n\n"
-    "EXAMPLE OUTPUT:\n"
-    "The proposal was sent on 15 May. The client requested a 10 percent discount "
-    "on the setup fee and SLA terms need follow-up before end of month. "
-    "The Appscrip Platform Renewal is in Proposal, INR 450,000, close 31 July 2026, "
-    "referral-sourced, high priority; Appscrip (Technology) is Client on the deal. "
-    "Rohit Marthak (Decision Maker, rohitmarthak@appscrip.co) and Avinash Singh "
-    "(Technical Lead, avinashsingh@appscrip.co) are engaged. "
-    "Rohit confirmed via email on 18 May that legal will revert by 25 May.\n\n"
-    "END OF LEAD EXAMPLE.\n\n"
-    # ── Writing rules ──────────────────────────────────────────────────────────
-    "WRITING RULES:\n"
-    "- Write one continuous block of flowing prose. "
-    "Do not use newline or line-break characters anywhere in the response. "
-    "Separate logical sections with periods and spaces only. "
-    "No bullet points, dashes, numbered lists, headers, or markdown of any kind.\n"
-    "- Open with notes, then lead amounts and company/deal context when present; "
-    "do not bury notes, deal value, or company associations after profile, skills, or education.\n"
-    "- First mention of the person or company name may appear in the opening note sentence; "
-    "after that use He, She, They, or The company.\n"
-    "- Notes must appear verbatim or near-verbatim. Never compress or paraphrase them.\n"
-    "- Spend more words on notes, deal amounts, and company associations than on "
-    "skills, education, or address lines.\n"
-    "- Always state deal amount with currency when the CRM notes include it.\n"
-    "- When listing multiple deals or companies, write all of them. "
-    "Never write 'and others' or truncate.\n"
-    "- Write amounts with currency and formatting: 'INR 450,000' not '450000'.\n"
-    "- Write dates in natural form: '31 July 2026' not '2026-07-31'.\n"
-    "- Write deal labels naturally in context: "
-    "'he is the Decision Maker on this deal' not 'label: Decision Maker'.\n"
-    "- Write custom fields as prose: "
-    "'his insurance is through ICICI' not 'Insurance Company: ICICI'.\n"
-    "- For email signals: state the business fact, not the email itself. "
-    "'He confirmed legal will revert by 25 May' not "
-    "'An email from Rohit says legal will revert by 25 May'.\n\n"
-    # ── Content rules ──────────────────────────────────────────────────────────
-    "CONTENT RULES:\n"
-    "- Use only facts explicitly present in the provided notes.\n"
-    "- When the same field appears with different values, "
-    "use the most recent one silently.\n"
-    "- A field with no value is omitted entirely — no mention, no placeholder.\n"
-    "- For deal fields specifically: if amount is absent, omit it. "
-    "If close date is absent, omit it. If a label is absent, omit it. "
-    "If priority is absent, omit it. State only what is present.\n"
-    "- Skip any URL or domain containing 'example.com'. Do not mention the skip.\n"
-    "- Skip raw timestamps, ISO datetime strings, updated_at values, database IDs. "
-    "Do not mention skipping them.\n"
-    "- Each fact appears exactly once across the entire output.\n"
-    "- Merge all fragments for the same entity silently into one output. "
-    "Never write the same entity twice.\n\n"
-    # ── Banned ─────────────────────────────────────────────────────────────────
-    "BANNED — never write any of the following under any circumstance:\n"
-    "- Newline characters, line breaks, or blank lines between sentences.\n"
-    "- Bullet points, dashes as list markers, numbered lists, headers, or any markdown.\n"
-    "- 'not provided', 'not listed', 'not specified', 'not available', "
-    "'not shown', 'not included', 'not set', 'not assigned', 'not yet set', "
-    "'no amount', 'no close date', 'no label', 'no value', 'no currency', "
-    "'with no amount', 'with no date', 'amount not set', 'unset', 'none set'.\n"
-    "- 'based on', 'the notes show', 'the CRM', 'the record', 'the data', "
-    "'according to', 'as per', 'the data indicates', 'pulled from'.\n"
-    "- Raw timestamps, ISO datetime strings, 'updated_at', 'last updated', "
-    "'updated in the database'.\n"
-    "- 'here is', 'here are', 'if you would like', 'I can', 'let me know', "
-    "'feel free', 'would you like', 'I have', 'please note'.\n"
-    "- Any sentence explaining what was omitted, skipped, or ignored.\n"
-    "- Any closing sentence offering further help or asking a question.\n"
-    "- Starting the response with 'I', 'Here', 'Based on', or 'According to'.\n"
-    "- Parenthetical gaps of any kind: '(not provided)', '(omitted)', "
-    "'(which is omitted here due to the domain rule)', '(see above)'.\n"
-    "- The phrase 'domain rule' or any reference to internal processing logic."
+    "You are a sales intelligence assistant. Write a markdown briefing "
+    "for a sales professional using only the provided CRM data. "
+    "Each section is a short flowing paragraph, not a list.\n\n"
+    "SECTIONS — output exactly these headers in order. "
+    "Omit a section only if it has zero data.\n\n"
+    "## Overview\n"
+    "Name, title, company or companies, location, status, "
+    "email, phone, LinkedIn in natural prose.\n\n"
+    "## Key Insights\n"
+    "Weave all notes verbatim and email signals together with sharp analysis: "
+    "what was discussed, what they want, what was committed, "
+    "what the opportunity is, what the blocker is, and what needs to happen next.\n\n"
+    "## Leads\n"
+    "Every lead: name, stage, amount, close date, role, priority in natural prose. "
+    "Omit section if no leads.\n\n"
+    "## Companies\n"
+    "Every linked company: name, industry, role in natural prose. "
+    "Omit section if no companies.\n\n"
+    "EXAMPLE INPUT:\n"
+    "Contact: Rohit Marthak. Title: Python AI Engineer. "
+    "Companies: Appscrip, Hex Wireless. Email: rohitmarthak@appscrip.co. "
+    "Phone: +919823929922. LinkedIn: https://in.linkedin.com/in/rohitmarthak. "
+    "Status: active. Location: Bengaluru, India. "
+    "Leads: Appscrip Platform Renewal — Proposal — INR 450000 — close 2026-07-31 "
+    "— Decision Maker — high. Hex Q3 Retainer — Qualified — Technical Lead — medium. "
+    "Notes: Met at Reva College on intake. Follow up next Friday. "
+    "Wants enterprise tier but needs SLA clause reviewed before signing. "
+    "Email: Legal will revert by 25 May.\n\n"
+    "EXAMPLE OUTPUT:\n\n"
+    "## Overview\n"
+    "Rohit Marthak is a Python AI Engineer working across Appscrip and Hex Wireless, "
+    "based in Bengaluru, India. He can be reached at rohitmarthak@appscrip.co "
+    "and +919823929922, with his LinkedIn at https://in.linkedin.com/in/rohitmarthak.\n\n"
+    "## Key Insights\n"
+    "Rohit was met at Reva College on initial intake with a follow-up scheduled for the "
+    "following Friday, and has since expressed strong interest in the enterprise tier. "
+    "The only blocker is a custom SLA clause he wants reviewed before signing — "
+    "legal has confirmed they will revert by 25 May, making that the critical follow-up date. "
+    "He holds Decision Maker status on the Appscrip Platform Renewal at INR 450,000 "
+    "closing 31 July and is simultaneously Technical Lead on the Hex Q3 Retainer, "
+    "making him a high-value contact across both accounts.\n\n"
+    "## Leads\n"
+    "Rohit is the Decision Maker on the Appscrip Platform Renewal, currently in Proposal "
+    "at INR 450,000, targeting a close by 31 July 2026 and flagged high priority. "
+    "He is also engaged as Technical Lead on the Hex Q3 Retainer, "
+    "which is in Qualified at medium priority.\n\n"
+    "## Companies\n"
+    "Rohit is linked to Appscrip, a technology company where he is a primary contact, "
+    "and to Hex Wireless where he is engaged in a technical capacity.\n\n"
+    "END OF EXAMPLE.\n\n"
+    "RULES:\n"
+    "- Each section is one short paragraph. No bullets. No sub-headings.\n"
+    "- Key Insights must open with the notes verbatim, then blend in "
+    "email signals, blockers, and the next action with a date.\n"
+    "- Amounts with currency: 'INR 450,000'. Dates natural: '31 July 2026'.\n"
+    "- Latest value wins when a field repeats. Each fact appears once only.\n"
+    "- Skip example.com URLs, raw timestamps, ISO strings, database IDs.\n"
+    "- Omit fields with no value. Never say a field is missing.\n"
+    "- Never use: 'not provided', 'based on', 'the CRM', 'updated_at', "
+    "'here is', 'I can', 'please note', or any closing offer.\n"
+    "- Never start with 'I', 'Here', or 'Based on'."
 )
 
 
-def _flatten_answer_for_response(text: str) -> str:
-    """Return the API answer as one line with no newline characters."""
-    return " ".join((text or "").replace("\r", " ").split()).strip()
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _strip_code_fences(raw: str) -> str:
@@ -323,18 +146,18 @@ def _parse_intent(plan_text: str, *, fallback_queries: list[str]) -> OrgMemoryIn
     return plan
 
 
-def _pin_synth_instruction(raw: str) -> str:
-    """Ensure synthesize instructions enforce notes/emails-first sales intelligence."""
-    instruction = raw.strip().rstrip(".")
-    if not instruction.startswith(_SYNTH_INSTRUCTION_REQUIRED_LEAD):
-        instruction = f"{_SYNTH_INSTRUCTION_REQUIRED_LEAD}. {instruction}"
-    if not instruction.endswith(_SYNTH_INSTRUCTION_REQUIRED_TAIL):
-        instruction = f"{instruction}. {_SYNTH_INSTRUCTION_REQUIRED_TAIL}"
-    return instruction
+def _build_hardcoded_queries(entity_name: str) -> list[str]:
+    """Return three Supermemory search queries for ``entity_name``.
+
+    Replaces the LLM intent planner for entity-scoped lookups. The three templates
+    cover: identity recall, notes/email signals, and pipeline/company context.
+    """
+    name = entity_name.strip()
+    return [template.format(name=name) for template in _HARDCODED_QUERY_TEMPLATES]
 
 
 def _snapshot_section_sort_key(heading: str) -> int:
-    """Order CRM sections for synthesis: notes → deals/companies → emails → rest."""
+    """Order CRM sections for synthesis: notes -> leads/companies -> emails -> rest."""
     heading_lower = heading.casefold()
     if heading_lower.startswith("notes"):
         return 0
@@ -397,7 +220,7 @@ def _drop_deleted_and_empty(hits: list[SupermemorySearchHit]) -> list[Supermemor
 
 
 def _entity_key_from_header(text: str) -> str | None:
-    """Parse ``# Contact:`` / ``# Company:`` / ``# Lead:`` header when metadata is missing."""
+    """Parse # Contact: / # Company: / # Lead: header when metadata is missing."""
     trimmed = text.lstrip()
     for prefix, kind in _ENTITY_HEADER_PREFIXES:
         if trimmed.startswith(prefix):
@@ -445,7 +268,7 @@ def _is_authoritative_crm_snapshot(hit: SupermemorySearchHit) -> bool:
 
 
 def _metadata_updated_at(hit: SupermemorySearchHit) -> int:
-    """Unix ``updated_at`` from sync metadata (0 when missing)."""
+    """Unix updated_at from sync metadata (0 when missing)."""
     meta = hit.metadata or {}
     raw = meta.get("updated_at")
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
@@ -458,7 +281,7 @@ def _sync_generation_hits(hits: list[SupermemorySearchHit]) -> list[SupermemoryS
 
     Hybrid search often returns multiple chunks of the same document. Keeping only the
     highest-scoring chunk dropped Notes, pipeline, and profile sections in sibling
-    chunks. When ``updated_at`` is present, all hits at that timestamp are merged;
+    chunks. When updated_at is present, all hits at that timestamp are merged;
     otherwise only scored snapshot fragments are used.
     """
     snapshots = [hit for hit in hits if _is_authoritative_crm_snapshot(hit)]
@@ -499,7 +322,7 @@ def _metadata_filters_for_entity(
     entity_type: str,
     entity_id: str,
 ) -> dict[str, object]:
-    """Supermemory metadata filter matching sync ``_base_metadata`` fields."""
+    """Supermemory metadata filter matching sync _base_metadata fields."""
     return {
         "AND": [
             {"key": "entity_type", "value": entity_type},
@@ -511,7 +334,7 @@ def _metadata_filters_for_entity(
 def _merge_entity_snippets(hits: list[SupermemorySearchHit]) -> str:
     """Combine search fragments for one CRM record.
 
-    When sync snapshots exist, merge every chunk from the newest ``updated_at`` so hybrid
+    When sync snapshots exist, merge every chunk from the newest updated_at so hybrid
     search recall is not truncated to a single section. Short unstructured lines from
     older extracted memories (e.g. removed company associations) are still excluded.
     """
@@ -564,8 +387,13 @@ def _collapse_hits_by_entity(hits: list[SupermemorySearchHit]) -> list[Supermemo
     return merged[:_MAX_SYNTH_ENTITY_SNIPPETS]
 
 
+# ---------------------------------------------------------------------------
+# Service
+# ---------------------------------------------------------------------------
+
+
 class OrgMemoryQueryService:
-    """Intent → Supermemory hybrid search → answer synthesis."""
+    """Hardcoded Supermemory search -> sales intelligence markdown synthesis."""
 
     def __init__(self) -> None:
         self._supermemory = SupermemoryService.from_settings()
@@ -578,44 +406,75 @@ class OrgMemoryQueryService:
         entity_id: str | None = None,
         entity_type: str | None = None,
     ) -> str:
-        """Return a user-facing natural-language answer."""
+        """Return a sales intelligence markdown briefing for the queried entity."""
         user_message = user_message.strip()
-        fallback_queries = [user_message]
         model = shared_settings.org_memory_llm_model
+
+        # Build hardcoded search queries — no LLM intent planner needed.
+        # entity_id is known when the caller passes a specific CRM record;
+        # fall back to the raw user message as the entity name otherwise.
+        entity_name = user_message
+        search_queries = _build_hardcoded_queries(entity_name)
+
+        # When entity_id + entity_type are known, run both unfiltered searches
+        # (catches associated company/lead fragments) and filtered searches
+        # (catches the authoritative snapshot for that specific record).
+        # Merging both sets gives full coverage.
         search_filters: dict[str, object] | None = None
         if entity_id and entity_type:
             search_filters = _metadata_filters_for_entity(entity_type, entity_id.strip())
 
-        raw_plan = await create_chat_completion(
-            model=model,
-            messages=[
-                {"role": "system", "content": INTENT_SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            max_completion_tokens=_INTENT_MAX_TOKENS,
-        )
-        plan = _parse_intent(raw_plan or "{}", fallback_queries=fallback_queries)
-
-        limit = _AGGREGATION_SEARCH_LIMIT if plan.is_aggregation else _LOOKUP_SEARCH_LIMIT
         container = container_tag_for_organization(organization_id)
 
-        search_sets = await asyncio.gather(
-            *(
+        unfiltered_coroutines = [
+            self._supermemory.search_hybrid(
+                query=q,
+                container_tag=container,
+                limit=_LOOKUP_SEARCH_LIMIT,
+                filters=None,
+            )
+            for q in search_queries
+        ]
+        filtered_coroutines = (
+            [
                 self._supermemory.search_hybrid(
                     query=q,
                     container_tag=container,
-                    limit=limit,
+                    limit=_LOOKUP_SEARCH_LIMIT,
                     filters=search_filters,
                 )
-                for q in plan.search_queries
-            )
+                for q in search_queries
+            ]
+            if search_filters is not None
+            else []
         )
-        merged: list[SupermemorySearchHit] = []
-        for subset in search_sets:
-            merged.extend(subset)
 
-        cleaned = _drop_deleted_and_empty(_dedupe_hits(merged))
+        all_search_sets = await asyncio.gather(
+            *unfiltered_coroutines,
+            *filtered_coroutines,
+        )
+
+        raw_hits: list[SupermemorySearchHit] = []
+        for subset in all_search_sets:
+            raw_hits.extend(subset)
+
+        logger.info(
+            "org_memory_search organization_id=%s entity_id=%s raw_hits=%s",
+            organization_id,
+            entity_id,
+            len(raw_hits),
+        )
+
+        cleaned = _drop_deleted_and_empty(_dedupe_hits(raw_hits))
         usable = _collapse_hits_by_entity(cleaned)
+
+        # Promote the specific entity's snapshot to position 0 so the synthesizer
+        # anchors on the right record before reading associated fragments.
+        if entity_id and entity_type:
+            entity_key = f"{entity_type.strip().lower()}:{entity_id.strip()}"
+            primary = [h for h in usable if h.id == entity_key]
+            rest = [h for h in usable if h.id != entity_key]
+            usable = primary + rest
 
         notes_truncated = False
         if usable:
@@ -632,18 +491,21 @@ class OrgMemoryQueryService:
             scope_line = ""
             if entity_id and entity_type:
                 scope_line = f"Answer only about this CRM {entity_type} (id {entity_id}).\n\n"
-            synth_instruction = _pin_synth_instruction(plan.synthesize_instruction)
             synth_user = (
                 f"{scope_line}"
                 f"Question: {user_message}\n\n"
-                f"{_SYNTH_USER_ANSWER_ORDER}\n\n"
-                f"CRM notes:\n{notes}\n\n"
-                f"Instruction: {synth_instruction}"
+                "Return the four markdown sections: "
+                "Overview, Key Insights, Leads, Companies. "
+                "Open Key Insights with every note verbatim then blend in email signals, "
+                "blockers, and the next action with a date. "
+                "Use only the latest value when a field repeats. "
+                "Omit any field that has no value.\n\n"
+                f"CRM data:\n{notes}"
             )
         else:
             synth_user = (
                 f"Question: {user_message}\n\n"
-                "No matching CRM notes were retrieved. "
+                "No matching CRM data was retrieved. "
                 "Reply in one short neutral sentence that the information is not available."
             )
 
@@ -657,6 +519,7 @@ class OrgMemoryQueryService:
                 max_completion_tokens=_SYNTH_MAX_TOKENS,
             )
         ).strip()
+
         used_fallback = False
         if not answer:
             used_fallback = True
@@ -665,12 +528,12 @@ class OrgMemoryQueryService:
                 if not notes
                 else "No answer could be formed from the available records."
             )
-        answer = _flatten_answer_for_response(answer)
+
         logger.info(
             "org_memory_query organization_id=%s search_hits=%s entities=%s "
             "notes_len=%s notes_truncated=%s used_fallback=%s answer_len=%s",
             organization_id,
-            len(merged),
+            len(raw_hits),
             len(usable),
             len(notes),
             notes_truncated,
