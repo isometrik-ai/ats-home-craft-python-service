@@ -81,6 +81,40 @@ def _skipped(
     )
 
 
+def _webhook_event_context(webhook_body: dict[str, Any]) -> tuple[str, str]:
+    """Return ``(event_id, event_type)`` for structured logs (``-`` when missing)."""
+    event_id = str(webhook_body.get("event_id") or "").strip()
+    event_type = str(webhook_body.get("event_type") or "").strip()
+    return event_id or "-", event_type or "-"
+
+
+def _log_inbound_email_skip(
+    *,
+    organization_id: str,
+    reason: str,
+    webhook_body: dict[str, Any] | None = None,
+    contact_id: str | None = None,
+    sender_email: str | None = None,
+    message_id: str | None = None,
+    custom_id: str | None = None,
+) -> InboundEmailProcessResult:
+    """Log why Supermemory was not updated and return a skip result."""
+    event_id, event_type = _webhook_event_context(webhook_body or {})
+    logger.info(
+        "inbound_email_supermemory_skipped organization_id=%s reason=%s "
+        "event_id=%s event_type=%s contact_id=%s sender=%s message_id=%s custom_id=%s",
+        organization_id,
+        reason,
+        event_id,
+        event_type,
+        contact_id or "-",
+        sender_email or "-",
+        message_id or "-",
+        custom_id or "-",
+    )
+    return _skipped(reason, contact_id=contact_id)
+
+
 def normalize_email_address(raw: str | None) -> str | None:
     """Return a lowercase email from a plain address or ``Name <email>`` header."""
     text = (raw or "").strip()
@@ -222,31 +256,56 @@ class EmailNotificationService:
         webhook_body: dict[str, Any],
     ) -> InboundEmailProcessResult:
         """Append inbound email content to the contact's Supermemory document."""
-        event_type = str(webhook_body.get("event_type") or "").strip()
-        if event_type and event_type != MESSAGE_RECEIVED_EVENT:
-            return _skipped(f"unsupported_event_type:{event_type}")
+        event_id, event_type = _webhook_event_context(webhook_body)
+        logger.info(
+            "inbound_email_processing_started organization_id=%s event_id=%s event_type=%s "
+            "supermemory_configured=%s",
+            organization_id,
+            event_id,
+            event_type,
+            is_supermemory_configured(),
+        )
+
+        if event_type not in ("-", MESSAGE_RECEIVED_EVENT):
+            return _log_inbound_email_skip(
+                organization_id=organization_id,
+                reason=f"unsupported_event_type:{event_type}",
+                webhook_body=webhook_body,
+            )
 
         if not is_supermemory_configured():
-            return _skipped("supermemory_not_configured")
+            return _log_inbound_email_skip(
+                organization_id=organization_id,
+                reason="supermemory_not_configured",
+                webhook_body=webhook_body,
+            )
 
         if not await is_organization_memory_enabled(self._db_connection, organization_id):
-            return _skipped("organization_memory_disabled")
+            return _log_inbound_email_skip(
+                organization_id=organization_id,
+                reason="organization_memory_disabled",
+                webhook_body=webhook_body,
+            )
 
         sender_email = extract_sender_email(webhook_body)
         if not sender_email:
-            return _skipped("missing_sender_email")
+            return _log_inbound_email_skip(
+                organization_id=organization_id,
+                reason="missing_sender_email",
+                webhook_body=webhook_body,
+            )
 
         contact_id = await self._contacts_repo.get_contact_id_by_email(
             organization_id=organization_id,
             email=sender_email,
         )
         if not contact_id:
-            logger.info(
-                "inbound_email_no_matching_contact organization_id=%s sender=%s",
-                organization_id,
-                sender_email,
+            return _log_inbound_email_skip(
+                organization_id=organization_id,
+                reason="contact_not_found",
+                webhook_body=webhook_body,
+                sender_email=sender_email,
             )
-            return _skipped("contact_not_found")
 
         record = build_inbound_email_record(
             webhook_body=webhook_body,
@@ -255,26 +314,50 @@ class EmailNotificationService:
             include_attachments=self._attachments_enabled,
         )
         if not record:
-            return _skipped("empty_message_content", contact_id=contact_id)
+            return _log_inbound_email_skip(
+                organization_id=organization_id,
+                reason="empty_message_content",
+                webhook_body=webhook_body,
+                contact_id=contact_id,
+                sender_email=sender_email,
+            )
 
         contact_custom_id = custom_id_for_entity("contact", contact_id)
-        appended = await self._append_to_contact_document(
+        logger.info(
+            "inbound_email_contact_matched organization_id=%s event_id=%s contact_id=%s "
+            "sender=%s message_id=%s custom_id=%s",
+            organization_id,
+            event_id,
+            contact_id,
+            sender_email,
+            record.message_id,
+            contact_custom_id,
+        )
+
+        append_failure = await self._append_to_contact_document(
             organization_id=organization_id,
             record=record,
         )
-        if not appended:
-            return InboundEmailProcessResult(
+        if append_failure:
+            return _log_inbound_email_skip(
+                organization_id=organization_id,
+                reason=append_failure,
+                webhook_body=webhook_body,
                 contact_id=contact_id,
-                stored=False,
-                supermemory_document_ids=(contact_custom_id,),
-                skipped_reason="duplicate_message_id",
+                sender_email=sender_email,
+                message_id=record.message_id,
+                custom_id=contact_custom_id,
             )
 
         logger.info(
-            "inbound_email_appended contact organization_id=%s contact_id=%s message_id=%s",
+            "inbound_email_supermemory_stored organization_id=%s event_id=%s contact_id=%s "
+            "sender=%s message_id=%s custom_id=%s",
             organization_id,
+            event_id,
             contact_id,
+            sender_email,
             record.message_id,
+            contact_custom_id,
         )
         return InboundEmailProcessResult(
             contact_id=contact_id,
@@ -287,18 +370,22 @@ class EmailNotificationService:
         *,
         organization_id: str,
         record: InboundEmailRecord,
-    ) -> bool:
-        """Rebuild CRM snapshot, append the email block, and replace the contact document."""
+    ) -> str | None:
+        """Rebuild CRM snapshot, append the email block, and replace the contact document.
+
+        Returns:
+            ``None`` on success, or a stable skip/failure reason string.
+        """
+        contact_custom_id = custom_id_for_entity("contact", record.contact_id)
         snapshot = await self._sync_service.load_contact_snapshot(
             self._db_connection,
             organization_id=organization_id,
             contact_id=record.contact_id,
         )
         if snapshot is None:
-            return False
+            return "contact_snapshot_not_found"
 
         base_content, metadata = snapshot
-        contact_custom_id = custom_id_for_entity("contact", record.contact_id)
         existing_content = await self._supermemory.get_document_content(
             custom_id=contact_custom_id,
             organization_id=organization_id,
@@ -323,8 +410,16 @@ class EmailNotificationService:
             message_id=record.message_id,
         )
         if not appended:
-            return False
+            return "duplicate_message_id"
 
+        logger.info(
+            "inbound_email_supermemory_upsert organization_id=%s contact_id=%s "
+            "message_id=%s custom_id=%s",
+            organization_id,
+            record.contact_id,
+            record.message_id,
+            contact_custom_id,
+        )
         await self._supermemory.add_or_replace_document(
             content=merged_content,
             container_tag=container_tag_for_organization(organization_id),
@@ -332,7 +427,7 @@ class EmailNotificationService:
             metadata=metadata,
             entity_context=_ENTITY_CONTEXT,
         )
-        return True
+        return None
 
     async def _fetch_attachment_blocks(self, record: InboundEmailRecord) -> list[str]:
         """Download and format attachment text blocks when AgentMail is configured."""

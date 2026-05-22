@@ -27,8 +27,11 @@ from apps.user_service.app.services.typesense_index_service import (
 )
 from apps.user_service.app.services.webhook_service import WebhookService
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger("webhooks")
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
@@ -169,6 +172,14 @@ async def email_notifications_webhook(
     a lifecycle event.
     """
     aggregate_id = str(body.get("event_id") or uuid.uuid4())
+    webhook_event_type = str(body.get("event_type") or "-")
+    logger.info(
+        "email_notifications_webhook_received aggregate_id=%s organization_id=%s event_type=%s",
+        aggregate_id,
+        organization_id,
+        webhook_event_type,
+    )
+
     email_service = EmailNotificationService(db_connection=db_connection)
 
     event_service = EventService(db_connection=db_connection)
@@ -181,6 +192,17 @@ async def email_notifications_webhook(
         )
         contact_id = process_result.contact_id
         email_stored = process_result.stored
+
+        logger.info(
+            "email_notifications_webhook_processed aggregate_id=%s organization_id=%s "
+            "stored_in_supermemory=%s skipped_reason=%s contact_id=%s custom_ids=%s",
+            aggregate_id,
+            organization_id,
+            email_stored,
+            process_result.skipped_reason or "-",
+            contact_id or "-",
+            ",".join(process_result.supermemory_document_ids) or "-",
+        )
 
         event_payload: dict[str, Any] = {
             "module": "email",
