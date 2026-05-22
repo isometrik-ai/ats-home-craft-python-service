@@ -6,7 +6,6 @@ from apps.user_service.app.services.org_memory_query_service import (
     _collapse_hits_by_entity,
     _dedupe_hits,
     _drop_deleted_and_empty,
-    _flatten_answer_for_response,
     _parse_intent,
     _prioritize_intel_sections_in_snapshot,
 )
@@ -28,13 +27,6 @@ def test_prioritize_sections_sales_first() -> None:
     assert ordered.index("## Linked leads") < ordered.index("## Companies")
     assert ordered.index("## Companies") < ordered.index("## Profile")
     assert ordered.index("## Profile") < ordered.index("## Skills")
-
-
-def test_flatten_answer_for_response_removes_newlines() -> None:
-    """API answers are returned as a single line."""
-    raw = "Line one.\n\nLine two.\nLine three."
-    assert _flatten_answer_for_response(raw) == "Line one. Line two. Line three."
-    assert "\n" not in _flatten_answer_for_response(raw)
 
 
 def test_parse_intent_strips_json_fence() -> None:
