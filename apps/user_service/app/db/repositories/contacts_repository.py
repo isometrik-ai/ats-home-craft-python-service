@@ -1027,3 +1027,33 @@ class ContactsRepository(BaseRepository):
         )
         contact_rows = [dict(contact_row) for contact_row in rows]
         return contact_rows, int(total or 0)
+
+    async def get_contacts_by_ids(
+        self,
+        *,
+        organization_id: str,
+        contact_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Return id, name parts, and email for contacts in the given org (non-deleted)."""
+        if not contact_ids:
+            return []
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              ct.id::text AS id,
+              ct.first_name,
+              ct.last_name,
+              NULLIF(au.email::text, '') AS email
+            FROM contacts ct
+            LEFT JOIN auth.users au
+              ON au.id = ct.user_id
+            WHERE ct.organization_id = $1::uuid
+              AND ct.id = ANY($2::uuid[])
+              AND ct.status != $3
+            ORDER BY array_position($2::uuid[], ct.id)
+            """,
+            organization_id,
+            contact_ids,
+            ClientStatus.DELETED.value,
+        )
+        return [dict(row) for row in rows]

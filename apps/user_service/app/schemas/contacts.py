@@ -241,6 +241,29 @@ class ListContactsRequest(BaseModel):
     dropdown_filters: list[DropdownCustomFieldFilter] = Field(default_factory=list)
 
 
+class GetContactsByIdsRequest(BaseModel):
+    """Request body for bulk contact lookup by id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        description="Contact identifiers (UUID strings).",
+    )
+
+
+class ContactBasicInfoResponse(BaseModel):
+    """Minimal contact fields for bulk lookup."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str
+    email: str | None = None
+
+
 class UpdateContactRequest(BaseModel):
     """Patch a contact (contacts table) and/or manage associations."""
 
