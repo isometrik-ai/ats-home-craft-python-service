@@ -416,27 +416,15 @@ class OrgMemoryQueryService:
         entity_name = user_message
         search_queries = _build_hardcoded_queries(entity_name)
 
-        # When entity_id + entity_type are known, run both unfiltered searches
-        # (catches associated company/lead fragments) and filtered searches
-        # (catches the authoritative snapshot for that specific record).
-        # Merging both sets gives full coverage.
+        # When entity_id + entity_type are known, scope search to that CRM record only.
         search_filters: dict[str, object] | None = None
         if entity_id and entity_type:
             search_filters = _metadata_filters_for_entity(entity_type, entity_id.strip())
 
         container = container_tag_for_organization(organization_id)
 
-        unfiltered_coroutines = [
-            self._supermemory.search_hybrid(
-                query=q,
-                container_tag=container,
-                limit=_LOOKUP_SEARCH_LIMIT,
-                filters=None,
-            )
-            for q in search_queries
-        ]
-        filtered_coroutines = (
-            [
+        all_search_sets = await asyncio.gather(
+            *[
                 self._supermemory.search_hybrid(
                     query=q,
                     container_tag=container,
@@ -445,13 +433,6 @@ class OrgMemoryQueryService:
                 )
                 for q in search_queries
             ]
-            if search_filters is not None
-            else []
-        )
-
-        all_search_sets = await asyncio.gather(
-            *unfiltered_coroutines,
-            *filtered_coroutines,
         )
 
         raw_hits: list[SupermemorySearchHit] = []
@@ -468,8 +449,7 @@ class OrgMemoryQueryService:
         cleaned = _drop_deleted_and_empty(_dedupe_hits(raw_hits))
         usable = _collapse_hits_by_entity(cleaned)
 
-        # Promote the specific entity's snapshot to position 0 so the synthesizer
-        # anchors on the right record before reading associated fragments.
+        # Promote the specific entity's snapshot to position 0 for synthesis.
         if entity_id and entity_type:
             entity_key = f"{entity_type.strip().lower()}:{entity_id.strip()}"
             primary = [h for h in usable if h.id == entity_key]
