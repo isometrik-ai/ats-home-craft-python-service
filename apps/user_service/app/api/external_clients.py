@@ -33,9 +33,11 @@ from apps.user_service.app.schemas.companies import (
     UpdateCompanyRequest,
 )
 from apps.user_service.app.schemas.contacts import (
+    ContactBasicInfoResponse,
     ContactDetailsResponse,
     ContactSummaryResponse,
     CreateContactRequest,
+    GetContactsByIdsRequest,
     UpdateContactRequest,
 )
 from apps.user_service.app.schemas.contacts_imports import (
@@ -242,6 +244,63 @@ async def external_list_contacts(
         message_key="clients.success.clients_retrieved",
         custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("external lookup contacts by ids")
+@router.post(
+    "/contacts/lookup",
+    status_code=http_status.HTTP_200_OK,
+    summary="Lookup contacts by id (external auth)",
+    description=(
+        "Returns id, display name, and email for each requested contact id in the "
+        "organization resolved from Isometrik credentials (`licenseKey`/`appSecret`). "
+        "Unknown or deleted ids are omitted."
+    ),
+    responses={
+        http_status.HTTP_200_OK: {"description": "Contacts retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+    },
+)
+@limiter.limit("200/minute")
+async def external_lookup_contacts_by_ids(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    organization_id: str = Depends(get_organization_context),
+    body: GetContactsByIdsRequest = Body(...),
+):
+    """Bulk lookup contacts by id (Isometrik credential auth)."""
+    service = ContactsService(
+        db_connection=db_connection,
+        user_context=_external_user_context(
+            organization_id=organization_id,
+            actor_email=getattr(request.state, "external_actor_email", None),
+        ),
+    )
+    rows = await service.get_contacts_by_ids(contact_ids=body.contact_ids)
+    items = [
+        ContactBasicInfoResponse.model_validate(row).model_dump(exclude_none=True, mode="json")
+        for row in rows
+    ]
+    if not items:
+        return success_response(
+            request=request,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+            data=[],
+        )
+    return success_response(
+        request=request,
+        message_key="clients.success.clients_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=items,
     )
 
 

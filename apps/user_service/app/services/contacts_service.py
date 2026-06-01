@@ -1968,6 +1968,39 @@ class ContactsService:
             self._normalize_contact_list_row(list_row)
         return {"items": rows, "total": total}
 
+    @staticmethod
+    def _format_contact_display_name(
+        *,
+        first_name: str | None,
+        last_name: str | None,
+    ) -> str:
+        """Build a display name from first/last name parts."""
+        return " ".join(
+            part for part in [(first_name or "").strip(), (last_name or "").strip()] if part
+        ).strip()
+
+    async def get_contacts_by_ids(self, *, contact_ids: list[str]) -> list[dict[str, Any]]:
+        """Return minimal contact info (id, name, email) for the given contact ids."""
+        unique_ids = list(dict.fromkeys(cid.strip() for cid in contact_ids if (cid or "").strip()))
+        if not unique_ids:
+            return []
+
+        rows = await self.contacts_repo.get_contacts_by_ids(
+            organization_id=self.user_context.organization_id,
+            contact_ids=unique_ids,
+        )
+        return [
+            {
+                "id": row["id"],
+                "name": self._format_contact_display_name(
+                    first_name=row.get("first_name"),
+                    last_name=row.get("last_name"),
+                ),
+                "email": row.get("email"),
+            }
+            for row in rows
+        ]
+
     async def soft_delete_contact(self, *, contact_id: str) -> dict[str, Any]:
         """Soft-delete a contact (sets status='deleted') and return old/new snapshots."""
         org_id = self.user_context.organization_id
