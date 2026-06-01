@@ -565,6 +565,11 @@ class CompaniesService:
                         "user_id": (contact_data or {}).get("user_id"),
                     },
                 ) from exc
+            if constraint == "uq_contacts_org_external_contact_id":
+                raise ConflictException(
+                    message_key="contacts.errors.external_contact_id_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                ) from exc
             raise
         company_id = str(created["company_id"])
         company = created["company"]
@@ -813,6 +818,9 @@ class CompaniesService:
             "title": create_contact.title,
             "date_of_birth": create_contact.date_of_birth,
             "profile_photo_url": create_contact.profile_photo_url,
+            "external_contact_id": ContactsService._normalize_external_contact_id(
+                create_contact.external_contact_id
+            ),
             "email": email_norm,
             "phones": contact_phones_payload,
             "tags": create_contact.tags,

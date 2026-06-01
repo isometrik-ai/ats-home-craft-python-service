@@ -154,6 +154,7 @@ class ContactsRepository(BaseRepository):
             "title",
             "date_of_birth",
             "profile_photo_url",
+            "external_contact_id",
             "phones",
             "tags",
             "notes",
@@ -253,7 +254,7 @@ class ContactsRepository(BaseRepository):
               WHERE $3::uuid IS NOT NULL
                 AND co.id = $3::uuid
                 AND co.organization_id = $2::uuid
-                AND co.status != $22::text
+                AND co.status != $23::text
             ),
             contact AS (
               INSERT INTO contacts (
@@ -269,6 +270,7 @@ class ContactsRepository(BaseRepository):
                 title,
                 date_of_birth,
                 profile_photo_url,
+                external_contact_id,
                 phones,
                 tags,
                 notes,
@@ -289,12 +291,13 @@ class ContactsRepository(BaseRepository):
                 $11::text,
                 $12::date,
                 $13::text,
-                COALESCE($14::jsonb, '[]'::jsonb),
-                COALESCE($15::text[], '{}'::text[]),
-                COALESCE($16::jsonb, '[]'::jsonb),
-                COALESCE($17::jsonb, '{}'::jsonb),
+                $14::text,
+                COALESCE($15::jsonb, '[]'::jsonb),
+                COALESCE($16::text[], '{}'::text[]),
+                COALESCE($17::jsonb, '[]'::jsonb),
                 COALESCE($18::jsonb, '{}'::jsonb),
-                COALESCE($19::jsonb, '{}'::jsonb)
+                COALESCE($19::jsonb, '{}'::jsonb),
+                COALESCE($20::jsonb, '{}'::jsonb)
               )
               RETURNING *
             ),
@@ -323,7 +326,7 @@ class ContactsRepository(BaseRepository):
               )
               SELECT
                 $2::uuid,
-                CASE WHEN $21::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
+                CASE WHEN $22::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
                 c.status,
                 c.name,
                 c.industry,
@@ -342,7 +345,7 @@ class ContactsRepository(BaseRepository):
                 c.description,
                 c.custom_fields,
                 c.additional_data
-              FROM jsonb_to_recordset(COALESCE($20::jsonb, '[]'::jsonb)) AS c(
+              FROM jsonb_to_recordset(COALESCE($21::jsonb, '[]'::jsonb)) AS c(
                 status text,
                 name text,
                 industry text,
@@ -402,7 +405,7 @@ class ContactsRepository(BaseRepository):
                 a.address_type,
                 COALESCE(a.address_data, '{}'::jsonb) AS address_data,
                 a.is_primary
-              FROM jsonb_to_recordset(COALESCE($23::jsonb, '[]'::jsonb)) AS a(
+              FROM jsonb_to_recordset(COALESCE($24::jsonb, '[]'::jsonb)) AS a(
                 place_id text,
                 address_line1 text,
                 address_line2 text,
@@ -417,7 +420,7 @@ class ContactsRepository(BaseRepository):
                 is_primary boolean
               )
               WHERE (SELECT id FROM company) IS NOT NULL
-                AND $23::jsonb IS NOT NULL
+                AND $24::jsonb IS NOT NULL
               RETURNING 1
             ),
             membership AS (
@@ -433,7 +436,7 @@ class ContactsRepository(BaseRepository):
                   updated_at = NOW()
               WHERE id = (SELECT id FROM company)
                 AND organization_id = $2::uuid
-                AND $21::boolean IS TRUE
+                AND $22::boolean IS TRUE
                 AND (SELECT id FROM company) IS NOT NULL
               RETURNING 1
             )
@@ -455,6 +458,7 @@ class ContactsRepository(BaseRepository):
             contact_data.get("title"),
             contact_data.get("date_of_birth"),
             contact_data.get("profile_photo_url"),
+            contact_data.get("external_contact_id"),
             contact_data.get("phones"),
             contact_data.get("tags"),
             contact_data.get("notes"),
@@ -1011,6 +1015,7 @@ class ContactsRepository(BaseRepository):
               ct.title,
               au.email::text AS email,
               ct.profile_photo_url,
+              ct.external_contact_id,
               ct.phones,
               COALESCE(cn.company_names, '[]'::jsonb) AS company_names,
               ct.created_at,
@@ -1034,7 +1039,7 @@ class ContactsRepository(BaseRepository):
         organization_id: str,
         contact_ids: list[str],
     ) -> list[dict[str, Any]]:
-        """Return id, name parts, and email for contacts in the given org (non-deleted)."""
+        """Return id, name parts, email, and external_contact_id for contacts in the org."""
         if not contact_ids:
             return []
         rows = await self.db_connection.fetch(
@@ -1043,7 +1048,8 @@ class ContactsRepository(BaseRepository):
               ct.id::text AS id,
               ct.first_name,
               ct.last_name,
-              NULLIF(au.email::text, '') AS email
+              NULLIF(au.email::text, '') AS email,
+              ct.external_contact_id
             FROM contacts ct
             LEFT JOIN auth.users au
               ON au.id = ct.user_id
