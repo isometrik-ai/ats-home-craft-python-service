@@ -989,6 +989,9 @@ class ContactsImportService:
                 "title": model.title,
                 "date_of_birth": model.date_of_birth,
                 "profile_photo_url": model.profile_photo_url,
+                "external_contact_id": ContactsService._normalize_external_contact_id(
+                    model.external_contact_id
+                ),
                 "phones": jsonb_params["phones"],
                 "tags": model.tags,
                 "custom_fields": jsonb_params["custom_fields"],
@@ -1546,6 +1549,9 @@ class ContactsImportService:
             "last_name": (canonical.get("last_name") or "").strip() or None,
             "title": (canonical.get("title") or "").strip() or None,
             "profile_photo_url": (canonical.get("profile_photo_url") or "").strip() or None,
+            "external_contact_id": ContactsService._normalize_external_contact_id(
+                (canonical.get("external_contact_id") or "").strip() or None
+            ),
         }
 
         dob_raw = (canonical.get("date_of_birth") or "").strip()
@@ -1664,6 +1670,9 @@ class ContactsImportService:
             "title": row_model.title,
             "date_of_birth": row_model.date_of_birth,
             "profile_photo_url": row_model.profile_photo_url,
+            "external_contact_id": ContactsService._normalize_external_contact_id(
+                row_model.external_contact_id
+            ),
             "phones": jsonb_params["phones"],
             "tags": row_model.tags,
             "custom_fields": jsonb_params["custom_fields"],

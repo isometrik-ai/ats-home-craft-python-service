@@ -783,6 +783,11 @@ class ContactsService:
                         "user_id": user_id,
                     },
                 ) from exc
+            if constraint == "uq_contacts_org_external_contact_id":
+                raise ConflictException(
+                    message_key="contacts.errors.external_contact_id_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                ) from exc
             raise
 
     async def create_contact(self, body: CreateContactRequest) -> dict[str, Any]:
@@ -914,6 +919,9 @@ class ContactsService:
                 "title": body.title,
                 "date_of_birth": body.date_of_birth,
                 "profile_photo_url": body.profile_photo_url,
+                "external_contact_id": self._normalize_external_contact_id(
+                    body.external_contact_id
+                ),
                 "email": email_norm,
                 "phones": phones_jsonb,
                 "tags": body.tags,
@@ -1979,8 +1987,16 @@ class ContactsService:
             part for part in [(first_name or "").strip(), (last_name or "").strip()] if part
         ).strip()
 
+    @staticmethod
+    def _normalize_external_contact_id(value: str | None) -> str | None:
+        """Strip and normalize optional external contact id."""
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
     async def get_contacts_by_ids(self, *, contact_ids: list[str]) -> list[dict[str, Any]]:
-        """Return minimal contact info (id, name, email) for the given contact ids."""
+        """Return minimal contact info (id, name, email, external_contact_id) for the given ids."""
         unique_ids = list(dict.fromkeys(cid.strip() for cid in contact_ids if (cid or "").strip()))
         if not unique_ids:
             return []
@@ -1997,6 +2013,7 @@ class ContactsService:
                     last_name=row.get("last_name"),
                 ),
                 "email": row.get("email"),
+                "external_contact_id": row.get("external_contact_id"),
             }
             for row in rows
         ]

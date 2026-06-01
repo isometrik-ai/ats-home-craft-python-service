@@ -253,9 +253,9 @@ async def external_list_contacts(
     status_code=http_status.HTTP_200_OK,
     summary="Lookup contacts by id (external auth)",
     description=(
-        "Returns id, display name, and email for each requested contact id in the "
-        "organization resolved from Isometrik credentials (`licenseKey`/`appSecret`). "
-        "Unknown or deleted ids are omitted."
+        "Returns id, display name, email, and external_contact_id for each requested "
+        "contact id in the organization resolved from Isometrik credentials "
+        "(`licenseKey`/`appSecret`). Unknown or deleted ids are omitted."
     ),
     responses={
         http_status.HTTP_200_OK: {"description": "Contacts retrieved successfully"},
@@ -461,7 +461,7 @@ async def external_create_company(
     summary="Create a contact (external auth)",
     description=(
         "Create a contact/person client using Isometrik credential auth. "
-        "Payload is contact-specific and mapped internally to the existing CreateClientRequest."
+        "Supports optional `external_contact_id` (immutable after create)."
     ),
     responses={
         http_status.HTTP_201_CREATED: {"description": "Contact created successfully"},

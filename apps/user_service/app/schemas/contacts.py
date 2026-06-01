@@ -140,6 +140,11 @@ class CreateContactRequest(BaseModel):
     title: str | None = Field(None, max_length=100)
     date_of_birth: date | None = None
     profile_photo_url: str | None = Field(None, max_length=500)
+    external_contact_id: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional identifier from an external system (immutable after create).",
+    )
 
     phones: list[PhoneInput] = Field(default_factory=list, max_length=20)
     tags: list[str] = Field(default_factory=list, max_length=50)
@@ -202,6 +207,11 @@ class CreateContactRequestStandalone(BaseModel):
     title: str | None = Field(None, max_length=100)
     date_of_birth: date | None = None
     profile_photo_url: str | None = Field(None, max_length=500)
+    external_contact_id: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional identifier from an external system (immutable after create).",
+    )
 
     phones: list[PhoneInput] = Field(default_factory=list, max_length=20)
     tags: list[str] = Field(default_factory=list, max_length=50)
@@ -262,6 +272,7 @@ class ContactBasicInfoResponse(BaseModel):
     id: str
     name: str
     email: str | None = None
+    external_contact_id: str | None = None
 
 
 class UpdateContactRequest(BaseModel):
@@ -422,6 +433,7 @@ class ContactSummaryResponse(BaseModel):
     title: str | None = None
     email: str | None = None
     profile_photo_url: str | None = None
+    external_contact_id: str | None = None
     phones: list[dict[str, Any]] = Field(default_factory=list)
     company_names: list[str] = Field(default_factory=list)
     created_at: str
@@ -447,6 +459,7 @@ class ContactDetailsResponse(BaseModel):
     date_of_birth: date | None = None
     profile_photo_url: str | None = None
     email: str | None = None
+    external_contact_id: str | None = None
     phones: list[dict[str, Any]] = Field(default_factory=list)
 
     tags: list[str] = Field(default_factory=list)
