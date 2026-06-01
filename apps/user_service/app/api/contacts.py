@@ -17,11 +17,9 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.contacts import (
-    ContactBasicInfoResponse,
     ContactDetailsResponse,
     ContactSummaryResponse,
     CreateContactRequest,
-    GetContactsByIdsRequest,
     ListContactsRequest,
     UpdateContactRequest,
 )
@@ -280,62 +278,6 @@ async def list_contacts(
         message_key="contacts.success.contacts_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
-    )
-
-
-@handle_api_exceptions("lookup contacts by ids")
-@router.post(
-    "/lookup",
-    status_code=http_status.HTTP_200_OK,
-    summary="Lookup contacts by id",
-    description=(
-        "Returns id, display name, and email for each requested contact id "
-        "that exists in the caller's organization. Unknown or deleted ids are omitted."
-    ),
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("100/minute")
-async def lookup_contacts_by_ids(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-    body: GetContactsByIdsRequest = Body(...),
-):
-    """Bulk lookup contacts by id.
-
-    Args:
-        request: FastAPI request.
-        db_connection: PostgreSQL connection (request-scoped).
-        current_user: Authenticated user claims extracted from JWT.
-        body: Request body containing contact ids.
-
-    Returns:
-        Success response envelope with a list of ``{id, name, email}`` objects.
-    """
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
-    )
-    service = ContactsService(db_connection=db_connection, user_context=user_context)
-    rows = await service.get_contacts_by_ids(contact_ids=body.contact_ids)
-    items = [
-        ContactBasicInfoResponse.model_validate(row).model_dump(exclude_none=True) for row in rows
-    ]
-    if not items:
-        return success_response(
-            request=request,
-            message_key="success.no_data",
-            custom_code=CustomStatusCode.NO_CONTENT,
-            status_code=http_status.HTTP_200_OK,
-            data=[],
-        )
-    return success_response(
-        request=request,
-        message_key="contacts.success.contacts_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        status_code=http_status.HTTP_200_OK,
-        data=items,
     )
 
 
