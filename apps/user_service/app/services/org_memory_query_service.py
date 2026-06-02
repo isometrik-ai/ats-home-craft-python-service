@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
-from apps.user_service.app.schemas.org_memory import OrgMemoryIntentPlan
+import asyncpg
+
+from apps.user_service.app.constants.ai_overview_defaults import (
+    DEFAULT_OVERVIEW_PROMPTS,
+    EntityOverviewType,
+)
+from apps.user_service.app.db.repositories.organization_repository import (
+    OrganizationRepository,
+)
+from apps.user_service.app.schemas.ai_overview_settings import AiOverviewSettings
+from apps.user_service.app.services.organization_service import OrganizationService
+from apps.user_service.app.utils.common_utils import parse_json_field
 from libs.shared_config.app_settings import shared_settings
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.openai_chat_service import create_chat_completion
@@ -38,112 +48,92 @@ _STRUCTURED_SECTION_MARKERS = ("## Profile", "## Companies")
 #   2. Notes / email signals — what has been said and committed
 #   3. Leads / company associations — pipeline and org context
 # {name} is substituted at runtime with the entity display name or user message.
-_HARDCODED_QUERY_TEMPLATES: tuple[str, str, str] = (
+_DEFAULT_QUERY_TEMPLATES: tuple[str, str, str] = (
     "{name}",
     "{name} notes emails follow-up objections interests business",
     "{name} pipeline stage company association lead",
 )
 
-# ---------------------------------------------------------------------------
-# Synthesis prompt
-# ---------------------------------------------------------------------------
-SYNTH_SYSTEM_PROMPT = (
-    "You are a sales intelligence assistant. Write a markdown briefing "
-    "for a sales professional using only the provided CRM data. "
-    "Each section is a short flowing paragraph, not a list.\n\n"
-    "SECTIONS — output exactly these headers in order. "
-    "Omit a section only if it has zero data.\n\n"
-    "## Overview\n"
-    "Name, title, company or companies, location, status, "
-    "email, phone, LinkedIn in natural prose.\n\n"
-    "## Key Insights\n"
-    "Weave all notes verbatim and email signals together with sharp analysis: "
-    "what was discussed, what they want, what was committed, "
-    "what the opportunity is, what the blocker is, and what needs to happen next.\n\n"
-    "## Leads\n"
-    "Every lead: name, stage, amount, close date, role, priority in natural prose. "
-    "Omit section if no leads.\n\n"
-    "## Companies\n"
-    "Every linked company: name, industry, role in natural prose. "
-    "Omit section if no companies.\n\n"
-    "EXAMPLE INPUT:\n"
-    "Contact: Rohit Marthak. Title: Python AI Engineer. "
-    "Companies: Appscrip, Hex Wireless. Email: rohitmarthak@appscrip.co. "
-    "Phone: +919823929922. LinkedIn: https://in.linkedin.com/in/rohitmarthak. "
-    "Status: active. Location: Bengaluru, India. "
-    "Leads: Appscrip Platform Renewal — Proposal — INR 450000 — close 2026-07-31 "
-    "— Decision Maker — high. Hex Q3 Retainer — Qualified — Technical Lead — medium. "
-    "Notes: Met at Reva College on intake. Follow up next Friday. "
-    "Wants enterprise tier but needs SLA clause reviewed before signing. "
-    "Email: Legal will revert by 25 May.\n\n"
-    "EXAMPLE OUTPUT:\n\n"
-    "## Overview\n"
-    "Rohit Marthak is a Python AI Engineer working across Appscrip and Hex Wireless, "
-    "based in Bengaluru, India. He can be reached at rohitmarthak@appscrip.co "
-    "and +919823929922, with his LinkedIn at https://in.linkedin.com/in/rohitmarthak.\n\n"
-    "## Key Insights\n"
-    "Rohit was met at Reva College on initial intake with a follow-up scheduled for the "
-    "following Friday, and has since expressed strong interest in the enterprise tier. "
-    "The only blocker is a custom SLA clause he wants reviewed before signing — "
-    "legal has confirmed they will revert by 25 May, making that the critical follow-up date. "
-    "He holds Decision Maker status on the Appscrip Platform Renewal at INR 450,000 "
-    "closing 31 July and is simultaneously Technical Lead on the Hex Q3 Retainer, "
-    "making him a high-value contact across both accounts.\n\n"
-    "## Leads\n"
-    "Rohit is the Decision Maker on the Appscrip Platform Renewal, currently in Proposal "
-    "at INR 450,000, targeting a close by 31 July 2026 and flagged high priority. "
-    "He is also engaged as Technical Lead on the Hex Q3 Retainer, "
-    "which is in Qualified at medium priority.\n\n"
-    "## Companies\n"
-    "Rohit is linked to Appscrip, a technology company where he is a primary contact, "
-    "and to Hex Wireless where he is engaged in a technical capacity.\n\n"
-    "END OF EXAMPLE.\n\n"
-    "RULES:\n"
-    "- Each section is one short paragraph. No bullets. No sub-headings.\n"
-    "- Key Insights must open with the notes verbatim, then blend in "
-    "email signals, blockers, and the next action with a date.\n"
-    "- Amounts with currency: 'INR 450,000'. Dates natural: '31 July 2026'.\n"
-    "- Latest value wins when a field repeats. Each fact appears once only.\n"
-    "- Skip example.com URLs, raw timestamps, ISO strings, database IDs.\n"
-    "- Omit fields with no value. Never say a field is missing.\n"
-    "- Never use: 'not provided', 'based on', 'the CRM', 'updated_at', "
-    "'here is', 'I can', 'please note', or any closing offer.\n"
-    "- Never start with 'I', 'Here', or 'Based on'."
-)
+_ENTITY_NAME_PLACEHOLDER = "{{entity_name}}"
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _resolve_overview_entity_type(entity_type: str | None) -> EntityOverviewType:
+    """Map request entity_type to the overview prompt key (defaults to contact)."""
+    normalized = (entity_type or "").strip().lower()
+    if normalized in ("lead", "company", "contact"):
+        return normalized  # type: ignore[return-value]
+    return "contact"
 
 
-def _strip_code_fences(raw: str) -> str:
-    """Remove optional markdown code fences from LLM JSON output."""
-    text = raw.strip()
-    if not text.startswith("```"):
-        return text
-    lines = text.splitlines()
-    if lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
+def _overview_prompt_template(
+    overview_settings: AiOverviewSettings,
+    entity_type: str | None,
+) -> str:
+    """Return stored prompt for ``entity_type``, or the platform default when missing."""
+    key = _resolve_overview_entity_type(entity_type)
+    stored = getattr(overview_settings.overview_prompts, key, "")
+    if isinstance(stored, str) and stored.strip():
+        return stored.strip()
+    return DEFAULT_OVERVIEW_PROMPTS[key]
 
 
-def _parse_intent(plan_text: str, *, fallback_queries: list[str]) -> OrgMemoryIntentPlan:
-    """Parse and validate the intent JSON plan; fall back to raw user queries on failure."""
-    try:
-        data = json.loads(_strip_code_fences(plan_text))
-        if not isinstance(data, dict):
-            raise ValueError("intent payload must be a JSON object")
-        plan = OrgMemoryIntentPlan.model_validate(data)
-    except Exception:
-        logger.warning("org_memory_intent_json_parse_failed")
-        return OrgMemoryIntentPlan(search_queries=fallback_queries[:3])
+def _build_synth_system_prompt(
+    *,
+    entity_type: str | None,
+    entity_name: str,
+    overview_settings: AiOverviewSettings,
+) -> str:
+    """Org-specific AI Overview agent prompt; falls back to platform defaults."""
+    template = _overview_prompt_template(overview_settings, entity_type)
+    return template.replace(_ENTITY_NAME_PLACEHOLDER, entity_name)
 
-    if not plan.search_queries:
-        return plan.model_copy(update={"search_queries": fallback_queries[:3]})
-    return plan
+
+def _build_synth_user_message(
+    *,
+    user_message: str,
+    notes: str,
+    entity_id: str | None,
+    entity_type: str | None,
+    business_overview: str | None,
+) -> str:
+    """User turn: org background, scope, question, and retrieved CRM data."""
+    parts: list[str] = []
+    if business_overview and business_overview.strip():
+        parts.append(
+            "Organization background (context only — do not invent facts beyond CRM data):\n"
+            f"{business_overview.strip()}"
+        )
+    if entity_id and entity_type:
+        parts.append(f"Answer only about this CRM {entity_type} (id {entity_id}).")
+    parts.append(f"Question: {user_message}")
+    if notes:
+        parts.append(
+            "Use only the CRM data below. Follow the system instructions for "
+            "sections and format.\n\n"
+            f"CRM data:\n{notes}"
+        )
+    else:
+        parts.append(
+            "No matching CRM data was retrieved. "
+            "Reply in one short neutral sentence that the information is not available."
+        )
+    return "\n\n".join(parts)
+
+
+async def _load_effective_ai_overview_settings(
+    db_connection: asyncpg.Connection,
+    organization_id: str,
+) -> AiOverviewSettings:
+    """Load org AI overview settings; per-entity prompts fall back to platform defaults."""
+    repo = OrganizationRepository(db_connection=db_connection)
+    org = await repo.get_organization_by_id(organization_id)
+    if not org:
+        return OrganizationService.default_ai_overview_settings()
+    settings = parse_json_field(org.get("settings"))
+    return OrganizationService._resolve_effective_ai_overview_settings(settings)
 
 
 def _build_hardcoded_queries(entity_name: str) -> list[str]:
@@ -153,7 +143,7 @@ def _build_hardcoded_queries(entity_name: str) -> list[str]:
     cover: identity recall, notes/email signals, and pipeline/company context.
     """
     name = entity_name.strip()
-    return [template.format(name=name) for template in _HARDCODED_QUERY_TEMPLATES]
+    return [template.format(name=name) for template in _DEFAULT_QUERY_TEMPLATES]
 
 
 def _snapshot_section_sort_key(heading: str) -> int:
@@ -393,7 +383,7 @@ def _collapse_hits_by_entity(hits: list[SupermemorySearchHit]) -> list[Supermemo
 
 
 class OrgMemoryQueryService:
-    """Hardcoded Supermemory search -> sales intelligence markdown synthesis."""
+    """Supermemory search -> markdown AI Overview using org-specific agent prompts."""
 
     def __init__(self) -> None:
         self._supermemory = SupermemoryService.from_settings()
@@ -405,10 +395,21 @@ class OrgMemoryQueryService:
         organization_id: str,
         entity_id: str | None = None,
         entity_type: str | None = None,
+        db_connection: asyncpg.Connection | None = None,
     ) -> str:
         """Return a sales intelligence markdown briefing for the queried entity."""
         user_message = user_message.strip()
         model = shared_settings.org_memory_llm_model
+
+        if db_connection is not None:
+            overview_settings = await _load_effective_ai_overview_settings(
+                db_connection,
+                organization_id,
+            )
+        else:
+            overview_settings = OrganizationService.default_ai_overview_settings()
+
+        prompt_entity_type = _resolve_overview_entity_type(entity_type)
 
         # Build hardcoded search queries — no LLM intent planner needed.
         # entity_id is known when the caller passes a specific CRM record;
@@ -467,33 +468,24 @@ class OrgMemoryQueryService:
         else:
             notes = ""
 
-        if notes:
-            scope_line = ""
-            if entity_id and entity_type:
-                scope_line = f"Answer only about this CRM {entity_type} (id {entity_id}).\n\n"
-            synth_user = (
-                f"{scope_line}"
-                f"Question: {user_message}\n\n"
-                "Return the four markdown sections: "
-                "Overview, Key Insights, Leads, Companies. "
-                "Open Key Insights with every note verbatim then blend in email signals, "
-                "blockers, and the next action with a date. "
-                "Use only the latest value when a field repeats. "
-                "Omit any field that has no value.\n\n"
-                f"CRM data:\n{notes}"
-            )
-        else:
-            synth_user = (
-                f"Question: {user_message}\n\n"
-                "No matching CRM data was retrieved. "
-                "Reply in one short neutral sentence that the information is not available."
-            )
+        synth_system = _build_synth_system_prompt(
+            entity_type=entity_type,
+            entity_name=entity_name,
+            overview_settings=overview_settings,
+        )
+        synth_user = _build_synth_user_message(
+            user_message=user_message,
+            notes=notes,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            business_overview=overview_settings.business_overview,
+        )
 
         answer = (
             await create_chat_completion(
                 model=model,
                 messages=[
-                    {"role": "system", "content": SYNTH_SYSTEM_PROMPT},
+                    {"role": "system", "content": synth_system},
                     {"role": "user", "content": synth_user},
                 ],
                 max_completion_tokens=_SYNTH_MAX_TOKENS,
@@ -510,9 +502,10 @@ class OrgMemoryQueryService:
             )
 
         logger.info(
-            "org_memory_query organization_id=%s search_hits=%s entities=%s "
-            "notes_len=%s notes_truncated=%s used_fallback=%s answer_len=%s",
+            "org_memory_query organization_id=%s prompt_entity_type=%s search_hits=%s "
+            "entities=%s notes_len=%s notes_truncated=%s used_fallback=%s answer_len=%s",
             organization_id,
+            prompt_entity_type,
             len(raw_hits),
             len(usable),
             len(notes),

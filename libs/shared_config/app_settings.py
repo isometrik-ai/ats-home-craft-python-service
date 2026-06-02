@@ -77,6 +77,31 @@ class IsometrikSettings(BaseSettings):
         "ISOMETRIK_WHATSAPP_WORKFLOW_ID",
         default="6a056642da7550b8dd2632a1",
     )
+    strands_auth_token: str = config("ISOMETRIK_STRANDS_AUTH_TOKEN", default="")
+    domain_discovery_agent_id: str = config(
+        "ISOMETRIK_DOMAIN_DISCOVERY_AGENT_ID",
+        default="6a1e96782a47334a19c74188",
+    )
+    business_overview_agent_id: str = config(
+        "ISOMETRIK_BUSINESS_OVERVIEW_AGENT_ID",
+        default="6a1e806e8dc032d543776318",
+    )
+    org_business_overview_on_create_enabled: bool = config(
+        "ISOMETRIK_ORG_BUSINESS_OVERVIEW_ON_CREATE_ENABLED",
+        default=True,
+    )
+    strands_request_timeout_seconds: float = config(
+        "ISOMETRIK_STRANDS_REQUEST_TIMEOUT_SECONDS",
+        default=300.0,
+    )
+    org_enrichment_max_concurrent: int = config(
+        "ISOMETRIK_ORG_ENRICHMENT_MAX_CONCURRENT",
+        default=5,
+    )
+    org_overview_openai_timeout_seconds: float = config(
+        "ORG_OVERVIEW_OPENAI_TIMEOUT_SECONDS",
+        default=360.0,
+    )
 
 
 class CloudflareR2Settings(BaseSettings):

@@ -6,7 +6,6 @@ from apps.user_service.app.services.org_memory_query_service import (
     _collapse_hits_by_entity,
     _dedupe_hits,
     _drop_deleted_and_empty,
-    _parse_intent,
     _prioritize_intel_sections_in_snapshot,
 )
 from libs.shared_utils.supermemory_service import SupermemorySearchHit
@@ -27,22 +26,6 @@ def test_prioritize_sections_sales_first() -> None:
     assert ordered.index("## Linked leads") < ordered.index("## Companies")
     assert ordered.index("## Companies") < ordered.index("## Profile")
     assert ordered.index("## Profile") < ordered.index("## Skills")
-
-
-def test_parse_intent_strips_json_fence() -> None:
-    """JSON wrapped in markdown fences is parsed into a plan."""
-    raw = """```json
-{"is_aggregation": false, "search_queries": ["Alice"], "synthesize_instruction": "Summarize"}
-```"""
-    plan = _parse_intent(raw, fallback_queries=["fallback"])
-    assert plan.search_queries == ["Alice"]
-    assert plan.is_aggregation is False
-
-
-def test_parse_intent_fallback_on_bad_json() -> None:
-    """Invalid JSON falls back to the user's original query strings."""
-    plan = _parse_intent("not json", fallback_queries=["hello", "world"])
-    assert plan.search_queries == ["hello", "world"]
 
 
 def test_dedupe_hits_by_id() -> None:

@@ -423,6 +423,12 @@ class LeadEventType(str, Enum):
     DELETED = "leads.deleted"
 
 
+class OrganizationEventType(str, Enum):
+    """Organization lifecycle events published to Kafka."""
+
+    ENRICHMENT_REQUESTED = "organizations.enrichment.requested"
+
+
 class KafkaTopics(str, Enum):
     """Kafka topics used by this service.
 
@@ -431,6 +437,7 @@ class KafkaTopics(str, Enum):
     """
 
     CRM_EVENTS = "crm.events.dev"
+    ORG_ENRICHMENT = "org.enrichment.dev"
 
 
 class UiColor(str, Enum):

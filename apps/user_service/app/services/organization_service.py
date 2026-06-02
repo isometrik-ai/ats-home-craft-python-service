@@ -19,6 +19,7 @@ from apps.user_service.app.db.repositories import (
     RoleRepository,
     TeamRepository,
 )
+from apps.user_service.app.schemas.ai_overview_settings import AiOverviewSettings
 from apps.user_service.app.schemas.common import OrganizationBasicDetails, Subscription
 from apps.user_service.app.schemas.enums import (
     AccountType,
@@ -34,6 +35,17 @@ from apps.user_service.app.schemas.organizations import (
     OrganizationAdminUpdate,
     OrganizationInfo,
     OrganizationListResponse,
+)
+from apps.user_service.app.services.ai_overview_settings_ops import (
+    coerce_overview_prompts_dict,
+)
+from apps.user_service.app.services.ai_overview_settings_ops import (
+    default_ai_overview_settings as platform_default_ai_overview_settings,
+)
+from apps.user_service.app.services.ai_overview_settings_ops import (
+    merge_ai_overview_settings_into_settings,
+    parse_stored_ai_overview_settings,
+    resolve_effective_ai_overview_settings,
 )
 from apps.user_service.app.services.organization_memory_service import (
     effective_organization_memory_enabled,
@@ -115,7 +127,10 @@ class OrganizationService:
             search=search, status=status
         )
 
-        items = [self._map_to_organization_info(org) for org in organizations_data]
+        items = [
+            self._map_to_organization_info(org, include_ai_overview_settings=False)
+            for org in organizations_data
+        ]
         total_pages = math.ceil(total_count / page_size) if page_size else 0
         message = "success.no_data" if total_count == 0 else "success.retrieved"
 
@@ -138,6 +153,27 @@ class OrganizationService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return self._map_to_organization_info(org)
+
+    async def _enqueue_business_overview_enrichment(
+        self,
+        *,
+        organization_id: str,
+        organization_name: str,
+        organization_website: str | None,
+        settings: dict[str, Any] | None,
+    ) -> None:
+        """Publish org enrichment job to Kafka after create (best-effort; never raises)."""
+        from apps.user_service.app.services.org_business_overview_enrichment_service import (
+            OrgBusinessOverviewEnrichmentService,
+        )
+
+        await OrgBusinessOverviewEnrichmentService.enqueue_enrichment_requested(
+            organization_id=organization_id,
+            organization_name=organization_name,
+            organization_website=organization_website,
+            settings=settings,
+            actor_user_id=self.user_context.user_id,
+        )
 
     async def create_organization(
         self,
@@ -223,6 +259,13 @@ class OrganizationService:
             organization_id=organization_id,
         )
 
+        await self._enqueue_business_overview_enrichment(
+            organization_id=organization_id,
+            organization_name=created["name"],
+            organization_website=body.company_data.company_website,
+            settings=settings,
+        )
+
         # Match API response shape
         return {
             "organization_id": organization_id,
@@ -287,6 +330,13 @@ class OrganizationService:
             isometrik_creds=isometrik_details,
         )
 
+        await self._enqueue_business_overview_enrichment(
+            organization_id=organization_id,
+            organization_name=created["name"],
+            organization_website=body.company_data.company_website,
+            settings=settings,
+        )
+
         return {
             "organization_id": organization_id,
             "organization_name": created["name"],
@@ -295,6 +345,30 @@ class OrganizationService:
             "user_email": self.user_context.email,
             "role_name": "admin",
         }
+
+    @staticmethod
+    def _build_admin_update_payload(update_data: OrganizationAdminUpdate) -> dict[str, Any]:
+        """Normalize admin PATCH body, including AI overview and repopulate flags."""
+        update_payload = update_data.model_dump(exclude_none=True, exclude_unset=True)
+        if "ai_overview_settings" in update_data.model_fields_set:
+            ai_patch = update_data.ai_overview_settings
+            update_payload["ai_overview_settings"] = (
+                ai_patch.model_dump(exclude_unset=True) if ai_patch is not None else {}
+            )
+        if update_data.repopulate_ai_overview_prompts:
+            reset_types = list(update_data.repopulate_ai_overview_prompts)
+            update_payload.pop("repopulate_ai_overview_prompts", None)
+            patch = update_payload.get("ai_overview_settings") or {}
+            if not isinstance(patch, dict):
+                patch = {}
+            prompts_patch = patch.get("overview_prompts") or {}
+            if not isinstance(prompts_patch, dict):
+                prompts_patch = {}
+            for entity_type in reset_types:
+                prompts_patch[str(entity_type)] = None
+            patch["overview_prompts"] = prompts_patch
+            update_payload["ai_overview_settings"] = patch
+        return update_payload
 
     async def update_organization(
         self, organization_id: str, update_data: OrganizationAdminUpdate
@@ -316,8 +390,7 @@ class OrganizationService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        # Extract only fields that were actually set
-        update_payload = update_data.model_dump(exclude_none=True, exclude_unset=True)
+        update_payload = self._build_admin_update_payload(update_data)
 
         if not update_payload:
             return {
@@ -348,7 +421,7 @@ class OrganizationService:
             organization_id=organization_id, update_data=db_payload
         )
 
-        if "organization_memory" in update_payload:
+        if "organization_memory" in update_payload or "ai_overview_settings" in update_payload:
             from apps.user_service.app.services.organization_memory_service import (
                 invalidate_organization_memory_cache,
             )
@@ -367,6 +440,13 @@ class OrganizationService:
         if "organization_memory" in update_payload:
             updated_settings = parse_json_field(updated.get("settings"))
             result["organization_memory"] = effective_organization_memory_enabled(updated_settings)
+        if "ai_overview_settings" in update_payload:
+            updated_settings = parse_json_field(updated.get("settings"))
+            result["ai_overview_settings"] = (
+                OrganizationService._resolve_effective_ai_overview_settings(
+                    updated_settings
+                ).model_dump()
+            )
 
         return result
 
@@ -411,14 +491,20 @@ class OrganizationService:
 
     def _categorize_update_fields(
         self, update_data: dict[str, Any]
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
         """Categorize update fields into different types.
 
         Args:
             update_data: Update payload with only fields being updated
 
         Returns:
-            Tuple of (direct_columns, nested_settings, simple_settings, practice_areas)
+            Tuple of (
+                direct_columns,
+                nested_settings,
+                simple_settings,
+                practice_areas,
+                ai_overview_settings,
+            )
         """
         # Direct database columns (not stored in settings JSON)
         direct_columns = {
@@ -448,6 +534,7 @@ class OrganizationService:
             "need_help_importing_data",
             "need_migration_assistance",
             "organization_memory",
+            "website_url",
         }
 
         # Practice area fields (replaced entirely, not merged)
@@ -461,11 +548,14 @@ class OrganizationService:
         nested_settings_updates = {}
         simple_settings_updates = {}
         practice_areas_updates = {}
+        ai_overview_settings_update: dict[str, Any] = {}
 
         # Separate fields by type
         for field, value in update_data.items():
             if field in direct_columns:
                 db_payload[field] = value
+            elif field == "ai_overview_settings":
+                ai_overview_settings_update = value if isinstance(value, dict) else {}
             elif field in practice_area_fields:
                 practice_areas_updates[field] = value
             elif field in nested_settings_fields:
@@ -473,7 +563,13 @@ class OrganizationService:
             elif field in simple_settings_fields:
                 simple_settings_updates[field] = value
 
-        return db_payload, nested_settings_updates, simple_settings_updates, practice_areas_updates
+        return (
+            db_payload,
+            nested_settings_updates,
+            simple_settings_updates,
+            practice_areas_updates,
+            ai_overview_settings_update,
+        )
 
     def _merge_nested_settings(
         self, merged_settings: dict[str, Any], nested_settings_updates: dict[str, Any]
@@ -548,16 +644,29 @@ class OrganizationService:
             nested_settings_updates,
             simple_settings_updates,
             practice_areas_updates,
+            ai_overview_settings_update,
         ) = self._categorize_update_fields(update_data)
 
         # Build settings object if any settings fields are being updated
-        if nested_settings_updates or simple_settings_updates or practice_areas_updates:
+        settings_fields_updated = (
+            nested_settings_updates
+            or simple_settings_updates
+            or practice_areas_updates
+            or ai_overview_settings_update
+        )
+        if settings_fields_updated:
             # Start with existing settings (or empty dict when settings/key never set)
             base_settings = existing_settings if isinstance(existing_settings, dict) else {}
             merged_settings = base_settings.copy()
 
             # Apply partial updates to nested JSON objects (deep merge subfields)
             self._merge_nested_settings(merged_settings, nested_settings_updates)
+
+            if ai_overview_settings_update:
+                merge_ai_overview_settings_into_settings(
+                    merged_settings,
+                    ai_overview_settings_update,
+                )
 
             # Replace simple settings fields entirely (no merging)
             for field, value in simple_settings_updates.items():
@@ -601,18 +710,51 @@ class OrganizationService:
         return None
 
     @staticmethod
-    def _extract_settings_fields(settings: dict[str, Any]) -> dict[str, Any]:
+    def _coerce_overview_prompts_dict(raw: Any) -> dict[str, str]:
+        """Return a dict of non-empty per-entity overview prompt strings."""
+        return coerce_overview_prompts_dict(raw)
+
+    @staticmethod
+    def _parse_stored_ai_overview_settings(settings: Any) -> dict[str, Any]:
+        """Return the raw ``ai_overview_settings`` object from organization settings JSON."""
+        return parse_stored_ai_overview_settings(settings)
+
+    @staticmethod
+    def _resolve_effective_ai_overview_settings(settings: Any) -> AiOverviewSettings:
+        """Merge stored overrides with platform defaults for API responses."""
+        return resolve_effective_ai_overview_settings(settings)
+
+    @staticmethod
+    def _merge_ai_overview_settings_into_settings(
+        settings: dict[str, Any],
+        update: dict[str, Any],
+    ) -> None:
+        """Apply a partial ``AiOverviewSettingsUpdate`` dict into ``settings`` in place."""
+        merge_ai_overview_settings_into_settings(settings, update)
+
+    @staticmethod
+    def default_ai_overview_settings() -> AiOverviewSettings:
+        """Platform defaults for reset or new-org display."""
+        return platform_default_ai_overview_settings()
+
+    @staticmethod
+    def _extract_settings_fields(
+        settings: dict[str, Any],
+        *,
+        include_ai_overview_settings: bool = True,
+    ) -> dict[str, Any]:
         """Extract fields from settings dictionary.
 
         Args:
             settings: Settings dictionary
+            include_ai_overview_settings: When false, omit prompts from list responses
 
         Returns:
             Dictionary with extracted fields
         """
         practice_areas = settings.get("practice_areas", {}) if isinstance(settings, dict) else {}
 
-        return {
+        extracted: dict[str, Any] = {
             "address": settings.get("address"),
             "preferred_integration": settings.get("preferred_integration"),
             "need_help_importing_data": settings.get("need_help_importing_data"),
@@ -624,7 +766,13 @@ class OrganizationService:
             "primary_practice_areas": practice_areas.get("primary"),
             "secondary_practice_areas": practice_areas.get("secondary"),
             "specializations": practice_areas.get("specializations"),
+            "website_url": settings.get("website_url"),
         }
+        if include_ai_overview_settings:
+            extracted["ai_overview_settings"] = (
+                OrganizationService._resolve_effective_ai_overview_settings(settings)
+            )
+        return extracted
 
     @staticmethod
     def _format_organization_for_audit(org_data: dict[str, Any]) -> dict[str, Any]:
@@ -657,6 +805,7 @@ class OrganizationService:
             "industry": org_data.get("industry"),
             "referral_source": org_data.get("referral_source"),
             "address": existing_settings.get("address") if is_settings_dict else None,
+            "website_url": existing_settings.get("website_url") if is_settings_dict else None,
             "preferred_integration": (
                 existing_settings.get("preferred_integration") if is_settings_dict else None
             ),
@@ -683,20 +832,31 @@ class OrganizationService:
             "specializations": (
                 practice_areas.get("specializations") if is_practice_areas_dict else None
             ),
+            "ai_overview_settings": OrganizationService._resolve_effective_ai_overview_settings(
+                existing_settings
+            ).model_dump(),
         }
 
     @staticmethod
-    def _map_to_organization_info(org_data: dict[str, Any]) -> OrganizationInfo:
+    def _map_to_organization_info(
+        org_data: dict[str, Any],
+        *,
+        include_ai_overview_settings: bool = True,
+    ) -> OrganizationInfo:
         """Map raw DB row to OrganizationInfo schema."""
         settings = parse_json_field(org_data.get("settings"))
         subscription_obj = OrganizationService._parse_subscription(org_data.get("subscription"))
-        settings_fields = OrganizationService._extract_settings_fields(settings)
+        settings_fields = OrganizationService._extract_settings_fields(
+            settings,
+            include_ai_overview_settings=include_ai_overview_settings,
+        )
 
         return OrganizationInfo(
             organization_id=str(org_data["id"]),
             name=org_data.get("name"),
             slug=org_data.get("slug"),
             domain=org_data.get("domain"),
+            website_url=settings_fields.get("website_url"),
             logo_url=org_data.get("logo_url"),
             subscription=subscription_obj,
             status=org_data.get("status"),
@@ -717,6 +877,7 @@ class OrganizationService:
             primary_practice_areas=settings_fields["primary_practice_areas"],
             secondary_practice_areas=settings_fields["secondary_practice_areas"],
             specializations=settings_fields["specializations"],
+            ai_overview_settings=settings_fields.get("ai_overview_settings"),
         )
 
     @staticmethod
@@ -784,6 +945,7 @@ class OrganizationService:
                 "enterprise_features": body.company_data.enterprise_features,
                 "team_setup": body.company_data.team_setup,
                 "address": body.company_data.address,
+                "website_url": body.company_data.company_website,
             }
             settings = serialize_pydantic_models(settings)
 

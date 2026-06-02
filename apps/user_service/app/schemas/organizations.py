@@ -4,11 +4,15 @@ This module contains all Pydantic models and schemas related to organization man
 These schemas are used for request/response validation and API documentation.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from apps.user_service.app.schemas.ai_overview_settings import (
+    AiOverviewSettings,
+    AiOverviewSettingsUpdate,
+)
 from apps.user_service.app.schemas.auth import (
     CompanyData,
     ComplianceSecurity,
@@ -54,6 +58,10 @@ class OrganizationInfo(BaseModel):
     name: str = Field(..., description="Organization's name")
     slug: str = Field(..., description="URL-friendly slug for the organization")
     domain: str | None = Field(None, description="Organization's domain name")
+    website_url: str | None = Field(
+        None,
+        description="Organization website URL (https preferred)",
+    )
     logo_url: str | None = Field(None, description="URL to organization's logo")
     subscription: Subscription | None = Field(
         default=None,
@@ -98,6 +106,13 @@ class OrganizationInfo(BaseModel):
     team_setup: TeamSetup | None = Field(None, description="Organization's team setup")
     description: str | None = Field(None, description="Organization's description")
     company_size: str | None = Field(None, description="Organization's company size")
+    ai_overview_settings: AiOverviewSettings | None = Field(
+        None,
+        description=(
+            "AI Overview Settings: business overview (company facts) and overview prompts "
+            "for lead, contact, and company records"
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -423,6 +438,25 @@ class OrganizationUpdate(BaseModel):
             "Toggle Supermemory CRM sync. Send true or false to change; omit to leave "
             "unchanged. When not stored in settings, memory is enabled by default."
         ),
+    )
+    ai_overview_settings: AiOverviewSettingsUpdate | None = Field(
+        None,
+        description=(
+            "AI Overview Settings. business_overview is company facts (not a prompt). "
+            "Set overview_prompts.<entity> to null to reset that prompt to the platform default."
+        ),
+    )
+    repopulate_ai_overview_prompts: list[Literal["lead", "contact", "company"]] | None = Field(
+        None,
+        description=(
+            "Clears stored prompt overrides for the selected entity types so platform defaults "
+            "are used again. Example: ['lead'] resets only the lead prompt."
+        ),
+    )
+    website_url: str | None = Field(
+        None,
+        max_length=2048,
+        description="Organization website URL (https preferred)",
     )
 
     timezone: str | None = Field(
