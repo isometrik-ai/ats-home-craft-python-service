@@ -325,7 +325,9 @@ async def create_organization(
         user_context=user_context, db_connection=db_connection
     )
     result = await organization_service.create_organization(
-        body=body, slug=None, session_id=session_id
+        body=body,
+        slug=None,
+        session_id=session_id,
     )
     request.state.audit_requested_id = str(result.get("organization_id", "")) if result else ""
 
@@ -425,6 +427,8 @@ async def update_organization(
     }
     if "organization_memory" in result:
         response_data["organization_memory"] = result["organization_memory"]
+    if "ai_overview_settings" in result:
+        response_data["ai_overview_settings"] = result["ai_overview_settings"]
 
     return success_response(
         request=request,

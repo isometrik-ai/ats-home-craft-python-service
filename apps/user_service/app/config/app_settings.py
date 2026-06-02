@@ -65,6 +65,10 @@ class KafkaSettings(BaseSettings):
     max_batch_size: int = config("KAFKA_MAX_BATCH_SIZE", default=16384)
     linger_ms: int = config("KAFKA_LINGER_MS", default=5)
     compression_type: str | None = config("KAFKA_COMPRESSION_TYPE", default="gzip")
+    org_enrichment_consumer_group_id: str = config(
+        "KAFKA_ORG_ENRICHMENT_CONSUMER_GROUP_ID",
+        default="org-enrichment-worker",
+    )
 
 
 class ApplicationSettings(BaseSettings):

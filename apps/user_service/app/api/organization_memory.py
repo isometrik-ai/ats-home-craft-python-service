@@ -76,6 +76,7 @@ async def post_org_memory_query(
         organization_id=org_id,
         entity_id=body.entity_id.strip() if body.entity_id else None,
         entity_type=body.entity_type,
+        db_connection=db_connection,
     )
     payload = OrgMemoryQueryResponse(answer=answer)
     return success_response(

@@ -160,9 +160,11 @@ def _build_chat_completion_payload(
 async def _post_chat_completion(
     client: httpx.AsyncClient,
     payload: dict[str, Any],
+    *,
+    timeout: httpx.Timeout | None = None,
 ) -> str:
     """Execute one chat completion request and return assistant text."""
-    response = await client.post("/chat/completions", json=payload)
+    response = await client.post("/chat/completions", json=payload, timeout=timeout)
     if response.status_code in _RETRYABLE_STATUS_CODES:
         raise httpx.HTTPStatusError(
             f"retryable status {response.status_code}",
@@ -186,13 +188,15 @@ async def _post_chat_completion(
 async def _post_chat_completion_with_retries(
     client: httpx.AsyncClient,
     payload: dict[str, Any],
+    *,
+    timeout: httpx.Timeout | None = None,
 ) -> str:
     """POST with exponential backoff on transient failures."""
     last_error: Exception | None = None
 
     for attempt in range(_DEFAULT_NUM_RETRIES):
         try:
-            return await _post_chat_completion(client, payload)
+            return await _post_chat_completion(client, payload, timeout=timeout)
         except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
             last_error = exc
             if attempt + 1 >= _DEFAULT_NUM_RETRIES:
@@ -218,6 +222,7 @@ async def create_chat_completion(
     max_completion_tokens: int,
     response_format: dict[str, str] | None = None,
     settings: SharedAppSettings | None = None,
+    timeout_seconds: float | None = None,
 ) -> str:
     """POST ``/chat/completions`` and return assistant message text."""
     if not is_openai_configured(settings):
@@ -229,5 +234,14 @@ async def create_chat_completion(
         max_completion_tokens=max_completion_tokens,
         response_format=response_format,
     )
+    request_timeout: httpx.Timeout | None = None
+    if timeout_seconds is not None:
+        read_seconds = max(30.0, float(timeout_seconds))
+        request_timeout = httpx.Timeout(read_seconds)
+
     client = await get_openai_http_client(settings)
-    return await _post_chat_completion_with_retries(client, payload)
+    return await _post_chat_completion_with_retries(
+        client,
+        payload,
+        timeout=request_timeout,
+    )
