@@ -1018,6 +1018,7 @@ class ContactsRepository(BaseRepository):
               ct.external_contact_id,
               ct.phones,
               COALESCE(cn.company_names, '[]'::jsonb) AS company_names,
+              ct.tags,
               ct.created_at,
               ct.updated_at
             FROM contacts ct

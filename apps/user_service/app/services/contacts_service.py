@@ -1942,6 +1942,12 @@ class ContactsService:
         elif phones is None:
             list_row["phones"] = []
 
+        tags = list_row.get("tags")
+        if tags is None:
+            list_row["tags"] = []
+        elif not isinstance(tags, list):
+            list_row["tags"] = list(tags)
+
     async def list_contacts(
         self,
         *,
@@ -2121,6 +2127,7 @@ class ContactsService:
                 "profile_photo_url": hit_document.get("profile_photo_url"),
                 "phones": hit_document.get("phones_display") or [],
                 "company_names": hit_document.get("company_names") or [],
+                "tags": hit_document.get("tags") or [],
                 "created_at": created_at_iso,
                 "updated_at": updated_at_iso,
             }

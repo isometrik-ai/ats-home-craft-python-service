@@ -436,6 +436,7 @@ class ContactSummaryResponse(BaseModel):
     external_contact_id: str | None = None
     phones: list[dict[str, Any]] = Field(default_factory=list)
     company_names: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
