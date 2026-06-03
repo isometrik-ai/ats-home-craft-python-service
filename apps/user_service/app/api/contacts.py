@@ -90,7 +90,7 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
         "audit_required",
     ],
     table_name="contacts",
-    category="CLIENT",
+    category="CONTACT",
 )
 async def create_contact(
     request: Request,
@@ -516,7 +516,7 @@ async def get_contact_details(
         "audit_required",
     ],
     table_name="contacts",
-    category="CLIENT",
+    category="CONTACT",
 )
 async def update_contact(
     request: Request,
@@ -664,7 +664,7 @@ async def update_contact(
     data_classification="pii",
     compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
     table_name="contacts",
-    category="CLIENT",
+    category="CONTACT",
 )
 async def enrich_contact(
     request: Request,
@@ -747,7 +747,7 @@ async def enrich_contact(
         "audit_required",
     ],
     table_name="contacts",
-    category="CLIENT",
+    category="CONTACT",
 )
 async def delete_contact(
     request: Request,

@@ -92,7 +92,7 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
         "audit_required",
     ],
     table_name="companies",
-    category="CLIENT",
+    category="COMPANY",
 )
 async def create_company(
     request: Request,
@@ -458,7 +458,7 @@ async def get_company_details(
     data_classification="pii",
     compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
     table_name="companies",
-    category="CLIENT",
+    category="COMPANY",
 )
 async def enrich_company(
     request: Request,
@@ -568,7 +568,7 @@ async def enrich_company(
     data_classification="pii",
     compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
     table_name="companies",
-    category="CLIENT",
+    category="COMPANY",
 )
 async def update_company(
     request: Request,
@@ -707,7 +707,7 @@ async def update_company(
     data_classification="pii",
     compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
     table_name="companies",
-    category="CLIENT",
+    category="COMPANY",
 )
 async def delete_company(
     request: Request,
