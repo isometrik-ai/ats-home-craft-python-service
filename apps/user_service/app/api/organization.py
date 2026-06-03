@@ -214,6 +214,61 @@ async def get_delete_request_list(
     )
 
 
+@handle_api_exceptions("get organization AI overview settings")
+@router.get(
+    "/ai-overview-settings",
+    response_model=None,
+    description="Get AI overview prompts and business background for the current organization",
+    summary="Get organization AI overview settings",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        http_status.HTTP_200_OK: {"description": "AI overview settings retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+async def get_organization_ai_overview_settings(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Get stored AI overview prompts merged with platform defaults for the session org.
+
+    Returns ``business_overview`` (company facts for AI background) and
+    ``overview_prompts`` for lead, contact, and company record types.
+    Requires: settings_management.edit
+    """
+    user_context = await extract_user_context(current_user, db_connection)
+    if user_context.organization_id is None:
+        raise ValidationException(
+            message_key="organizations.errors.user_not_a_member_of_any_organization",
+            custom_code=CustomStatusCode.INVALID_DATA,
+        )
+
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
+        organization_id=user_context.organization_id,
+    )
+    organization_service = OrganizationService(
+        user_context=user_context, db_connection=db_connection
+    )
+    settings = await organization_service.get_ai_overview_settings(user_context.organization_id)
+    return success_response(
+        request=request,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=settings.model_dump(exclude_none=False),
+    )
+
+
 @handle_api_exceptions("get organization by ID")
 @router.get(
     "/{organization_id}",

@@ -93,6 +93,59 @@ async def test_get_organization_by_id(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_get_organization_ai_overview_settings(monkeypatch, client):
+    """Get organization AI overview prompts."""
+
+    async def fake_extract(current_user, db_connection):
+        del current_user, db_connection
+        return _ctx()
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        del current_user, db_connection, permission_codes
+        assert organization_id == "org-1"
+        return _ctx()
+
+    async def fake_ai_overview_settings(self, org_id):
+        del self
+        assert org_id == "org-1"
+        return type(
+            "Settings",
+            (),
+            {
+                "model_dump": lambda self=None, **_k: {
+                    "business_overview": "Healthcare SaaS",
+                    "overview_prompts": {
+                        "lead": "Lead prompt {{entity_name}}",
+                        "contact": "Contact prompt {{entity_name}}",
+                        "company": "Company prompt {{entity_name}}",
+                    },
+                }
+            },
+        )()
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.extract_user_context",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service."
+        "OrganizationService.get_ai_overview_settings",
+        fake_ai_overview_settings,
+    )
+
+    res = await client.get("/v1/organization/ai-overview-settings")
+    body = assert_success(res, 200)
+    assert body["data"]["business_overview"] == "Healthcare SaaS"
+    assert body["data"]["overview_prompts"]["lead"] == "Lead prompt {{entity_name}}"
+
+
+@pytest.mark.asyncio
 async def test_create_organization(monkeypatch, client):
     """Create organization."""
 
