@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
@@ -18,6 +19,7 @@ from apps.user_service.app.db.repositories import OrganizationRepository
 from apps.user_service.app.schemas.enums import KafkaTopics, OrganizationEventType
 from apps.user_service.app.services.ai_overview_settings_ops import (
     merge_ai_overview_settings_into_settings,
+    resolve_effective_ai_overview_settings,
 )
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.kafka_event_service import get_kafka_event_service
@@ -28,11 +30,26 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_config.app_settings import shared_settings
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
+from libs.shared_utils.http_exceptions import BadRequestException, NotFoundException
 from libs.shared_utils.isometrik_strands_client import call_strands_agent
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.openai_chat_service import create_chat_completion
+from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("org_business_overview_enrichment")
+
+
+@asynccontextmanager
+async def _db_repository(organization_repository: OrganizationRepository | None):
+    """Use API request repo when provided; otherwise acquire a short-lived pool connection."""
+    if organization_repository is not None:
+        yield organization_repository
+        return
+
+    pool = await get_pool()
+    async with AcquireConnection(pool) as conn:
+        yield OrganizationRepository(db_connection=conn)
+
 
 _STRANDS_ERROR_BODY_MAX_LEN = 2000
 
@@ -200,15 +217,19 @@ def _normalize_website_url(url: str | None) -> str | None:
     return normalized if _is_safe_http_url(normalized) else None
 
 
-def _parse_overview_prompts_response(raw: str) -> dict[str, str] | None:
-    """Parse LLM JSON into validated overview_prompts, or None if invalid."""
+def _parse_overview_prompts_response(
+    raw: str,
+    entity_types: tuple[str, ...] | None = None,
+) -> dict[str, str] | None:
+    """Parse LLM JSON into validated overview_prompts for the requested entity types."""
+    targets = entity_types or OVERVIEW_PROMPT_ENTITY_TYPES
     try:
         payload = _parse_json_object_text(raw)
     except (json.JSONDecodeError, ValueError):
         return None
 
     prompts: dict[str, str] = {}
-    for entity_type in OVERVIEW_PROMPT_ENTITY_TYPES:
+    for entity_type in targets:
         value = payload.get(entity_type)
         if not isinstance(value, str):
             return None
@@ -333,42 +354,324 @@ class OrgBusinessOverviewEnrichmentService:
         if not org_name:
             return
 
-        if await OrgBusinessOverviewEnrichmentService._enrichment_already_persisted(
-            organization_id
-        ):
-            logger.info(
-                "org_business_overview_skip_already_enriched",
-                extra={"organization_id": organization_id},
-            )
-            return
+        async with _db_repository(None) as organization_repository:
+            if await OrgBusinessOverviewEnrichmentService._enrichment_already_persisted(
+                organization_id,
+                organization_repository,
+            ):
+                logger.info(
+                    "org_business_overview_skip_already_enriched",
+                    extra={"organization_id": organization_id},
+                )
+                return
+
         website_hint = _normalize_website_url(organization_website)
         if website_hint is None:
             website_hint = await OrgBusinessOverviewEnrichmentService._load_organization_website(
-                organization_id
+                organization_id,
+                organization_repository=None,
             )
 
         await OrgBusinessOverviewEnrichmentService._run_enrichment_pipeline(
             organization_id,
             org_name,
+            organization_repository=None,
             organization_website=website_hint,
         )
 
     @staticmethod
-    async def _load_organization_website(organization_id: str) -> str | None:
-        """Read website from org row (domain) or settings.website_url."""
-        pool = await get_pool()
-        async with AcquireConnection(pool) as conn:
-            repo = OrganizationRepository(db_connection=conn)
+    def _require_strands_for_refetch() -> None:
+        """Raise when strands enrichment is not configured."""
+        if not strands_enrichment_enabled():
+            raise BadRequestException(
+                message_key="errors.service_unavailable",
+                custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+                params={"reason": "strands_enrichment_not_configured"},
+            )
+
+    @staticmethod
+    async def _refetch_org_context(
+        organization_id: str,
+        organization_repository: OrganizationRepository,
+    ) -> tuple[str, str | None]:
+        """Load org name and website for refetch; raise when org or name is invalid."""
+        org = await organization_repository.get_organization_by_id(organization_id)
+        if not org:
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        org_name = _sanitize_org_name(str(org.get("name") or ""))
+        if not org_name:
+            raise BadRequestException(
+                message_key="organizations.errors.invalid_data",
+                custom_code=CustomStatusCode.INVALID_DATA,
+                params={"field": "organization_name"},
+            )
+        return org_name, OrgBusinessOverviewEnrichmentService._website_from_org_row(org)
+
+    @staticmethod
+    async def _refetch_business_overview_field(
+        organization_id: str,
+        org_name: str,
+        website: str | None,
+        *,
+        organization_repository: OrganizationRepository,
+    ) -> None:
+        """Re-fetch and persist business_overview from website (discover website if missing)."""
+        if not website:
+            website = await OrgBusinessOverviewEnrichmentService._ensure_organization_website(
+                organization_id,
+                org_name,
+                organization_repository=organization_repository,
+            )
+        if not website:
+            raise BadRequestException(
+                message_key="organizations.errors.invalid_data",
+                custom_code=CustomStatusCode.INVALID_DATA,
+                params={"reason": "website_required_for_business_overview_refetch"},
+            )
+        overview = await OrgBusinessOverviewEnrichmentService._fetch_business_overview(website)
+        if not overview:
+            raise BadRequestException(
+                message_key="organizations.errors.invalid_data",
+                custom_code=CustomStatusCode.INVALID_DATA,
+                params={"reason": "business_overview_refetch_failed"},
+            )
+        await OrgBusinessOverviewEnrichmentService._persist_ai_settings(
+            organization_id,
+            organization_repository=organization_repository,
+            business_overview=overview[:_MAX_BUSINESS_OVERVIEW_LEN],
+            force_business_overview=True,
+        )
+
+    @staticmethod
+    async def _refetch_overview_prompt_fields(
+        organization_id: str,
+        org_name: str,
+        website: str | None,
+        prompt_entities: tuple[str, ...],
+        *,
+        organization_repository: OrganizationRepository,
+    ) -> None:
+        """Regenerate and persist only the requested overview prompt entity types."""
+        overview_text = await OrgBusinessOverviewEnrichmentService._load_business_overview_text(
+            organization_id,
+            organization_repository=organization_repository,
+        )
+        if not overview_text:
+            raise BadRequestException(
+                message_key="organizations.errors.invalid_data",
+                custom_code=CustomStatusCode.INVALID_DATA,
+                params={"reason": "stored_business_overview_required_for_prompt_refetch"},
+            )
+
+        prompts = await OrgBusinessOverviewEnrichmentService._generate_overview_prompts(
+            business_overview=overview_text,
+            organization_name=org_name,
+            website_url=website,
+            entity_types=prompt_entities,
+        )
+        if prompts is None:
+            prompts = {
+                entity_type: DEFAULT_OVERVIEW_PROMPTS[entity_type]
+                for entity_type in prompt_entities
+            }
+            logger.info(
+                "org_business_overview_prompt_gen_failed_using_defaults",
+                extra={
+                    "organization_id": organization_id,
+                    "entity_types": list(prompt_entities),
+                },
+            )
+
+        await OrgBusinessOverviewEnrichmentService._persist_ai_settings(
+            organization_id,
+            organization_repository=organization_repository,
+            overview_prompts=prompts,
+        )
+
+    @staticmethod
+    def _invalidate_refetch_cache(organization_id: str, requested: set[str]) -> None:
+        """Invalidate org memory cache when overview settings were updated."""
+        if not requested & {"business_overview", *OVERVIEW_PROMPT_ENTITY_TYPES}:
+            return
+        from apps.user_service.app.services.organization_memory_service import (
+            invalidate_organization_memory_cache,
+        )
+
+        invalidate_organization_memory_cache(organization_id)
+
+    @staticmethod
+    async def _build_refetch_response(
+        organization_id: str,
+        requested: set[str],
+        prompt_entities: tuple[str, ...],
+        *,
+        organization_repository: OrganizationRepository,
+    ) -> dict[str, Any]:
+        """Return only the field(s) that were refetched."""
+        refreshed = await organization_repository.get_organization_by_id(organization_id)
+        settings = parse_json_field(refreshed.get("settings")) if refreshed else {}
+        effective = resolve_effective_ai_overview_settings(settings)
+
+        result: dict[str, Any] = {}
+        if "business_overview" in requested:
+            result["business_overview"] = effective.business_overview
+            if isinstance(settings, dict):
+                result["website_url"] = _normalize_website_url(settings.get("website_url"))
+        if prompt_entities:
+            result["overview_prompts"] = {
+                entity_type: getattr(effective.overview_prompts, entity_type)
+                for entity_type in prompt_entities
+            }
+        return result
+
+    @staticmethod
+    async def refetch_ai_overview_fields(
+        organization_id: str,
+        fields: list[str],
+        *,
+        organization_repository: OrganizationRepository,
+    ) -> dict[str, Any]:
+        """Refetch only the explicitly requested fields (no chained side effects)."""
+        OrgBusinessOverviewEnrichmentService._require_strands_for_refetch()
+
+        requested = set(fields)
+        prompt_entities = tuple(
+            entity_type for entity_type in OVERVIEW_PROMPT_ENTITY_TYPES if entity_type in requested
+        )
+        org_name, website = await OrgBusinessOverviewEnrichmentService._refetch_org_context(
+            organization_id,
+            organization_repository,
+        )
+
+        if "business_overview" in requested:
+            await OrgBusinessOverviewEnrichmentService._refetch_business_overview_field(
+                organization_id,
+                org_name,
+                website,
+                organization_repository=organization_repository,
+            )
+
+        if prompt_entities:
+            await OrgBusinessOverviewEnrichmentService._refetch_overview_prompt_fields(
+                organization_id,
+                org_name,
+                website,
+                prompt_entities,
+                organization_repository=organization_repository,
+            )
+
+        OrgBusinessOverviewEnrichmentService._invalidate_refetch_cache(
+            organization_id,
+            requested,
+        )
+        return await OrgBusinessOverviewEnrichmentService._build_refetch_response(
+            organization_id,
+            requested,
+            prompt_entities,
+            organization_repository=organization_repository,
+        )
+
+    @staticmethod
+    def _website_from_org_row(org: dict[str, Any] | None) -> str | None:
+        """Extract normalized website URL from an organization row."""
+        if not org:
+            return None
+        domain = _normalize_website_url(org.get("domain"))
+        if domain:
+            return domain
+        settings = parse_json_field(org.get("settings"))
+        if isinstance(settings, dict):
+            return _normalize_website_url(settings.get("website_url"))
+        return None
+
+    @staticmethod
+    async def _load_business_overview_text(
+        organization_id: str,
+        *,
+        organization_repository: OrganizationRepository | None = None,
+    ) -> str | None:
+        """Return stored business overview text when present."""
+        async with _db_repository(organization_repository) as repo:
             org = await repo.get_organization_by_id(organization_id)
             if not org:
                 return None
-            domain = _normalize_website_url(org.get("domain"))
-            if domain:
-                return domain
             settings = parse_json_field(org.get("settings"))
-            if isinstance(settings, dict):
-                return _normalize_website_url(settings.get("website_url"))
-        return None
+            if not isinstance(settings, dict):
+                return None
+            ai_settings = settings.get(AI_OVERVIEW_SETTINGS_KEY)
+            if not isinstance(ai_settings, dict):
+                return None
+            overview = ai_settings.get("business_overview")
+            if isinstance(overview, str) and overview.strip():
+                return overview.strip()
+            return None
+
+    @staticmethod
+    async def _persist_website_url(
+        organization_id: str,
+        website_url: str,
+        *,
+        organization_repository: OrganizationRepository | None = None,
+    ) -> None:
+        """Persist resolved or discovered website on organization settings."""
+        normalized = _normalize_website_url(website_url)
+        if not normalized:
+            return
+
+        async with _db_repository(organization_repository) as repo:
+            org = await repo.get_organization_by_id(organization_id)
+            if not org:
+                return
+            settings = parse_json_field(org.get("settings"))
+            if not isinstance(settings, dict):
+                settings = {}
+            if settings.get("website_url") == normalized:
+                return
+            settings["website_url"] = normalized
+            serialized_settings = json.dumps(serialize_pydantic_models(settings))
+            await repo.update_organization(organization_id, {"settings": serialized_settings})
+
+    @staticmethod
+    async def _load_organization_website(
+        organization_id: str,
+        *,
+        organization_repository: OrganizationRepository | None = None,
+    ) -> str | None:
+        """Read website from org row (domain) or settings.website_url."""
+        async with _db_repository(organization_repository) as repo:
+            org = await repo.get_organization_by_id(organization_id)
+            return OrgBusinessOverviewEnrichmentService._website_from_org_row(org)
+
+    @staticmethod
+    async def _ensure_organization_website(
+        organization_id: str,
+        organization_name: str,
+        *,
+        organization_repository: OrganizationRepository | None = None,
+    ) -> str | None:
+        """Return stored website, or discover and persist it when missing."""
+        website = await OrgBusinessOverviewEnrichmentService._load_organization_website(
+            organization_id,
+            organization_repository=organization_repository,
+        )
+        if website:
+            return website
+        website, _ = await OrgBusinessOverviewEnrichmentService._resolve_website_url(
+            organization_id=organization_id,
+            organization_name=organization_name,
+            organization_website=None,
+        )
+        if not website:
+            return None
+        await OrgBusinessOverviewEnrichmentService._persist_website_url(
+            organization_id,
+            website,
+            organization_repository=organization_repository,
+        )
+        return website
 
     @staticmethod
     async def _resolve_website_url(
@@ -399,16 +702,16 @@ class OrgBusinessOverviewEnrichmentService:
         return None, "none"
 
     @staticmethod
-    async def _enrichment_already_persisted(organization_id: str) -> bool:
+    async def _enrichment_already_persisted(
+        organization_id: str,
+        organization_repository: OrganizationRepository,
+    ) -> bool:
         """Idempotency guard for duplicate Kafka deliveries."""
-        pool = await get_pool()
-        async with AcquireConnection(pool) as conn:
-            repo = OrganizationRepository(db_connection=conn)
-            org = await repo.get_organization_by_id(organization_id)
-            if not org:
-                return True
-            settings = parse_json_field(org.get("settings"))
-            return _has_stored_overview_prompts(settings)
+        org = await organization_repository.get_organization_by_id(organization_id)
+        if not org:
+            return True
+        settings = parse_json_field(org.get("settings"))
+        return _has_stored_overview_prompts(settings)
 
     @staticmethod
     async def _discover_official_website(company_name: str) -> str | None:
@@ -528,6 +831,7 @@ class OrgBusinessOverviewEnrichmentService:
         organization_id: str,
         organization_name: str,
         *,
+        organization_repository: OrganizationRepository | None = None,
         organization_website: str | None = None,
     ) -> None:
         """Resolve website, fetch overview, generate prompts, and persist settings."""
@@ -548,8 +852,17 @@ class OrgBusinessOverviewEnrichmentService:
                         "website_source": website_source,
                     },
                 )
-                await OrgBusinessOverviewEnrichmentService._persist_default_prompts(organization_id)
+                await OrgBusinessOverviewEnrichmentService._persist_default_prompts(
+                    organization_id,
+                    organization_repository=organization_repository,
+                )
                 return
+
+            await OrgBusinessOverviewEnrichmentService._persist_website_url(
+                organization_id,
+                website,
+                organization_repository=organization_repository,
+            )
 
             overview = await OrgBusinessOverviewEnrichmentService._fetch_business_overview(website)
             if not overview:
@@ -560,7 +873,10 @@ class OrgBusinessOverviewEnrichmentService:
                     website,
                     website_source,
                 )
-                await OrgBusinessOverviewEnrichmentService._persist_default_prompts(organization_id)
+                await OrgBusinessOverviewEnrichmentService._persist_default_prompts(
+                    organization_id,
+                    organization_repository=organization_repository,
+                )
                 return
 
             truncated = overview[:_MAX_BUSINESS_OVERVIEW_LEN]
@@ -577,8 +893,10 @@ class OrgBusinessOverviewEnrichmentService:
                 prompts = DEFAULT_OVERVIEW_PROMPTS
             await OrgBusinessOverviewEnrichmentService._persist_ai_settings(
                 organization_id,
+                organization_repository=organization_repository,
                 business_overview=truncated,
                 overview_prompts=prompts,
+                force_business_overview=True,
             )
             logger.info(
                 "org_business_overview_enriched",
@@ -594,7 +912,10 @@ class OrgBusinessOverviewEnrichmentService:
                 extra={"organization_id": organization_id},
             )
             try:
-                await OrgBusinessOverviewEnrichmentService._persist_default_prompts(organization_id)
+                await OrgBusinessOverviewEnrichmentService._persist_default_prompts(
+                    organization_id,
+                    organization_repository=organization_repository,
+                )
             except Exception:
                 logger.exception(
                     "org_business_overview_fallback_prompt_persist_failed",
@@ -602,10 +923,15 @@ class OrgBusinessOverviewEnrichmentService:
                 )
 
     @staticmethod
-    async def _persist_default_prompts(organization_id: str) -> None:
+    async def _persist_default_prompts(
+        organization_id: str,
+        *,
+        organization_repository: OrganizationRepository | None = None,
+    ) -> None:
         """Store platform default overview prompts when enrichment cannot run."""
         await OrgBusinessOverviewEnrichmentService._persist_ai_settings(
             organization_id,
+            organization_repository=organization_repository,
             business_overview=None,
             overview_prompts=dict(DEFAULT_OVERVIEW_PROMPTS),
         )
@@ -615,16 +941,22 @@ class OrgBusinessOverviewEnrichmentService:
         *,
         business_overview: str,
         organization_name: str,
-        website_url: str,
+        website_url: str | None = None,
+        entity_types: tuple[str, ...] | None = None,
     ) -> dict[str, str] | None:
-        """Generate per-entity overview agent templates (stored prompts, not live overviews)."""
+        """Generate overview agent templates for one or more entity types."""
+        targets = entity_types or OVERVIEW_PROMPT_ENTITY_TYPES
+        keys_label = ", ".join(targets)
         model = shared_settings.org_memory_llm_model
+        website_line = ""
+        if isinstance(website_url, str) and website_url.strip():
+            website_line = f"Website: {website_url.strip()}\n\n"
         user = (
             "Generate industry-specific overview_prompts for this organization.\n\n"
-            "These three strings will be stored and used later when users request AI "
+            "These strings will be stored and used later when users request AI "
             "Overview on CRM records. Do not output an overview for any real entity now.\n\n"
             f"Organization name: {organization_name.strip()}\n"
-            f"Website: {website_url.strip()}\n\n"
+            f"{website_line}"
             "Business overview (derive industry, buyers, and deal motion from this):\n"
             f"{business_overview.strip()}\n\n"
             "Instructions:\n"
@@ -635,7 +967,7 @@ class OrgBusinessOverviewEnrichmentService:
             "so future overviews sound native to this business—not generic sales copy.\n"
             "- Preserve platform section headers, EXAMPLE blocks, and RULES from the "
             "structural reference in the system message.\n"
-            "- Return JSON with keys contact, lead, company only.\n"
+            f"- Return JSON with keys {keys_label} only.\n"
         )
         try:
             raw = await create_chat_completion(
@@ -651,22 +983,25 @@ class OrgBusinessOverviewEnrichmentService:
             logger.exception("org_overview_prompt_gen_request_failed")
             return None
 
-        parsed = _parse_overview_prompts_response(raw)
+        parsed = _parse_overview_prompts_response(raw, entity_types=targets)
         if parsed is None:
-            logger.warning("org_overview_prompt_gen_parse_failed")
+            logger.warning(
+                "org_overview_prompt_gen_parse_failed",
+                extra={"entity_types": list(targets)},
+            )
         return parsed
 
     @staticmethod
     async def _persist_ai_settings(
         organization_id: str,
         *,
-        business_overview: str | None,
-        overview_prompts: dict[str, str],
+        organization_repository: OrganizationRepository | None = None,
+        business_overview: str | None = None,
+        overview_prompts: dict[str, str] | None = None,
+        force_business_overview: bool = False,
     ) -> None:
         """Merge AI overview fields into organization settings and save."""
-        pool = await get_pool()
-        async with AcquireConnection(pool) as conn:
-            repo = OrganizationRepository(db_connection=conn)
+        async with _db_repository(organization_repository) as repo:
             org = await repo.get_organization_by_id(organization_id)
             if not org:
                 return
@@ -674,12 +1009,17 @@ class OrgBusinessOverviewEnrichmentService:
             if not isinstance(settings, dict):
                 settings = {}
 
-            patch: dict[str, Any] = {"overview_prompts": overview_prompts}
-            if (
-                business_overview is not None
-                and not OrgBusinessOverviewEnrichmentService._has_business_overview(settings)
+            patch: dict[str, Any] = {}
+            if overview_prompts is not None:
+                patch["overview_prompts"] = overview_prompts
+            if business_overview is not None and (
+                force_business_overview
+                or not OrgBusinessOverviewEnrichmentService._has_business_overview(settings)
             ):
                 patch["business_overview"] = business_overview.strip()
+
+            if not patch:
+                return
 
             merge_ai_overview_settings_into_settings(settings, patch)
             serialized_settings = json.dumps(serialize_pydantic_models(settings))

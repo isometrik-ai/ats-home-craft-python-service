@@ -71,6 +71,7 @@ from libs.shared_utils.http_exceptions import (
     ForbiddenException,
     InternalServerErrorException,
     NotFoundException,
+    ServiceUnavailableException,
 )
 from libs.shared_utils.isometrik_service import (
     DEFAULT_ORG_ROLE,
@@ -164,6 +165,32 @@ class OrganizationService:
             )
         settings = parse_json_field(org.get("settings"))
         return resolve_effective_ai_overview_settings(settings)
+
+    async def refetch_ai_overview_settings(self, fields: list[str]) -> dict[str, Any]:
+        """Refetch selected AI overview fields for the session organization."""
+        from apps.user_service.app.services.org_business_overview_enrichment_service import (
+            OrgBusinessOverviewEnrichmentService,
+            strands_enrichment_enabled,
+        )
+
+        organization_id = self.user_context.organization_id
+        if not organization_id:
+            raise BadRequestException(
+                message_key="organizations.errors.user_not_a_member_of_any_organization",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+        if not strands_enrichment_enabled():
+            raise ServiceUnavailableException(
+                message_key="errors.service_unavailable",
+                custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+                params={"reason": "strands_enrichment_not_configured"},
+            )
+
+        return await OrgBusinessOverviewEnrichmentService.refetch_ai_overview_fields(
+            organization_id=organization_id,
+            fields=fields,
+            organization_repository=self.organization_repository,
+        )
 
     async def _enqueue_business_overview_enrichment(
         self,

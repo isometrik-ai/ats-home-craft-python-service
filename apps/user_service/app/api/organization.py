@@ -19,6 +19,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 
 # Schema imports
+from apps.user_service.app.schemas.ai_overview_settings import AiOverviewRefetchBody
 from apps.user_service.app.schemas.organizations import (
     ApproveRejectDeleteRequestBody,
     CreateOrganizationWithUserResponse,
@@ -266,6 +267,70 @@ async def get_organization_ai_overview_settings(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=settings.model_dump(exclude_none=False),
+    )
+
+
+@handle_api_exceptions("refetch organization AI overview settings")
+@router.post(
+    "/ai-overview-settings/refetch",
+    response_model=None,
+    description=(
+        "Refetch business overview and/or individual overview prompts "
+        "(lead, contact, company) for the current org"
+    ),
+    summary="Refetch organization AI overview fields",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        http_status.HTTP_200_OK: {"description": "AI overview fields refetched successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("10/minute")
+async def refetch_organization_ai_overview_settings(
+    request: Request,
+    body: AiOverviewRefetchBody = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Refetch selected AI overview fields using the org enrichment agents.
+
+    Each field is refreshed independently — no chaining between overview fields.
+    Response includes only the field(s) that were refetched (not the full settings snapshot).
+    - ``business_overview`` — re-fetch from website (discovers website only if unset)
+    - ``lead`` / ``contact`` / ``company`` — regenerate that prompt only (requires
+      stored business_overview)
+
+    Use GET ``/ai-overview-settings`` for the full current settings.
+
+    Requires: settings_management.edit
+    """
+    user_context = await extract_user_context(current_user, db_connection)
+    if user_context.organization_id is None:
+        raise ValidationException(
+            message_key="organizations.errors.user_not_a_member_of_any_organization",
+            custom_code=CustomStatusCode.INVALID_DATA,
+        )
+
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=SETTINGS_SYSTEM_MANAGE,
+        organization_id=user_context.organization_id,
+    )
+
+    organization_service = OrganizationService(
+        user_context=user_context, db_connection=db_connection
+    )
+    result = await organization_service.refetch_ai_overview_settings(list(body.fields))
+    return success_response(
+        request=request,
+        message_key="organizations.success.organization_updated",
+        custom_code=CustomStatusCode.UPDATED,
+        status_code=http_status.HTTP_200_OK,
+        data=result,
     )
 
 

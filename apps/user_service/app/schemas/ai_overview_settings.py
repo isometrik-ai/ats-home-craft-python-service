@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _MAX_BUSINESS_OVERVIEW_LEN = 2000
@@ -68,3 +70,37 @@ class AiOverviewSettingsUpdate(BaseModel):
             return value
         stripped = value.strip()
         return stripped if stripped else None
+
+
+AiOverviewRefetchField = Literal[
+    "business_overview",
+    "lead",
+    "contact",
+    "company",
+]
+
+
+class AiOverviewRefetchBody(BaseModel):
+    """Request body to refetch selected AI overview fields for the current organization."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fields: list[AiOverviewRefetchField] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Fields to refetch independently (no chaining): business_overview, "
+            "or individual overview prompts (lead, contact, company). "
+            "Prompt refetch requires stored business_overview."
+        ),
+    )
+
+    @field_validator("fields")
+    @classmethod
+    def _dedupe_fields(cls, value: list[str]) -> list[str]:
+        """Preserve order while removing duplicates."""
+        seen: list[str] = []
+        for item in value:
+            if item not in seen:
+                seen.append(item)
+        return seen
