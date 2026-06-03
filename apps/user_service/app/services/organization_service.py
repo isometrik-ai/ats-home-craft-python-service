@@ -154,6 +154,17 @@ class OrganizationService:
             )
         return self._map_to_organization_info(org)
 
+    async def get_ai_overview_settings(self, organization_id: str) -> AiOverviewSettings:
+        """Return effective AI overview prompts and business background for an organization."""
+        org = await self.organization_repository.get_organization_by_id(organization_id)
+        if not org:
+            raise NotFoundException(
+                message_key="organizations.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        settings = parse_json_field(org.get("settings"))
+        return resolve_effective_ai_overview_settings(settings)
+
     async def _enqueue_business_overview_enrichment(
         self,
         *,
