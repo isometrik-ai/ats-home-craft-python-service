@@ -438,6 +438,54 @@ async def select_organization(
     )
 
 
+@handle_api_exceptions("switch_organization")
+@router.post(
+    "/switch-org",
+    response_model=SelectOrganizationResponse,
+    status_code=http_status.HTTP_200_OK,
+    description="Switch organization for the current user session",
+    summary="Switch organization for the current user session",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Organization switched successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "User is not a member of the organization"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("10/minute")
+async def switch_organization(
+    request: Request,
+    data: SelectOrganizationRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Switch organization for the current user session.
+
+    Updates user_sessions.organization_id when unset or changing orgs and returns
+    isometrik details for the target organization.
+    """
+    auth_service = AuthService(db_connection=db_connection)
+
+    user_id = current_user.get("sub")
+    session_id = current_user.get("session_id")
+
+    result = await auth_service.switch_organization(
+        user_id=user_id,
+        session_id=session_id,
+        organization_id=data.organization_id,
+        user_type=data.user_type,
+    )
+
+    return success_response(
+        request=request,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=result.model_dump(exclude_none=True),
+    )
+
+
 @handle_api_exceptions("validate_token")
 @router.get(
     "/validate",

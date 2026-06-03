@@ -4,7 +4,11 @@ import datetime as dt
 
 import pytest
 
-from apps.user_service.app.schemas.auth import RefreshSessionResponse
+from apps.user_service.app.schemas.auth import (
+    RefreshSessionResponse,
+    SelectOrganizationResponse,
+)
+from apps.user_service.app.schemas.enums import SelectOrganizationType
 from apps.user_service.tests.factories import user_payload
 from apps.user_service.tests.utils.assertions import assert_success
 
@@ -269,6 +273,38 @@ async def test_validate_account(monkeypatch, client):
     )
     body = assert_success(res, 200)
     assert body["data"]["two_fa_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_switch_organization(monkeypatch, client):
+    """Switch-org should succeed and return switch-org payload shape."""
+
+    async def fake_switch(
+        _self,
+        *,
+        user_id: str,
+        session_id: str,
+        organization_id: str,
+        user_type: SelectOrganizationType,
+    ):
+        del _self
+        assert user_id == "test-user-id"
+        assert session_id == "test-session-id"
+        assert organization_id == "org-456"
+        assert user_type == SelectOrganizationType.ORGANIZATION_MEMBER
+        return SelectOrganizationResponse(isometrik_details=None)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.switch_organization",
+        fake_switch,
+    )
+
+    res = await client.post(
+        "/v1/auth/switch-org",
+        json={"organization_id": "org-456", "user_type": "organization_member"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"] == {}
 
 
 @pytest.mark.asyncio
