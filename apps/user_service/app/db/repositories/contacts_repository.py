@@ -1013,6 +1013,7 @@ class ContactsRepository(BaseRepository):
               ct.profile_photo_url,
               ct.phones,
               COALESCE(cn.company_names, '[]'::jsonb) AS company_names,
+              ct.tags,
               ct.created_at,
               ct.updated_at
             FROM contacts ct
