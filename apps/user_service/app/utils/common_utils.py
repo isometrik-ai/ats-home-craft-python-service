@@ -16,6 +16,7 @@ import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, datetime
 from enum import Enum
 from functools import wraps
 from typing import Any
@@ -451,6 +452,105 @@ def handle_api_exceptions(operation_name: str):
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+
+
+_NUMERIC_DATE_RE = re.compile(r"^(\d{1,4})[/\-.](\d{1,2})[/\-.](\d{1,4})$")
+
+_STRPTIME_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%Y/%m/%d",
+    "%m-%d-%Y",
+    "%d-%m-%Y",
+    "%m.%d.%Y",
+    "%d.%m.%Y",
+    "%Y.%m.%d",
+    "%m/%d/%y",
+    "%d/%m/%y",
+)
+
+
+def _date_from_numeric_parts(first: int, second: int, third: int) -> date:
+    """Build a date when the year is the last numeric segment (MDY or DMY)."""
+    if third <= 31:
+        raise ValueError("year must be a four-digit value in the last segment")
+    year = third
+    if first > 12:
+        day, month = first, second
+    elif second > 12:
+        month, day = first, second
+    else:
+        month, day = first, second
+    return date(year, month, day)
+
+
+def _parse_numeric_delimited_date(value: str) -> date | None:
+    """Parse dates like ``11/2/1992`` or ``31-12-1992`` with variable-width segments."""
+    match = _NUMERIC_DATE_RE.match(value.strip())
+    if not match:
+        return None
+    first, second, third = (int(match.group(i)) for i in range(1, 4))
+    if first > 31:
+        return date(first, second, third)
+    if third > 31:
+        return _date_from_numeric_parts(first, second, third)
+    return None
+
+
+def _parse_iso_date_string(raw: str) -> date | None:
+    """Try ISO date (or datetime prefix) parsing."""
+    iso_candidate = raw.split("T", maxsplit=1)[0].split(" ", maxsplit=1)[0]
+    try:
+        return date.fromisoformat(iso_candidate)
+    except ValueError:
+        return None
+
+
+def _parse_strptime_date_string(raw: str) -> date | None:
+    """Try known fixed-width date string formats."""
+    for fmt in _STRPTIME_DATE_FORMATS:
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_flexible_date_string(raw: str, *, original: str) -> date:
+    """Parse a non-empty date string or raise ``ValueError``."""
+    for parser in (
+        _parse_iso_date_string,
+        _parse_strptime_date_string,
+        _parse_numeric_delimited_date,
+    ):
+        parsed = parser(raw)
+        if parsed is not None:
+            return parsed
+    raise ValueError(f"Unable to parse date: {original!r}")
+
+
+def parse_flexible_date(value: Any) -> date | None:
+    """Parse common date inputs into a ``date`` for API/CSV validation.
+
+    Accepts ISO ``YYYY-MM-DD``, several fixed-width slash/dash/dot formats, and
+    variable-width numeric dates (e.g. ``11/2/1992``). Ambiguous ``MM/DD`` vs
+    ``DD/MM`` values default to US month-first when both parts are <= 12.
+    """
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if not isinstance(value, str):
+        raise TypeError(f"date must be a string or date, got {type(value).__name__}")
+
+    raw = value.strip()
+    if not raw:
+        return None
+
+    return _parse_flexible_date_string(raw, original=value)
 
 
 def format_iso_datetime(dt: Any) -> str | None:

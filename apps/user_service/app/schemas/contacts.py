@@ -10,9 +10,9 @@ Contracts here are intentionally resource-specific (no legacy `clients.*` fields
 from __future__ import annotations
 
 from datetime import date
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from apps.user_service.app.schemas.common import (
     AddressesUpdate,
@@ -29,8 +29,11 @@ from apps.user_service.app.schemas.common import (
 )
 from apps.user_service.app.schemas.enums import ClientStatus
 from apps.user_service.app.schemas.list_filters import DropdownCustomFieldFilter
+from apps.user_service.app.utils.common_utils import parse_flexible_date
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
+
+FlexibleOptionalDate = Annotated[date | None, BeforeValidator(parse_flexible_date)]
 
 if TYPE_CHECKING:
     from apps.user_service.app.schemas.companies import CreateCompanyRequest
@@ -138,7 +141,7 @@ class CreateContactRequest(BaseModel):
     middle_name: str | None = Field(None, max_length=100)
     last_name: str | None = Field(None, max_length=100)
     title: str | None = Field(None, max_length=100)
-    date_of_birth: date | None = None
+    date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = Field(None, max_length=500)
     external_contact_id: str | None = Field(
         default=None,
@@ -205,7 +208,7 @@ class CreateContactRequestStandalone(BaseModel):
     middle_name: str | None = Field(None, max_length=100)
     last_name: str | None = Field(None, max_length=100)
     title: str | None = Field(None, max_length=100)
-    date_of_birth: date | None = None
+    date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = Field(None, max_length=500)
     external_contact_id: str | None = Field(
         default=None,
@@ -286,7 +289,7 @@ class UpdateContactRequest(BaseModel):
     middle_name: str | None = None
     last_name: str | None = None
     title: str | None = None
-    date_of_birth: date | None = None
+    date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = None
     phones: PhonesUpdate | None = None
     tags: list[str] | None = None

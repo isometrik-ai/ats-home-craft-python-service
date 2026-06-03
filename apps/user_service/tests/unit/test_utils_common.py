@@ -5,8 +5,10 @@ import uuid
 
 import pytest
 
+from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
+    parse_flexible_date,
     safe_json_loads,
     validate_uuid_format,
 )
@@ -50,3 +52,31 @@ def test_validate_uuid_format_invalid():
     """Test validate_uuid_format with invalid UUID raises exception."""
     with pytest.raises(ValidationException):
         validate_uuid_format("not-a-uuid")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("1992-11-02", dt.date(1992, 11, 2)),
+        ("11/2/1992", dt.date(1992, 11, 2)),
+        ("11-02-1992", dt.date(1992, 11, 2)),
+        ("31/12/1992", dt.date(1992, 12, 31)),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_parse_flexible_date(raw, expected):
+    """Test parse_flexible_date accepts common input formats."""
+    assert parse_flexible_date(raw) == expected
+
+
+def test_parse_flexible_date_invalid_raises():
+    """Test parse_flexible_date rejects unparseable values."""
+    with pytest.raises(ValueError, match="Unable to parse date"):
+        parse_flexible_date("not-a-date")
+
+
+def test_create_contact_flexible_dob():
+    """CreateContactRequest normalizes flexible DOB strings to date objects."""
+    model = CreateContactRequest(email="user@example.com", date_of_birth="11/2/1992")
+    assert model.date_of_birth == dt.date(1992, 11, 2)
