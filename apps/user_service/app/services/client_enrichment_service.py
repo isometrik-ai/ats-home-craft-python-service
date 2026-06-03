@@ -36,9 +36,27 @@ from apps.user_service.app.schemas.enums import ClientEnrichmentStatus, ClientTy
 from apps.user_service.app.utils.common_utils import parse_json_field, safe_json_loads
 from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
+from libs.shared_utils.http_exceptions import ServiceUnavailableException
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("client_enrichment_service")
+
+
+def client_enrichment_enabled() -> bool:
+    """Return True when outbound client/contact/company enrichment is enabled."""
+    return bool(app_settings.enrichment_service.enabled)
+
+
+def require_client_enrichment_enabled() -> None:
+    """Raise when enrichment is disabled (explicit enrich API calls)."""
+    if not client_enrichment_enabled():
+        raise ServiceUnavailableException(
+            message_key="enrichment.errors.enrichment_disabled",
+            custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+            params={"reason": "enrichment_service_disabled"},
+        )
+
 
 _MAX_PROFILE_PHOTO_BYTES = 50 * 1024 * 1024  # safety cap for downloaded images
 _LOGO_DEV_IMG_PARAMS = "format=png&size=256&retina=true"
@@ -633,6 +651,17 @@ class ClientEnrichmentService:
         ``skip_company_logo``: when True, do not fetch logo.dev / R2 for companies
         (caller already set or is managing ``profile_photo_url``).
         """
+        if not client_enrichment_enabled():
+            logger.info(
+                "Client enrichment skipped (ENRICHMENT_SERVICE_ENABLED=false)",
+                extra={
+                    "client_id": client_id,
+                    "organization_id": organization_id,
+                    "client_type": client_type,
+                },
+            )
+            return
+
         webhook_url = self._webhook_url
 
         if client_type not in (ClientType.PERSON.value, ClientType.COMPANY.value):

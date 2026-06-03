@@ -33,6 +33,7 @@ class TwoFASettings(BaseSettings):
 class EnrichmentServiceSettings(BaseSettings):
     """Client enrichment service settings."""
 
+    enabled: bool = config("ENRICHMENT_SERVICE_ENABLED", default=True)
     base_url: str = config(
         "ENRICHMENT_SERVICE_BASE_URL",
         default="http://91.99.230.218:8071",

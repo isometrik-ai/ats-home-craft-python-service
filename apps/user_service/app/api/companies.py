@@ -32,6 +32,7 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.activity_service import ActivityService
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
+    require_client_enrichment_enabled,
 )
 from apps.user_service.app.services.companies_service import CompaniesService
 from apps.user_service.app.services.event_service import EventService
@@ -468,6 +469,7 @@ async def enrich_company(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Trigger enrichment for a company (best-effort async)."""
+    require_client_enrichment_enabled()
     request.state.audit_table = "companies"
     request.state.audit_requested_id = company_id
     request.state.audit_description = f"Triggered enrichment for company: {company_id}"

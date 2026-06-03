@@ -235,6 +235,11 @@
       "company_deleted": "Company deleted successfully."
     }
   },
+  "enrichment": {
+    "errors": {
+      "enrichment_disabled": "Contact and company enrichment is temporarily disabled."
+    }
+  },
   "contacts": {
     "errors": {
       "contact_not_found": "Contact does not exist or has been deleted.",

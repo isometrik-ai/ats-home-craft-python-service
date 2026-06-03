@@ -11,6 +11,8 @@ from apps.user_service.app.services.client_enrichment_service import (
     _is_empty_value,
     _linkedin_url_from_social_pages,
     _merge_update_without_overwriting_empty,
+    client_enrichment_enabled,
+    require_client_enrichment_enabled,
 )
 
 # --- Module-level helpers ---
@@ -109,6 +111,33 @@ def test_linkedin_url_from_social_pages_finds_linkedin():
 
 
 # --- ClientEnrichmentService ---
+
+
+def test_client_enrichment_enabled_reads_settings(monkeypatch):
+    """client_enrichment_enabled reflects ENRICHMENT_SERVICE_ENABLED."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.app_settings",
+        MagicMock(enrichment_service=MagicMock(enabled=True)),
+    )
+    assert client_enrichment_enabled() is True
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.app_settings",
+        MagicMock(enrichment_service=MagicMock(enabled=False)),
+    )
+    assert client_enrichment_enabled() is False
+
+
+def test_require_enrichment_raises_when_disabled(monkeypatch):
+    """require_client_enrichment_enabled raises 503 when feature is off."""
+    from libs.shared_utils.http_exceptions import ServiceUnavailableException
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.client_enrichment_enabled",
+        lambda: False,
+    )
+    with pytest.raises(ServiceUnavailableException):
+        require_client_enrichment_enabled()
 
 
 def test_from_settings_returns_instance(monkeypatch):
@@ -255,6 +284,27 @@ class _FakeConnCM:
 
     async def __aexit__(self, *a):
         return None
+
+
+@pytest.mark.asyncio
+async def test_run_enrichment_skipped_when_disabled(monkeypatch):
+    """run_client_enrichment is a no-op when ENRICHMENT_SERVICE_ENABLED is false."""
+    mock_post = AsyncMock(return_value={"request_id": "req-123"})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.client_enrichment_enabled",
+        lambda: False,
+    )
+    monkeypatch.setattr(ClientEnrichmentService, "_post", mock_post)
+
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=30.0)
+    await svc.run_client_enrichment(
+        client_id="c1",
+        organization_id="org-1",
+        client_type="person",
+        payload_data={"first_name": "John"},
+        entity_table="contacts",
+    )
+    mock_post.assert_not_called()
 
 
 @pytest.mark.asyncio

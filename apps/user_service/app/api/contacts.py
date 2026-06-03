@@ -30,6 +30,9 @@ from apps.user_service.app.schemas.enums import (
     KafkaTopics,
 )
 from apps.user_service.app.services.activity_service import ActivityService
+from apps.user_service.app.services.client_enrichment_service import (
+    require_client_enrichment_enabled,
+)
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service import (
@@ -674,6 +677,7 @@ async def enrich_contact(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Trigger enrichment for a contact (best-effort async)."""
+    require_client_enrichment_enabled()
     enrich_event: dict | None = None
     organization_id: str | None = None
     async with db_connection.transaction():
