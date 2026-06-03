@@ -72,7 +72,7 @@ JOB_NOT_FOUND = "contacts_imports.errors.job_not_found"
     data_classification="pii",
     compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
     table_name="import_jobs",
-    category="CLIENT",
+    category="CONTACT",
 )
 async def create_contacts_import_job(
     request: Request,
@@ -242,7 +242,7 @@ async def get_contacts_import_job(
     data_classification="pii",
     compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
     table_name="import_jobs",
-    category="CLIENT",
+    category="CONTACT",
 )
 async def retry_contacts_import_job(
     request: Request,
