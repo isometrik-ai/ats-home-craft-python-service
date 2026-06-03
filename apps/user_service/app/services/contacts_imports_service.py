@@ -11,6 +11,7 @@ import csv
 import ipaddress
 import logging
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -61,6 +62,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_db.supabase_db.client import get_supabase_service_client
 
 CONTACTS_IMPORT_TOPIC = ContactsImportKafkaStream.CONTACTS_IMPORT_REQUESTED.value
+SYNTHETIC_CONTACT_EMAIL_DOMAIN = "email.com"
 
 logger = logging.getLogger(__name__)
 
@@ -1498,13 +1500,23 @@ class ContactsImportService:
             if not isinstance(row, dict):
                 continue
             canonical = self._canonicalize_row(row=row, reverse_mapping=reverse_mapping)
-            email_raw = (canonical.get("email") or "").strip()
-            if not email_raw:
-                yield self._row_item_missing_email(row_number=row_number, raw_row=canonical)
+            email_raw, phones_payload, identity_error = self._resolve_row_email_and_phones(
+                canonical=canonical
+            )
+            if identity_error:
+                yield self._row_item_missing_contact_identifier(
+                    row_number=row_number,
+                    raw_row=canonical,
+                    message=identity_error,
+                )
                 continue
 
             company_name = (canonical.get("company_name") or "").strip() or None
-            body_dict = self._build_contact_body_dict(canonical=canonical, email_raw=email_raw)
+            body_dict = self._build_contact_body_dict(
+                canonical=canonical,
+                email_raw=email_raw,
+                phones=phones_payload,
+            )
             yield self._validate_row_body(
                 row_number=row_number,
                 canonical=canonical,
@@ -1524,20 +1536,122 @@ class ContactsImportService:
         return canonical
 
     @staticmethod
-    def _row_item_missing_email(*, row_number: int, raw_row: dict[str, Any]) -> dict[str, Any]:
-        """Build a row work item for missing-email failures."""
+    def _row_item_missing_contact_identifier(
+        *,
+        row_number: int,
+        raw_row: dict[str, Any],
+        message: str,
+    ) -> dict[str, Any]:
+        """Build a row work item when neither email nor phone is present."""
         return {
             "row_number": row_number,
             "raw_row": raw_row,
-            "error": {"code": "missing_email", "message": "email is required"},
+            "error": {
+                "code": "missing_email_or_phone",
+                "message": message,
+            },
             "contact_model": None,
         }
+
+    @staticmethod
+    def _normalize_phone_digits(*, phone_number: str, phone_isd_code: str | None = None) -> str:
+        """Return digits-only key used for synthetic import emails."""
+        combined = f"{phone_isd_code or ''}{phone_number}"
+        return re.sub(r"\D", "", combined)
+
+    @classmethod
+    def _synthetic_email_from_phone(
+        cls, *, phone_number: str, phone_isd_code: str | None = None
+    ) -> str | None:
+        """Build default contact email ``{digits}@email.com`` when CSV has phone only."""
+        digits = cls._normalize_phone_digits(
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
+        )
+        if not digits:
+            return None
+        return f"{digits}@{SYNTHETIC_CONTACT_EMAIL_DOMAIN}"
+
+    @staticmethod
+    def _extract_phones_from_canonical(canonical: dict[str, Any]) -> list[dict[str, Any]]:
+        """Read phones from ``phones_json`` or flat phone columns."""
+        phones = coerce_json_list(canonical.get("phones_json"))
+        parsed: list[dict[str, Any]] = [
+            phone for phone in phones if isinstance(phone, dict) and phone.get("phone_number")
+        ]
+        if parsed:
+            return parsed
+
+        phone_number = (canonical.get("phone_number") or "").strip()
+        if not phone_number:
+            return []
+
+        phone_isd_code = (canonical.get("phone_isd_code") or "").strip() or "+1"
+        return [
+            {
+                "phone_number": phone_number,
+                "phone_isd_code": phone_isd_code,
+                "is_primary": True,
+            }
+        ]
+
+    @staticmethod
+    def _primary_phone_fields(
+        phones: list[dict[str, Any]],
+    ) -> tuple[str, str | None] | None:
+        """Return (phone_number, phone_isd_code) for the primary phone, else the first entry."""
+        if not phones:
+            return None
+
+        primary = next(
+            (phone for phone in phones if phone.get("is_primary") is True),
+            None,
+        )
+        candidate = primary or phones[0]
+        phone_number = str(candidate.get("phone_number") or "").strip()
+        if not phone_number:
+            return None
+        phone_isd_code = str(candidate.get("phone_isd_code") or "").strip() or None
+        return phone_number, phone_isd_code
+
+    @classmethod
+    def _resolve_row_email_and_phones(
+        cls, *, canonical: dict[str, Any]
+    ) -> tuple[str, list[dict[str, Any]], str | None]:
+        """Resolve email and phones for one CSV row.
+
+        Email is required unless a phone is provided; phone-only rows use
+        ``{digits}@email.com``.
+        """
+        phones_payload = cls._extract_phones_from_canonical(canonical)
+        email_raw = (canonical.get("email") or "").strip()
+        if email_raw:
+            return email_raw, phones_payload, None
+
+        phone_fields = cls._primary_phone_fields(phones_payload)
+        if phone_fields is None:
+            return (
+                "",
+                phones_payload,
+                "either email or phone number is required",
+            )
+
+        phone_number, phone_isd_code = phone_fields
+        synthetic_email = cls._synthetic_email_from_phone(
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
+        )
+        if not synthetic_email:
+            return "", phones_payload, "either email or phone number is required"
+
+        return synthetic_email, phones_payload, None
 
     def _build_contact_body_dict(
         self,
         *,
         canonical: dict[str, Any],
         email_raw: str,
+        phones: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build the `CreateContactRequest` body dict from canonicalized row data."""
         body_dict: dict[str, Any] = {
@@ -1558,7 +1672,9 @@ class ContactsImportService:
         if dob_raw:
             body_dict["date_of_birth"] = dob_raw
 
-        body_dict["phones"] = coerce_json_list(canonical.get("phones_json"))
+        body_dict["phones"] = (
+            phones if phones is not None else self._extract_phones_from_canonical(canonical)
+        )
         body_dict["tags"] = coerce_json_list(canonical.get("tags_json"))
         body_dict["social_pages"] = coerce_json_list(canonical.get("social_pages_json"))
 
