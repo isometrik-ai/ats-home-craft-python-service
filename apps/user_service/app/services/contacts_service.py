@@ -71,6 +71,7 @@ from apps.user_service.app.search.contact_typesense_schema import (
 )
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
+    client_enrichment_enabled,
 )
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.event_service import EventService
@@ -332,6 +333,9 @@ class ContactsService:
         enrichment_targets: list[dict] | None,
     ) -> None:
         """Schedule enrichment for created entities."""
+        if not client_enrichment_enabled():
+            return
+
         enrichment_service = ClientEnrichmentService.from_settings()
         for item in enrichment_targets or []:
             background_tasks.add_task(

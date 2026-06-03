@@ -346,7 +346,7 @@ class EducationalHistoryItem(BaseModel):
     id: str | None = Field(None, description="Educational history item ID")
     university: str | None = Field(None, description="University name", max_length=300)
     degree: str | None = Field(None, description="Degree", max_length=200)
-    field_of_study: str = Field(..., description="Field of study", max_length=200)
+    field_of_study: str | None = Field(None, description="Field of study", max_length=200)
     start_date: str = Field(..., description="Start date (e.g. Sep 2018)", max_length=50)
     end_date: str | None = Field(None, description="End date (e.g. May 2022)", max_length=50)
 
@@ -356,7 +356,11 @@ class EducationalHistoryInput(BaseModel):
 
     university: str | None = Field(None, max_length=300)
     degree: str | None = Field(None, max_length=200)
-    field_of_study: str = Field(..., max_length=200)
+    field_of_study: str | None = Field(
+        default=None,
+        description="Field of study (optional)",
+        max_length=200,
+    )
     start_date: str = Field(..., max_length=50)
     end_date: str | None = Field(None, max_length=50)
 
@@ -367,7 +371,11 @@ class EducationalHistoryUpdateItem(BaseModel):
     id: str = Field(..., description="Educational history item ID to update")
     university: str | None = Field(None, max_length=300)
     degree: str | None = Field(None, max_length=200)
-    field_of_study: str | None = Field(None, max_length=200)
+    field_of_study: str | None = Field(
+        default=None,
+        description="Field of study (optional)",
+        max_length=200,
+    )
     start_date: str | None = Field(None, max_length=50)
     end_date: str | None = Field(None, max_length=50)
 
