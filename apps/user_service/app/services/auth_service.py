@@ -1397,3 +1397,76 @@ class AuthService:
             )
 
         return SelectOrganizationResponse(isometrik_details=isometrik_details)
+
+    async def switch_organization(
+        self,
+        user_id: str,
+        session_id: str,
+        organization_id: str,
+        user_type: SelectOrganizationType = SelectOrganizationType.ORGANIZATION_MEMBER,
+    ) -> SelectOrganizationResponse:
+        """Switch organization for the current session.
+
+        Same membership and isometrik handling as select_organization, but updates
+        user_sessions when org is unset or changing instead of returning 409.
+        """
+        session_repository = SessionRepository(db_connection=self.db_connection)
+        org_member_isometrik_user_id: str | None = None
+
+        if user_type == SelectOrganizationType.CLIENT:
+            contacts_repository = ContactsRepository(db_connection=self.db_connection)
+            is_member = await contacts_repository.is_active_contact_user_for_organization(
+                user_id=user_id,
+                organization_id=organization_id,
+            )
+        else:
+            organization_member_repository = OrganizationMemberRepository(
+                db_connection=self.db_connection
+            )
+            (
+                is_member,
+                org_member_isometrik_user_id,
+            ) = await organization_member_repository.get_active_membership_isometrik_user_id(
+                user_id=user_id,
+                organization_id=organization_id,
+                disallow_suspended=True,
+            )
+        if not is_member:
+            raise NotFoundException(
+                message_key="auth.errors.user_not_member_of_organization",
+                custom_code=CustomStatusCode.NOT_FOUND,
+                params={"organization_id": organization_id},
+            )
+
+        session_data = await session_repository.check_session_has_organization(
+            session_id=session_id
+        )
+        if not session_data:
+            raise BadRequestException(
+                message_key="auth.errors.session_not_found",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+
+        current_org_id = session_data.get("organization_id")
+        if current_org_id is None or str(current_org_id) != organization_id:
+            await session_repository.update_session_organization_context(
+                session_id=session_id,
+                user_id=user_id,
+                organization_id=organization_id,
+            )
+
+        isometrik_details = await get_isometrik_details(
+            user_id=user_id,
+            organization_id=organization_id,
+            organization_repository=self.organization_repository,
+            organization_member_repository=organization_member_repository
+            if user_type != SelectOrganizationType.CLIENT
+            else None,
+        )
+
+        if user_type != SelectOrganizationType.CLIENT and isometrik_details is not None:
+            isometrik_details = isometrik_details.model_copy(
+                update={"user_id": org_member_isometrik_user_id}
+            )
+
+        return SelectOrganizationResponse(isometrik_details=isometrik_details)
