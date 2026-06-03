@@ -1,15 +1,25 @@
 """Tests for Isometrik service helpers."""
 
+import time
+
+import jwt
 import pytest
 
 from libs.shared_utils import isometrik_service
-from libs.shared_utils.isometrik_service import create_isometrik_user
+from libs.shared_utils.isometrik_service import (
+    ISOMETRIK_AUDIENCE,
+    create_isometrik_token,
+    create_isometrik_user,
+)
 
 
 class _DummyIsometrikSettings:
     """Minimal settings object for Isometrik tests."""
 
     api_url = "https://isometrik.example.com"
+    client_name = "isometrik-client"
+    private_key = "test-private-key"
+    token_exp_minutes = 540
 
 
 class _DummySharedSettings:
@@ -122,3 +132,27 @@ async def test_create_isometrik_user_custom_avatar(monkeypatch) -> None:
     assert calls["json"]["userName"] == "Jane Smith"
     assert calls["json"]["userIdentifier"] == "user-2"
     assert calls["json"]["userProfileImageUrl"] == "https://example.com/custom-avatar.jpg"
+
+
+def test_create_isometrik_token(monkeypatch) -> None:
+    """create_isometrik_token builds an HS512 JWT with expected claims."""
+    monkeypatch.setattr(isometrik_service, "shared_settings", _DummySharedSettings())
+
+    token = create_isometrik_token()
+
+    claims = jwt.decode(
+        token,
+        "test-private-key",
+        algorithms=["HS512"],
+        audience=ISOMETRIK_AUDIENCE,
+        issuer=ISOMETRIK_AUDIENCE,
+        options={"verify_exp": False},
+    )
+    assert claims["sub"] == "isometrik-client"
+    assert claims["typ"] == "access"
+    assert claims["aud"] == ISOMETRIK_AUDIENCE
+    assert claims["iss"] == ISOMETRIK_AUDIENCE
+    assert claims["iat"] <= int(time.time())
+    assert claims["nbf"] == claims["iat"] - 1
+    assert claims["exp"] == claims["iat"] + 540 * 60
+    assert isinstance(claims["jti"], str)

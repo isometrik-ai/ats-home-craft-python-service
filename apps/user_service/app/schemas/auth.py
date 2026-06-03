@@ -407,3 +407,9 @@ class SignupWizardResponse(BaseModel):
     data: dict[str, Any]
     message: str = Field(..., description="Response message describing the operation result")
     validation_passed: bool = True
+
+
+class CreateIsometrikTokenResponse(BaseModel):
+    """Response model for an Isometrik access token."""
+
+    token: str = Field(..., description="Signed Isometrik access JWT")

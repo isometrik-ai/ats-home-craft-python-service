@@ -102,6 +102,8 @@ class IsometrikSettings(BaseSettings):
         "ORG_OVERVIEW_OPENAI_TIMEOUT_SECONDS",
         default=360.0,
     )
+    private_key: str = config("ISOMETRIK_PRIVATE_KEY", default="")
+    token_exp_minutes: int = config("ISOMETRIK_TOKEN_EXP_MIN", default=540)
 
 
 class CloudflareR2Settings(BaseSettings):
