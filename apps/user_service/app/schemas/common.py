@@ -127,7 +127,7 @@ class SocialPage(BaseModel):
 class Address(BaseModel):
     """Address schema (legacy client/contact/company address shape)."""
 
-    address_line1: str = Field(..., description="Primary address line", max_length=1000)
+    address_line1: str | None = Field(None, description="Primary address line", max_length=1000)
     address_line2: str | None = Field(None, description="Secondary address line", max_length=1000)
     city: str | None = Field(None, description="City", max_length=100)
     state: str | None = Field(None, description="State/Province", max_length=100)
@@ -169,7 +169,7 @@ class AddressInput(BaseModel):
     """Address input for add operation."""
 
     place_id: str | None = Field(None, max_length=200)
-    address_line1: str = Field(..., max_length=1000, description="Primary address line")
+    address_line1: str | None = Field(None, max_length=1000, description="Primary address line")
     address_line2: str | None = Field(None, max_length=1000)
     city: str | None = Field(None, max_length=100)
     state: str | None = Field(None, max_length=100)
@@ -344,8 +344,8 @@ class EducationalHistoryItem(BaseModel):
     """Educational history item (person type)."""
 
     id: str | None = Field(None, description="Educational history item ID")
-    university: str = Field(..., description="University name", max_length=300)
-    degree: str = Field(..., description="Degree", max_length=200)
+    university: str | None = Field(None, description="University name", max_length=300)
+    degree: str | None = Field(None, description="Degree", max_length=200)
     field_of_study: str = Field(..., description="Field of study", max_length=200)
     start_date: str = Field(..., description="Start date (e.g. Sep 2018)", max_length=50)
     end_date: str | None = Field(None, description="End date (e.g. May 2022)", max_length=50)
@@ -354,8 +354,8 @@ class EducationalHistoryItem(BaseModel):
 class EducationalHistoryInput(BaseModel):
     """Educational history input for add operation."""
 
-    university: str = Field(..., max_length=300)
-    degree: str = Field(..., max_length=200)
+    university: str | None = Field(None, max_length=300)
+    degree: str | None = Field(None, max_length=200)
     field_of_study: str = Field(..., max_length=200)
     start_date: str = Field(..., max_length=50)
     end_date: str | None = Field(None, max_length=50)
