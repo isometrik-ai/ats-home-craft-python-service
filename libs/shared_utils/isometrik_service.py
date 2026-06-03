@@ -3,9 +3,12 @@ This module provides integration with Isometrik API for application creation.
 Handles creation of Isometrik applications.
 """
 
+import time
+import uuid
 from typing import Any
 
 import httpx
+import jwt
 
 from libs.shared_config.app_settings import shared_settings
 from libs.shared_utils.http_exceptions import (
@@ -23,6 +26,44 @@ logger = get_logger("isometrik_service")
 # Default organization-level role used when interacting with Isometrik.
 # Kept as a simple string to avoid coupling to application enums.
 DEFAULT_ORG_ROLE = "owner"
+
+# JWT aud/iss claim value for Isometrik access tokens (matches Go IsometrikAudience).
+ISOMETRIK_AUDIENCE = "Isometrik"
+
+
+def create_isometrik_token() -> str:
+    """Create a signed Isometrik access JWT for the configured client.
+
+    Mirrors the Go ``CreateIsometrikToken`` helper: HS512 token with standard
+    Isometrik claims (aud, iss, sub, typ, jti, etc.). The ``sub`` claim uses
+    ``ISOMETRIK_CLIENT_NAME`` from settings.
+
+    Returns:
+        Encoded JWT string.
+
+    Raises:
+        InternalServerErrorException: If Isometrik token settings are missing.
+    """
+    iso = shared_settings.isometrik
+    if not iso.private_key.strip() or not iso.client_name.strip():
+        logger.error("Isometrik token settings are not configured")
+        raise InternalServerErrorException(
+            message_key="errors.internal_server_error",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        )
+
+    now = int(time.time())
+    payload = {
+        "aud": ISOMETRIK_AUDIENCE,
+        "exp": now + iso.token_exp_minutes * 60,
+        "iat": now,
+        "iss": ISOMETRIK_AUDIENCE,
+        "jti": str(uuid.uuid4()),
+        "nbf": now - 1,
+        "sub": iso.client_name,
+        "typ": "access",
+    }
+    return jwt.encode(payload, iso.private_key, algorithm="HS512")
 
 
 def _handle_isometrik_error(

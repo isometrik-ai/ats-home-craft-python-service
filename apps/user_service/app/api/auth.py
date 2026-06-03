@@ -23,6 +23,7 @@ from apps.user_service.app.schemas.auth import (
     AuthResponse,
     ChangePasswordRequest,
     ChangePasswordResponse,
+    CreateIsometrikTokenResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     PasswordResponse,
@@ -41,6 +42,7 @@ from apps.user_service.app.services.auth_service import AuthService
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.http_exceptions import UnauthorizedException
+from libs.shared_utils.isometrik_service import create_isometrik_token
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -483,4 +485,34 @@ async def validate(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=ValidateTokenResponse(organization_id=organization_id),
+    )
+
+
+@handle_api_exceptions("create isometrik token")
+@router.post(
+    "/isometrik-token",
+    response_model=CreateIsometrikTokenResponse,
+    status_code=http_status.HTTP_200_OK,
+    description="Create a signed Isometrik access JWT using the configured client name",
+    summary="Create Isometrik access token",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Isometrik token created successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+    },
+)
+@limiter.limit("100/minute")
+async def create_isometrik_access_token(
+    request: Request,
+    _current_user: dict = Depends(get_user_from_auth),
+):
+    """Create a signed Isometrik access JWT (HS512) for the configured client."""
+    token = create_isometrik_token()
+    return success_response(
+        request=request,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=CreateIsometrikTokenResponse(token=token),
     )
