@@ -381,6 +381,33 @@ class RoleRepository:
             query, len(permission_ids), permission_ids, organization_id
         )
 
+    async def get_permissions_by_ids_or_codes(
+        self,
+        permission_ids: list[str],
+        organization_id: str,
+        codes: list[str],
+    ) -> list[dict[str, Any]]:
+        """Fetch permissions matching the given IDs or codes within an organization."""
+        if not permission_ids and not codes:
+            return []
+
+        query = """
+            SELECT id, code
+            FROM permissions
+            WHERE organization_id = $1
+              AND (
+                id = ANY($2::uuid[])
+                OR code = ANY($3::text[])
+              )
+        """
+        rows = await self.db_connection.fetch(
+            query,
+            organization_id,
+            permission_ids,
+            codes,
+        )
+        return [dict(row) for row in rows]
+
     async def check_role_name_unique(
         self, name: str, organization_id: str, exclude_role_id: str = None
     ) -> bool:

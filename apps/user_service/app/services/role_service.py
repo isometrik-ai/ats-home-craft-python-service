@@ -18,6 +18,10 @@ from apps.user_service.app.utils.common_utils import (
     safe_json_loads,
     validate_uuid_format,
 )
+from libs.shared_utils.common_query import (
+    ALL_CUSTOM_FIELDS_MANAGEMENT_PERMISSION_CODES,
+    custom_fields_permission_codes_to_add,
+)
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     ConflictException,
@@ -70,9 +74,7 @@ class RoleService:
         await self._validate_role_name_unique(
             name=role_data.name, organization_id=self.user_context.organization_id
         )
-        # Validate permissions if any
-        if role_data.permission_ids:
-            await self._validate_permission_ids(role_data.permission_ids)
+        permission_ids = await self._resolve_permission_ids(role_data.permission_ids)
 
         # Create the role
         role = await self.role_repository.create_role(
@@ -82,11 +84,11 @@ class RoleService:
         )
 
         # Assign permissions if any
-        if role_data.permission_ids:
+        if permission_ids:
             await self.role_repository.assign_permissions_to_role(
                 role_id=role["id"],
                 organization_id=self.user_context.organization_id,
-                permission_ids=role_data.permission_ids,
+                permission_ids=permission_ids,
             )
 
         return role
@@ -179,8 +181,7 @@ class RoleService:
 
         # Handle permission updates if provided
         if update_data.permission_ids:
-            # First validate all permissions exist
-            await self._validate_permission_ids(update_data.permission_ids)
+            resolved_permission_ids = await self._resolve_permission_ids(update_data.permission_ids)
 
             # Compute permission changes to avoid full replace
             current_permission_ids = set(
@@ -189,7 +190,7 @@ class RoleService:
                     organization_id=self.user_context.organization_id,
                 )
             )
-            new_permission_ids = set(update_data.permission_ids)
+            new_permission_ids = set(resolved_permission_ids)
             permissions_to_add, permissions_to_remove = self._compute_permission_changes(
                 current_permission_ids, new_permission_ids
             )
@@ -332,33 +333,56 @@ class RoleService:
         to_remove = current_permission_ids - new_permission_ids
         return to_add, to_remove
 
-    async def _validate_permission_ids(self, permission_ids: list[str]) -> None:
-        """Validate that all permission IDs exist in the organization.
+    async def _resolve_permission_ids(self, permission_ids: list[str] | None) -> list[str]:
+        """Validate permission IDs and append implied custom-fields permissions.
 
         Args:
-            permission_ids: List of permission IDs to validate
+            permission_ids: Permission IDs submitted for a role
+
+        Returns:
+            Deduplicated permission IDs including any required custom-fields permissions
 
         Raises:
             BadRequestException: If any permission ID is invalid or doesn't exist
         """
         if not permission_ids:
-            return
+            return []
 
-        # Validate UUID format for all permission IDs
-        for permission_id in permission_ids:
+        unique_permission_ids = list(dict.fromkeys(permission_ids))
+
+        for permission_id in unique_permission_ids:
             validate_uuid_format(permission_id, "permission ID")
 
-        # Check if all permissions exist in the organization
-        permissions_exist = await self.role_repository.check_permissions_exist(
-            permission_ids=permission_ids,
+        rows = await self.role_repository.get_permissions_by_ids_or_codes(
+            permission_ids=unique_permission_ids,
             organization_id=self.user_context.organization_id,
+            codes=list(ALL_CUSTOM_FIELDS_MANAGEMENT_PERMISSION_CODES),
         )
 
-        if not permissions_exist:
+        id_to_code = {str(row["id"]): row["code"] for row in rows}
+        code_to_id = {row["code"]: str(row["id"]) for row in rows}
+
+        if len(id_to_code) < len(unique_permission_ids):
             raise BadRequestException(
                 message_key="permissions.errors.invalid_permissions",
                 custom_code=CustomStatusCode.BAD_REQUEST,
             )
+
+        selected_codes = {id_to_code[permission_id] for permission_id in unique_permission_ids}
+        missing_custom_field_codes = custom_fields_permission_codes_to_add(selected_codes)
+
+        resolved_permission_ids = list(unique_permission_ids)
+        for code in sorted(missing_custom_field_codes):
+            custom_field_permission_id = code_to_id.get(code)
+            if not custom_field_permission_id:
+                raise BadRequestException(
+                    message_key="permissions.errors.invalid_permissions",
+                    custom_code=CustomStatusCode.BAD_REQUEST,
+                )
+            if custom_field_permission_id not in resolved_permission_ids:
+                resolved_permission_ids.append(custom_field_permission_id)
+
+        return resolved_permission_ids
 
     async def _validate_role_name_unique(
         self, name: str, organization_id: str, exclude_role_id: str = None
