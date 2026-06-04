@@ -178,8 +178,16 @@ class AddressInput(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     address_type: AddressType | None = None
-    address_data: dict[str, Any] | None = None
+    address_data: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extra address metadata (e.g. formatted line). Defaults to {} when omitted.",
+    )
     is_primary: bool = Field(default=False, description="Primary address flag")
+
+    @field_validator("address_data", mode="before")
+    @classmethod
+    def _coerce_address_data(cls, value: Any) -> dict[str, Any]:
+        return {} if value is None else value
 
 
 class WebsiteInput(BaseModel):
