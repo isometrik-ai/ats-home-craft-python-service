@@ -187,6 +187,7 @@ class AddressInput(BaseModel):
     @field_validator("address_data", mode="before")
     @classmethod
     def _coerce_address_data(cls, value: Any) -> dict[str, Any]:
+        """Use an empty object when address_data is omitted or explicitly null."""
         return {} if value is None else value
 
 
