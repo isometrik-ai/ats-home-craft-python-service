@@ -30,6 +30,17 @@ def _row_columns_present(rows: Iterable[dict[str, Any]], columns: Iterable[str])
     return [c for c in allowed if c in present]
 
 
+def rows_with_default_address_data(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Coerce missing/null ``address_data`` to ``{}`` for NOT NULL jsonb columns."""
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        next_row = dict(row)
+        if next_row.get("address_data") is None:
+            next_row["address_data"] = {}
+        normalized.append(next_row)
+    return normalized
+
+
 class BaseRepository:
     """Base repository with small, reusable SQL helpers."""
 

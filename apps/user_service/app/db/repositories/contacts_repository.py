@@ -7,7 +7,10 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.db.repositories.base_repository import BaseRepository
+from apps.user_service.app.db.repositories.base_repository import (
+    BaseRepository,
+    rows_with_default_address_data,
+)
 from apps.user_service.app.schemas.enums import ClientStatus
 from apps.user_service.app.utils.common_utils import parse_json_any
 from libs.shared_utils.custom_field_filtering import build_dropdown_jsonb_where
@@ -676,7 +679,7 @@ class ContactsRepository(BaseRepository):
             table="contact_addresses",
             required_columns=required,
             optional_columns=optional,
-            rows=rows,
+            rows=rows_with_default_address_data(rows),
             jsonb_columns=CONTACT_ADDRESS_JSONB_COLUMNS,
         )
 
