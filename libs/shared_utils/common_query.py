@@ -346,3 +346,32 @@ SETTINGS_ROLES_MANAGE = ROLES_MANAGEMENT_EDIT
 SETTINGS_USERS_MANAGE = "users_management.edit"
 SETTINGS_USERS_VIEW = "users_management.view"
 SETTINGS_PERMISSIONS_MANAGE = ROLES_MANAGEMENT_EDIT
+
+# CRM entity permissions that require custom-fields management permissions on a role.
+ENTITY_PERMISSION_CODE_PREFIXES = (
+    "leads_management.",
+    "companies_management.",
+    "contacts_management.",
+    "projects_management.",
+)
+
+ALL_CUSTOM_FIELDS_MANAGEMENT_PERMISSION_CODES = frozenset(
+    {
+        CUSTOM_FIELDS_MANAGEMENT_CREATE,
+        CUSTOM_FIELDS_MANAGEMENT_VIEW,
+        CUSTOM_FIELDS_MANAGEMENT_EDIT,
+        CUSTOM_FIELDS_MANAGEMENT_DELETE,
+    }
+)
+
+
+def custom_fields_permission_codes_to_add(selected_codes: set[str]) -> set[str]:
+    """Return custom-fields permission codes implied by the selected permission codes."""
+    requires_custom_fields = any(
+        code.startswith(prefix)
+        for code in selected_codes
+        for prefix in ENTITY_PERMISSION_CODE_PREFIXES
+    )
+    if not requires_custom_fields:
+        return set()
+    return ALL_CUSTOM_FIELDS_MANAGEMENT_PERMISSION_CODES - selected_codes
