@@ -379,6 +379,43 @@
       "field_deleted": "Custom field deleted successfully."
     }
   },
+  "email_templates": {
+    "errors": {
+      "name_required": "Template name is required.",
+      "name_exists": "An email template with this name already exists in the organization.",
+      "not_found": "Email template does not exist or has been deleted.",
+      "empty_update_payload": "At least one field must be provided to update an email template.",
+      "empty_variables_mutation": "Variable changes require at least one add, update, or remove entry.",
+      "variable_id_not_found": "Variable id '{variable_id}' does not exist on this template.",
+      "variable_parent_not_found": "Parent variable id '{variable_id}' does not exist on this template.",
+      "variable_parent_cannot_have_children": "Variable '{variable_id}' cannot have child variables.",
+      "invalid_variable_key": "Variable key must be lowercase snake_case (letters, numbers, underscores).",
+      "duplicate_variable_key": "Duplicate variable key '{variable_key}' in template variables.",
+      "variable_not_in_html": "Variable '{variable_key}' is defined but not used in HTML content.",
+      "placeholder_undefined_variable": "HTML placeholder for '{variable_key}' has no matching variable definition.",
+      "body_content_required": "Layout templates must include {{BODY_CONTENT}}.",
+      "body_inject_required": "Layout templates must include id=\"body-inject\" on the body injection element.",
+      "body_content_not_allowed": "Trigger templates must not include {{BODY_CONTENT}}.",
+      "default_value_required": "Default value is required for variable '{variable_key}'.",
+      "default_value_not_allowed_on_container": "Default value is not allowed on object/list variable '{variable_key}'.",
+      "cannot_delete_default_layout": "The default layout template cannot be deleted.",
+      "default_layout_exists": "A default layout already exists for this organization.",
+      "unknown_variable_key": "Unknown variable key '{variable_key}'.",
+      "runtime_value_required": "Runtime value is required for variable '{variable_key}'.",
+      "layout_not_found": "Layout template does not exist.",
+      "layout_id_must_be_layout": "layout_id must reference a LAYOUT template.",
+      "default_layout_not_found": "No default layout exists for this organization.",
+      "is_default_layout_only": "Only LAYOUT templates can be marked as the organization default."
+    },
+    "success": {
+      "template_created": "Email template created successfully.",
+      "templates_retrieved": "Email templates retrieved successfully.",
+      "template_retrieved": "Email template retrieved successfully.",
+      "template_updated": "Email template updated successfully.",
+      "template_deleted": "Email template deleted successfully.",
+      "template_rendered": "Email template rendered successfully."
+    }
+  },
   "lead_stages": {
     "errors": {
       "invalid_stage_name": "The stage name is invalid. Please provide a valid name.",

@@ -19,6 +19,9 @@ from apps.user_service.app.db.repositories import (
     RoleRepository,
     TeamRepository,
 )
+from apps.user_service.app.db.repositories.email_template_repository import (
+    EmailTemplateRepository,
+)
 from apps.user_service.app.schemas.ai_overview_settings import AiOverviewSettings
 from apps.user_service.app.schemas.common import OrganizationBasicDetails, Subscription
 from apps.user_service.app.schemas.enums import (
@@ -109,6 +112,7 @@ class OrganizationService:
         )
         self.team_repository = TeamRepository(db_connection=db_connection)
         self.lead_stage_repository = LeadStageRepository(db_connection=db_connection)
+        self.email_template_repository = EmailTemplateRepository(db_connection=db_connection)
 
     async def list_organizations(
         self,
@@ -277,6 +281,7 @@ class OrganizationService:
         await self.lead_stage_repository.bulk_insert_default_stages_for_organization(
             organization_id
         )
+        await self.email_template_repository.insert_default_layout(organization_id)
 
         permission_ids = await self.permissions_repository.create_default_permissions(
             organization_id=organization_id
@@ -356,6 +361,7 @@ class OrganizationService:
         await self.lead_stage_repository.bulk_insert_default_stages_for_organization(
             organization_id
         )
+        await self.email_template_repository.insert_default_layout(organization_id)
 
         permission_ids = await self.permissions_repository.create_default_permissions(
             organization_id=organization_id
