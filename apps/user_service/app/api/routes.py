@@ -9,6 +9,7 @@ from apps.user_service.app.api.contacts import router as contacts_router
 from apps.user_service.app.api.contacts_imports import router as contacts_imports_router
 from apps.user_service.app.api.custom_fields import router as custom_fields_router
 from apps.user_service.app.api.dashboard import router as dashboard_router
+from apps.user_service.app.api.email_templates import router as email_templates_router
 from apps.user_service.app.api.entity_lists import router as entity_lists_router
 from apps.user_service.app.api.external_clients import router as external_clients_router
 from apps.user_service.app.api.external_leads import router as external_leads_router
@@ -53,6 +54,7 @@ router.include_router(external_clients_router)
 router.include_router(external_leads_router)
 router.include_router(projects_router)
 router.include_router(custom_fields_router)
+router.include_router(email_templates_router)
 router.include_router(lead_stages_router)
 router.include_router(leads_router)
 router.include_router(webhooks_router)

@@ -101,6 +101,20 @@ class OrganizationMemberRole(str, Enum):
     MEMBER = "member"
 
 
+class EmailTemplateType(str, Enum):
+    """Email template kind: full layout shell or trigger body fragment."""
+
+    TRIGGER = "trigger"
+    LAYOUT = "layout"
+
+
+class EmailTemplateStatus(str, Enum):
+    """Email template publish state (enforced in API; stored as text in DB)."""
+
+    DRAFT = "draft"
+    PUBLISHED = "published"
+
+
 class SuperadminOrganizationListStatus(str, Enum):
     """Derived / filter status for superadmin organization listing."""
 

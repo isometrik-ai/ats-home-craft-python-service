@@ -39,6 +39,11 @@ CUSTOM_FIELDS_MANAGEMENT_VIEW = "custom_fields_management.view"
 CUSTOM_FIELDS_MANAGEMENT_EDIT = "custom_fields_management.edit"
 CUSTOM_FIELDS_MANAGEMENT_DELETE = "custom_fields_management.delete"
 
+EMAIL_TEMPLATES_MANAGEMENT_CREATE = "email_templates_management.create"
+EMAIL_TEMPLATES_MANAGEMENT_VIEW = "email_templates_management.view"
+EMAIL_TEMPLATES_MANAGEMENT_EDIT = "email_templates_management.edit"
+EMAIL_TEMPLATES_MANAGEMENT_DELETE = "email_templates_management.delete"
+
 LEADS_MANAGEMENT_CREATE = "leads_management.create"
 LEADS_MANAGEMENT_VIEW = "leads_management.view"
 LEADS_MANAGEMENT_EDIT = "leads_management.edit"
@@ -317,6 +322,31 @@ DEFAULT_PERMISSIONS = [
         "View organization CRM dashboard metrics",
         "dashboard",
     ),
+    # Email Templates
+    (
+        EMAIL_TEMPLATES_MANAGEMENT_VIEW,
+        "View Email Templates",
+        "View email template list and details",
+        "email_templates",
+    ),
+    (
+        EMAIL_TEMPLATES_MANAGEMENT_CREATE,
+        "Create Email Templates",
+        "Create email templates",
+        "email_templates",
+    ),
+    (
+        EMAIL_TEMPLATES_MANAGEMENT_EDIT,
+        "Edit Email Templates",
+        "Modify email templates",
+        "email_templates",
+    ),
+    (
+        EMAIL_TEMPLATES_MANAGEMENT_DELETE,
+        "Delete Email Templates",
+        "Remove email templates",
+        "email_templates",
+    ),
 ]
 
 
@@ -361,6 +391,15 @@ ALL_CUSTOM_FIELDS_MANAGEMENT_PERMISSION_CODES = frozenset(
         CUSTOM_FIELDS_MANAGEMENT_VIEW,
         CUSTOM_FIELDS_MANAGEMENT_EDIT,
         CUSTOM_FIELDS_MANAGEMENT_DELETE,
+    }
+)
+
+ALL_EMAIL_TEMPLATES_MANAGEMENT_PERMISSION_CODES = frozenset(
+    {
+        EMAIL_TEMPLATES_MANAGEMENT_CREATE,
+        EMAIL_TEMPLATES_MANAGEMENT_VIEW,
+        EMAIL_TEMPLATES_MANAGEMENT_EDIT,
+        EMAIL_TEMPLATES_MANAGEMENT_DELETE,
     }
 )
 
