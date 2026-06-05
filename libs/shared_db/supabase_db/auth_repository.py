@@ -297,7 +297,7 @@ async def generate_magiclink_and_exchange_for_session(
     fresh_anon_client = await create_async_client(
         shared_settings.supabase.url,
         shared_settings.supabase.anon_key,
-        options=ClientOptions(persist_session=False),
+        options=ClientOptions(persist_session=False, auto_refresh_token=False),
     )
     verify_response = await fresh_anon_client.auth.verify_otp(verify_params)
     if not getattr(verify_response, "session", None):

@@ -60,9 +60,8 @@ async def test_refresh_returns_new_tokens(monkeypatch, client):
         "token_refreshed": True,
     }
 
-    async def fake_refresh(_self, access_token: str, refresh_token: str):
+    async def fake_refresh(_self, refresh_token: str):
         del _self
-        assert access_token == "old-atk"
         assert refresh_token == "old-rtk"
         return RefreshSessionResponse(**fake_result)
 
@@ -73,7 +72,7 @@ async def test_refresh_returns_new_tokens(monkeypatch, client):
 
     res = await client.put(
         "/v1/auth/refresh",
-        headers={"Access-Token": "old-atk", "Refresh-Token": "old-rtk"},
+        headers={"Refresh-Token": "old-rtk"},
     )
 
     body = assert_success(res, 200)
@@ -82,35 +81,10 @@ async def test_refresh_returns_new_tokens(monkeypatch, client):
 
 
 @pytest.mark.asyncio
-async def test_refresh_token_not_expired(monkeypatch, client):
-    """Test that the refresh endpoint returns new tokens if the refresh token is not expired."""
-    fake_result = {
-        "access_token": None,
-        "refresh_token": None,
-        "expires_in": None,
-        "expires_at": None,
-        "token_refreshed": False,
-    }
-
-    async def fake_refresh(_self, access_token: str, refresh_token: str):
-        del _self
-        assert access_token == "still-valid"
-        assert refresh_token == "rtk"
-        return RefreshSessionResponse(**fake_result)
-
-    monkeypatch.setattr(
-        "apps.user_service.app.services.auth_service.AuthService.refresh_session",
-        fake_refresh,
-    )
-
-    res = await client.put(
-        "/v1/auth/refresh",
-        headers={"Access-Token": "still-valid", "Refresh-Token": "rtk"},
-    )
-
-    body = assert_success(res, 200)
-    assert body["data"]["token_refreshed"] is False
-    assert "access_token" not in body["data"]
+async def test_refresh_requires_refresh_token_header(client):
+    """Refresh requires Refresh-Token header."""
+    res = await client.put("/v1/auth/refresh", headers={})
+    assert res.status_code == 400
 
 
 @pytest.mark.asyncio

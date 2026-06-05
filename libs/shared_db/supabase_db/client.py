@@ -42,7 +42,15 @@ async def get_supabase_client() -> AsyncClient:
     if _cache.anon is None:
         if not SUPABASE_URL or not SUPABASE_ANON_KEY:
             raise RuntimeError("SUPABASE_URL and SUPABASE_ANON_KEY must be set for anon client.")
-        _cache.anon = await create_async_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        # Backend services should never auto-refresh or persist sessions.
+        _cache.anon = await create_async_client(
+            SUPABASE_URL,
+            SUPABASE_ANON_KEY,
+            options=ClientOptions(
+                persist_session=False,
+                auto_refresh_token=False,
+            ),
+        )
     return _cache.anon
 
 
@@ -64,6 +72,7 @@ async def supabase_anon_with_headers(
 
     options = ClientOptions(
         persist_session=False,
+        auto_refresh_token=False,
         headers=headers,
     )
 
@@ -85,7 +94,7 @@ async def get_supabase_service_client() -> AsyncClient:
         _cache.service = await create_async_client(
             SUPABASE_URL,
             SUPABASE_SERVICE_KEY,
-            options=ClientOptions(persist_session=False),
+            options=ClientOptions(persist_session=False, auto_refresh_token=False),
         )
 
         try:

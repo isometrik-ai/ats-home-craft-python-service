@@ -103,30 +103,17 @@ async def login(
 @limiter.limit("100/minute")
 async def refresh(
     request: Request,
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    sb_client: AsyncClient = Depends(supabase_anon),
+    sb_client: AsyncClient = Depends(supabase_anon_client_with_headers),
 ):
     """Refresh user session."""
-    auth_service = AuthService(db_connection=db_connection, sb_client=sb_client)
-
-    access_token = request.headers.get("Access-Token")
     refresh_token = request.headers.get("Refresh-Token")
 
-    result = await auth_service.refresh_session(
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
-
-    # Use different message based on whether token was refreshed
-    message_key = (
-        "auth.success.session_refreshed"
-        if result.token_refreshed
-        else "auth.success.token_not_expired"
-    )
+    auth_service = AuthService(db_connection=None, sb_client=sb_client)
+    result = await auth_service.refresh_session(refresh_token=refresh_token)
 
     return success_response(
         request=request,
-        message_key=message_key,
+        message_key="auth.success.session_refreshed",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=result,
