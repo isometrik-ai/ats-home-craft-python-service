@@ -7,7 +7,9 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.schemas.email_templates import EmailTemplateVariableDefinition
+from apps.user_service.app.schemas.email_templates import (
+    EmailTemplateVariableDefinition,
+)
 from apps.user_service.app.schemas.enums import FieldType
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -198,9 +200,7 @@ class EmailTemplateVariableValidator:
                         message_key="custom_fields.errors.list_must_have_exactly_one_child",
                         custom_code=CustomStatusCode.VALIDATION_ERROR,
                     )
-                resolved[key] = self.validate_list_default_value(
-                    key, node.sub_fields[0], raw_value
-                )
+                resolved[key] = self.validate_list_default_value(key, node.sub_fields[0], raw_value)
             else:
                 resolved[key] = self.validate_default_for_field_type(
                     key,

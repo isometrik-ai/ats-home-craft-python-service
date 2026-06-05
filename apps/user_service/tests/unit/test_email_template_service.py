@@ -2,7 +2,9 @@
 
 import pytest
 
-from apps.user_service.app.schemas.email_templates import EmailTemplateVariableDefinition
+from apps.user_service.app.schemas.email_templates import (
+    EmailTemplateVariableDefinition,
+)
 from apps.user_service.app.schemas.enums import EmailTemplateType, FieldType
 from apps.user_service.app.services.email_template_service import EmailTemplateService
 from apps.user_service.app.services.email_template_variable_validation import (
@@ -23,7 +25,7 @@ def test_layout_requires_body_content_and_body_inject():
     with pytest.raises(ValidationException):
         EmailTemplateService._validate_template_html_rules(
             EmailTemplateType.LAYOUT,
-            f"<div id=\"body-inject\">only inject</div>",
+            '<div id="body-inject">only inject</div>',
         )
 
 

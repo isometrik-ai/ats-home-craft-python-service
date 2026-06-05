@@ -13,7 +13,9 @@ from asyncpg import UniqueViolationError
 from apps.user_service.app.db.repositories.email_template_repository import (
     EmailTemplateRepository,
 )
-from apps.user_service.app.schemas.custom_fields import validate_and_normalize_type_config
+from apps.user_service.app.schemas.custom_fields import (
+    validate_and_normalize_type_config,
+)
 from apps.user_service.app.schemas.email_templates import (
     CreateEmailTemplateRequest,
     EmailTemplateDetailResponse,
@@ -366,9 +368,7 @@ class EmailTemplateService:
         )
 
         if mutation.add:
-            EmailTemplateService._validate_mutation_add_parents(
-                index, mutation.add, remove_ids
-            )
+            EmailTemplateService._validate_mutation_add_parents(index, mutation.add, remove_ids)
 
     @staticmethod
     def _remove_variable_nodes(
@@ -472,9 +472,7 @@ class EmailTemplateService:
         mutation: EmailTemplateVariablesMutation,
     ) -> list[dict[str, Any]]:
         """Apply remove → update → add and return the new stored variable tree."""
-        roots = EmailTemplateService._ensure_storage_variable_ids(
-            copy.deepcopy(stored_variables)
-        )
+        roots = EmailTemplateService._ensure_storage_variable_ids(copy.deepcopy(stored_variables))
         index = EmailTemplateService._index_variable_nodes(roots)
         EmailTemplateService._validate_variable_mutation_ids(index, mutation)
 
@@ -679,9 +677,7 @@ class EmailTemplateService:
 
         template_type = EmailTemplateType(existing["template_type"])
         html_content = (
-            body.html_content
-            if body.html_content is not None
-            else existing["html_content"]
+            body.html_content if body.html_content is not None else existing["html_content"]
         )
         variables_json = self._resolve_variables_json_for_update(
             existing, body, template_type, html_content

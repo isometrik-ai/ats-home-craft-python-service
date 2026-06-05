@@ -446,8 +446,13 @@ class VerificationCodeService:
                 custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
 
-        # Create client with user's access token in headers
-        options = AsyncClientOptions(headers={"Authorization": f"Bearer {access_token}"})
+        # Create client with user's access token in headers.
+        # Backend services should never auto-refresh or persist sessions.
+        options = AsyncClientOptions(
+            headers={"Authorization": f"Bearer {access_token}"},
+            persist_session=False,
+            auto_refresh_token=False,
+        )
 
         client = await supabase.create_async_client(supabase_url, supabase_anon_key, options)
         return client

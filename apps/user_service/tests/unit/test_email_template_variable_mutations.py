@@ -4,8 +4,8 @@ import pytest
 
 from apps.user_service.app.schemas.email_templates import (
     EmailTemplateVariableAddRequest,
-    EmailTemplateVariableUpdateRequest,
     EmailTemplateVariablesMutation,
+    EmailTemplateVariableUpdateRequest,
 )
 from apps.user_service.app.schemas.enums import FieldType
 from apps.user_service.app.services.email_template_service import EmailTemplateService
@@ -13,6 +13,7 @@ from libs.shared_utils.http_exceptions import ValidationException
 
 
 def _brand_node(variable_id: str = "var-1") -> dict:
+    """Build a sample root-level text variable node for mutation tests."""
     return {
         "id": variable_id,
         "variable_key": "brand",
@@ -58,7 +59,7 @@ def test_remove_variable_by_id():
     result = EmailTemplateService._apply_variable_mutations(  # pylint: disable=protected-access
         [_brand_node()], mutation
     )
-    assert result == []
+    assert not result
 
 
 def test_update_variable_default_value():
@@ -129,7 +130,7 @@ def test_remove_cascades_to_descendants():
     result = EmailTemplateService._apply_variable_mutations(  # pylint: disable=protected-access
         tree, mutation
     )
-    assert result == []
+    assert not result
 
 
 def test_unknown_variable_id_raises():

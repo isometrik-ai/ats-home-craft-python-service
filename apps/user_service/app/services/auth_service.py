@@ -7,7 +7,6 @@ All business logic for authentication endpoints is centralized here.
 # Standard library imports
 import json
 import re
-import time
 from typing import Any
 
 # Third-party imports
@@ -96,15 +95,22 @@ class AuthService:
     Handles all authentication operations including login, signup, password management, and 2FA.
     """
 
-    def __init__(self, db_connection: asyncpg.Connection, sb_client: AsyncClient | None = None):
+    def __init__(
+        self, db_connection: asyncpg.Connection | None, sb_client: AsyncClient | None = None
+    ):
         """Initialize AuthService with database connection.
 
         Args:
             db_connection: Active asyncpg connection (potentially in transaction)
         """
         self.db_connection = db_connection
-        self.user_repository = UserRepository(db_connection=db_connection)
-        self.organization_repository = OrganizationRepository(db_connection=db_connection)
+        # Some auth operations (e.g. refresh) should not require DB access.
+        self.user_repository = (
+            UserRepository(db_connection=db_connection) if db_connection else None
+        )
+        self.organization_repository = (
+            OrganizationRepository(db_connection=db_connection) if db_connection else None
+        )
         self.supabase_client = sb_client
 
     # UTILITY METHODS
@@ -659,69 +665,6 @@ class AuthService:
             organizations=organizations,
         )
 
-    def _validate_tokens_present(
-        self, access_token: str | None, refresh_token: str | None
-    ) -> tuple[str, str]:
-        """Validate that both tokens are present and return stripped versions.
-
-        Args:
-            access_token: Current access token
-            refresh_token: Refresh token
-
-        Returns:
-            Tuple of (stripped_access_token, stripped_refresh_token)
-
-        Raises:
-            BadRequestException: If access token or refresh token is missing
-        """
-        if not access_token:
-            raise BadRequestException(
-                message_key="errors.required_headers_missing",
-                custom_code=CustomStatusCode.BAD_REQUEST,
-                params={"missing_headers": "Access-Token"},
-            )
-
-        if not refresh_token:
-            raise BadRequestException(
-                message_key="errors.required_headers_missing",
-                custom_code=CustomStatusCode.BAD_REQUEST,
-                params={"missing_headers": "Refresh-Token"},
-            )
-
-        return access_token.strip(), refresh_token.strip()
-
-    async def _decode_and_validate_access_token(
-        self, access_token: str, supabase_client: AsyncClient
-    ) -> tuple[str | None, bool]:
-        """Decode access token and check if it's expired.
-
-        Args:
-            access_token: Access token to decode
-            supabase_client: Supabase client instance
-
-        Returns:
-            Tuple of (user_id, is_expired) where is_expired is True if token is expired.
-            user_id will be None if token is expired.
-
-        Raises:
-            UnauthorizedException: If access token is invalid (but not if it's just expired)
-        """
-        try:
-            decoded_access_token = await get_claims_from_token(access_token, supabase_client)
-            access_token_user_id = decoded_access_token.get("sub")
-
-            # Check if token is expired (required for refresh)
-            exp = decoded_access_token.get("exp")
-            is_expired = not (exp and exp > int(time.time()))
-
-            return access_token_user_id, is_expired
-        except UnauthorizedException as e:
-            # Allow expired tokens for refresh flows
-            if e.message_key == "errors.token_expired":
-                return None, True
-            # Re-raise for invalid tokens
-            raise
-
     async def _refresh_user_session_with_error_handling(self, refresh_token: str) -> Any:
         """Refresh user session with comprehensive error handling.
 
@@ -732,7 +675,8 @@ class AuthService:
             Result from refresh_user_session
 
         Raises:
-            UnauthorizedException: If refresh token is invalid/expired
+            BadRequestException: If refresh token is invalid/expired (Supabase status 400)
+            UnauthorizedException: If Supabase returns other client-side auth errors (4xx)
             TooManyRequestsException: If rate limit is exceeded
             ServiceUnavailableException: If authentication service is unavailable
         """
@@ -744,9 +688,21 @@ class AuthService:
             # Invalid refresh token (status 400)
             if status == 400:
                 logger.error("Invalid refresh token: %s", str(auth_error))
-                raise UnauthorizedException(
-                    message_key="auth.errors.invalid_refresh_token",
-                    custom_code=CustomStatusCode.UNAUTHORIZED,
+                supabase_code = getattr(auth_error, "code", None)
+                message_key = (
+                    "auth.errors.refresh_token_already_used"
+                    if supabase_code == "refresh_token_already_used"
+                    else "auth.errors.invalid_refresh_token"
+                )
+                raise BadRequestException(
+                    message_key=message_key,
+                    custom_code=CustomStatusCode.BAD_REQUEST,
+                    errors=[
+                        {
+                            "code": supabase_code,
+                            "message": getattr(auth_error, "message", str(auth_error)),
+                        }
+                    ],
                 ) from auth_error
 
             # Rate limiting (status 429)
@@ -783,60 +739,26 @@ class AuthService:
                 custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
             ) from exc
 
-    def _validate_token_user_match(self, access_token_user_id: str, refresh_user_id: str) -> None:
-        """Validate that access token and refresh token belong to the same user.
+    async def refresh_session(self, refresh_token: str | None) -> RefreshSessionResponse:
+        """Refresh user session using refresh token only.
 
-        Args:
-            access_token_user_id: User ID from access token
-            refresh_user_id: User ID from refresh token result
+        Backend services should treat refresh tokens as one-time-use (Supabase rotates them).
+        This method is intentionally stateless and does not depend on DB access.
 
         Raises:
-            UnauthorizedException: If tokens don't belong to same user
+            BadRequestException: If refresh token header is missing or Supabase rejects it
+            UnauthorizedException: If Supabase returns other client-side auth errors (4xx)
+            TooManyRequestsException: If rate limit is exceeded
+            ServiceUnavailableException: If authentication service is unavailable
         """
-        if access_token_user_id != refresh_user_id:
-            raise UnauthorizedException(
-                message_key="auth.errors.authentication_failed",
-                custom_code=CustomStatusCode.UNAUTHORIZED,
+        if not refresh_token or not refresh_token.strip():
+            raise BadRequestException(
+                message_key="errors.required_headers_missing",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+                params={"missing_headers": "Refresh-Token"},
             )
 
-    async def refresh_session(
-        self, access_token: str | None, refresh_token: str | None
-    ) -> RefreshSessionResponse:
-        """Refresh user session.
-
-        Args:
-            access_token: Current access token
-            refresh_token: Refresh token
-
-        Returns:
-            RefreshSessionResponse: Token information with refresh status
-
-        Raises:
-            BadRequestException: If access token or refresh token is missing
-            UnauthorizedException: If access token is invalid, refresh token is invalid/expired,
-                or tokens don't belong to same user
-            ServiceUnavailableException: If authentication service is unavailable or
-                encounters server errors
-            TooManyRequestsException: If rate limit is exceeded
-        """
-        # Validate required tokens
-        access_token, refresh_token = self._validate_tokens_present(access_token, refresh_token)
-
-        # Decode access token and check expiration
-        access_token_user_id, is_expired = await self._decode_and_validate_access_token(
-            access_token, self.supabase_client
-        )
-
-        # If token is not expired, return without refreshing
-        if not is_expired:
-            return RefreshSessionResponse(token_refreshed=False)
-
-        # Refresh the session
-        res = await self._refresh_user_session_with_error_handling(refresh_token)
-
-        # Verify tokens belong to same user (skip if access token was expired)
-        if access_token_user_id is not None:
-            self._validate_token_user_match(access_token_user_id, res.user.id)
+        res = await self._refresh_user_session_with_error_handling(refresh_token.strip())
 
         return RefreshSessionResponse(
             access_token=res.session.access_token,

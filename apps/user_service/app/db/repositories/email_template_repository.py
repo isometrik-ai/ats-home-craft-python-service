@@ -37,6 +37,7 @@ class EmailTemplateRepository:
 
     @classmethod
     def _columns_expr(cls) -> str:
+        """Return SELECT column list as a single-line SQL fragment."""
         return cls.TEMPLATE_COLUMNS.strip().replace("\n", " ")
 
     async def insert_default_layout(self, organization_id: str) -> dict[str, Any]:
