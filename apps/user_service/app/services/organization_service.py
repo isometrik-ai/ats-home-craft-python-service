@@ -244,17 +244,6 @@ class OrganizationService:
         # Check if session is already linked to an organization before creating a new one
         session_manager = SessionManagementService(db_connection=self.db_connection)
 
-        # Check if session already has an organization context
-        current_org_id = await session_manager.session_repository.get_session_organization_id(
-            session_id
-        )
-
-        # Restrict user from creating an organization if session is already linked with one
-        if current_org_id is not None:
-            raise BadRequestException(
-                message_key="organizations.errors.session_already_linked",
-            )
-
         organization_id = str(uuid.uuid4())
         validate_uuid_format(organization_id, "organization_id")
 
