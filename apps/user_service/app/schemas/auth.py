@@ -347,7 +347,11 @@ class CompanyData(BaseModel):
     """Company signup data model"""
 
     company_name: str
-    company_website: str | None = None
+    website_url: str | None = Field(
+        None,
+        max_length=2048,
+        description="Organization website URL (https preferred)",
+    )
     industry: str | None = None
     company_size: str | None = None
     description: str | None = None
@@ -369,9 +373,9 @@ class CompanyData(BaseModel):
     enterprise_features: EnterpriseFeatures | None = None
 
     @classmethod
-    @field_validator("company_website")
+    @field_validator("website_url")
     def validate_website(cls, value):
-        """Enforce https scheme for company website."""
+        """Enforce https scheme for organization website."""
         if not value:
             return value
 
