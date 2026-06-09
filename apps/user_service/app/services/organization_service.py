@@ -294,7 +294,7 @@ class OrganizationService:
         await self._enqueue_business_overview_enrichment(
             organization_id=organization_id,
             organization_name=created["name"],
-            organization_website=body.company_data.company_website,
+            organization_website=body.company_data.website_url,
             settings=settings,
         )
 
@@ -366,7 +366,7 @@ class OrganizationService:
         await self._enqueue_business_overview_enrichment(
             organization_id=organization_id,
             organization_name=created["name"],
-            organization_website=body.company_data.company_website,
+            organization_website=body.company_data.website_url,
             settings=settings,
         )
 
@@ -978,7 +978,7 @@ class OrganizationService:
                 "enterprise_features": body.company_data.enterprise_features,
                 "team_setup": body.company_data.team_setup,
                 "address": body.company_data.address,
-                "website_url": body.company_data.company_website,
+                "website_url": body.company_data.website_url,
             }
             settings = serialize_pydantic_models(settings)
 
@@ -1050,7 +1050,7 @@ class OrganizationService:
             "id": organization_id,
             "name": body.company_data.company_name,
             "slug": resolved_slug,
-            "domain": body.company_data.company_website,
+            "domain": body.company_data.website_url,
             "logo_url": body.company_data.logo_url,
             "status": OrganizationStatus.ACTIVE.value,
             "description": body.company_data.description,

@@ -134,7 +134,7 @@ def test_create_skips_ai_overview() -> None:
                         "enterprise_features": None,
                         "team_setup": None,
                         "address": None,
-                        "company_website": None,
+                        "website_url": None,
                     },
                 )()
             },
