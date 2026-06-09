@@ -296,6 +296,7 @@ class UpdateContactRequest(BaseModel):
     social_pages: SocialPagesUpdate | None = None
     custom_fields: list[dict[str, Any]] | None = None
     additional_data: dict[str, Any] | None = None
+    sales_intelligence: dict[str, Any] | None = None
     description: str | None = None
     notes: list[NoteItem] | None = None
 
@@ -469,6 +470,7 @@ class ContactDetailsResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     custom_fields: list[dict[str, Any]] = Field(default_factory=list)
     additional_data: dict[str, Any] = Field(default_factory=dict)
+    sales_intelligence: dict[str, Any] | None = None
     social_pages: list[dict[str, Any]] = Field(default_factory=list)
     notes: list[NoteItem] = Field(default_factory=list)
 

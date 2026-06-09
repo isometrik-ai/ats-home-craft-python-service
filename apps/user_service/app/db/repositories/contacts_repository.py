@@ -26,6 +26,7 @@ CONTACT_JSONB_COLUMNS: frozenset[str] = frozenset(
         "social_pages",
         "work_history",
         "educational_history",
+        "sales_intelligence",
     }
 )
 

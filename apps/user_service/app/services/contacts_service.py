@@ -1235,6 +1235,16 @@ class ContactsService:
         return normalized
 
     @staticmethod
+    def _normalize_contact_sales_intelligence(details: dict[str, Any]) -> None:
+        """Parse sales_intelligence when asyncpg returns JSONB as a string."""
+        sales_intel = details.get("sales_intelligence")
+        if isinstance(sales_intel, str):
+            parsed = parse_json_field(sales_intel)
+            details["sales_intelligence"] = parsed if isinstance(parsed, dict) else None
+        elif sales_intel is not None and not isinstance(sales_intel, dict):
+            details["sales_intelligence"] = None
+
+    @staticmethod
     def _normalize_contact_jsonb_columns(normalized: dict[str, Any]) -> None:
         """Normalize JSONB contact columns to Python objects (dict/list) where possible."""
         for field_name in CONTACT_JSONB_COLUMNS:
@@ -1246,6 +1256,10 @@ class ContactsService:
             if field_name == "additional_data":
                 parsed = parse_json_field(normalized.get(field_name))
                 normalized[field_name] = parsed if isinstance(parsed, dict) else {}
+                continue
+
+            if field_name == "sales_intelligence":
+                ContactsService._normalize_contact_sales_intelligence(normalized)
                 continue
 
             normalized[field_name] = coerce_json_list(normalized.get(field_name))
@@ -1305,6 +1319,9 @@ class ContactsService:
 
         if body.additional_data is not None:
             update_data["additional_data"] = body.additional_data
+
+        if body.sales_intelligence is not None:
+            update_data["sales_intelligence"] = body.sales_intelligence
 
         if body.skills is not None:
             update_data["skills"] = body.skills
@@ -1902,6 +1919,7 @@ class ContactsService:
         self._coerce_contact_detail_json_lists(details)
         self._normalize_contact_detail_scalar_arrays(details)
         self._normalize_contact_detail_additional_data(details)
+        self._normalize_contact_sales_intelligence(details)
         self._normalize_contact_detail_timestamps(details)
         return details
 
