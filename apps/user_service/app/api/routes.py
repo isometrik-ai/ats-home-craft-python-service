@@ -12,6 +12,9 @@ from apps.user_service.app.api.dashboard import router as dashboard_router
 from apps.user_service.app.api.email_templates import router as email_templates_router
 from apps.user_service.app.api.entity_lists import router as entity_lists_router
 from apps.user_service.app.api.external_clients import router as external_clients_router
+from apps.user_service.app.api.external_email_templates import (
+    router as external_email_templates_router,
+)
 from apps.user_service.app.api.external_leads import router as external_leads_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.lead_stages import router as lead_stages_router
@@ -51,6 +54,7 @@ router.include_router(presigned_url_router)
 router.include_router(verification_codes_router)
 router.include_router(teams_router)
 router.include_router(external_clients_router)
+router.include_router(external_email_templates_router)
 router.include_router(external_leads_router)
 router.include_router(projects_router)
 router.include_router(custom_fields_router)
