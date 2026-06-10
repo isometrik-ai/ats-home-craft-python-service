@@ -693,6 +693,10 @@ class LeadContactDetail(BaseModel):
         default=None,
         description="Contact profile image URL",
     )
+    addresses: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Contact addresses (primary first)",
+    )
 
 
 class LeadDetail(BaseModel):
