@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 import uuid
 from typing import Any
 
 import asyncpg
+import httpx
 from asyncpg import UniqueViolationError
 
 from apps.user_service.app.db.repositories.email_template_repository import (
@@ -39,12 +41,18 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_field,
 )
+from libs.shared_config.app_settings import shared_settings
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
+    ServiceUnavailableException,
     ValidationException,
 )
+from libs.shared_utils.isometrik_strands_client import call_strands_agent
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger("email_template_service")
 
 PLACEHOLDER_RE = re.compile(r"\{\{\.([a-z][a-z0-9_]*)\}\}")
 BODY_CONTENT_TOKEN = "{{BODY_CONTENT}}"
@@ -827,3 +835,102 @@ class EmailTemplateService:
             resolved_variables=resolved,
         )
         return response.model_dump(mode="json")
+
+    @staticmethod
+    def email_template_ai_generation_enabled() -> bool:
+        """Return True when strands email-template agent credentials are configured."""
+        iso = shared_settings.isometrik
+        return bool(iso.strands_auth_token.strip() and iso.email_template_agent_id.strip())
+
+    @staticmethod
+    def _build_email_template_agent_message(*, query: str, organization_id: str) -> str:
+        """Append organization scope suffix expected by the external template agent."""
+        normalized_query = query.strip()
+        return f"{normalized_query} ::organization_id : {organization_id.strip()}"
+
+    @staticmethod
+    def _parse_template_id_from_agent_text(raw_text: str) -> str | None:
+        """Extract template_id from agent text (JSON object or bare UUID)."""
+        cleaned = raw_text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+
+        try:
+            payload = json.loads(cleaned)
+            if isinstance(payload, dict):
+                template_id = payload.get("template_id")
+                if isinstance(template_id, str) and template_id.strip():
+                    return template_id.strip()
+        except json.JSONDecodeError:
+            pass
+
+        try:
+            return str(uuid.UUID(cleaned))
+        except ValueError:
+            return None
+
+    async def generate_email_template_with_ai(self, *, query: str) -> str:
+        """Invoke the configured strands agent and return the created template id."""
+        if not self.email_template_ai_generation_enabled():
+            raise ServiceUnavailableException(
+                message_key="email_templates.errors.ai_generation_not_configured",
+            )
+
+        organization_id = self.user_context.organization_id
+        if not organization_id:
+            raise ValidationException(
+                message_key="email_templates.errors.ai_generation_failed",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        agent_id = shared_settings.isometrik.email_template_agent_id
+        message = self._build_email_template_agent_message(
+            query=query,
+            organization_id=organization_id,
+        )
+
+        try:
+            body = await call_strands_agent(agent_id=agent_id, message=message, stream=False)
+        except httpx.HTTPError as exc:
+            logger.error(
+                "email_template_agent_request_failed: %s | agent_id=%s organization_id=%s",
+                exc,
+                agent_id,
+                organization_id,
+                exc_info=True,
+            )
+            raise ServiceUnavailableException(
+                message_key="email_templates.errors.ai_generation_failed",
+            ) from exc
+
+        raw_text = body.get("text")
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            logger.error(
+                "email_template_agent_empty_text | agent_id=%s organization_id=%s body_keys=%s",
+                agent_id,
+                organization_id,
+                list(body.keys()),
+            )
+            raise ServiceUnavailableException(
+                message_key="email_templates.errors.ai_generation_invalid_response",
+            )
+
+        template_id = self._parse_template_id_from_agent_text(raw_text)
+        if not template_id:
+            logger.error(
+                "email_template_agent_invalid_template_id | agent_id=%s organization_id=%s "
+                "raw_text_preview=%s",
+                agent_id,
+                organization_id,
+                raw_text[:500],
+            )
+            raise ServiceUnavailableException(
+                message_key="email_templates.errors.ai_generation_invalid_response",
+            )
+
+        return template_id

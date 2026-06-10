@@ -332,5 +332,26 @@ class RenderEmailTemplateResponse(BaseModel):
     resolved_variables: dict[str, Any]
 
 
+class GenerateEmailTemplateWithAiRequest(BaseModel):
+    """Request body for AI-assisted email template generation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=4000,
+        description="Natural-language prompt forwarded to the email template agent",
+    )
+
+
+class GenerateEmailTemplateWithAiResult(BaseModel):
+    """Response for AI-assisted email template generation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template_id: str
+
+
 EmailTemplateVariableDefinition.model_rebuild()
 EmailTemplateVariableRequest.model_rebuild()

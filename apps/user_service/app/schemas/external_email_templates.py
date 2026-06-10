@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from apps.user_service.app.schemas.email_templates import CreateEmailTemplateRequest
+
+
+class ExternalCreateEmailTemplateRequest(CreateEmailTemplateRequest):
+    """External create payload scoped by explicit organization id."""
+
+    organization_id: str = Field(..., min_length=1, description="Target organization UUID")
 
 
 class ExternalCreateEmailTemplateResult(BaseModel):
@@ -16,4 +24,7 @@ class ExternalCreateEmailTemplateResult(BaseModel):
     status: str
 
 
-__all__ = ["ExternalCreateEmailTemplateResult"]
+__all__ = [
+    "ExternalCreateEmailTemplateRequest",
+    "ExternalCreateEmailTemplateResult",
+]

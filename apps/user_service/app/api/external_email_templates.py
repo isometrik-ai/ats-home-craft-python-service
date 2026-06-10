@@ -1,15 +1,9 @@
 """External Email Templates API.
 
-These endpoints are intended for external integrations (partners, embedded apps)
-that need to create email templates but do not authenticate with our JWT bearer
-token. Instead, the caller authenticates via Isometrik credential decode using
-headers:
-
-- ``licenseKey``
-- ``appSecret``
-
-The decoded ``projectId`` is mapped to our internal ``organization_id`` and all
-writes are scoped to that organization.
+These endpoints are intended for external integrations (partners, embedded apps,
+AI agents) that authenticate with a Ross AI integration API key via the
+``ROSSAI_API_KEY`` header. The caller supplies ``organization_id`` in the request
+body; writes are scoped to that organization.
 """
 
 import asyncpg
@@ -19,15 +13,21 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_uow
-from apps.user_service.app.dependencies.external_auth import get_organization_context
+from apps.user_service.app.dependencies.external_auth import (
+    resolve_external_organization_id,
+)
 from apps.user_service.app.schemas.email_templates import CreateEmailTemplateRequest
 from apps.user_service.app.schemas.external_email_templates import (
+    ExternalCreateEmailTemplateRequest,
     ExternalCreateEmailTemplateResult,
 )
 from apps.user_service.app.services.email_template_service import EmailTemplateService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     handle_api_exceptions,
+)
+from libs.shared_middleware.ross_ai_integration_auth import (
+    verify_ross_ai_integration_api_key,
 )
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -41,9 +41,10 @@ router = APIRouter(prefix="/integrations/email-templates", tags=["Email Template
     status_code=http_status.HTTP_201_CREATED,
     summary="Create an email template (external auth)",
     description=(
-        "Create a TRIGGER or LAYOUT email template for the organization resolved from "
-        "Isometrik credentials (`licenseKey`/`appSecret`). Templates are created as "
-        "draft by default unless `status` is set to `published`."
+        "Create a TRIGGER or LAYOUT email template for the organization specified in "
+        "`organization_id`. Authenticate with the Ross AI integration API key "
+        "(`ROSSAI_API_KEY`). Templates are created as draft by default unless `status` is "
+        "set to `published`."
     ),
     responses={
         http_status.HTTP_201_CREATED: {"description": "Email template created successfully"},
@@ -66,11 +67,20 @@ router = APIRouter(prefix="/integrations/email-templates", tags=["Email Template
 async def external_create_email_template(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
-    organization_id: str = Depends(get_organization_context),
-    body: CreateEmailTemplateRequest = Body(...),
+    _: None = Depends(verify_ross_ai_integration_api_key),
+    body: ExternalCreateEmailTemplateRequest = Body(...),
 ):
-    """External create email template endpoint (Isometrik credential auth)."""
+    """External create email template endpoint (Ross AI API key auth)."""
+    organization_id = await resolve_external_organization_id(
+        request=request,
+        organization_id=body.organization_id,
+        db_connection=db_connection,
+    )
     actor_email = request.state.external_actor_email
+    create_body = CreateEmailTemplateRequest.model_validate(
+        body.model_dump(exclude={"organization_id"})
+    )
+
     service = EmailTemplateService(
         user_context=UserContext(
             user_id="00000000-0000-0000-0000-000000000000",
@@ -79,7 +89,7 @@ async def external_create_email_template(
         ),
         db_connection=db_connection,
     )
-    created = await service.create_email_template(body)
+    created = await service.create_email_template(create_body)
 
     request.state.audit_table = "email_templates"
     request.state.audit_requested_id = str(created.get("id", "")) if created else ""
