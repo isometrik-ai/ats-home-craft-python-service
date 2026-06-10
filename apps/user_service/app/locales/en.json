@@ -406,10 +406,14 @@
       "layout_not_found": "Layout template does not exist.",
       "layout_id_must_be_layout": "layout_id must reference a LAYOUT template.",
       "default_layout_not_found": "No default layout exists for this organization.",
-      "is_default_layout_only": "Only LAYOUT templates can be marked as the organization default."
+      "is_default_layout_only": "Only LAYOUT templates can be marked as the organization default.",
+      "ai_generation_not_configured": "Email template AI generation is not configured.",
+      "ai_generation_failed": "Email template AI generation failed.",
+      "ai_generation_invalid_response": "Email template agent returned an invalid response."
     },
     "success": {
       "template_created": "Email template created successfully.",
+      "template_generated": "Email template generated successfully.",
       "templates_retrieved": "Email templates retrieved successfully.",
       "template_retrieved": "Email template retrieved successfully.",
       "template_updated": "Email template updated successfully.",

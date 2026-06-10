@@ -9,6 +9,8 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.email_templates import (
     CreateEmailTemplateRequest,
+    GenerateEmailTemplateWithAiRequest,
+    GenerateEmailTemplateWithAiResult,
     RenderEmailTemplateRequest,
     UpdateEmailTemplateRequest,
 )
@@ -78,6 +80,46 @@ async def create_email_template(
         message_key="email_templates.success.template_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("generate email template with ai")
+@router.post(
+    "/generate",
+    status_code=http_status.HTTP_200_OK,
+    description=(
+        "Generate an email template via the configured Isometrik strands agent. "
+        "Organization is taken from the authenticated session. The agent message is "
+        "suffixed with `::organization_id : <org_id>`."
+    ),
+    summary="Generate email template with AI",
+)
+@limiter.limit("30/minute")
+async def generate_email_template_with_ai(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    body: GenerateEmailTemplateWithAiRequest = Body(...),
+):
+    """Generate an email template for the authenticated organization via strands."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=EMAIL_TEMPLATES_MANAGEMENT_CREATE,
+    )
+
+    service = EmailTemplateService(user_context=user_context, db_connection=db_connection)
+    template_id = await service.generate_email_template_with_ai(query=body.query)
+
+    return success_response(
+        request=request,
+        message_key="email_templates.success.template_generated",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=GenerateEmailTemplateWithAiResult(template_id=template_id).model_dump(
+            exclude_none=True,
+            mode="json",
+        ),
     )
 
 

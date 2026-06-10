@@ -86,6 +86,10 @@ class IsometrikSettings(BaseSettings):
         "ISOMETRIK_BUSINESS_OVERVIEW_AGENT_ID",
         default="6a1e806e8dc032d543776318",
     )
+    email_template_agent_id: str = config(
+        "ISOMETRIK_EMAIL_TEMPLATE_AGENT_ID",
+        default="6a2831dddb53333f06d01e68",
+    )
     org_business_overview_on_create_enabled: bool = config(
         "ISOMETRIK_ORG_BUSINESS_OVERVIEW_ON_CREATE_ENABLED",
         default=True,
@@ -208,6 +212,7 @@ class SharedAppSettings(BaseSettings):
     company_terms_url: str = config("COMPANY_TERMS_URL", default="https://houseofapps.ai/terms")
     openai_api_key: str = config("OPENAI_API_KEY")
     org_memory_llm_model: str = config("ORG_MEMORY_LLM_MODEL", default="gpt-4.1-mini")
+    rossai_api_key: str = config("ROSSAI_API_KEY", default="")
 
 
 shared_settings = SharedAppSettings()
