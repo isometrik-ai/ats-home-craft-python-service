@@ -36,6 +36,7 @@ from apps.user_service.app.utils.common_utils import (
     UserContext,
     coerce_json_list,
     format_iso_datetime,
+    normalize_nested_addresses_for_audit,
     parse_json_field,
 )
 from libs.shared_utils.custom_field_filtering import normalize_dropdown_filters_payload
@@ -676,6 +677,14 @@ class LeadService:
         return out
 
     @staticmethod
+    def _normalize_lead_contact_addresses(raw: Any) -> list[dict[str, Any]]:
+        """Normalize nested contact address rows for lead list/detail responses."""
+        wrapper = {"addresses": coerce_json_list(raw)}
+        normalize_nested_addresses_for_audit(wrapper, parent_fk_field="contact_id")
+        addresses = wrapper.get("addresses")
+        return addresses if isinstance(addresses, list) else []
+
+    @staticmethod
     def _parse_contacts_from_row(raw: Any) -> list[LeadContactDetail]:
         """Parse `contacts` list from a repository row."""
         items = coerce_json_list(raw)
@@ -694,6 +703,7 @@ class LeadService:
                     email=item.get("email"),
                     phones=item.get("phones") if isinstance(item.get("phones"), list) else [],
                     profile_photo_url=item.get("profile_photo_url"),
+                    addresses=LeadService._normalize_lead_contact_addresses(item.get("addresses")),
                 )
             )
         return out
@@ -756,6 +766,7 @@ class LeadService:
                 email=c.get("email"),
                 phones=c.get("phones") or [],
                 profile_photo_url=c.get("profile_photo_url"),
+                addresses=LeadService._normalize_lead_contact_addresses(c.get("addresses")),
             )
             for c in contacts
         ]

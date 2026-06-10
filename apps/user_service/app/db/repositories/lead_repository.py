@@ -113,6 +113,34 @@ COALESCE(
 ) AS companies
 """
 
+_CONTACT_ADDRESSES_JSON_FOR_LC_SQL = """
+COALESCE(
+    (
+        SELECT json_agg(
+            to_jsonb(addr)
+            ORDER BY addr.is_primary DESC, addr.created_at ASC
+        )
+        FROM contact_addresses addr
+        WHERE addr.contact_id = lc.contact_id
+    ),
+    '[]'::json
+)
+"""
+
+_CONTACT_ADDRESSES_JSON_FOR_D_SQL = """
+COALESCE(
+    (
+        SELECT json_agg(
+            to_jsonb(addr)
+            ORDER BY addr.is_primary DESC, addr.created_at ASC
+        )
+        FROM contact_addresses addr
+        WHERE addr.contact_id = d.contact_id
+    ),
+    '[]'::json
+)
+"""
+
 _LEAD_CONTACTS_AGG_SQL = f"""
 COALESCE(
     (
@@ -121,7 +149,8 @@ COALESCE(
                 'contact_id', lc.contact_id::text,
                 'label', lc.label,
                 'contact_name', ({_CONTACT_DISPLAY_NAME_SQL.strip()}),
-                'profile_photo_url', ct.profile_photo_url
+                'profile_photo_url', ct.profile_photo_url,
+                'addresses', ({_CONTACT_ADDRESSES_JSON_FOR_LC_SQL.strip()})
             )
             ORDER BY lc.created_at ASC
         )
@@ -228,7 +257,8 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
         ({_CONTACT_DISPLAY_NAME_SQL.strip()}) AS contact_name,
         cu.email::text AS contact_email,
         ct.phones AS contact_phones,
-        ct.profile_photo_url AS contact_profile_photo_url
+        ct.profile_photo_url AS contact_profile_photo_url,
+        COALESCE(contact_addr_rows.addresses, '[]'::jsonb) AS contact_addresses
     FROM leads l
     {_LEADS_JOIN_DISPLAY.strip()}
     LEFT JOIN lead_contacts lc
@@ -239,6 +269,13 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
        AND ct.organization_id = lc.organization_id
     LEFT JOIN auth.users cu
         ON cu.id = ct.user_id
+    LEFT JOIN LATERAL (
+        SELECT jsonb_agg(
+            to_jsonb(addr) ORDER BY addr.is_primary DESC, addr.created_at ASC
+        ) AS addresses
+        FROM contact_addresses addr
+        WHERE addr.contact_id = ct.id
+    ) contact_addr_rows ON TRUE
     WHERE l.organization_id = $1
       AND l.id = $2::uuid
       AND ($3::uuid IS NULL OR l.owner_id = $3)
@@ -604,6 +641,7 @@ class LeadRepository:
         payload.pop("contact_email", None)
         payload.pop("contact_phones", None)
         payload.pop("contact_profile_photo_url", None)
+        payload.pop("contact_addresses", None)
 
         contacts: list[dict[str, Any]] = []
         for row in rows:
@@ -618,6 +656,7 @@ class LeadRepository:
                     "email": row.get("contact_email"),
                     "phones": parse_json_field(row.get("contact_phones")) or [],
                     "profile_photo_url": row.get("contact_profile_photo_url"),
+                    "addresses": parse_json_field(row.get("contact_addresses")) or [],
                 }
             )
 
@@ -887,7 +926,8 @@ class LeadRepository:
                                         'contact_id', d.contact_id::text,
                                         'label', d.label,
                                         'contact_name', ({_CONTACT_DISPLAY_NAME_SQL.strip()}),
-                                        'profile_photo_url', ct.profile_photo_url
+                                        'profile_photo_url', ct.profile_photo_url,
+                                        'addresses', ({_CONTACT_ADDRESSES_JSON_FOR_D_SQL.strip()})
                                     )
                                     ORDER BY coalesce(d.contact_id::text, '') ASC
                                 )
