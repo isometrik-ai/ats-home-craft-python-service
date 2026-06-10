@@ -25,6 +25,7 @@ class EmailTemplateRepository:
         name,
         template_type,
         status,
+        subject,
         html_content,
         variables,
         is_default,
@@ -48,11 +49,12 @@ class EmailTemplateRepository:
                 name,
                 template_type,
                 status,
+                subject,
                 html_content,
                 variables,
                 is_default
             )
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
             RETURNING {self._columns_expr()}
         """
         row = await self.db_connection.fetchrow(
@@ -61,6 +63,7 @@ class EmailTemplateRepository:
             DEFAULT_LAYOUT_NAME,
             EmailTemplateType.LAYOUT.value,
             EmailTemplateStatus.PUBLISHED.value,
+            None,
             DEFAULT_LAYOUT_HTML,
             json.dumps([]),
             True,
@@ -75,11 +78,12 @@ class EmailTemplateRepository:
                 name,
                 template_type,
                 status,
+                subject,
                 html_content,
                 variables,
                 is_default
             )
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
             RETURNING {self._columns_expr()}
         """
         created = await self.db_connection.fetchrow(
@@ -88,6 +92,7 @@ class EmailTemplateRepository:
             row["name"],
             row["template_type"],
             row["status"],
+            row.get("subject"),
             row["html_content"],
             json.dumps(row.get("variables", [])),
             row.get("is_default", False),
