@@ -193,6 +193,11 @@ class CreateEmailTemplateRequest(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=200)
     template_type: EmailTemplateType
+    subject: str | None = Field(
+        None,
+        max_length=500,
+        description="Plain email subject line (no variable placeholders)",
+    )
     html_content: str = Field(..., min_length=1)
     variables: list[EmailTemplateVariableDefinition] = Field(default_factory=list)
     status: EmailTemplateStatus = Field(default=EmailTemplateStatus.DRAFT)
@@ -230,6 +235,11 @@ class UpdateEmailTemplateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(None, min_length=1, max_length=200)
+    subject: str | None = Field(
+        None,
+        max_length=500,
+        description="Plain email subject line (no variable placeholders)",
+    )
     html_content: str | None = Field(None, min_length=1)
     variables: EmailTemplateVariablesMutation | None = None
     status: EmailTemplateStatus | None = None
@@ -239,6 +249,7 @@ class UpdateEmailTemplateRequest(BaseModel):
         """Require at least one updatable field."""
         if (
             self.name is None
+            and self.subject is None
             and self.html_content is None
             and self.variables is None
             and self.status is None
@@ -284,6 +295,7 @@ class EmailTemplateDetailResponse(BaseModel):
     template_type: str
     status: str
     is_default: bool
+    subject: str | None = None
     html_content: str
     variables: list[dict[str, Any]]
     created_at: str | None = None
@@ -315,6 +327,7 @@ class RenderEmailTemplateResponse(BaseModel):
     template_id: str
     template_type: str
     layout_id: str | None = None
+    subject: str | None = None
     html_content: str
     resolved_variables: dict[str, Any]
 

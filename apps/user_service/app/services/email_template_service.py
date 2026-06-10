@@ -524,6 +524,7 @@ class EmailTemplateService:
             "template_type": row["template_type"],
             "status": row["status"],
             "is_default": row["is_default"],
+            "subject": row.get("subject"),
             "html_content": row["html_content"],
             "variables": EmailTemplateService._parse_variables_from_row(row),
             "created_at": format_iso_datetime(row.get("created_at")),
@@ -541,6 +542,7 @@ class EmailTemplateService:
             template_type=row["template_type"],
             status=row["status"],
             is_default=row["is_default"],
+            subject=row.get("subject"),
             html_content=row["html_content"],
             variables=self._parse_variables_from_row(row),
             created_at=format_iso_datetime(row.get("created_at")),
@@ -600,6 +602,8 @@ class EmailTemplateService:
         update_data: dict[str, Any] = {}
         if body.name is not None:
             update_data["name"] = body.name.strip()
+        if body.subject is not None:
+            update_data["subject"] = body.subject
         if body.html_content is not None:
             update_data["html_content"] = body.html_content
         if body.status is not None:
@@ -622,6 +626,7 @@ class EmailTemplateService:
             "name": body.name.strip(),
             "template_type": body.template_type.value,
             "status": body.status.value,
+            "subject": body.subject,
             "html_content": body.html_content,
             "variables": variables_json,
             "is_default": body.is_default and body.template_type == EmailTemplateType.LAYOUT,
@@ -792,6 +797,7 @@ class EmailTemplateService:
                 template_id=str(template["id"]),
                 template_type=template_type.value,
                 layout_id=layout_id,
+                subject=template.get("subject"),
                 html_content=html_content,
                 resolved_variables=resolved,
             )
@@ -816,6 +822,7 @@ class EmailTemplateService:
             template_id=str(template["id"]),
             template_type=template_type.value,
             layout_id=str(template["id"]),
+            subject=None,
             html_content=html_content,
             resolved_variables=resolved,
         )
