@@ -837,6 +837,9 @@ class UserService:  # pylint: disable=too-many-public-methods
         alternate_emails = user_metadata.get("alternate_emails")
         base_profile["alternate_emails"] = alternate_emails
 
+        if base_profile.get("salutation") is None:
+            base_profile["salutation"] = user_metadata.get("salutation")
+
         return base_profile
 
     @staticmethod
