@@ -149,6 +149,18 @@ class SupermemorySettings(BaseSettings):
     )
 
 
+class TelemetrySettings(BaseSettings):
+    """OpenTelemetry / SigNoz telemetry settings."""
+
+    enabled: bool = config("ENABLE_TELEMETRY", default=True)
+    service_name: str = config("SIGNOZ_SERVICE_NAME", default="legalai-user-service")
+    service_version: str = config("SERVICE_VERSION", default="1.0.0")
+    environment: str = config("SIGNOZ_ENVIRONMENT", default="development")
+    signoz_cloud_url: str = config("SIGNOZ_CLOUD_URL", default="")
+    signoz_cloud_token: str = config("SIGNOZ_CLOUD_TOKEN", default="")
+    signoz_endpoint: str = config("SIGNOZ_ENDPOINT", default="")
+
+
 class TypesenseSettings(BaseSettings):
     """Typesense cluster and API key configuration."""
 
@@ -191,6 +203,7 @@ class SharedAppSettings(BaseSettings):
     typesense: TypesenseSettings = TypesenseSettings()
     agentmail: AgentMailSettings = AgentMailSettings()
     supermemory: SupermemorySettings = SupermemorySettings()
+    telemetry: TelemetrySettings = TelemetrySettings()
     environment: EnvironmentOption = config("ENVIRONMENT", default=EnvironmentOption.LOCAL)
     log_level: LogLevelOption = config("LOG_LEVEL", default=LogLevelOption.INFO.value)
     website_url: str = config("WEBSITE_URL")
