@@ -386,10 +386,22 @@ class EmailNotificationService:
             return "contact_snapshot_not_found"
 
         base_content, metadata = snapshot
-        existing_content = await self._supermemory.get_document_content(
-            custom_id=contact_custom_id,
-            organization_id=organization_id,
-        )
+        try:
+            existing_content = await self._supermemory.get_document_content(
+                custom_id=contact_custom_id,
+                organization_id=organization_id,
+            )
+        except Exception:
+            logger.warning(
+                "inbound_email_supermemory_read_failed organization_id=%s contact_id=%s "
+                "message_id=%s custom_id=%s",
+                organization_id,
+                record.contact_id,
+                record.message_id,
+                contact_custom_id,
+                exc_info=True,
+            )
+            return "supermemory_read_failed"
 
         attachment_blocks = await self._fetch_attachment_blocks(record)
         new_entry = format_inbound_email_entry(
@@ -420,13 +432,25 @@ class EmailNotificationService:
             record.message_id,
             contact_custom_id,
         )
-        await self._supermemory.add_or_replace_document(
-            content=merged_content,
-            container_tag=container_tag_for_organization(organization_id),
-            custom_id=contact_custom_id,
-            metadata=metadata,
-            entity_context=_ENTITY_CONTEXT,
-        )
+        try:
+            await self._supermemory.add_or_replace_document(
+                content=merged_content,
+                container_tag=container_tag_for_organization(organization_id),
+                custom_id=contact_custom_id,
+                metadata=metadata,
+                entity_context=_ENTITY_CONTEXT,
+            )
+        except Exception:
+            logger.warning(
+                "inbound_email_supermemory_write_failed organization_id=%s contact_id=%s "
+                "message_id=%s custom_id=%s",
+                organization_id,
+                record.contact_id,
+                record.message_id,
+                contact_custom_id,
+                exc_info=True,
+            )
+            return "supermemory_write_failed"
         return None
 
     async def _fetch_attachment_blocks(self, record: InboundEmailRecord) -> list[str]:
