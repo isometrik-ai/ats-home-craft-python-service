@@ -11,11 +11,10 @@ from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.schemas.dashboard import DashboardQueryParams
 from apps.user_service.app.services.dashboard_service import DashboardService
 from apps.user_service.app.utils.common_utils import (
-    check_permissions,
+    extract_user_context,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_utils.common_query import BUSINESS_DASHBOARD_VIEW
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -23,7 +22,6 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     401: {"description": "Unauthorized (missing/invalid JWT)."},
-    403: {"description": "Forbidden (insufficient permissions)."},
     400: {"description": "Bad request (invalid date range)."},
     422: {"description": "Validation error."},
     429: {"description": "Too many requests (rate limited)."},
@@ -51,11 +49,7 @@ async def get_dashboard(
     Optional ``leads_start_date`` / ``leads_end_date`` filter the leads chart, pipeline, and
     lead ``new_*`` metrics only. All other sections use default calendar-week behavior.
     """
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=BUSINESS_DASHBOARD_VIEW,
-    )
+    user_context = await extract_user_context(current_user, db_connection)
     assert user_context.organization_id is not None
     service = DashboardService(
         db_connection=db_connection,

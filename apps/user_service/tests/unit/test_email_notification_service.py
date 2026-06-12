@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from apps.user_service.app.services.email_notification_service import (
@@ -153,3 +154,48 @@ async def test_process_skips_unknown_contact() -> None:
     assert result.contact_id is None
     assert result.stored is False
     supermemory.add_or_replace_document.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_continues_when_supermemory_write_fails() -> None:
+    """Supermemory errors are isolated; contact match and skip reason are still returned."""
+    repo = MagicMock()
+    repo.get_contact_id_by_email = AsyncMock(return_value="contact-1")
+
+    supermemory = MagicMock()
+    supermemory.get_document_content = AsyncMock(return_value=None)
+    supermemory.add_or_replace_document = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "402 Payment Required",
+            request=MagicMock(),
+            response=MagicMock(status_code=402),
+        )
+    )
+
+    sync_service = MagicMock()
+    sync_service.load_contact_snapshot = AsyncMock(
+        return_value=("# Contact: Sai\n", {"entity_type": "contact"})
+    )
+
+    service = EmailNotificationService(
+        db_connection=MagicMock(),
+        supermemory=supermemory,
+        sync_service=sync_service,
+    )
+    service._contacts_repo = repo
+
+    with (
+        patch(f"{_EMAIL_SVC}.is_supermemory_configured", return_value=True),
+        patch(
+            f"{_EMAIL_SVC}.is_organization_memory_enabled",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        result = await service.process_message_received(
+            organization_id="org-1",
+            webhook_body=SAMPLE_WEBHOOK,
+        )
+
+    assert result.contact_id == "contact-1"
+    assert result.stored is False
+    assert result.skipped_reason == "supermemory_write_failed"
