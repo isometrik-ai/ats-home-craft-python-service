@@ -24,6 +24,7 @@ from libs.shared_utils.supermemory_service import (
     close_supermemory_http_client,
     init_supermemory_http_client,
 )
+from libs.shared_utils.telemetry_config import telemetry_config
 from libs.shared_utils.typesense_service import (
     close_typesense_http_client,
     get_typesense_http_client,
@@ -75,3 +76,4 @@ async def lifespan(app: FastAPI):
         app_logger.info("Typesense HTTP client closed successfully")
         await close_pool()
         app_logger.info("Database pool closed successfully")
+        telemetry_config.shutdown()

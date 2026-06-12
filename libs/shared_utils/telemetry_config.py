@@ -1,0 +1,306 @@
+"""OpenTelemetry / SigNoz telemetry configuration."""
+
+import logging
+import traceback
+from typing import Any
+
+from libs.shared_config.app_settings import TelemetrySettings, shared_settings
+from libs.shared_utils.logger import app_logger
+
+logger = app_logger
+
+
+class TelemetryConfig:
+    """Configures OpenTelemetry tracing and metrics export to SigNoz."""
+
+    def __init__(self, settings: TelemetrySettings | None = None):
+        telemetry_settings = settings or shared_settings.telemetry
+        self.service_name = telemetry_settings.service_name
+        self.service_version = telemetry_settings.service_version
+        self.environment = telemetry_settings.environment
+        self.signoz_cloud_url = telemetry_settings.signoz_cloud_url
+        self.signoz_cloud_token = telemetry_settings.signoz_cloud_token
+        self.signoz_endpoint = telemetry_settings.signoz_endpoint
+        self.enable_telemetry = telemetry_settings.enabled
+        self.tracer_provider = None
+        self.meter_provider = None
+        self._is_setup = False
+
+    def setup_telemetry(self) -> None:
+        """Initialize OpenTelemetry providers and instrument the application."""
+        if not self.enable_telemetry:
+            logger.info("Telemetry is disabled")
+            return
+        if self._is_setup:
+            logger.info("Telemetry already set up, skipping redundant setup")
+            return
+
+        try:
+            logger.info("Setting up OpenTelemetry telemetry...")
+
+            from opentelemetry import metrics, trace
+            from opentelemetry.sdk.metrics import MeterProvider
+            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+            from opentelemetry.sdk.resources import Resource
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+            from opentelemetry.semconv.resource import ResourceAttributes
+
+            use_grpc = self._use_grpc_exporter()
+            span_exporter_cls, metric_exporter_cls = self._import_otlp_exporters(use_grpc)
+
+            trace._TRACER_PROVIDER = None
+            metrics._METER_PROVIDER = None
+
+            resource = Resource.create(
+                {
+                    ResourceAttributes.SERVICE_NAME: self.service_name,
+                    ResourceAttributes.SERVICE_VERSION: self.service_version,
+                    ResourceAttributes.DEPLOYMENT_ENVIRONMENT: self.environment,
+                }
+            )
+
+            self._setup_tracer_provider(
+                resource=resource,
+                trace_module=trace,
+                tracer_provider_cls=TracerProvider,
+                batch_span_processor_cls=BatchSpanProcessor,
+                span_exporter_cls=span_exporter_cls,
+                use_grpc=use_grpc,
+            )
+            self._setup_meter_provider(
+                resource=resource,
+                metrics_module=metrics,
+                meter_provider_cls=MeterProvider,
+                metric_reader_cls=PeriodicExportingMetricReader,
+                metric_exporter_cls=metric_exporter_cls,
+                use_grpc=use_grpc,
+            )
+            self._setup_instrumentations()
+
+            self._re_instrument_mongodb()
+            self._instrument_asyncpg()
+
+            logger.info("OpenTelemetry telemetry setup completed successfully")
+            self._is_setup = True
+
+        except Exception as exc:
+            logger.error("Failed to setup telemetry: %s", exc)
+
+    def _use_grpc_exporter(self) -> bool:
+        """Return True when self-hosted gRPC export should be used."""
+        return bool(
+            self.signoz_endpoint and not (self.signoz_cloud_url and self.signoz_cloud_token)
+        )
+
+    def _import_otlp_exporters(self, use_grpc: bool) -> tuple[type[Any], type[Any]]:
+        """Import OTLP span and metric exporter classes for the selected transport."""
+        if use_grpc:
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+                OTLPMetricExporter,
+            )
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                OTLPSpanExporter,
+            )
+
+            logger.info("Using gRPC exporter for self-hosted SigNoz")
+        else:
+            from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+                OTLPMetricExporter,
+            )
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter,
+            )
+
+            logger.info("Using HTTP exporter for SigNoz Cloud")
+
+        return OTLPSpanExporter, OTLPMetricExporter
+
+    def _re_instrument_mongodb(self) -> None:
+        """Instrument PyMongo when the optional instrumentation package is installed."""
+        try:
+            from opentelemetry.instrumentation.pymongo import PymongoInstrumentor
+
+            PymongoInstrumentor().instrument(
+                enable_commenter=True,
+                capture_parameters=True,
+            )
+            logger.info("MongoDB client re-instrumented successfully")
+        except ImportError:
+            logger.warning("PyMongo instrumentation not available - package not installed")
+        except Exception as exc:
+            logger.error("Failed to re-instrument MongoDB client: %s", exc)
+            logger.error("Traceback: %s", traceback.format_exc())
+
+    def _instrument_asyncpg(self) -> None:
+        """Instrument asyncpg when the optional instrumentation package is installed."""
+        try:
+            from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
+
+            AsyncPGInstrumentor().instrument()
+            logger.info("AsyncPG instrumentation setup completed")
+        except ImportError:
+            logger.warning("AsyncPG instrumentation not available - package not installed")
+        except Exception as exc:
+            logger.error("Failed to instrument AsyncPG: %s", exc)
+            logger.error("Traceback: %s", traceback.format_exc())
+
+    def _setup_tracer_provider(
+        self,
+        *,
+        resource: Any,
+        trace_module: Any,
+        tracer_provider_cls: type[Any],
+        batch_span_processor_cls: type[Any],
+        span_exporter_cls: type[Any],
+        use_grpc: bool,
+    ) -> None:
+        """Configure and register the OTLP trace exporter."""
+        try:
+            endpoint, headers = self._get_endpoint_and_headers(use_grpc)
+            if endpoint is None:
+                logger.warning(
+                    "Skipping tracer provider setup due to missing SigNoz configuration."
+                )
+                return
+            logger.info("Setting up tracer provider with endpoint: %s", endpoint)
+
+            if use_grpc:
+                endpoint = endpoint.split("/")[0]
+                otlp_exporter = span_exporter_cls(
+                    endpoint=endpoint,
+                    headers=headers,
+                    insecure=True,
+                )
+            else:
+                otlp_exporter = span_exporter_cls(endpoint=endpoint, headers=headers)
+
+            self.tracer_provider = tracer_provider_cls(
+                resource=resource,
+                active_span_processor=batch_span_processor_cls(otlp_exporter),
+            )
+            trace_module.set_tracer_provider(self.tracer_provider)
+            logger.info("Tracer provider setup completed")
+        except Exception as exc:
+            logger.error("Failed to setup tracer provider: %s", exc)
+            logger.error("Traceback: %s", traceback.format_exc())
+
+    def _setup_meter_provider(
+        self,
+        *,
+        resource: Any,
+        metrics_module: Any,
+        meter_provider_cls: type[Any],
+        metric_reader_cls: type[Any],
+        metric_exporter_cls: type[Any],
+        use_grpc: bool,
+    ) -> None:
+        """Configure and register the OTLP metrics exporter."""
+        try:
+            endpoint, headers = self._get_endpoint_and_headers(use_grpc)
+            if endpoint is None:
+                logger.warning("Skipping meter provider setup due to missing SigNoz configuration.")
+                return
+
+            if use_grpc:
+                metrics_endpoint = endpoint.split("/")[0]
+                otlp_metric_exporter = metric_exporter_cls(
+                    endpoint=metrics_endpoint,
+                    headers=headers,
+                    insecure=True,
+                )
+            else:
+                metrics_endpoint = endpoint.replace("/v1/traces", "/v1/metrics")
+                otlp_metric_exporter = metric_exporter_cls(
+                    endpoint=metrics_endpoint,
+                    headers=headers,
+                )
+
+            metric_reader = metric_reader_cls(
+                exporter=otlp_metric_exporter,
+                export_interval_millis=10000,
+            )
+            self.meter_provider = meter_provider_cls(
+                resource=resource,
+                metric_readers=[metric_reader],
+            )
+            metrics_module.set_meter_provider(self.meter_provider)
+            logger.info("Meter provider setup completed")
+        except Exception as exc:
+            logger.error("Failed to setup meter provider: %s", exc)
+            logger.error("Traceback: %s", traceback.format_exc())
+
+    def _get_endpoint_and_headers(
+        self, use_grpc: bool = False
+    ) -> tuple[str | None, dict[str, str]]:
+        """Resolve the OTLP endpoint URL and auth headers from SigNoz settings."""
+        if self.signoz_cloud_url and self.signoz_cloud_token:
+            cloud_url = self.signoz_cloud_url
+            if not cloud_url.startswith(("http://", "https://")):
+                cloud_url = f"https://{cloud_url}"
+            endpoint = f"{cloud_url}/v1/traces"
+            headers = {"Authorization": f"Bearer {self.signoz_cloud_token}"}
+            logger.info("Using SigNoz Cloud configuration: %s", endpoint)
+        elif self.signoz_endpoint:
+            if use_grpc:
+                endpoint = self.signoz_endpoint
+                if endpoint.startswith("http://"):
+                    endpoint = endpoint.replace("http://", "")
+                elif endpoint.startswith("https://"):
+                    endpoint = endpoint.replace("https://", "")
+                logger.info("Using self-hosted SigNoz configuration (gRPC): %s", endpoint)
+            else:
+                endpoint = f"{self.signoz_endpoint}/v1/traces"
+                logger.info("Using self-hosted SigNoz configuration (HTTP): %s", endpoint)
+            headers = {}
+        else:
+            logger.warning("No SigNoz configuration found. Telemetry will be disabled.")
+            return None, {}
+        return endpoint, headers
+
+    def _setup_instrumentations(self) -> None:
+        """Register OpenTelemetry auto-instrumentation for supported libraries."""
+        try:
+            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+            from opentelemetry.instrumentation.logging import LoggingInstrumentor
+            from opentelemetry.instrumentation.requests import RequestsInstrumentor
+
+            FastAPIInstrumentor().instrument()
+            logger.info("FastAPI instrumentation setup completed")
+            RequestsInstrumentor().instrument()
+            logger.info("HTTP requests instrumentation setup completed")
+            self._instrument_httpx()
+            LoggingInstrumentor().instrument(set_logging_format=True, log_level=logging.INFO)
+            logger.info("Logging instrumentation setup completed")
+            logger.info("OpenTelemetry instrumentations setup completed")
+        except Exception as exc:
+            logger.error("Failed to setup instrumentations: %s", exc)
+            logger.error("Traceback: %s", traceback.format_exc())
+
+    def _instrument_httpx(self) -> None:
+        """Instrument httpx when the optional instrumentation package is installed."""
+        try:
+            from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+            HTTPXClientInstrumentor().instrument()
+            logger.info("HTTPX instrumentation setup completed")
+        except ImportError:
+            logger.warning("HTTPX instrumentation not available - package not installed")
+        except Exception as exc:
+            logger.error("Failed to instrument HTTPX: %s", exc)
+            logger.error("Traceback: %s", traceback.format_exc())
+
+    def shutdown(self) -> None:
+        """Flush and shut down configured telemetry providers."""
+        try:
+            if self.tracer_provider:
+                self.tracer_provider.shutdown()
+            if self.meter_provider:
+                self.meter_provider.shutdown()
+            logger.info("Telemetry providers shutdown completed")
+            self._is_setup = False
+        except Exception as exc:
+            logger.error("Failed to shutdown telemetry providers: %s", exc)
+
+
+telemetry_config = TelemetryConfig()
