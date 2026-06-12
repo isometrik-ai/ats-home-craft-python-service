@@ -26,7 +26,7 @@ class TelemetryConfig:
         self.meter_provider = None
         self._is_setup = False
 
-    def setup_telemetry(self) -> None:
+    def setup_telemetry(self, app: Any = None) -> None:
         """Initialize OpenTelemetry providers and instrument the application."""
         if not self.enable_telemetry:
             logger.info("Telemetry is disabled")
@@ -76,7 +76,7 @@ class TelemetryConfig:
                 metric_exporter_cls=metric_exporter_cls,
                 use_grpc=use_grpc,
             )
-            self._setup_instrumentations()
+            self._setup_instrumentations(app=app)
 
             self._re_instrument_mongodb()
             self._instrument_asyncpg()
@@ -258,14 +258,18 @@ class TelemetryConfig:
             return None, {}
         return endpoint, headers
 
-    def _setup_instrumentations(self) -> None:
+    def _setup_instrumentations(self, app: Any = None) -> None:
         """Register OpenTelemetry auto-instrumentation for supported libraries."""
         try:
             from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
             from opentelemetry.instrumentation.logging import LoggingInstrumentor
             from opentelemetry.instrumentation.requests import RequestsInstrumentor
 
-            FastAPIInstrumentor().instrument()
+            if app is not None:
+                FastAPIInstrumentor.instrument_app(app)
+            else:
+                FastAPIInstrumentor().instrument()
+
             logger.info("FastAPI instrumentation setup completed")
             RequestsInstrumentor().instrument()
             logger.info("HTTP requests instrumentation setup completed")
