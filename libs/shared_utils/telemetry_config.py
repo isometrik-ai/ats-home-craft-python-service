@@ -230,7 +230,9 @@ class TelemetryConfig:
             logger.error("Failed to setup meter provider: %s", exc)
             logger.error("Traceback: %s", traceback.format_exc())
 
-    def _get_endpoint_and_headers(self, use_grpc: bool = False) -> tuple[str | None, dict[str, str]]:
+    def _get_endpoint_and_headers(
+        self, use_grpc: bool = False
+    ) -> tuple[str | None, dict[str, str]]:
         """Resolve the OTLP endpoint URL and auth headers from SigNoz settings."""
         if self.signoz_cloud_url and self.signoz_cloud_token:
             cloud_url = self.signoz_cloud_url
