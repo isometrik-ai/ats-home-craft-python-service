@@ -884,20 +884,24 @@ class UserService:  # pylint: disable=too-many-public-methods
 
             # Fallback to sub if provider_id not found
             if not provider_id:
-                provider_id = identity_data.get("sub")
+                provider_id = identity.get("id") or identity_data.get("sub")
+
+            email = identity.get("email") or identity_data.get("email")
 
             # Convert datetime objects to ISO strings if needed
             created_at = identity.get("created_at")
             updated_at = identity.get("updated_at")
 
-            identities.append(
-                {
-                    "provider": provider,
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "provider_id": provider_id,
-                }
-            )
+            identity_entry: dict[str, Any] = {
+                "provider": provider,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "provider_id": provider_id,
+            }
+            if email:
+                identity_entry["email"] = email
+
+            identities.append(identity_entry)
 
         return identities
 
