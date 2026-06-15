@@ -103,6 +103,10 @@ class Indentites(BaseModel):
 
     provider: str = Field(..., description="Provider of the indentite")
     provider_id: str = Field(..., description="Data of the indentite")
+    email: str | None = Field(
+        None,
+        description="Email associated with the identity (OAuth providers, email provider)",
+    )
     created_at: datetime.datetime = Field(
         ..., description="ISO timestamp when the indentite was created"
     )
@@ -113,10 +117,10 @@ class Indentites(BaseModel):
         json_schema_extra={
             "example": {
                 "provider": "google",
-                "identity_data": {"sub": "1234567890"},
+                "provider_id": "1234567890",
+                "email": "user@gmail.com",
                 "created_at": "2024-12-19T10:00:00Z",
                 "updated_at": "2024-12-19T10:00:00Z",
-                "last_sign_in_at": "2024-12-19T10:00:00Z",
             }
         }
     )
@@ -244,10 +248,10 @@ class UserProfileData(BaseModel):
                 "identities": [
                     {
                         "provider": "google",
-                        "identity_data": {"sub": "1234567890"},
+                        "provider_id": "1234567890",
+                        "email": "john.doe@gmail.com",
                         "created_at": "2024-12-19T10:00:00Z",
                         "updated_at": "2024-12-19T10:00:00Z",
-                        "last_sign_in_at": "2024-12-19T10:00:00Z",
                     }
                 ],
                 "verification_preference": {
