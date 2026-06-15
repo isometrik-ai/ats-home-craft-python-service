@@ -426,6 +426,7 @@ async def update_lead(
         )
         event_service = EventService(db_connection=db_connection)
         previous, updated = await lead_service.update_lead(lead_id=lead_id, body=body)
+        changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
         update_event = await event_service.create_lifecycle_event(
             event_type=LeadEventType.UPDATED.value,
             aggregate_id=lead_id,
@@ -434,6 +435,7 @@ async def update_lead(
             payload={
                 "module": "leads",
                 "action": "update",
+                "changed_fields": changed_fields,
             },
             topics=LEAD_KAFKA_TOPICS,
         )

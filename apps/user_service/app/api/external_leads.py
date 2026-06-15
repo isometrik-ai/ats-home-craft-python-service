@@ -338,12 +338,17 @@ async def external_update_lead(
             else updated
         )
 
+        changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
         update_event = await event_service.create_lifecycle_event(
             event_type=LeadEventType.UPDATED.value,
             aggregate_id=lead_id,
             organization_id=organization_id,
             actor_user_id=None,
-            payload={"module": "leads", "action": "update"},
+            payload={
+                "module": "leads",
+                "action": "update",
+                "changed_fields": changed_fields,
+            },
             topics=LEAD_KAFKA_TOPICS,
         )
 
