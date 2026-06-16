@@ -129,6 +129,11 @@ class ExternalLeadsService:
             conflict_contact_id = str((getattr(exc, "params", None) or {}).get("client_id") or "")
             if not conflict_contact_id:
                 raise
+            if contact_payload.phones:
+                await self.contacts_service.add_phones_to_contact_if_missing(
+                    contact_id=conflict_contact_id,
+                    phones=contact_payload.phones,
+                )
             return (
                 {
                     "contact_id": conflict_contact_id,

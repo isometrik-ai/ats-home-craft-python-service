@@ -17,6 +17,7 @@ Design goals:
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from email.utils import parseaddr
@@ -44,7 +45,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
-from apps.user_service.app.schemas.common import NoteItem
+from apps.user_service.app.schemas.common import NoteItem, PhoneInput
 from apps.user_service.app.schemas.contacts import (
     ContactCompanyUpdate,
     ContactSummaryResponse,
@@ -583,6 +584,90 @@ class ContactsService:
                 custom_code=CustomStatusCode.CONFLICT,
                 params={"client_id": existing_contact_id},
             )
+
+    @staticmethod
+    def _phone_match_key(*, phone_number: str, phone_isd_code: str | None = None) -> str:
+        """Return a digits-only key used to compare phone numbers."""
+        combined = f"{phone_isd_code or ''}{phone_number}"
+        return re.sub(r"\D", "", combined)
+
+    async def add_phones_to_contact_if_missing(
+        self,
+        *,
+        contact_id: str,
+        phones: list[PhoneInput],
+    ) -> bool:
+        """Append phones to an existing contact when they are not already present."""
+        if not phones:
+            return False
+
+        org_id = self.user_context.organization_id
+        existing_phones = await self.contacts_repo.get_contact_phones_for_update(
+            contact_id=contact_id,
+            organization_id=org_id,
+        )
+        if existing_phones is None:
+            raise NotFoundException(
+                message_key="contacts.errors.contact_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        existing_keys = {
+            self._phone_match_key(
+                phone_number=str(phone.get("phone_number") or ""),
+                phone_isd_code=phone.get("phone_isd_code"),
+            )
+            for phone in existing_phones
+            if isinstance(phone, dict) and str(phone.get("phone_number") or "").strip()
+        }
+
+        has_primary = any(
+            isinstance(phone, dict) and phone.get("is_primary") is True for phone in existing_phones
+        )
+
+        phones_to_add: list[dict[str, Any]] = []
+        for phone in phones:
+            phone_number = (phone.phone_number or "").strip()
+            if not phone_number:
+                continue
+            phone_key = self._phone_match_key(
+                phone_number=phone_number,
+                phone_isd_code=phone.phone_isd_code,
+            )
+            if phone_key in existing_keys:
+                continue
+            existing_keys.add(phone_key)
+            is_primary = bool(phone.is_primary and not has_primary)
+            if is_primary:
+                has_primary = True
+            new_phone = phone.model_dump(mode="json", exclude_none=True)
+            new_phone["id"] = str(uuid.uuid4())
+            new_phone["is_primary"] = is_primary
+            phones_to_add.append(new_phone)
+
+        if not phones_to_add:
+            return False
+
+        merged_phones = [dict(phone) for phone in existing_phones if isinstance(phone, dict)]
+        merged_phones.extend(phones_to_add)
+
+        primary_phone_count = sum(
+            1 for phone_item in merged_phones if phone_item.get("is_primary") is True
+        )
+        if primary_phone_count > 1:
+            raise ValidationException(
+                message_key="contacts.errors.only_one_primary_phone",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        await self.contacts_repo.update_contact(
+            contact_id=contact_id,
+            organization_id=org_id,
+            update_data={
+                "phones": serialize_jsonb_param("phones", merged_phones, CONTACT_JSONB_COLUMNS),
+            },
+        )
+        return True
 
     async def _validate_custom_fields_for_create(
         self,

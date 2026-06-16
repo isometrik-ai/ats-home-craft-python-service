@@ -33,7 +33,7 @@ CONTACT_JSONB_COLUMNS: frozenset[str] = frozenset(
 CONTACT_ADDRESS_JSONB_COLUMNS: frozenset[str] = frozenset({"address_data"})
 
 
-class ContactsRepository(BaseRepository):
+class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-methods
     """Database operations class for contact management using asyncpg."""
 
     def __init__(self, db_connection: asyncpg.Connection) -> None:
@@ -502,6 +502,31 @@ class ContactsRepository(BaseRepository):
             ClientStatus.DELETED.value,
         )
         return {str(contact_row["id"]) for contact_row in rows}
+
+    async def get_contact_phones_for_update(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+    ) -> list[Any] | None:
+        """Load only the phones JSONB column for a contact (row locked for update)."""
+        fetched_row = await self.db_connection.fetchrow(
+            """
+            SELECT ct.phones
+            FROM contacts ct
+            WHERE ct.id = $1::uuid
+              AND ct.organization_id = $2::uuid
+              AND ct.status != $3
+            FOR UPDATE OF ct
+            """,
+            contact_id,
+            organization_id,
+            ClientStatus.DELETED.value,
+        )
+        if not fetched_row:
+            return None
+        phones = parse_json_any(fetched_row.get("phones"), default=[])
+        return phones if isinstance(phones, list) else []
 
     async def get_contact_for_update(self, *, contact_id: str, organization_id: str) -> dict | None:
         """Get a contact for update (DB-shaped details + `FOR UPDATE` lock).
