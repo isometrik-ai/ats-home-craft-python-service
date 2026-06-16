@@ -3,6 +3,8 @@
 Creates import jobs and builds metadata-only Kafka payloads for best-effort publish.
 """
 
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import asyncio
@@ -22,6 +24,7 @@ from urllib.parse import urlparse
 
 import asyncpg
 import httpx
+from asyncpg import UniqueViolationError
 from supabase import AsyncClient
 
 from apps.user_service.app.db.repositories.companies_repository import (
@@ -30,6 +33,9 @@ from apps.user_service.app.db.repositories.companies_repository import (
 from apps.user_service.app.db.repositories.contacts_repository import (
     CONTACT_JSONB_COLUMNS,
     ContactsRepository,
+)
+from apps.user_service.app.db.repositories.entity_lists_repository import (
+    EntityListsRepository,
 )
 from apps.user_service.app.db.repositories.import_job_logs_repository import (
     ImportJobLogsRepository,
@@ -76,6 +82,7 @@ class _ContactsImportTotals:
     errors_total: int = 0
     last_log_ts: float = 0.0
     company_cache: dict[str, str] = field(default_factory=dict)
+    created_contact_ids: list[str] = field(default_factory=list)
 
 
 class ContactsImportService:
@@ -256,6 +263,7 @@ class ContactsImportService:
     # ------------------------------------------------------------------
     # Consumer-side processing
     # ------------------------------------------------------------------
+    # pylint: disable=too-complex
     async def process_job_event(
         self,
         *,
@@ -370,6 +378,24 @@ class ContactsImportService:
                 totals=totals,
             )
 
+            entity_list_id: str | None = None
+            try:
+                entity_list_id = await self._maybe_create_customer_list(
+                    event=event,
+                    options=options,
+                    totals=totals,
+                )
+            except Exception as exc:
+                # Best-effort only: never fail the import job for list creation issues.
+                logger.warning(
+                    "contacts_import_service_customer_list_best_effort_failed",
+                    exc_info=exc,
+                    extra={
+                        "job_key": str(event.job_key),
+                        "organization_id": str(event.organization_id),
+                    },
+                )
+
             finished_at_dt = datetime.now(UTC)
             finished_at = finished_at_dt.isoformat()
             await job_repo.set_status_and_timestamps(
@@ -378,19 +404,22 @@ class ContactsImportService:
                 status=ContactsImportJobStatus.COMPLETED.value,
                 finished_at=finished_at_dt,
             )
+            finished_payload: dict[str, Any] = {
+                "phase": "finished",
+                "action": str(event.action).lower(),
+                "finished_at": finished_at,
+                "stats": {
+                    "processed": totals.processed_total,
+                    "success": totals.success_total,
+                    "errors": totals.errors_total,
+                },
+            }
+            if entity_list_id:
+                finished_payload["entity_list_id"] = entity_list_id
             await logs_repo.upsert_payload(
                 organization_id=event.organization_id,
                 job_id=job_internal_id,
-                payload={
-                    "phase": "finished",
-                    "action": str(event.action).lower(),
-                    "finished_at": finished_at,
-                    "stats": {
-                        "processed": totals.processed_total,
-                        "success": totals.success_total,
-                        "errors": totals.errors_total,
-                    },
-                },
+                payload=finished_payload,
             )
 
             elapsed_s = max(0.0, (finished_at_dt - started_at_dt).total_seconds())
@@ -1086,6 +1115,7 @@ class ContactsImportService:
                 success_row_numbers.append(row_number)
         return success_row_numbers
 
+    # pylint: disable=too-complex
     async def _persist_contacts_for_rows_impl(
         self,
         *,
@@ -1242,6 +1272,137 @@ class ContactsImportService:
                 job_id=job_internal_id,
                 row_numbers=success_row_numbers,
             )
+            for item in valid_rows:
+                row_number = int(item["row_number"])
+                if row_number not in success_row_numbers:
+                    continue
+                contact_id = str(item.get("contact_id") or "").strip()
+                if contact_id:
+                    totals.created_contact_ids.append(contact_id)
+
+    @staticmethod
+    def _resolve_customer_list_name(*, job_key: str, options: dict[str, Any]) -> str:
+        """Resolve the entity list name for an import job."""
+        custom_name = str((options or {}).get("customer_list_name") or "").strip()
+        if custom_name:
+            return custom_name
+        return f"Contacts Import {job_key}"
+
+    async def _get_entity_list_id_by_name(
+        self,
+        *,
+        organization_id: str,
+        name: str,
+        entity_type: EntityType,
+    ) -> str | None:
+        """Return an active entity list id by org-scoped name, if present."""
+        repo = EntityListsRepository(db_connection=self.db_connection)
+        return await repo.get_active_list_id_by_name(
+            organization_id=organization_id,
+            name=name,
+            entity_type=entity_type,
+        )
+
+    async def _add_entity_ids_to_list_in_chunks(
+        self,
+        *,
+        repo: EntityListsRepository,
+        organization_id: str,
+        list_id: str,
+        entity_ids: list[str],
+        chunk_size: int = 1000,
+    ) -> None:
+        """Add entity members to a list in bounded batches."""
+        for offset in range(0, len(entity_ids), chunk_size):
+            chunk = entity_ids[offset : offset + chunk_size]
+            if not chunk:
+                continue
+            await repo.update_list(
+                organization_id=organization_id,
+                list_id=list_id,
+                update_data={"add_entity_ids": chunk},
+            )
+
+    async def _maybe_create_customer_list(
+        self,
+        *,
+        event: ContactsImportEventPayload,
+        options: dict[str, Any],
+        totals: _ContactsImportTotals,
+    ) -> str | None:
+        """Create (or extend) a contact entity list for successfully imported contacts."""
+        try:
+            if not bool((options or {}).get("create_customer_list")):
+                return None
+
+            contact_ids = list(dict.fromkeys(totals.created_contact_ids))
+            if not contact_ids:
+                return None
+
+            list_name = self._resolve_customer_list_name(job_key=event.job_key, options=options)
+            repo = EntityListsRepository(db_connection=self.db_connection)
+            list_id = await self._get_entity_list_id_by_name(
+                organization_id=event.organization_id,
+                name=list_name,
+                entity_type=EntityType.CONTACT,
+            )
+
+            if not list_id:
+                try:
+                    created = await repo.create_list(
+                        organization_id=event.organization_id,
+                        name=list_name,
+                        entity_type=EntityType.CONTACT,
+                        description=f"Auto-created from contacts import job {event.job_key}",
+                        tags=[],
+                        entity_ids=None,
+                    )
+                    list_id = str((created.get("list") or {}).get("id") or "")
+                except UniqueViolationError:
+                    list_id = await self._get_entity_list_id_by_name(
+                        organization_id=event.organization_id,
+                        name=list_name,
+                        entity_type=EntityType.CONTACT,
+                    )
+
+            if not list_id:
+                logger.warning(
+                    "contacts_import_service_customer_list_create_failed",
+                    extra={
+                        "job_key": str(event.job_key),
+                        "organization_id": str(event.organization_id),
+                        "list_name": list_name,
+                    },
+                )
+                return None
+
+            await self._add_entity_ids_to_list_in_chunks(
+                repo=repo,
+                organization_id=event.organization_id,
+                list_id=list_id,
+                entity_ids=contact_ids,
+            )
+            logger.info(
+                "contacts_import_service_customer_list_created",
+                extra={
+                    "job_key": str(event.job_key),
+                    "organization_id": str(event.organization_id),
+                    "entity_list_id": list_id,
+                    "member_count": len(contact_ids),
+                },
+            )
+            return list_id
+        except Exception as exc:
+            # Best-effort only: never fail the import job for list creation issues.
+            logger.warning(
+                "contacts_import_service_customer_list_best_effort_failed",
+                exc_info=exc,
+                extra={
+                    "job_key": str(event.job_key),
+                    "organization_id": str(event.organization_id),
+                },
+            )
+            return None
 
     async def _process_event_batches(
         self,

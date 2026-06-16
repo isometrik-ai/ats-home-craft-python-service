@@ -102,6 +102,30 @@ class EntityListsRepository(BaseRepository):
         """Create a repository with a request-scoped db connection."""
         super().__init__(db_connection=db_connection)
 
+    async def get_active_list_id_by_name(
+        self,
+        *,
+        organization_id: str,
+        name: str,
+        entity_type: EntityType,
+    ) -> str | None:
+        """Return an active entity list id by org-scoped name, if present."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT id::text AS id
+            FROM entity_lists
+            WHERE organization_id = $1::uuid
+              AND name = $2::text
+              AND entity_type = $3::text
+              AND status != 'deleted'
+            LIMIT 1
+            """,
+            organization_id,
+            name,
+            entity_type.value,
+        )
+        return str(row["id"]) if row and row.get("id") else None
+
     async def create_list(
         self,
         *,

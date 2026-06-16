@@ -30,6 +30,21 @@ class ContactsImportOptions(BaseModel):
     mode: ContactsImportMode = ContactsImportMode.UPSERT
     dedupe_key: ContactsImportDedupeKey = ContactsImportDedupeKey.EMAIL
     has_header: bool = True
+    create_customer_list: bool = Field(
+        default=False,
+        description=(
+            "When true, create a contact entity list containing all contacts "
+            "successfully created by this import job."
+        ),
+    )
+    customer_list_name: str | None = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "Optional name for the auto-created contact list. "
+            "Defaults to 'Contacts Import {job_id}' when omitted."
+        ),
+    )
 
 
 class CreateContactsImportJobRequest(BaseModel):
