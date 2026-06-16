@@ -14,7 +14,6 @@ reads are scoped to that organization.
 
 import json
 from typing import Any
-from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
@@ -53,10 +52,13 @@ from apps.user_service.app.schemas.enums import (
     KafkaTopics,
 )
 from apps.user_service.app.schemas.external_clients import (
+    EXTERNAL_VARIABLE_ENTITY_TO_ENTITY_TYPE,
     ExternalContactFieldsByPhoneRequest,
     ExternalContactFieldValue,
     ExternalCreateCompanyResult,
     ExternalCreateContactResult,
+    ExternalEntityVariableDefinition,
+    ExternalVariableEntityType,
 )
 from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
@@ -68,6 +70,9 @@ from apps.user_service.app.services.contacts_imports_service import (
 )
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.event_service import EventService
+from apps.user_service.app.services.external_variables_service import (
+    ExternalVariablesService,
+)
 from apps.user_service.app.services.typesense_index_service import (
     delete_company_background,
     delete_contact_background,
@@ -91,6 +96,12 @@ from libs.shared_utils.status_codes import CustomStatusCode
 router = APIRouter(prefix="/integrations/clients", tags=["Clients (External)"])
 
 CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
+
+VARIABLES_MESSAGE_KEY_BY_ENTITY: dict[ExternalVariableEntityType, str] = {
+    ExternalVariableEntityType.CONTACT: "contacts.success.contacts_retrieved",
+    ExternalVariableEntityType.COMPANY: "companies.success.companies_retrieved",
+    ExternalVariableEntityType.LEAD: "leads.success.leads_retrieved",
+}
 
 logger = get_logger(__name__)
 
@@ -685,6 +696,66 @@ async def external_get_contact_details(
     )
 
 
+@handle_api_exceptions("external list entity variables")
+@router.get(
+    "/variables",
+    status_code=http_status.HTTP_200_OK,
+    summary="List entity variables (external auth)",
+    description=(
+        "Return scalar variable keys for the organization resolved from "
+        "Isometrik credentials (`licenseKey`/`appSecret`). Use the "
+        "`entity_type` query parameter to list variables for contacts, companies, "
+        "or leads. Includes built-in scalar fields and active scalar custom fields."
+    ),
+    responses={
+        http_status.HTTP_200_OK: {"description": "Variables retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+    },
+)
+@limiter.limit("200/minute")
+async def external_list_entity_variables(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    organization_id: str = Depends(get_organization_context),
+    entity_type: ExternalVariableEntityType = Query(
+        ExternalVariableEntityType.CONTACT,
+        description="Entity type: contact, company, or lead",
+    ),
+):
+    """External list entity variables endpoint (Isometrik credential auth)."""
+    user_context = _external_user_context(
+        organization_id=organization_id,
+        actor_email=getattr(request.state, "external_actor_email", None),
+    )
+    variables_service = ExternalVariablesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    resolved_entity_type = EXTERNAL_VARIABLE_ENTITY_TO_ENTITY_TYPE[entity_type]
+    variables = await variables_service.get_variable_definitions(resolved_entity_type)
+    items = [
+        ExternalEntityVariableDefinition.model_validate(variable).model_dump(
+            exclude_none=True,
+            mode="json",
+        )
+        for variable in variables
+    ]
+    return list_response(
+        request=request,
+        items=items,
+        total=len(items),
+        page=1,
+        page_size=max(len(items), 1),
+        message_key=VARIABLES_MESSAGE_KEY_BY_ENTITY[entity_type],
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
 @handle_api_exceptions("external get contact fields by phone")
 @router.post(
     "/contacts/by-phone",
@@ -692,9 +763,10 @@ async def external_get_contact_details(
     response_model=list[ExternalContactFieldValue],
     summary="Get selected contact fields by phone number (external auth)",
     description=(
-        "Given a phone number and a list of requested field keys, returns values from the "
-        "first matching contact in the organization resolved from Isometrik credentials "
-        "(`licenseKey`/`appSecret`)."
+        "Given a phone number, returns variable_key/variable_value pairs from the first "
+        "matching contact in the organization resolved from Isometrik credentials "
+        "(`licenseKey`/`appSecret`). Omit variable_keys to return all contact scalar variables "
+        "from GET /integrations/clients/variables?entity_type=contact."
     ),
     responses={
         http_status.HTTP_200_OK: {"description": "Contact fields retrieved successfully"},
@@ -710,53 +782,36 @@ async def external_get_contact_details(
 async def external_get_contact_fields_by_phone(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
+    organization_id: str = Depends(get_organization_context),
     body: ExternalContactFieldsByPhoneRequest = Body(...),
 ):
     """External get contact fields by phone endpoint (Isometrik credential auth)."""
-    organization_id = UUID("381b7581-8c6b-4e88-b0e7-d9485eecfecc")
-    request.state.external_actor_email = None
-    user_context = _external_user_context(organization_id=organization_id, actor_email=None)
-
-    raw_body_bytes = await request.body()
-    raw_body_text = raw_body_bytes.decode("utf-8", errors="replace")
-    logger.info("external_get_contact_fields_by_phone raw_body %s", raw_body_text)
-
-    phone_number = body.phone_number
-    variable_keys = body.variable_keys
-
-    req_log = {
-        "path": str(request.url.path),
-        "organization_id": str(organization_id),
-        "phone_number_masked": _mask_phone_number(phone_number),
-        "variable_keys": list(variable_keys or []),
-    }
-    logger.info("external_get_contact_fields_by_phone request %s", json.dumps(req_log))
-
-    service = ContactsService(db_connection=db_connection, user_context=user_context)
-    items = await service.get_contact_fields_by_phone(
-        phone_number=phone_number,
-        variable_keys=variable_keys,
+    user_context = _external_user_context(
+        organization_id=organization_id,
+        actor_email=getattr(request.state, "external_actor_email", None),
     )
-
-    resp_log = {
-        "path": str(request.url.path),
-        "organization_id": str(organization_id),
-        "items_count": len(items or []),
-        "items": [
-            (
-                it
-                if isinstance(it, dict)
-                else {
-                    "variable_key": getattr(it, "variable_key", None),
-                    "variable_value": getattr(it, "variable_value", None),
-                }
-            )
-            for it in (items or [])
-        ],
-    }
-    logger.info("external_get_contact_fields_by_phone response %s", json.dumps(resp_log))
-
-    return items
+    variables_service = ExternalVariablesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    logger.info(
+        "external_get_contact_fields_by_phone request %s",
+        json.dumps(
+            {
+                "path": str(request.url.path),
+                "organization_id": organization_id,
+                "phone_number_masked": _mask_phone_number(body.phone_number),
+                "variable_keys": list(body.variable_keys or []),
+            }
+        ),
+    )
+    items = await variables_service.resolve_contact_field_values_by_phone(
+        phone_number=body.phone_number,
+        variable_keys=body.variable_keys,
+    )
+    return [
+        ExternalContactFieldValue.model_validate(item).model_dump(mode="json") for item in items
+    ]
 
 
 @handle_api_exceptions("external update company")
