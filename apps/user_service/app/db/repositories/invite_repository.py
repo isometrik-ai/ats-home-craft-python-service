@@ -265,6 +265,35 @@ class InviteRepository:
         row = await self.db_connection.fetchrow(query, token_hash, expires_at, invite_id)
         return dict(row) if row else None
 
+    async def renew_expired_invite(
+        self, invite_id: str, invite_data: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Refresh an expired pending invitation with a new token, role, and metadata."""
+        query = """
+            UPDATE organization_invites
+            SET role_id = $1,
+                token_hash = $2,
+                invited_by = $3,
+                expires_at = $4,
+                metadata = $5::jsonb,
+                updated_at = NOW()
+            WHERE id = $6
+              AND status = $7
+              AND expires_at <= NOW()
+            RETURNING *
+        """
+        row = await self.db_connection.fetchrow(
+            query,
+            invite_data["role_id"],
+            invite_data["token_hash"],
+            invite_data["invited_by"],
+            invite_data["expires_at"],
+            json.dumps(invite_data.get("metadata", {})),
+            invite_id,
+            InviteStatus.PENDING.value,
+        )
+        return dict(row) if row else None
+
     async def patch_pending_invitation(
         self,
         invite_id: str,
