@@ -637,15 +637,16 @@ class InviteService:
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
-        # for the same email (e.g. a previously deleted member) must not block re-invites.
-        existing_invite = await self.invite_repository.check_existing_invite(
+        pending_invite = await self.invite_repository.check_existing_invite(
             organization_id, body.email, status=InviteStatus.PENDING.value
         )
-        if existing_invite:
-            raise ConflictException(
-                message_key="invitations.errors.pending_invitation_exists",
-                custom_code=CustomStatusCode.CONFLICT,
-            )
+        if pending_invite:
+            expires_at_val = pending_invite.get("expires_at")
+            if expires_at_val and expires_at_val > datetime.now(timezone.utc):
+                raise ConflictException(
+                    message_key="invitations.errors.pending_invitation_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
 
         # Validate the role exists for this organization before inserting the invite
         role_data = await self._get_role_data(str(body.role_id), organization_id)
@@ -654,24 +655,42 @@ class InviteService:
         invite_token, token_hash = self._generate_invite_token()
         expires_at = datetime.now(timezone.utc) + timedelta(days=app_settings.invite_expiry_days)
 
-        invite_data = {
-            "organization_id": organization_id,
-            "email": body.email,
-            "role_id": str(body.role_id),
-            "token_hash": token_hash,
-            "invited_by": self.user_context.user_id,
-            "status": InviteStatus.PENDING.value,
-            "expires_at": expires_at,
-            "metadata": {
-                "first_name": body.first_name,
-                "last_name": body.last_name,
-                "phone_number": body.phone_number,
-                "phone_isd_code": body.phone_isd_code,
-                "salutation": body.salutation,
-            },
+        metadata = {
+            "first_name": body.first_name,
+            "last_name": body.last_name,
+            "phone_number": body.phone_number,
+            "phone_isd_code": body.phone_isd_code,
+            "salutation": body.salutation,
         }
 
-        created_invite = await self.invite_repository.create_invite(invite_data)
+        if pending_invite:
+            created_invite = await self.invite_repository.renew_expired_invite(
+                str(pending_invite["id"]),
+                {
+                    "role_id": str(body.role_id),
+                    "token_hash": token_hash,
+                    "invited_by": self.user_context.user_id,
+                    "expires_at": expires_at,
+                    "metadata": metadata,
+                },
+            )
+            if not created_invite:
+                raise InternalServerErrorException(
+                    message_key="errors.internal_server_error",
+                    custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+                )
+        else:
+            invite_data = {
+                "organization_id": organization_id,
+                "email": body.email,
+                "role_id": str(body.role_id),
+                "token_hash": token_hash,
+                "invited_by": self.user_context.user_id,
+                "status": InviteStatus.PENDING.value,
+                "expires_at": expires_at,
+                "metadata": metadata,
+            }
+            created_invite = await self.invite_repository.create_invite(invite_data)
 
         # Generate invitation URL
         invite_url = self._generate_invite_url(invite_token)
