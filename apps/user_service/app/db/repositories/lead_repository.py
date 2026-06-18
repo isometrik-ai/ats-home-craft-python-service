@@ -57,6 +57,7 @@ _LEADS_SEARCH_PREDICATE = f"""
               INNER JOIN companies co
                   ON co.id = lco.company_id
                  AND co.organization_id = lco.organization_id
+                 AND co.status != '{ClientStatus.DELETED.value}'
               WHERE lco.lead_id = l.id
                 AND lco.organization_id = l.organization_id
                 AND co.name ILIKE $6
@@ -67,6 +68,7 @@ _LEADS_SEARCH_PREDICATE = f"""
               INNER JOIN contacts ct
                   ON ct.id = lct.contact_id
                  AND ct.organization_id = lct.organization_id
+                 AND ct.status != '{ClientStatus.DELETED.value}'
               LEFT JOIN auth.users cu
                   ON cu.id = ct.user_id
               WHERE lct.lead_id = l.id
@@ -90,7 +92,7 @@ _LEADS_FILTER_WHERE = f"""
 
 _LEADS_LIST_ORDER_BY = "ORDER BY l.updated_at DESC NULLS LAST, l.created_at DESC"
 
-_LEAD_COMPANIES_AGG_SQL = """
+_LEAD_COMPANIES_AGG_SQL = f"""
 COALESCE(
     (
         SELECT json_agg(
@@ -106,6 +108,7 @@ COALESCE(
         INNER JOIN companies co
             ON co.id = lc.company_id
            AND co.organization_id = lc.organization_id
+           AND co.status != '{ClientStatus.DELETED.value}'
         WHERE lc.lead_id = l.id
           AND lc.organization_id = l.organization_id
     ),
@@ -155,9 +158,10 @@ COALESCE(
             ORDER BY lc.created_at ASC
         )
         FROM lead_contacts lc
-        LEFT JOIN contacts ct
+        INNER JOIN contacts ct
             ON ct.id = lc.contact_id
            AND ct.organization_id = lc.organization_id
+           AND ct.status != '{ClientStatus.DELETED.value}'
         WHERE lc.lead_id = l.id
           AND lc.organization_id = l.organization_id
     ),
@@ -258,6 +262,7 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
         ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name,
         om.email::text AS owner_email,
         lc.contact_id AS contact_id,
+        ct.id AS contact_record_id,
         lc.label AS label,
         ({_CONTACT_DISPLAY_NAME_SQL.strip()}) AS contact_name,
         cu.email::text AS contact_email,
@@ -272,6 +277,7 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
     LEFT JOIN contacts ct
         ON ct.id = lc.contact_id
        AND ct.organization_id = lc.organization_id
+       AND ct.status != '{ClientStatus.DELETED.value}'
     LEFT JOIN auth.users cu
         ON cu.id = ct.user_id
     LEFT JOIN LATERAL (
@@ -653,6 +659,8 @@ class LeadRepository:
             contact_id = row["contact_id"]
             if contact_id is None:
                 continue
+            if row.get("contact_record_id") is None:
+                continue
             contacts.append(
                 {
                     "contact_id": contact_id,
@@ -916,6 +924,7 @@ class LeadRepository:
                                 INNER JOIN companies co
                                     ON co.id = d.company_id
                                    AND co.organization_id = $1
+                                   AND co.status != '{ClientStatus.DELETED.value}'
                             ),
                             '[]'::json
                         )
@@ -937,9 +946,10 @@ class LeadRepository:
                                     ORDER BY coalesce(d.contact_id::text, '') ASC
                                 )
                                 FROM desired_contacts d
-                                LEFT JOIN contacts ct
+                                INNER JOIN contacts ct
                                     ON ct.id = d.contact_id
                                    AND ct.organization_id = $1
+                                   AND ct.status != '{ClientStatus.DELETED.value}'
                             ),
                             '[]'::json
                         )

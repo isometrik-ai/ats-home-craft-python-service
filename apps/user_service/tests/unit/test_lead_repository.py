@@ -398,6 +398,7 @@ async def test_get_lead_detail_by_id_returns_row_or_none():
     assert len(conn.fetchrow_calls) == 1
     query, args = conn.fetchrow_calls[0]
     assert "LIMIT 1" in query
+    assert "co.status != 'deleted'" in query
     assert args == ("org-1", "lead-1", None)
 
     conn.fetchrow_result = None
@@ -414,6 +415,7 @@ async def test_get_lead_detail_with_contacts_by_id():
             "id": "lead-1",
             "companies": "[]",
             "contact_id": "c1",
+            "contact_record_id": "c1",
             "label": "decision_maker",
             "contact_name": "P",
         },
@@ -434,6 +436,37 @@ async def test_get_lead_detail_with_contacts_by_id():
     conn.fetch_result = []
     missing = await repo.get_lead_detail_with_contacts_by_id("org-1", "missing")
     assert missing is None
+
+
+@pytest.mark.asyncio
+async def test_get_lead_detail_skips_deleted_contacts():
+    """Deleted contacts remain in lead_contacts but are omitted from the response."""
+    conn = _FakeConn()
+    conn.fetch_result = [
+        {
+            "id": "lead-1",
+            "companies": "[]",
+            "contact_id": "active-contact",
+            "contact_record_id": "active-contact",
+            "label": "primary",
+            "contact_name": "Active Contact",
+        },
+        {
+            "id": "lead-1",
+            "companies": "[]",
+            "contact_id": "deleted-contact",
+            "contact_record_id": None,
+            "label": "former",
+            "contact_name": None,
+        },
+    ]
+    repo = LeadRepository(db_connection=conn)
+
+    found = await repo.get_lead_detail_with_contacts_by_id("org-1", "lead-1")
+
+    assert found is not None
+    assert len(found["contacts"]) == 1
+    assert found["contacts"][0]["contact_id"] == "active-contact"
 
 
 @pytest.mark.asyncio
