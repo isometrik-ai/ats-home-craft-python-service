@@ -19,7 +19,6 @@ import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi import status as http_status
 
-from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.external_auth import get_organization_context
@@ -54,12 +53,10 @@ router = APIRouter(prefix="/integrations/email-templates", tags=["Email Template
         http_status.HTTP_200_OK: {"description": "Email template retrieved successfully"},
         http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
         http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
-        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
         http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
         http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
     },
 )
-@limiter.limit("100/minute")
 async def external_get_email_template(
     request: Request,
     template_id: str = Path(..., description="Email template ID"),
@@ -102,12 +99,10 @@ async def external_get_email_template(
         http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
         http_status.HTTP_404_NOT_FOUND: {"description": "Not found"},
         http_status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Validation error"},
-        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
         http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
         http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
     },
 )
-@limiter.limit("100/minute")
 async def external_render_email_template(
     request: Request,
     template_id: str = Path(..., description="Email template ID (usually a TRIGGER)"),
@@ -150,12 +145,10 @@ async def external_render_email_template(
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
         http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
         http_status.HTTP_409_CONFLICT: {"description": "Conflict"},
-        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
         http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
         http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
     },
 )
-@limiter.limit("60/minute")
 @audit_api_call(
     action_type="CREATE",
     data_classification="confidential",
