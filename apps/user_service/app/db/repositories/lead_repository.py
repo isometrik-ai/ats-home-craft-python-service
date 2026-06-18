@@ -28,7 +28,7 @@ NULLIF(
 )
 """
 
-# Mirrors ``UserRepository._display_name_from_meta`` (first_name / last_name in JSON).
+# Owner display from organization_members (scoped to lead org; no auth.users fallback).
 _LEAD_OWNER_DISPLAY_NAME_SQL = """
 CASE
     WHEN l.owner_id IS NULL THEN NULL::text
@@ -36,8 +36,8 @@ CASE
         TRIM(
             CONCAT_WS(
                 ' ',
-                NULLIF(TRIM(COALESCE(u.raw_user_meta_data->>'first_name', '')), ''),
-                NULLIF(TRIM(COALESCE(u.raw_user_meta_data->>'last_name', '')), '')
+                NULLIF(TRIM(COALESCE(om.first_name, '')), ''),
+                NULLIF(TRIM(COALESCE(om.last_name, '')), '')
             )
         ),
         ''
@@ -165,12 +165,15 @@ COALESCE(
 ) AS contacts
 """
 
-# Join pipeline stage and owner display name (list/kanban) in one round trip.
+# Join pipeline stage and owner display (list/kanban/detail) in one round trip.
 _LEADS_JOIN_DISPLAY = """
 LEFT JOIN lead_stages ls
     ON ls.id = l.stage_id
    AND ls.organization_id = l.organization_id
-LEFT JOIN auth.users u ON u.id = l.owner_id
+LEFT JOIN organization_members om
+    ON om.user_id = l.owner_id
+   AND om.organization_id = l.organization_id
+   AND om.status != 'deleted'
 """
 
 # Filtered list rows (shared by paginated list, kanban, and window-count query).
@@ -220,7 +223,8 @@ _SQL_LEAD_DETAIL_BY_ID = f"""
         {_LEAD_COMPANIES_AGG_SQL.strip()},
         {_LEAD_CONTACTS_AGG_SQL.strip()},
         ls.stage_name AS stage_name,
-        ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name
+        ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name,
+        om.email::text AS owner_email
     FROM leads l
     {_LEADS_JOIN_DISPLAY.strip()}
     WHERE l.organization_id = $1
@@ -252,6 +256,7 @@ _SQL_LEAD_DETAIL_WITH_CONTACTS_FLAT_BY_ID = f"""
         {_LEAD_COMPANIES_AGG_SQL.strip()},
         ls.stage_name AS stage_name,
         ({_LEAD_OWNER_DISPLAY_NAME_SQL.strip()}) AS owner_name,
+        om.email::text AS owner_email,
         lc.contact_id AS contact_id,
         lc.label AS label,
         ({_CONTACT_DISPLAY_NAME_SQL.strip()}) AS contact_name,

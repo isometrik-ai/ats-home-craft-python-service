@@ -657,7 +657,7 @@ class LeadListItem(BaseModel):
     owner_id: str | None = Field(None, description="Owning organization member user UUID")
     owner_name: str | None = Field(
         None,
-        description="Owner display name from auth.users (raw_user_meta_data first/last name)",
+        description="Owner display name from organization_members (first_name / last_name)",
     )
     created_at: str = Field(..., description="Created at (ISO 8601)")
     updated_at: str = Field(..., description="Updated at (ISO 8601)")
@@ -725,7 +725,11 @@ class LeadDetail(BaseModel):
     owner_id: str | None = Field(None, description="Owning organization member user UUID")
     owner_name: str | None = Field(
         None,
-        description="Owner display name from auth.users (raw_user_meta_data first/last name)",
+        description="Owner display name from organization_members (first_name / last_name)",
+    )
+    owner_email: str | None = Field(
+        None,
+        description="Owner email from organization_members",
     )
     contacts: list[LeadContactDetail] = Field(
         default_factory=list,
