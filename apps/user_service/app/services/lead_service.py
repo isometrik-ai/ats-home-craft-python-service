@@ -789,6 +789,7 @@ class LeadService:
             description=row.get("description"),
             owner_id=self._uuid_str(row.get("owner_id")),
             owner_name=row.get("owner_name") or None,
+            owner_email=row.get("owner_email") or None,
             contacts=contact_models,
             custom_fields=custom_fields_payload,
             created_at=format_iso_datetime(row.get("created_at")) or "",

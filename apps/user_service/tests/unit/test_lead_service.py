@@ -921,6 +921,7 @@ async def test_get_lead_detail_custom_fields(monkeypatch):
         "description": "Opportunity desc",
         "owner_id": OWNER_ID,
         "owner_name": "Owner Name",
+        "owner_email": "owner@example.com",
         "custom_fields": ('[{"field_id":"foo","instance_id":"f1","type":"text","value":"bar"}]'),
         "created_at": now,
         "updated_at": now,
@@ -944,6 +945,7 @@ async def test_get_lead_detail_custom_fields(monkeypatch):
     ]
     assert detail["created_at"] == now.isoformat()
     assert detail["updated_at"] == now.isoformat()
+    assert detail["owner_email"] == "owner@example.com"
     assert lead_repo.calls["get_lead_detail_with_contacts_by_id"] == (ORG_ID, LEAD_ID, None)
     assert not stage_repo.calls
     assert not user_repo.calls
