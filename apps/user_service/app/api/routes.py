@@ -15,6 +15,9 @@ from apps.user_service.app.api.external_clients import router as external_client
 from apps.user_service.app.api.external_email_templates import (
     router as external_email_templates_router,
 )
+from apps.user_service.app.api.external_entity_lists import (
+    router as external_entity_lists_router,
+)
 from apps.user_service.app.api.external_leads import router as external_leads_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.lead_stages import router as lead_stages_router
@@ -56,6 +59,7 @@ router.include_router(teams_router)
 router.include_router(external_clients_router)
 router.include_router(external_email_templates_router)
 router.include_router(external_leads_router)
+router.include_router(external_entity_lists_router)
 router.include_router(projects_router)
 router.include_router(custom_fields_router)
 router.include_router(email_templates_router)
