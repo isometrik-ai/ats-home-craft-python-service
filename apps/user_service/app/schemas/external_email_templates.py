@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from apps.user_service.app.schemas.email_templates import CreateEmailTemplateRequest
+
+
+class ExternalCreateEmailTemplateRequest(CreateEmailTemplateRequest):
+    """External create payload with explicit organization scope (Ross AI API key auth)."""
+
+    organization_id: str = Field(..., min_length=1, description="Target organization UUID")
 
 
 class ExternalCreateEmailTemplateResult(BaseModel):
@@ -17,5 +25,6 @@ class ExternalCreateEmailTemplateResult(BaseModel):
 
 
 __all__ = [
+    "ExternalCreateEmailTemplateRequest",
     "ExternalCreateEmailTemplateResult",
 ]
