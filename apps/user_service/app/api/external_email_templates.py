@@ -5,7 +5,7 @@ These endpoints support two integration auth modes:
 - **Isometrik credentials** (`licenseKey` / `appSecret`) — GET details and POST render.
   The decoded ``projectId`` maps to internal ``organization_id``.
 
-- **Ross AI integration API key** (`ROSSAI_API_KEY`) — POST create. The caller supplies
+- **Ross AI integration API key** (`Rossai-Api-Key`) — POST create. The caller supplies
   ``organization_id`` in the request body.
 
 Endpoints:
@@ -144,7 +144,7 @@ async def external_render_email_template(
     description=(
         "Create a TRIGGER or LAYOUT email template for the organization specified in "
         "`organization_id`. Authenticate with the Ross AI integration API key "
-        "(`ROSSAI_API_KEY`). Templates are created as draft by default unless `status` is "
+        "(`Rossai-Api-Key`). Templates are created as draft by default unless `status` is "
         "set to `published`."
     ),
     responses={

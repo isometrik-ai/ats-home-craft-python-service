@@ -14,13 +14,17 @@ from libs.shared_utils.http_exceptions import (
 
 
 async def verify_ross_ai_integration_api_key(
-    rossai_api_key: str = Header(..., alias="ROSSAI_API_KEY"),
+    rossai_api_key: str = Header(
+        ...,
+        alias="Rossai-Api-Key",
+        description="Ross AI integration API key",
+    ),
 ) -> None:
-    """Validate the Ross AI integration API key from ``ROSSAI_API_KEY`` header."""
+    """Validate the Ross AI integration API key from the ``Rossai-Api-Key`` header."""
     expected = shared_settings.rossai_api_key.strip()
     if not expected:
         raise ServiceUnavailableException(message_key="errors.service_unavailable")
 
-    provided = (rossai_api_key or "").strip()
+    provided = rossai_api_key.strip()
     if not provided or not secrets.compare_digest(provided, expected):
         raise UnauthorizedException(message_key="errors.unauthorized")

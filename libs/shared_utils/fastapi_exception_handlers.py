@@ -85,6 +85,7 @@ def _handle_validation_exception(request: Request, exc: RequestValidationError |
         "latitude",
         "longitude",
         "platform",
+        "rossai-api-key",
         "version",
     }
 
