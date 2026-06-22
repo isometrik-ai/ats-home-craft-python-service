@@ -89,8 +89,8 @@ async def create_email_template(
     status_code=http_status.HTTP_200_OK,
     description=(
         "Generate an email template via the configured Isometrik strands agent. "
-        "Organization is taken from the authenticated session. The agent message is "
-        "suffixed with `::organization_id : <org_id>`."
+        "Organization is taken from the authenticated session and passed to the agent "
+        "in the strands request `schema`."
     ),
     summary="Generate email template with AI",
 )

@@ -843,12 +843,6 @@ class EmailTemplateService:
         return bool(iso.strands_auth_token.strip() and iso.email_template_agent_id.strip())
 
     @staticmethod
-    def _build_email_template_agent_message(*, query: str, organization_id: str) -> str:
-        """Append organization scope suffix expected by the external template agent."""
-        normalized_query = query.strip()
-        return f"{normalized_query} ::organization_id : {organization_id.strip()}"
-
-    @staticmethod
     def _parse_template_id_from_agent_text(raw_text: str) -> str | None:
         """Extract template_id from agent text (JSON object or bare UUID)."""
         cleaned = raw_text.strip()
@@ -889,13 +883,15 @@ class EmailTemplateService:
             )
 
         agent_id = shared_settings.isometrik.email_template_agent_id
-        message = self._build_email_template_agent_message(
-            query=query,
-            organization_id=organization_id,
-        )
+        message = query.strip()
 
         try:
-            body = await call_strands_agent(agent_id=agent_id, message=message, stream=False)
+            body = await call_strands_agent(
+                agent_id=agent_id,
+                message=message,
+                stream=False,
+                schema={"organization_id": organization_id},
+            )
         except httpx.HTTPError as exc:
             logger.error(
                 "email_template_agent_request_failed: %s | agent_id=%s organization_id=%s",

@@ -125,6 +125,7 @@ async def call_strands_agent(
     agent_id: str,
     message: str,
     stream: bool = False,
+    schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """POST to Isometrik strands chat and return the parsed JSON body."""
     client = await get_strands_http_client()
@@ -133,7 +134,7 @@ async def call_strands_agent(
         "agent_id": agent_id,
         "message": _sanitize_agent_message(message),
         "files": [],
-        "schema": {},
+        "schema": schema or {},
         "stream": stream,
     }
     response = await client.post(_STRANDS_PATH, headers=_strands_headers(), json=payload)

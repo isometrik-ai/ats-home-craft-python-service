@@ -130,15 +130,6 @@ def test_format_address_for_html():
     assert formatted == "500 Market St, San Francisco, CA 94104, US"
 
 
-def test_agent_message_appends_org_suffix() -> None:
-    """Agent message includes organization scope suffix."""
-    message = EmailTemplateService._build_email_template_agent_message(
-        query="Create a welcome email",
-        organization_id="org-123",
-    )
-    assert message == "Create a welcome email ::organization_id : org-123"
-
-
 def test_parse_template_id_from_agent_text_json() -> None:
     """Parse template_id from JSON agent response."""
     template_id = EmailTemplateService._parse_template_id_from_agent_text(
