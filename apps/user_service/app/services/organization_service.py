@@ -82,6 +82,10 @@ from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
 )
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.session_context_cache import (
+    revoke_org_member_sessions_everywhere,
+    revoke_organization_sessions_everywhere,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.super_admin_utils import get_system_super_admin_emails
 
@@ -1398,6 +1402,11 @@ class OrganizationService:
         )
         member_emails = [member.get("email") for member in members if member.get("email")]
 
+        await revoke_organization_sessions_everywhere(
+            db_connection=self.db_connection,
+            organization_id=organization_id,
+        )
+
         await self.team_repository.delete_all_teams_by_organization_id(organization_id)
         await self.role_repository.delete_all_roles_by_organization_id(organization_id)
         await self.permissions_repository.delete_all_permissions_by_organization_id(organization_id)
@@ -1472,6 +1481,11 @@ class OrganizationService:
             organization_id
         )
         member_emails = [member.get("email") for member in members if member.get("email")]
+
+        await revoke_organization_sessions_everywhere(
+            db_connection=self.db_connection,
+            organization_id=organization_id,
+        )
 
         # Delete all related data first (in correct order to respect foreign keys)
         # 1. Delete team members and teams
@@ -1616,6 +1630,12 @@ class OrganizationService:
         # Hard delete from all current organization teams
         await self.team_repository.delete_user_from_all_teams(
             user_id=member_user_id, organization_id=self.user_context.organization_id
+        )
+
+        await revoke_org_member_sessions_everywhere(
+            db_connection=self.db_connection,
+            user_id=member_user_id,
+            organization_id=str(self.user_context.organization_id),
         )
 
         audit_new: dict[str, Any] = {

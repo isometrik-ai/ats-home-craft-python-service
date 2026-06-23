@@ -84,6 +84,11 @@ from libs.shared_utils.http_exceptions import (
     ValidationException,
 )
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.session_context_cache import (
+    extract_session_id_from_access_token,
+    invalidate_user_sessions_cache,
+    warm_session_context_after_auth,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 # Initialize logger
@@ -135,6 +140,20 @@ class AuthService:
             return json.loads(raw_metadata)
         except json.JSONDecodeError:
             return {}
+
+    # SESSION CONTEXT CACHE
+    @staticmethod
+    async def _warm_session_context_from_session(
+        session: Any,
+        *,
+        organization_id: str | None = None,
+    ) -> None:
+        """Warm Redis using session_id from the Supabase session access token."""
+        session_id = extract_session_id_from_access_token(getattr(session, "access_token", None))
+        await warm_session_context_after_auth(
+            session_id=session_id,
+            organization_id=organization_id,
+        )
 
     # PASSWORD VALIDATION METHODS
     @staticmethod
@@ -604,6 +623,8 @@ class AuthService:
             for org in organizations_data
         ]
 
+        await self._warm_session_context_from_session(session, organization_id=None)
+
         return AuthResponse(
             access_token=session.access_token,
             refresh_token=getattr(session, "refresh_token", None),
@@ -646,6 +667,8 @@ class AuthService:
             )
             for org in organizations_data
         ]
+
+        await self._warm_session_context_from_session(session, organization_id=None)
 
         return AuthResponse(
             access_token=session.access_token,
@@ -1051,6 +1074,7 @@ class AuthService:
         self._send_welcome_email_safely(email=signup_data.email, first_name=signup_data.first_name)
 
         user_metadata = signup_result.user.user_metadata or {}
+        await self._warm_session_context_from_session(session, organization_id=None)
         return AuthResponse(
             access_token=session.access_token,
             refresh_token=session.refresh_token,
@@ -1076,6 +1100,9 @@ class AuthService:
         Raises:
             NotFoundException: If user not found
         """
+        session_repo = SessionRepository(db_connection=self.db_connection)
+        session_ids = await session_repo.get_active_session_ids_for_user(user_id)
+
         result = await delete_user(sb_client=self.supabase_client, user_id=user_id)
 
         if result is None:
@@ -1083,6 +1110,8 @@ class AuthService:
                 message_key="auth.errors.user_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+
+        await invalidate_user_sessions_cache(user_id, session_ids)
 
     async def change_password(
         self,

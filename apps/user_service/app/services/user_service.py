@@ -17,7 +17,6 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
-from apps.user_service.app.db.repositories.session_repository import SessionRepository
 from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
@@ -66,6 +65,9 @@ from libs.shared_utils.isometrik_service import (
     update_isometrik_user,
 )
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.session_context_cache import (
+    revoke_org_member_sessions_everywhere,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.super_admin_utils import is_system_super_admin
 
@@ -1093,11 +1095,11 @@ class UserService:  # pylint: disable=too-many-public-methods
                 str(exc),
             )
 
-        # Revoke sessions for that user scoped to this org (kicks them out)
-        session_repo = SessionRepository(
-            db_connection=self.organization_member_repository.db_connection
+        await revoke_org_member_sessions_everywhere(
+            db_connection=self.organization_member_repository.db_connection,
+            user_id=user_id,
+            organization_id=organization_id,
         )
-        await session_repo.revoke_org_sessions_for_user(user_id, organization_id)
 
         # Prepare audit data
         audit_data = {

@@ -502,27 +502,143 @@ class SessionRepository:
             "organization_id": str(row["organization_id"]),
         }
 
-    async def revoke_org_sessions_for_user(self, user_id: str, organization_id: str) -> None:
-        """Revoke sessions for a user **scoped to one organization**.
+    async def get_active_session_ids_for_org_member_removal(
+        self, user_id: str, organization_id: str
+    ) -> list[str]:
+        """Return active session IDs to revoke when removing a user from an organization.
 
-        Implementation detail:
-        - We revoke at Supabase level by deleting rows from `auth.sessions`
-          for session ids that exist in `public.user_sessions` for the given
-          (user_id, organization_id).
-        - We intentionally do **not** update rows in `public.user_sessions` here,
-          because lifecycle bookkeeping is handled by database triggers.
+        Includes sessions bound to the organization and unscoped sessions (no org yet)
+        so the member cannot keep using a stale login after removal.
+        """
+        query = """
+            SELECT us.id::text AS id
+            FROM user_sessions us
+            INNER JOIN auth.sessions s ON s.id = us.id
+            WHERE us.user_id = $1
+              AND us.session_status = $2
+              AND (
+                us.organization_id = $3
+                OR us.organization_id IS NULL
+              )
+        """
+        rows = await self.db_connection.fetch(
+            query, user_id, SessionStatus.ACTIVE.value, organization_id
+        )
+        return [str(row["id"]) for row in rows]
 
+    async def get_active_session_ids_for_user_org(
+        self, user_id: str, organization_id: str
+    ) -> list[str]:
+        """Alias for org-member removal session lookup."""
+        return await self.get_active_session_ids_for_org_member_removal(user_id, organization_id)
+
+    async def get_active_session_ids_for_organization(self, organization_id: str) -> list[str]:
+        """Return active session IDs linked to an organization or its members."""
+        query = """
+            SELECT us.id::text AS id
+            FROM user_sessions us
+            INNER JOIN auth.sessions s ON s.id = us.id
+            WHERE us.session_status = $1
+              AND (
+                us.organization_id = $2
+                OR (
+                  us.organization_id IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM organization_members om
+                    WHERE om.user_id = us.user_id
+                      AND om.organization_id = $2
+                      AND om.status != $3
+                  )
+                )
+              )
+        """
+        rows = await self.db_connection.fetch(
+            query,
+            SessionStatus.ACTIVE.value,
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+        )
+        return [str(row["id"]) for row in rows]
+
+    async def get_active_session_ids_for_user(self, user_id: str) -> list[str]:
+        """Return active session IDs for a user."""
+        query = """
+            SELECT us.id::text AS id
+            FROM user_sessions us
+            INNER JOIN auth.sessions s ON s.id = us.id
+            WHERE us.user_id = $1
+              AND us.session_status = $2
+        """
+        rows = await self.db_connection.fetch(query, user_id, SessionStatus.ACTIVE.value)
+        return [str(row["id"]) for row in rows]
+
+    async def revoke_org_sessions_for_user(self, user_id: str, organization_id: str) -> list[str]:
+        """Revoke sessions when removing a user from an organization.
+
+        Deletes matching rows from `auth.sessions` for active sessions that are either
+        bound to the organization or still unscoped for that user.
+
+        Returns:
+            Session IDs deleted from `auth.sessions`.
         """
         if not user_id or not user_id.strip():
-            return
+            return []
         if not organization_id or not organization_id.strip():
-            return
+            return []
 
         query = """
             DELETE FROM auth.sessions s
             USING public.user_sessions us
             WHERE us.id = s.id
               AND us.user_id = $1
-              AND us.organization_id = $2
+              AND us.session_status = $2
+              AND (
+                us.organization_id = $3
+                OR us.organization_id IS NULL
+              )
+            RETURNING s.id::text AS id
         """
-        await self.db_connection.execute(query, user_id, organization_id)
+        rows = await self.db_connection.fetch(
+            query, user_id, SessionStatus.ACTIVE.value, organization_id
+        )
+        return [str(row["id"]) for row in rows]
+
+    async def revoke_all_sessions_for_organization(self, organization_id: str) -> list[str]:
+        """Revoke active auth sessions for an organization and its members.
+
+        Includes org-bound sessions and unscoped sessions for users who belong to the org.
+
+        Returns:
+            Session IDs deleted from `auth.sessions`.
+        """
+        if not organization_id or not organization_id.strip():
+            return []
+
+        query = """
+            DELETE FROM auth.sessions s
+            USING public.user_sessions us
+            WHERE us.id = s.id
+              AND us.session_status = $1
+              AND (
+                us.organization_id = $2
+                OR (
+                  us.organization_id IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM organization_members om
+                    WHERE om.user_id = us.user_id
+                      AND om.organization_id = $2
+                      AND om.status != $3
+                  )
+                )
+              )
+            RETURNING s.id::text AS id
+        """
+        rows = await self.db_connection.fetch(
+            query,
+            SessionStatus.ACTIVE.value,
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+        )
+        return [str(row["id"]) for row in rows]

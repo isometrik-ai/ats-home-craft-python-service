@@ -44,6 +44,7 @@ from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.http_exceptions import UnauthorizedException
 from libs.shared_utils.isometrik_service import create_isometrik_token
 from libs.shared_utils.response_factory import success_response
+from libs.shared_utils.session_context_cache import warm_session_context_after_auth
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -416,6 +417,11 @@ async def select_organization(
         user_type=data.user_type,
     )
 
+    await warm_session_context_after_auth(
+        session_id=session_id,
+        organization_id=data.organization_id,
+    )
+
     return success_response(
         request=request,
         message_key="success.retrieved",
@@ -462,6 +468,11 @@ async def switch_organization(
         session_id=session_id,
         organization_id=data.organization_id,
         user_type=data.user_type,
+    )
+
+    await warm_session_context_after_auth(
+        session_id=session_id,
+        organization_id=data.organization_id,
     )
 
     return success_response(

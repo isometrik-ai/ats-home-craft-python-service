@@ -49,6 +49,7 @@ from libs.shared_db.supabase_db.auth_repository import (
     generate_magiclink_and_exchange_for_session,
 )
 from libs.shared_utils.http_exceptions import BadRequestException, NotFoundException
+from libs.shared_utils.session_context_cache import invalidate_session_context_cache
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.super_admin_utils import is_system_super_admin
 
@@ -325,4 +326,5 @@ class SuperadminOrganizationService:
                 message_key="organizations.errors.exit_impersonation_session_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        await invalidate_session_context_cache(str(session_id))
         return revoked

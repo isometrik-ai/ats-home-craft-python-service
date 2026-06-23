@@ -1,0 +1,281 @@
+"""Session context cache: Redis → Postgres."""
+
+from __future__ import annotations
+
+import json
+import time
+from typing import Any
+
+import asyncpg
+import jwt
+
+from libs.shared_config.app_settings import shared_settings
+from libs.shared_db.drivers.redis_client import get_redis
+from libs.shared_utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+SESSION_CTX_KEY_PREFIX = "session:ctx:"
+SESSION_REVOKED_KEY_PREFIX = "session:revoked:"
+USER_DELETED_KEY_PREFIX = "user:deleted:"
+
+
+def _settings():
+    """Return Redis-related settings."""
+    return shared_settings.redis
+
+
+def _session_ctx_key(session_id: str) -> str:
+    """Build Redis key for cached session context."""
+    return f"{SESSION_CTX_KEY_PREFIX}{session_id}"
+
+
+def _session_revoked_key(session_id: str) -> str:
+    """Build Redis key for session revocation marker."""
+    return f"{SESSION_REVOKED_KEY_PREFIX}{session_id}"
+
+
+def _user_deleted_key(user_id: str) -> str:
+    """Build Redis key for user-deleted marker."""
+    return f"{USER_DELETED_KEY_PREFIX}{user_id}"
+
+
+def extract_session_id_from_access_token(access_token: str | None) -> str | None:
+    """Read session_id from a Supabase access token without a network round trip."""
+    if not access_token:
+        return None
+    try:
+        claims = jwt.decode(access_token, options={"verify_signature": False})
+    except jwt.PyJWTError:
+        return None
+    session_id = claims.get("session_id") or claims.get("jti")
+    return str(session_id) if session_id else None
+
+
+async def _is_user_deleted(user_id: str | None) -> bool:
+    """Return True when the user is marked deleted in Redis."""
+    if not user_id or not _settings().session_ctx_cache_enabled:
+        return False
+    redis_client = await get_redis()
+    if redis_client is None:
+        return False
+    try:
+        return bool(await redis_client.exists(_user_deleted_key(user_id)))
+    except Exception as exc:
+        logger.warning("Redis user-deleted check failed: %s", exc)
+        return False
+
+
+async def _is_session_revoked(session_id: str | None) -> bool:
+    """Return True when the session is marked revoked in Redis."""
+    if not session_id or not _settings().session_ctx_cache_enabled:
+        return False
+    redis_client = await get_redis()
+    if redis_client is None:
+        return False
+    try:
+        return bool(await redis_client.exists(_session_revoked_key(session_id)))
+    except Exception as exc:
+        logger.warning("Redis session-revoked check failed: %s", exc)
+        return False
+
+
+async def _get_redis_session_context(session_id: str) -> dict[str, Any] | None:
+    """Read session context from Redis, or None on miss/error."""
+    redis_client = await get_redis()
+    if redis_client is None:
+        return None
+    try:
+        raw = await redis_client.get(_session_ctx_key(session_id))
+        if not raw:
+            return None
+        data = json.loads(raw)
+        org_id = data.get("organization_id")
+        return {"organization_id": str(org_id) if org_id is not None else None}
+    except Exception as exc:
+        logger.warning("Redis session-context read failed: %s", exc)
+        return None
+
+
+async def warm_session_context_cache(
+    session_id: str,
+    organization_id: str | None,
+) -> None:
+    """Write session context to Redis."""
+    if not session_id or not _settings().session_ctx_cache_enabled:
+        return
+
+    redis_client = await get_redis()
+    if redis_client is None:
+        return
+
+    try:
+        payload = json.dumps(
+            {
+                "organization_id": organization_id,
+                "cached_at": int(time.time()),
+            }
+        )
+        await redis_client.setex(
+            _session_ctx_key(session_id),
+            _settings().session_ctx_cache_ttl_seconds,
+            payload,
+        )
+        logger.info(
+            "session context cache warmed session_id=%s organization_id=%s ttl_seconds=%s",
+            session_id,
+            organization_id,
+            _settings().session_ctx_cache_ttl_seconds,
+        )
+    except Exception as exc:
+        logger.warning("Redis session-context warm failed: %s", exc)
+
+
+async def warm_session_context_after_auth(
+    *,
+    session_id: str | None,
+    organization_id: str | None,
+) -> None:
+    """Warm Redis after login or org selection."""
+    if not session_id:
+        return
+    await warm_session_context_cache(session_id, organization_id)
+
+
+async def invalidate_session_context_cache(session_id: str) -> None:
+    """Invalidate positive cache and set session revocation marker."""
+    if not session_id or not _settings().session_ctx_cache_enabled:
+        return
+
+    redis_client = await get_redis()
+    if redis_client is None:
+        return
+
+    try:
+        await redis_client.delete(_session_ctx_key(session_id))
+        await redis_client.setex(
+            _session_revoked_key(session_id),
+            _settings().session_revoked_cache_ttl_seconds,
+            "1",
+        )
+        logger.info("session context cache invalidated session_id=%s", session_id)
+    except Exception as exc:
+        logger.warning("Redis session-context invalidation failed: %s", exc)
+
+
+async def revoke_org_member_sessions_everywhere(
+    *,
+    db_connection: asyncpg.Connection,
+    user_id: str,
+    organization_id: str,
+) -> None:
+    """Revoke org-member sessions in Postgres and invalidate Redis markers."""
+    from apps.user_service.app.db.repositories import SessionRepository
+
+    session_repo = SessionRepository(db_connection=db_connection)
+    session_ids = await session_repo.revoke_org_sessions_for_user(user_id, organization_id)
+    for session_id in session_ids:
+        await invalidate_session_context_cache(session_id)
+    if session_ids:
+        logger.info(
+            "revoked org-member sessions user_id=%s organization_id=%s count=%s",
+            user_id,
+            organization_id,
+            len(session_ids),
+        )
+
+
+async def revoke_organization_sessions_everywhere(
+    *,
+    db_connection: asyncpg.Connection,
+    organization_id: str,
+) -> None:
+    """Revoke all organization-linked sessions in Postgres and Redis."""
+    from apps.user_service.app.db.repositories import SessionRepository
+
+    session_repo = SessionRepository(db_connection=db_connection)
+    session_ids = await session_repo.revoke_all_sessions_for_organization(organization_id)
+    for session_id in session_ids:
+        await invalidate_session_context_cache(session_id)
+    if session_ids:
+        logger.info(
+            "revoked organization sessions organization_id=%s count=%s",
+            organization_id,
+            len(session_ids),
+        )
+
+
+async def invalidate_user_sessions_cache(
+    user_id: str,
+    session_ids: list[str] | None = None,
+) -> None:
+    """Mark user deleted and invalidate known session caches."""
+    if not user_id or not _settings().session_ctx_cache_enabled:
+        return
+
+    redis_client = await get_redis()
+    if redis_client is not None:
+        try:
+            await redis_client.setex(
+                _user_deleted_key(user_id),
+                _settings().user_deleted_cache_ttl_seconds,
+                "1",
+            )
+        except Exception as exc:
+            logger.warning("Redis user-deleted mark failed: %s", exc)
+
+    if session_ids:
+        for session_id in session_ids:
+            await invalidate_session_context_cache(session_id)
+
+
+async def resolve_session_context(
+    *,
+    user_id: str | None,
+    session_id: str | None,
+    db_connection: asyncpg.Connection,
+) -> dict[str, Any] | None:
+    """Resolve session context via Redis → DB."""
+    if not session_id or not str(session_id).strip():
+        return None
+
+    session_id = str(session_id)
+
+    if await _is_user_deleted(user_id):
+        logger.info(
+            "session context blocked user_id=%s session_id=%s reason=user_deleted",
+            user_id,
+            session_id,
+        )
+        return None
+    if await _is_session_revoked(session_id):
+        logger.info(
+            "session context blocked session_id=%s reason=session_revoked",
+            session_id,
+        )
+        return None
+
+    redis_ctx = await _get_redis_session_context(session_id)
+    if redis_ctx is not None:
+        logger.info(
+            "session context cache hit session_id=%s organization_id=%s",
+            session_id,
+            redis_ctx.get("organization_id"),
+        )
+        return redis_ctx
+
+    from apps.user_service.app.db.repositories import SessionRepository
+
+    session_repo = SessionRepository(db_connection=db_connection)
+    db_ctx = await session_repo.get_valid_session_context(session_id)
+    if db_ctx is None:
+        logger.info("session context not found session_id=%s", session_id)
+        return None
+
+    logger.info(
+        "session context cache miss session_id=%s organization_id=%s source=db",
+        session_id,
+        db_ctx.get("organization_id"),
+    )
+    await warm_session_context_cache(session_id, db_ctx.get("organization_id"))
+    return db_ctx

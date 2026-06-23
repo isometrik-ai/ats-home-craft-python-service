@@ -14,6 +14,7 @@ from apps.user_service.app.schemas.auth import SessionFilter
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import BadRequestException
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.session_context_cache import invalidate_session_context_cache
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("session_service")
@@ -201,3 +202,4 @@ class SessionService:
             )
 
         await self.session_repository.delete_auth_session_by_id(session_id)
+        await invalidate_session_context_cache(session_id)
