@@ -33,6 +33,7 @@ from libs.shared_utils.http_exceptions import (
     ValidationException,
 )
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.session_context_cache import resolve_session_context
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.super_admin_utils import is_system_super_admin
 
@@ -137,19 +138,22 @@ def format_permissions_data(
 
 
 async def extract_user_context(
-    current_user: dict, db_connection: asyncpg.Connection
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    request: Request | None = None,
 ) -> UserContext:
     """Extract and validate user context from JWT token.
 
     This function performs comprehensive validation of JWT token data including:
     - User ID (sub) validation
-    - Organization ID extraction from user_metadata
+    - Organization ID extraction from session context
     - Email validation
     - Presence checks for all required fields
 
     Args:
         current_user (dict): Decoded JWT token containing user information
         db_connection (asyncpg.Connection): Database connection (required)
+        request (Request | None): Optional request for cached session context
 
     Returns:
         UserContext: Validated user context object
@@ -160,7 +164,7 @@ async def extract_user_context(
         InternalServerErrorException: If internal error occurs
 
     Usage:
-        user_context = await extract_user_context(current_user)
+        user_context = await extract_user_context(current_user, db_connection, request)
     """
     try:
         user_id = current_user.get("sub")
@@ -181,13 +185,30 @@ async def extract_user_context(
                 params={"error": "email not found"},
             )
 
-        # Get organization_id from user_sessions table using session_id from JWT
         organization_id = None
         session_id = current_user.get("session_id")
-        from apps.user_service.app.db.repositories import SessionRepository
 
-        session_repo = SessionRepository(db_connection)
-        organization_id = await session_repo.get_session_organization_id(session_id)
+        session_ctx = current_user.get("_session_context")
+        if session_ctx is not None:
+            organization_id = session_ctx.get("organization_id")
+        else:
+            audit_context = (
+                getattr(request.state, "audit_user_context", None) if request is not None else None
+            )
+            if audit_context and audit_context.get("user_id") == user_id:
+                organization_id = audit_context.get("organization_id")
+            else:
+                session_ctx = await resolve_session_context(
+                    user_id=user_id,
+                    session_id=session_id,
+                    db_connection=db_connection,
+                )
+                if session_ctx is None:
+                    raise ValidationException(
+                        message_key="auth.errors.session_not_found",
+                        custom_code=CustomStatusCode.UNAUTHORIZED,
+                    )
+                organization_id = session_ctx.get("organization_id")
 
         user_type = "organization_member" if organization_id else None
 
@@ -281,6 +302,7 @@ async def check_permissions(
     db_connection: asyncpg.Connection,
     permission_codes: list[str] | str,
     organization_id: str | None = None,
+    request: Request | None = None,
 ) -> UserContext:
     """Extracts user context and checks if the user has the given permission.
 
@@ -292,11 +314,12 @@ async def check_permissions(
         db_connection (asyncpg.Connection): Database connection
         permission_codes (list[str] | str): Permission codes to check
         organization_id (str | None): Organization ID for validation (not used for permission check)
+        request (Request | None): Optional request for session context resolution
 
     Returns:
         UserContext: User context
     """
-    user_context = await extract_user_context(current_user, db_connection)
+    user_context = await extract_user_context(current_user, db_connection, request=request)
 
     # Validate session can access requested organization if provided
     # Use already-fetched organization_id from user_context to avoid redundant DB query

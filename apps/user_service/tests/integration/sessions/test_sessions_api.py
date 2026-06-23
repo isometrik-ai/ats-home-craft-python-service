@@ -182,17 +182,13 @@ async def test_missing_session_returns_unauthorized(monkeypatch):
     # conftest patches `jwt_auth.get_user_from_auth`; reload module to test real implementation
     jwt_auth = importlib.reload(jwt_auth)
 
-    async def fake_get_valid_session_context(self, session_id: str):
-        del self
-        assert session_id == "test-session-id"
+    async def fake_resolve_session_context(**kwargs):
+        del kwargs
         return None
 
     monkeypatch.setattr(
-        (
-            "apps.user_service.app.db.repositories.session_repository.SessionRepository"
-            ".get_valid_session_context"
-        ),
-        fake_get_valid_session_context,
+        "libs.shared_middleware.jwt_auth.resolve_session_context",
+        fake_resolve_session_context,
     )
 
     request = Request(

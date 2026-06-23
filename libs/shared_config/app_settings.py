@@ -161,6 +161,19 @@ class TelemetrySettings(BaseSettings):
     signoz_endpoint: str = config("SIGNOZ_ENDPOINT", default="")
 
 
+class RedisSettings(BaseSettings):
+    """Redis connection and session-context cache settings."""
+
+    url: str = config("REDIS_URL", default="redis://localhost:6379/0")
+    enabled: bool = config("REDIS_ENABLED", default=True)
+    session_ctx_cache_enabled: bool = config("SESSION_CTX_CACHE_ENABLED", default=True)
+    session_ctx_cache_ttl_seconds: int = config("SESSION_CTX_CACHE_TTL_SECONDS", default=300)
+    session_revoked_cache_ttl_seconds: int = config(
+        "SESSION_REVOKED_CACHE_TTL_SECONDS", default=3600
+    )
+    user_deleted_cache_ttl_seconds: int = config("USER_DELETED_CACHE_TTL_SECONDS", default=86400)
+
+
 class TypesenseSettings(BaseSettings):
     """Typesense cluster and API key configuration."""
 
@@ -197,6 +210,7 @@ class SharedAppSettings(BaseSettings):
     """Application settings."""
 
     database: DatabaseSettings = DatabaseSettings()
+    redis: RedisSettings = RedisSettings()
     supabase: SupabaseSettings = SupabaseSettings()
     isometrik: IsometrikSettings = IsometrikSettings()
     cloudflare_r2: CloudflareR2Settings = CloudflareR2Settings()

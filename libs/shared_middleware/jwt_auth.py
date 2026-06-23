@@ -13,8 +13,6 @@ The module integrates with Supabase for user authentication and
 permission management, using environment variables for configuration.
 """
 
-import time
-
 import asyncpg
 from fastapi import Depends, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -28,6 +26,7 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import error_response
+from libs.shared_utils.session_context_cache import resolve_session_context
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger(__name__)
@@ -214,21 +213,21 @@ async def get_user_from_auth(
     Raises:
         UnauthorizedException: If user is not authenticated
     """
-
-    start = time.perf_counter()
     user = getattr(request.state, "user", None)
+    if not user:
+        raise UnauthorizedException(
+            message_key="errors.invalid_token",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    # Extract user data from JWT token
     user_id, user_email, session_id = extract_user_data(user)
 
-    # Setup audit context (before validation to ensure audit trail)
-    organization_id = None
-    from apps.user_service.app.db.repositories import SessionRepository
-
-    session_repo = SessionRepository(db_connection=db_connection)
-
-    # Single-call validation: session must exist (org may be NULL)
-    session_ctx = await session_repo.get_valid_session_context(session_id)
+    session_ctx = await resolve_session_context(
+        user_id=user_id,
+        session_id=session_id,
+        db_connection=db_connection,
+    )
     if not session_ctx:
         raise UnauthorizedException(
             message_key="auth.errors.session_not_found",
@@ -237,15 +236,13 @@ async def get_user_from_auth(
         )
 
     organization_id = session_ctx.get("organization_id")
-
-    # Update audit context with validated org/session info
     setup_audit_context(request, user_id, user_email, organization_id, session_id)
 
     request.state.audit_risk_level = "low"
     request.state.audit_description = "Successfully authenticated and authorized user"
 
-    print(f"get_user_from_auth time: {(time.perf_counter() - start) * 1000:.2f} milliseconds")
-
+    # Reuse in extract_user_context on the same request (avoids a second Redis/DB resolve).
+    user["_session_context"] = session_ctx
     return user
 
 
@@ -296,7 +293,6 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         """
         # Skip OPTIONS requests (CORS preflight) - they don't need authentication
         # CORS middleware will handle these requests and add appropriate headers
-        start = time.perf_counter()
         if request.method == "OPTIONS":
             return await call_next(request)
 
@@ -330,7 +326,5 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 custom_code=CustomStatusCode.UNAUTHORIZED,
             )
-        finally:
-            print(f"JWT validation time: {(time.perf_counter() - start) * 1000:.2f} milliseconds")
 
         return await call_next(request)
