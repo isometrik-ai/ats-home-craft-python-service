@@ -1,5 +1,7 @@
 """Integration tests for sessions endpoints."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from apps.user_service.app.schemas.auth import SessionFilter
@@ -188,6 +190,10 @@ async def test_missing_session_returns_unauthorized(monkeypatch):
     monkeypatch.setattr(
         "libs.shared_middleware.jwt_auth.resolve_session_context_from_redis",
         fake_resolve_session_context_from_redis,
+    )
+    monkeypatch.setattr(
+        "libs.shared_middleware.jwt_auth.coalesced_resolve_session_context_from_db",
+        AsyncMock(return_value=None),
     )
 
     request = Request(
