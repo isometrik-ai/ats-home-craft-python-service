@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 import asyncpg
 import jwt
@@ -20,6 +22,37 @@ logger = get_logger(__name__)
 SESSION_CTX_KEY_PREFIX = "session:ctx:"
 SESSION_REVOKED_KEY_PREFIX = "session:revoked:"
 USER_DELETED_KEY_PREFIX = "user:deleted:"
+
+T = TypeVar("T")
+
+
+class _AsyncSingleflight:
+    """Coalesce concurrent async work per key (one leader, many waiters)."""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._in_flight: dict[str, asyncio.Task[Any]] = {}
+
+    async def run_coalesced(self, key: str, fn: Callable[[], Awaitable[T]]) -> T:
+        """Run ``fn`` once per ``key``; concurrent callers await the same task."""
+        async with self._lock:
+            task = self._in_flight.get(key)
+            if task is None:
+                task = asyncio.create_task(self._run(key, fn))
+                self._in_flight[key] = task
+        return await task
+
+    async def _run(self, key: str, fn: Callable[[], Awaitable[T]]) -> T:
+        """Execute ``fn`` and clear the in-flight entry for ``key`` when done."""
+        try:
+            return await fn()
+        finally:
+            async with self._lock:
+                if self._in_flight.get(key) is asyncio.current_task():
+                    self._in_flight.pop(key, None)
+
+
+_session_ctx_db_singleflight = _AsyncSingleflight()
 
 
 def _settings():
@@ -179,8 +212,23 @@ async def resolve_session_context_from_db(
     *,
     session_id: str | None,
     db_connection: asyncpg.Connection,
+    redis_client: redis.Redis | None = None,
 ) -> dict[str, Any] | None:
     """Resolve session context from Postgres and warm Redis. No Redis reads."""
+    return await _resolve_session_context_from_db_impl(
+        session_id=session_id,
+        db_connection=db_connection,
+        redis_client=redis_client,
+    )
+
+
+async def _resolve_session_context_from_db_impl(
+    *,
+    session_id: str | None,
+    db_connection: asyncpg.Connection,
+    redis_client: redis.Redis | None = None,
+) -> dict[str, Any] | None:
+    """Load session context from Postgres and warm Redis (single caller)."""
     if not session_id or not str(session_id).strip():
         return None
 
@@ -196,25 +244,53 @@ async def resolve_session_context_from_db(
         logger.info("session context not found session_id=%s", session_id)
         return None
 
-    logger.info(
+    logger.debug(
         "session context cache miss session_id=%s organization_id=%s source=db",
         session_id,
         db_ctx.get("organization_id"),
     )
-    await warm_session_context_cache(session_id, db_ctx.get("organization_id"))
+    await warm_session_context_cache(
+        session_id,
+        db_ctx.get("organization_id"),
+        redis_client=redis_client,
+    )
     return db_ctx
+
+
+async def coalesced_resolve_session_context_from_db(
+    session_id: str | None,
+    *,
+    redis_client: redis.Redis | None = None,
+) -> dict[str, Any] | None:
+    """Resolve session context from Postgres with singleflight per session_id."""
+    if not session_id or not str(session_id).strip():
+        return None
+
+    session_id = str(session_id)
+
+    async def _leader() -> dict[str, Any] | None:
+        pool = await get_pool()
+        async with AcquireConnection(pool) as conn:
+            return await _resolve_session_context_from_db_impl(
+                session_id=session_id,
+                db_connection=conn,
+                redis_client=redis_client,
+            )
+
+    return await _session_ctx_db_singleflight.run_coalesced(session_id, _leader)
 
 
 async def warm_session_context_cache(
     session_id: str,
     organization_id: str | None,
+    redis_client: redis.Redis | None = None,
 ) -> None:
     """Write session context to Redis."""
     if not session_id or not _settings().session_ctx_cache_enabled:
         return
 
-    redis_client = await get_redis()
-    if redis_client is None:
+    client = redis_client if redis_client is not None else await get_redis()
+    if client is None:
         return
 
     try:
@@ -224,12 +300,12 @@ async def warm_session_context_cache(
                 "cached_at": int(time.time()),
             }
         )
-        await redis_client.setex(
+        await client.setex(
             _session_ctx_key(session_id),
             _settings().session_ctx_cache_ttl_seconds,
             payload,
         )
-        logger.info(
+        logger.debug(
             "session context cache warmed session_id=%s organization_id=%s ttl_seconds=%s",
             session_id,
             organization_id,
@@ -356,15 +432,8 @@ async def resolve_session_context(
     if redis_ctx is not None:
         return redis_ctx
 
-    if db_connection is not None:
-        return await resolve_session_context_from_db(
-            session_id=session_id,
-            db_connection=db_connection,
-        )
-
-    pool = await get_pool()
-    async with AcquireConnection(pool) as conn:
-        return await resolve_session_context_from_db(
-            session_id=session_id,
-            db_connection=conn,
-        )
+    del db_connection
+    return await coalesced_resolve_session_context_from_db(
+        session_id,
+        redis_client=client,
+    )

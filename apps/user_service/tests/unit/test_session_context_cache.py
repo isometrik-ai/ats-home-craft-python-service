@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from libs.shared_utils.session_context_cache import (
+    coalesced_resolve_session_context_from_db,
     invalidate_session_context_cache,
     invalidate_user_sessions_cache,
     resolve_session_context,
@@ -99,45 +101,90 @@ async def test_resolve_session_context_from_db_warms_redis():
         )
 
     assert ctx == {"organization_id": "org-db"}
-    warm_cache.assert_awaited_once_with("session-1", "org-db")
+    warm_cache.assert_awaited_once_with("session-1", "org-db", redis_client=None)
 
 
 @pytest.mark.asyncio
 async def test_resolve_session_context_falls_back_to_db():
-    """Cache miss loads context from the database and warms Redis."""
+    """Cache miss loads context via coalesced DB resolver."""
+
+    with (
+        patch(
+            "libs.shared_utils.session_context_cache.resolve_session_context_from_redis",
+            new=AsyncMock(return_value=(False, None)),
+        ),
+        patch(
+            "libs.shared_utils.session_context_cache.coalesced_resolve_session_context_from_db",
+            new=AsyncMock(return_value={"organization_id": "org-db"}),
+        ) as coalesced_db,
+    ):
+        ctx = await resolve_session_context(
+            user_id="user-1",
+            session_id="session-1",
+            db_connection=AsyncMock(),
+        )
+
+    assert ctx == {"organization_id": "org-db"}
+    coalesced_db.assert_awaited_once()
+    assert coalesced_db.await_args.args == ("session-1",)
+
+
+@pytest.mark.asyncio
+async def test_coalesced_db_resolve_one_query():
+    """Concurrent DB misses for one session run a single repository lookup."""
+
+    calls = 0
 
     class FakeRepo:
-        """Minimal SessionRepository stand-in for DB fallback."""
+        """Minimal SessionRepository stand-in for coalesced DB fallback."""
 
         async def get_valid_session_context(self, session_id: str, db_connection=None):
-            """Return a fixed organization context for the session."""
+            """Return session context and count how many times the repo was queried."""
+            nonlocal calls
+            calls += 1
             assert session_id == "session-1"
             assert db_connection is not None
-            return {"organization_id": "org-db"}
+            await asyncio.sleep(0.05)
+            return {"organization_id": "org-1"}
 
-    db_connection = MagicMock()
+    class FakeAcquire:
+        """Yield a mock connection without touching the real pool."""
+
+        def __init__(self, pool):
+            del pool
+            self.conn = MagicMock()
+
+        async def __aenter__(self):
+            return self.conn
+
+        async def __aexit__(self, exc_type, exc, exc_tb):
+            del exc_type, exc, exc_tb
+            return False
+
     with (
         patch(
             "apps.user_service.app.db.repositories.get_session_repo",
             return_value=FakeRepo(),
         ),
         patch(
-            "libs.shared_utils.session_context_cache.resolve_session_context_from_redis",
-            new=AsyncMock(return_value=(False, None)),
+            "libs.shared_utils.session_context_cache.get_pool",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "libs.shared_utils.session_context_cache.AcquireConnection",
+            FakeAcquire,
         ),
         patch(
             "libs.shared_utils.session_context_cache.warm_session_context_cache",
             new=AsyncMock(),
-        ) as warm_cache,
+        ),
     ):
-        ctx = await resolve_session_context(
-            user_id="user-1",
-            session_id="session-1",
-            db_connection=db_connection,
+        results = await asyncio.gather(
+            *[coalesced_resolve_session_context_from_db("session-1") for _ in range(20)]
         )
 
-    assert ctx == {"organization_id": "org-db"}
-    warm_cache.assert_awaited_once_with("session-1", "org-db")
+    assert calls == 1
+    assert all(result == {"organization_id": "org-1"} for result in results)
 
 
 @pytest.mark.asyncio

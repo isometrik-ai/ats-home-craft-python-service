@@ -6,8 +6,13 @@ from typing import Any
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import ClientDisconnect
+from starlette.responses import Response
 
 from libs.shared_utils.logger import get_logger
+
+# Methods that may carry a request body worth caching for audit logging.
+_BODY_METHODS = frozenset({"POST", "PUT", "PATCH"})
 
 # Use the shared application logger
 logger = get_logger()
@@ -43,35 +48,49 @@ class CacheRequestBodyMiddleware(BaseHTTPMiddleware):
         request_id = str(uuid.uuid4())
 
         if not hasattr(request.state, "cached_body"):
-            try:
-                body_bytes = await request.body()
-                request.state.cached_body = body_bytes
-
-                log_msg = (
-                    "Request body cached successfully - Request ID: %s, "
-                    "Method: %s, URL: %s, Body Size: %s bytes"
-                )
-                exception_logger.debug(
-                    log_msg,
-                    request_id,
-                    request.method,
-                    str(request.url),
-                    len(body_bytes),
-                )
-
-            except (OSError, ValueError) as e:
+            if request.method not in _BODY_METHODS:
                 request.state.cached_body = b""
+            else:
+                try:
+                    body_bytes = await request.body()
+                    request.state.cached_body = body_bytes
 
-                log_msg = (
-                    "Failed to cache request body - Request ID: %s, Method: %s, URL: %s, Error: %s"
-                )
-                exception_logger.warning(
-                    log_msg,
-                    request_id,
-                    request.method,
-                    str(request.url),
-                    str(e),
-                )
+                    log_msg = (
+                        "Request body cached successfully - Request ID: %s, "
+                        "Method: %s, URL: %s, Body Size: %s bytes"
+                    )
+                    exception_logger.debug(
+                        log_msg,
+                        request_id,
+                        request.method,
+                        str(request.url),
+                        len(body_bytes),
+                    )
+
+                except ClientDisconnect:
+                    exception_logger.debug(
+                        "Client disconnected before request body could be read - "
+                        "Request ID: %s, Method: %s, URL: %s",
+                        request_id,
+                        request.method,
+                        str(request.url),
+                    )
+                    return Response(status_code=499)
+
+                except (OSError, ValueError) as e:
+                    request.state.cached_body = b""
+
+                    log_msg = (
+                        "Failed to cache request body - Request ID: %s, "
+                        "Method: %s, URL: %s, Error: %s"
+                    )
+                    exception_logger.warning(
+                        log_msg,
+                        request_id,
+                        request.method,
+                        str(request.url),
+                        str(e),
+                    )
 
         response = await call_next(request)
         return response

@@ -20,7 +20,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from supabase import AsyncClient, AuthError
 
 from apps.user_service.app.dependencies.redis import redis_client as redis_client_dep
-from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.supabase_db.client import get_supabase_client
 from libs.shared_utils.http_exceptions import (
     InternalServerErrorException,
@@ -29,7 +28,7 @@ from libs.shared_utils.http_exceptions import (
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import error_response
 from libs.shared_utils.session_context_cache import (
-    resolve_session_context_from_db,
+    coalesced_resolve_session_context_from_db,
     resolve_session_context_from_redis,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -258,15 +257,15 @@ async def get_user_from_auth_redis(
 
 async def get_user_from_auth_db(
     request: Request,
-    db_connection: asyncpg.Connection,
+    redis_client: redis.Redis | None = None,
 ) -> dict:
     """Authenticate using Postgres only and warm Redis. Does not read Redis."""
     user = _require_request_user(request)
     _, _, session_id = extract_user_data(user)
 
-    session_ctx = await resolve_session_context_from_db(
-        session_id=session_id,
-        db_connection=db_connection,
+    session_ctx = await coalesced_resolve_session_context_from_db(
+        session_id,
+        redis_client=redis_client,
     )
     if not session_ctx:
         raise UnauthorizedException(
@@ -306,9 +305,18 @@ async def get_user_from_auth(
     if session_ctx is not None:
         return await _finalize_authenticated_user(request, user, session_ctx)
 
-    pool = await get_pool()
-    async with AcquireConnection(pool) as conn:
-        return await get_user_from_auth_db(request, db_connection=conn)
+    session_ctx = await coalesced_resolve_session_context_from_db(
+        session_id,
+        redis_client=redis_client,
+    )
+    if not session_ctx:
+        raise UnauthorizedException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return await _finalize_authenticated_user(request, user, session_ctx)
 
 
 async def get_user_from_token(token: str) -> dict:

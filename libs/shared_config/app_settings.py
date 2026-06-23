@@ -166,6 +166,7 @@ class RedisSettings(BaseSettings):
 
     url: str = config("REDIS_URL", default="redis://localhost:6379/0")
     enabled: bool = config("REDIS_ENABLED", default=True)
+    max_connections: int = config("REDIS_MAX_CONNECTIONS", default=200)
     session_ctx_cache_enabled: bool = config("SESSION_CTX_CACHE_ENABLED", default=True)
     session_ctx_cache_ttl_seconds: int = config("SESSION_CTX_CACHE_TTL_SECONDS", default=300)
     session_revoked_cache_ttl_seconds: int = config(
