@@ -41,4 +41,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 # Start the FastAPI app
 # CMD ["uvicorn", "apps.user_service.app.main:app", "--host", "0.0.0.0", "--port", "5000", "--log-level", "info", "--access-log"]
-CMD ["gunicorn", "apps.user_service.app.main:app", "-k", "uvicorn.workers.UvicornWorker", "-w", "3", "-b", "0.0.0.0:5000", "--log-level", "info", "--capture-output", "--access-logfile", "/dev/null", "--error-logfile", "-"]
+CMD ["gunicorn", "apps.user_service.app.main:app", "-k", "uvicorn.workers.UvicornWorker", "-w", "2", "-b", "0.0.0.0:5000", "--log-level", "info", "--capture-output", "--access-logfile", "/dev/null", "--error-logfile", "-"]

@@ -437,7 +437,7 @@ async def _mock_get_supabase_service_client():
     return _StubSupabase()
 
 
-async def _get_user_from_auth(request: Request, _db_connection=None) -> dict:
+async def _get_user_from_auth(request: Request, _redis_client=None) -> dict:
     """Mock get_user_from_auth that sets request.state.user and returns user."""
     user = {
         "sub": "test-user-id",

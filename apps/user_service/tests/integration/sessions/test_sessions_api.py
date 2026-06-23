@@ -175,20 +175,19 @@ async def test_missing_session_returns_unauthorized(monkeypatch):
 
     from starlette.requests import Request
 
-    from apps.user_service.tests.conftest import FakeConn
     from libs.shared_middleware import jwt_auth
     from libs.shared_utils.http_exceptions import UnauthorizedException
 
     # conftest patches `jwt_auth.get_user_from_auth`; reload module to test real implementation
     jwt_auth = importlib.reload(jwt_auth)
 
-    async def fake_resolve_session_context(**kwargs):
+    async def fake_resolve_session_context_from_redis(**kwargs):
         del kwargs
-        return None
+        return False, None
 
     monkeypatch.setattr(
-        "libs.shared_middleware.jwt_auth.resolve_session_context",
-        fake_resolve_session_context,
+        "libs.shared_middleware.jwt_auth.resolve_session_context_from_redis",
+        fake_resolve_session_context_from_redis,
     )
 
     request = Request(
@@ -207,4 +206,4 @@ async def test_missing_session_returns_unauthorized(monkeypatch):
     }
 
     with pytest.raises(UnauthorizedException):
-        await jwt_auth.get_user_from_auth(request, db_connection=FakeConn())
+        await jwt_auth.get_user_from_auth(request)

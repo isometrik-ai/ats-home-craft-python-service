@@ -14,11 +14,13 @@ permission management, using environment variables for configuration.
 """
 
 import asyncpg
+import redis.asyncio as redis
 from fastapi import Depends, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from supabase import AsyncClient, AuthError
 
-from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.dependencies.redis import redis_client as redis_client_dep
+from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.supabase_db.client import get_supabase_client
 from libs.shared_utils.http_exceptions import (
     InternalServerErrorException,
@@ -26,7 +28,10 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import error_response
-from libs.shared_utils.session_context_cache import resolve_session_context
+from libs.shared_utils.session_context_cache import (
+    resolve_session_context_from_db,
+    resolve_session_context_from_redis,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger(__name__)
@@ -201,18 +206,25 @@ async def check_user_access_async(
         ) from error
 
 
-async def get_user_from_auth(
+async def _finalize_authenticated_user(
     request: Request,
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    user: dict,
+    session_ctx: dict,
 ) -> dict:
-    """Validate user from JWT, get organization_id from session.
+    """Set audit context and cache session context on the user dict."""
+    user_id, user_email, session_id = extract_user_data(user)
+    organization_id = session_ctx.get("organization_id")
+    setup_audit_context(request, user_id, user_email, organization_id, session_id)
 
-    Sets audit context in request.state.
-    Ensures audit context is populated even during authentication/authorization failures.
+    request.state.audit_risk_level = "low"
+    request.state.audit_description = "Successfully authenticated and authorized user"
 
-    Raises:
-        UnauthorizedException: If user is not authenticated
-    """
+    user["_session_context"] = session_ctx
+    return user
+
+
+def _require_request_user(request: Request) -> dict:
+    """Return JWT user from request state or raise 401."""
     user = getattr(request.state, "user", None)
     if not user:
         raise UnauthorizedException(
@@ -220,11 +232,39 @@ async def get_user_from_auth(
             custom_code=CustomStatusCode.UNAUTHORIZED,
             headers={"WWW-Authenticate": "Bearer"},
         )
+    return user
 
-    user_id, user_email, session_id = extract_user_data(user)
 
-    session_ctx = await resolve_session_context(
+async def get_user_from_auth_redis(
+    request: Request,
+    redis_client: redis.Redis | None = Depends(redis_client_dep),
+) -> dict | None:
+    """Try to authenticate using Redis only. Returns None when Redis cannot resolve."""
+    user = getattr(request.state, "user", None)
+    if not user:
+        return None
+
+    user_id, _, session_id = extract_user_data(user)
+    blocked, session_ctx = await resolve_session_context_from_redis(
         user_id=user_id,
+        session_id=session_id,
+        redis_client=redis_client,
+    )
+    if blocked or session_ctx is None:
+        return None
+
+    return await _finalize_authenticated_user(request, user, session_ctx)
+
+
+async def get_user_from_auth_db(
+    request: Request,
+    db_connection: asyncpg.Connection,
+) -> dict:
+    """Authenticate using Postgres only and warm Redis. Does not read Redis."""
+    user = _require_request_user(request)
+    _, _, session_id = extract_user_data(user)
+
+    session_ctx = await resolve_session_context_from_db(
         session_id=session_id,
         db_connection=db_connection,
     )
@@ -235,15 +275,40 @@ async def get_user_from_auth(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    organization_id = session_ctx.get("organization_id")
-    setup_audit_context(request, user_id, user_email, organization_id, session_id)
+    return await _finalize_authenticated_user(request, user, session_ctx)
 
-    request.state.audit_risk_level = "low"
-    request.state.audit_description = "Successfully authenticated and authorized user"
 
-    # Reuse in extract_user_context on the same request (avoids a second Redis/DB resolve).
-    user["_session_context"] = session_ctx
-    return user
+async def get_user_from_auth(
+    request: Request,
+    redis_client: redis.Redis | None = Depends(redis_client_dep),
+) -> dict:
+    """Validate user from JWT via Redis first, then DB on cache miss.
+
+    Sets audit context in request.state.
+
+    Raises:
+        UnauthorizedException: If user is not authenticated
+    """
+    user = _require_request_user(request)
+    user_id, _, session_id = extract_user_data(user)
+
+    blocked, session_ctx = await resolve_session_context_from_redis(
+        user_id=user_id,
+        session_id=session_id,
+        redis_client=redis_client,
+    )
+    if blocked:
+        raise UnauthorizedException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if session_ctx is not None:
+        return await _finalize_authenticated_user(request, user, session_ctx)
+
+    pool = await get_pool()
+    async with AcquireConnection(pool) as conn:
+        return await get_user_from_auth_db(request, db_connection=conn)
 
 
 async def get_user_from_token(token: str) -> dict:

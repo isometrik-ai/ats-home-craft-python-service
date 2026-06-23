@@ -18,9 +18,10 @@ async def init_redis() -> None:
     if _client_holder["client"] is not None:
         return
     client = await redis.from_url(
-        shared_settings.redis.url, encoding="utf-8", decode_responses=True
+        shared_settings.redis.url, encoding="utf-8", decode_responses=True, max_connections=100
     )
     await client.ping()
+
     _client_holder["client"] = client
     logger.info("Redis connected for session context cache")
 

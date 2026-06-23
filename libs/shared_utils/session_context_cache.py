@@ -8,8 +8,10 @@ from typing import Any
 
 import asyncpg
 import jwt
+import redis.asyncio as redis
 
 from libs.shared_config.app_settings import shared_settings
+from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.drivers.redis_client import get_redis
 from libs.shared_utils.logger import get_logger
 
@@ -80,6 +82,70 @@ async def _is_session_revoked(session_id: str | None) -> bool:
         return False
 
 
+def _parse_session_context_payload(raw: str | bytes | None) -> dict[str, Any] | None:
+    """Parse a cached session-context JSON payload."""
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        org_id = data.get("organization_id")
+        return {"organization_id": str(org_id) if org_id is not None else None}
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+async def _fetch_redis_session_state(
+    redis_client: redis.Redis | None,
+    user_id: str | None,
+    session_id: str,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Read session state from Redis in one pipeline.
+
+    Returns:
+        (blocked, context) where blocked=True means deleted/revoked markers were found.
+    """
+    if not _settings().session_ctx_cache_enabled or redis_client is None:
+        return False, None
+
+    try:
+        pipe = redis_client.pipeline()
+        if user_id:
+            pipe.exists(_user_deleted_key(user_id))
+        pipe.exists(_session_revoked_key(session_id))
+        pipe.get(_session_ctx_key(session_id))
+        results = await pipe.execute()
+    except Exception as exc:
+        logger.warning("Redis session-state pipeline failed: %s", exc)
+        return False, None
+
+    idx = 0
+    if user_id:
+        if results[idx]:
+            logger.info(
+                "session context blocked user_id=%s session_id=%s reason=user_deleted",
+                user_id,
+                session_id,
+            )
+            return True, None
+        idx += 1
+
+    if results[idx]:
+        logger.info(
+            "session context blocked session_id=%s reason=session_revoked",
+            session_id,
+        )
+        return True, None
+
+    ctx = _parse_session_context_payload(results[idx + 1])
+    if ctx is not None:
+        logger.debug(
+            "session context cache hit session_id=%s organization_id=%s",
+            session_id,
+            ctx.get("organization_id"),
+        )
+    return False, ctx
+
+
 async def _get_redis_session_context(session_id: str) -> dict[str, Any] | None:
     """Read session context from Redis, or None on miss/error."""
     redis_client = await get_redis()
@@ -87,14 +153,56 @@ async def _get_redis_session_context(session_id: str) -> dict[str, Any] | None:
         return None
     try:
         raw = await redis_client.get(_session_ctx_key(session_id))
-        if not raw:
-            return None
-        data = json.loads(raw)
-        org_id = data.get("organization_id")
-        return {"organization_id": str(org_id) if org_id is not None else None}
+        return _parse_session_context_payload(raw)
     except Exception as exc:
         logger.warning("Redis session-context read failed: %s", exc)
         return None
+
+
+async def resolve_session_context_from_redis(
+    *,
+    user_id: str | None,
+    session_id: str | None,
+    redis_client: redis.Redis | None,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Resolve session context from Redis only.
+
+    Returns:
+        (blocked, context). blocked=True when deletion/revocation markers are present.
+    """
+    if not session_id or not str(session_id).strip():
+        return False, None
+    return await _fetch_redis_session_state(redis_client, user_id, str(session_id))
+
+
+async def resolve_session_context_from_db(
+    *,
+    session_id: str | None,
+    db_connection: asyncpg.Connection,
+) -> dict[str, Any] | None:
+    """Resolve session context from Postgres and warm Redis. No Redis reads."""
+    if not session_id or not str(session_id).strip():
+        return None
+
+    from apps.user_service.app.db.repositories import (
+        SessionRepository,
+        get_session_repo,
+    )
+
+    session_id = str(session_id)
+    session_repo: SessionRepository = get_session_repo()
+    db_ctx = await session_repo.get_valid_session_context(session_id, db_connection)
+    if db_ctx is None:
+        logger.info("session context not found session_id=%s", session_id)
+        return None
+
+    logger.info(
+        "session context cache miss session_id=%s organization_id=%s source=db",
+        session_id,
+        db_ctx.get("organization_id"),
+    )
+    await warm_session_context_cache(session_id, db_ctx.get("organization_id"))
+    return db_ctx
 
 
 async def warm_session_context_cache(
@@ -233,52 +341,30 @@ async def resolve_session_context(
     *,
     user_id: str | None,
     session_id: str | None,
-    db_connection: asyncpg.Connection,
+    db_connection: asyncpg.Connection | None = None,
+    redis_client: redis.Redis | None = None,
 ) -> dict[str, Any] | None:
-    """Resolve session context via Redis → DB."""
-    if not session_id or not str(session_id).strip():
+    """Resolve session context via Redis → DB (for extract_user_context fallback)."""
+    client = redis_client if redis_client is not None else await get_redis()
+    blocked, redis_ctx = await resolve_session_context_from_redis(
+        user_id=user_id,
+        session_id=session_id,
+        redis_client=client,
+    )
+    if blocked:
         return None
-
-    session_id = str(session_id)
-
-    if await _is_user_deleted(user_id):
-        logger.info(
-            "session context blocked user_id=%s session_id=%s reason=user_deleted",
-            user_id,
-            session_id,
-        )
-        return None
-    if await _is_session_revoked(session_id):
-        logger.info(
-            "session context blocked session_id=%s reason=session_revoked",
-            session_id,
-        )
-        return None
-
-    redis_ctx = await _get_redis_session_context(session_id)
     if redis_ctx is not None:
-        logger.info(
-            "session context cache hit session_id=%s organization_id=%s",
-            session_id,
-            redis_ctx.get("organization_id"),
-        )
         return redis_ctx
 
-    from apps.user_service.app.db.repositories import (
-        SessionRepository,
-        get_session_repo,
-    )
+    if db_connection is not None:
+        return await resolve_session_context_from_db(
+            session_id=session_id,
+            db_connection=db_connection,
+        )
 
-    session_repo: SessionRepository = get_session_repo()
-    db_ctx = await session_repo.get_valid_session_context(session_id, db_connection)
-    if db_ctx is None:
-        logger.info("session context not found session_id=%s", session_id)
-        return None
-
-    logger.info(
-        "session context cache miss session_id=%s organization_id=%s source=db",
-        session_id,
-        db_ctx.get("organization_id"),
-    )
-    await warm_session_context_cache(session_id, db_ctx.get("organization_id"))
-    return db_ctx
+    pool = await get_pool()
+    async with AcquireConnection(pool) as conn:
+        return await resolve_session_context_from_db(
+            session_id=session_id,
+            db_connection=conn,
+        )
