@@ -76,3 +76,4 @@ asyncpg==0.30.0
 publicsuffix2==2.20191221
 
 gunicorn==23.0.0
+uvloop==0.22.1
