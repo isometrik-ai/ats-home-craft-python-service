@@ -5,6 +5,7 @@ All SQL queries for session management are centralized here with proper
 transaction handling and efficient batch operations.
 """
 
+import threading
 from typing import Any
 
 import asyncpg
@@ -42,7 +43,7 @@ class SessionRepository:
     Provides efficient, transaction-safe operations with proper error handling.
     """
 
-    def __init__(self, db_connection: asyncpg.Connection) -> None:
+    def __init__(self, db_connection: asyncpg.Connection | None = None) -> None:
         """Initialize with asyncpg connection.
 
         Args:
@@ -398,7 +399,9 @@ class SessionRepository:
         result = await self.db_connection.fetchval(query, session_id, SessionStatus.ACTIVE.value)
         return str(result) if result else None
 
-    async def get_valid_session_context(self, session_id: str) -> dict[str, Any] | None:
+    async def get_valid_session_context(
+        self, session_id: str, db_connection: asyncpg.Connection | None = None
+    ) -> dict[str, Any] | None:
         """Validate session (single DB call) and return session context.
 
         This validates **session existence only** (not organization existence):
@@ -422,7 +425,8 @@ class SessionRepository:
                 WHERE s.id = us.id
               )
         """
-        row = await self.db_connection.fetchrow(query, session_id, SessionStatus.ACTIVE.value)
+        connection = db_connection or self.db_connection
+        row = await connection.fetchrow(query, session_id, SessionStatus.ACTIVE.value)
         if not row:
             return None
         org_id = row.get("organization_id") if hasattr(row, "get") else row["organization_id"]
@@ -642,3 +646,23 @@ class SessionRepository:
             OrganizationMemberStatus.DELETED.value,
         )
         return [str(row["id"]) for row in rows]
+
+
+_session_repo_holder: dict[str, SessionRepository | None] = {"repo": None}
+_repo_lock = threading.Lock()
+
+
+def init_session_repo() -> SessionRepository:
+    """Initialize the session repository."""
+    with _repo_lock:
+        if _session_repo_holder["repo"] is None:
+            _session_repo_holder["repo"] = SessionRepository()
+        return _session_repo_holder["repo"]
+
+
+def get_session_repo() -> SessionRepository:
+    """Get the session repository."""
+    repo = _session_repo_holder["repo"]
+    if repo is None:
+        return init_session_repo()
+    return repo

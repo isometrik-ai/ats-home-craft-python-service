@@ -264,10 +264,13 @@ async def resolve_session_context(
         )
         return redis_ctx
 
-    from apps.user_service.app.db.repositories import SessionRepository
+    from apps.user_service.app.db.repositories import (
+        SessionRepository,
+        get_session_repo,
+    )
 
-    session_repo = SessionRepository(db_connection=db_connection)
-    db_ctx = await session_repo.get_valid_session_context(session_id)
+    session_repo: SessionRepository = get_session_repo()
+    db_ctx = await session_repo.get_valid_session_context(session_id, db_connection)
     if db_ctx is None:
         logger.info("session context not found session_id=%s", session_id)
         return None

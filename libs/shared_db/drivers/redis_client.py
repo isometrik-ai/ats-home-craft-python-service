@@ -13,6 +13,18 @@ logger = logging.getLogger(__name__)
 _client_holder: dict[str, redis.Redis | None] = {"client": None}
 
 
+async def init_redis() -> None:
+    """Initialize the Redis client."""
+    if _client_holder["client"] is not None:
+        return
+    client = await redis.from_url(
+        shared_settings.redis.url, encoding="utf-8", decode_responses=True
+    )
+    await client.ping()
+    _client_holder["client"] = client
+    logger.info("Redis connected for session context cache")
+
+
 async def get_redis() -> redis.Redis | None:
     """Return a shared async Redis client, or None when disabled/unavailable."""
     settings = shared_settings.redis
@@ -22,17 +34,9 @@ async def get_redis() -> redis.Redis | None:
     client = _client_holder["client"]
     if client is not None:
         return client
-
     try:
-        client = redis.from_url(
-            settings.url,
-            encoding="utf-8",
-            decode_responses=True,
-        )
-        await client.ping()
-        _client_holder["client"] = client
-        logger.info("Redis connected for session context cache")
-        return client
+        await init_redis()
+        return _client_holder["client"]
     except Exception as exc:
         logger.warning("Redis unavailable, continuing without cache: %s", exc)
         return None
