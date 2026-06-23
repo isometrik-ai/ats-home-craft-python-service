@@ -9,8 +9,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from apps.user_service.app.db.repositories import init_session_repo
 from apps.user_service.app.dependencies.audit_logs.audit_logger import audit_logger
 from libs.shared_db.drivers.asyncpg_client import close_pool, get_pool
+from libs.shared_db.drivers.redis_client import init_redis
 from libs.shared_utils.isometrik_strands_client import (
     close_strands_http_client,
     init_strands_http_client,
@@ -60,6 +62,12 @@ async def lifespan(app: FastAPI):
 
     await init_strands_http_client()
     app_logger.info("Isometrik Strands HTTP client startup complete")
+
+    await init_redis()
+    app_logger.info("Redis client initialized successfully")
+
+    init_session_repo()
+    app_logger.info("Session repository initialized successfully")
 
     try:
         yield

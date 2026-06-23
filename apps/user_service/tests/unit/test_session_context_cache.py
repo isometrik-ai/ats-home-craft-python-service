@@ -66,20 +66,17 @@ async def test_resolve_session_context_falls_back_to_db():
     class FakeRepo:
         """Minimal SessionRepository stand-in for DB fallback."""
 
-        def __init__(self, db_connection):
-            """Accept and discard the injected connection."""
-            del db_connection
-
-        async def get_valid_session_context(self, session_id: str):
+        async def get_valid_session_context(self, session_id: str, db_connection=None):
             """Return a fixed organization context for the session."""
             assert session_id == "session-1"
+            assert db_connection is not None
             return {"organization_id": "org-db"}
 
     db_connection = MagicMock()
     with (
         patch(
-            "apps.user_service.app.db.repositories.SessionRepository",
-            FakeRepo,
+            "apps.user_service.app.db.repositories.get_session_repo",
+            return_value=FakeRepo(),
         ),
         patch(
             "libs.shared_utils.session_context_cache._is_user_deleted",

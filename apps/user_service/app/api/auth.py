@@ -3,6 +3,8 @@ This module provides authentication operations using Supabase.
 Includes login and signup functionality with proper error handling.
 """
 
+from typing import Annotated
+
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Request
 from fastapi import status as http_status
@@ -48,6 +50,7 @@ from libs.shared_utils.session_context_cache import warm_session_context_after_a
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+UserDependency = Annotated[dict, Depends(get_user_from_auth)]
 
 
 @handle_api_exceptions("login")
@@ -501,7 +504,7 @@ async def switch_organization(
 )
 async def validate(
     request: Request,
-    _current_user: dict = Depends(get_user_from_auth),
+    _current_user: UserDependency,
 ):
     """Validate authentication token and return organization_id.
 

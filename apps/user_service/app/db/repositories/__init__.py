@@ -46,6 +46,8 @@ from apps.user_service.app.db.repositories.project_repository import (
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
 from apps.user_service.app.db.repositories.session_repository import (
     SessionRepository,
+    get_session_repo,
+    init_session_repo,
 )
 from apps.user_service.app.db.repositories.team_repository import TeamRepository
 from apps.user_service.app.db.repositories.user_event_repository import (
@@ -69,6 +71,8 @@ __all__ = [
     "OrganizationDeleteRequestRepository",
     "RoleRepository",
     "SessionRepository",
+    "get_session_repo",
+    "init_session_repo",
     "UserRepository",
     "VerificationCodeRepository",
     "InviteRepository",
