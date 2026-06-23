@@ -13,6 +13,8 @@ The module integrates with Supabase for user authentication and
 permission management, using environment variables for configuration.
 """
 
+import time
+
 import asyncpg
 from fastapi import Depends, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -212,6 +214,8 @@ async def get_user_from_auth(
     Raises:
         UnauthorizedException: If user is not authenticated
     """
+
+    start = time.perf_counter()
     user = getattr(request.state, "user", None)
 
     # Extract user data from JWT token
@@ -239,6 +243,8 @@ async def get_user_from_auth(
 
     request.state.audit_risk_level = "low"
     request.state.audit_description = "Successfully authenticated and authorized user"
+
+    print(f"get_user_from_auth time: {(time.perf_counter() - start) * 1000:.2f} milliseconds")
 
     return user
 
@@ -290,6 +296,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         """
         # Skip OPTIONS requests (CORS preflight) - they don't need authentication
         # CORS middleware will handle these requests and add appropriate headers
+        start = time.perf_counter()
         if request.method == "OPTIONS":
             return await call_next(request)
 
@@ -323,5 +330,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 custom_code=CustomStatusCode.UNAUTHORIZED,
             )
+        finally:
+            print(f"JWT validation time: {(time.perf_counter() - start) * 1000:.2f} milliseconds")
 
         return await call_next(request)
