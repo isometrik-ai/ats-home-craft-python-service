@@ -1846,6 +1846,23 @@ class ContactsService:
             )
         return self._normalize_contact_details(details)
 
+    async def get_contact_details_by_email(self, *, email: str) -> dict[str, Any]:
+        """Return contact details for the contact matching email (case-insensitive).
+
+        Response payload is normalized exactly like `get_contact_details()`.
+        """
+        org_id = self.user_context.organization_id
+        contact_id = await self.contacts_repo.get_contact_id_by_email(
+            organization_id=org_id,
+            email=email,
+        )
+        if not contact_id:
+            raise NotFoundException(
+                message_key="contacts.errors.contact_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return await self.get_contact_details(contact_id=contact_id)
+
     @staticmethod
     def _stringify_contact_detail_uuids(details: dict[str, Any]) -> None:
         """Normalize UUID columns on a contact detail dict to strings for JSON responses."""
