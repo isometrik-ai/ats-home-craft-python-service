@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _MAX_BUSINESS_OVERVIEW_LEN = 2000
 _MAX_OVERVIEW_PROMPT_LEN = 4000
+_MAX_PULSE_AGENT_ID_LEN = 64
 
 
 class OverviewPrompts(BaseModel):
@@ -28,6 +29,10 @@ class AiOverviewSettings(BaseModel):
     business_overview: str | None = Field(
         default=None,
         description="Company facts the AI reads as background (not an instruction prompt)",
+    )
+    pulse_agent_id: str | None = Field(
+        default=None,
+        description="Isometrik Pulse Agent bot id for this organization",
     )
     overview_prompts: OverviewPrompts = Field(
         ...,
@@ -55,6 +60,11 @@ class AiOverviewSettingsUpdate(BaseModel):
         max_length=_MAX_BUSINESS_OVERVIEW_LEN,
         description="Company facts for AI background; null or empty clears stored value",
     )
+    pulse_agent_id: str | None = Field(
+        default=None,
+        max_length=_MAX_PULSE_AGENT_ID_LEN,
+        description="Isometrik Pulse Agent bot id; null or empty clears stored value",
+    )
     overview_prompts: OverviewPromptsUpdate | None = Field(
         default=None,
         description=(
@@ -62,10 +72,10 @@ class AiOverviewSettingsUpdate(BaseModel):
         ),
     )
 
-    @field_validator("business_overview", mode="before")
+    @field_validator("business_overview", "pulse_agent_id", mode="before")
     @classmethod
-    def _normalize_business_overview(cls, value: object) -> object:
-        """Strip business overview; empty string becomes None."""
+    def _normalize_optional_string(cls, value: object) -> object:
+        """Strip optional strings; empty string becomes None."""
         if value is None or not isinstance(value, str):
             return value
         stripped = value.strip()

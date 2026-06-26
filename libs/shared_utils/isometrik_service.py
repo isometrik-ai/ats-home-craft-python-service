@@ -18,6 +18,7 @@ from libs.shared_utils.http_exceptions import (
     RateLimitExceededException,
     ServiceUnavailableException,
 )
+from libs.shared_utils.isometrik_strands_client import get_strands_http_client
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -29,6 +30,8 @@ DEFAULT_ORG_ROLE = "owner"
 
 # JWT aud/iss claim value for Isometrik access tokens (matches Go IsometrikAudience).
 ISOMETRIK_AUDIENCE = "Isometrik"
+
+_AI_AGENT_PATH = "/v1/ai-agent"
 
 
 def create_isometrik_token() -> str:
@@ -386,3 +389,29 @@ async def update_isometrik_user(
 
     except Exception as e:
         _handle_isometrik_error(e, "updating Isometrik user", response)
+
+
+async def create_isometrik_ai_agent(
+    *,
+    payload: dict[str, Any],
+    app_secret: str,
+    license_key: str,
+) -> dict[str, Any]:
+    """POST to Isometrik admin ``/v1/ai-agent`` using org application credentials."""
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        "appsecret": app_secret,
+        "licensekey": license_key,
+    }
+    response: httpx.Response | None = None
+    try:
+        client = await get_strands_http_client()
+        response = await client.post(_AI_AGENT_PATH, json=payload, headers=headers)
+        response.raise_for_status()
+        body = response.json()
+        if not isinstance(body, dict):
+            raise ValueError("isometrik ai-agent response must be a JSON object")
+        return body
+    except Exception as e:
+        _handle_isometrik_error(e, "creating Isometrik AI agent", response)
