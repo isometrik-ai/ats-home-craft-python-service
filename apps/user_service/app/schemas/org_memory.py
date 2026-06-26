@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -13,7 +13,7 @@ EntityTypeFilter = Literal["contact", "company", "lead"]
 
 
 class OrgMemoryQueryBody(BaseModel):
-    """POST body for natural-language CRM queries (Supermemory-backed)."""
+    """POST body for natural-language CRM overview queries."""
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -39,35 +39,6 @@ class OrgMemoryQueryBody(BaseModel):
                 params={"field": "entity_id and entity_type must be provided together"},
             )
         return self
-
-
-class OrgMemoryIntentPlan(BaseModel):
-    """Structured plan produced by the intent LLM (JSON)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    is_aggregation: bool = False
-    search_queries: list[str] = Field(default_factory=list)
-    synthesize_instruction: str = (
-        "Answer the question with concise factual prose. "
-        "Include all present fields for each record. "
-        "One paragraph per record."
-    )
-
-    @field_validator("search_queries", mode="before")
-    @classmethod
-    def _normalize_queries(cls, value: object) -> list[str]:
-        """Coerce LLM output to at most three non-empty search query strings."""
-        if not value:
-            return []
-        if not isinstance(value, list):
-            return []
-        out: list[str] = []
-        for item in value:
-            text = str(item).strip()
-            if text:
-                out.append(text)
-        return out[:3]
 
 
 class OrgMemoryQueryResponse(BaseModel):
