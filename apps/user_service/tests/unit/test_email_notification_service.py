@@ -135,10 +135,11 @@ async def test_process_ingests_graphiti_email_episode() -> None:
     assert result.stored is True
     assert result.supermemory_document_ids == (custom_id_for_entity("contact", "contact-1"),)
     graphiti.add_text_episode.assert_awaited_once()
-    episode_name = graphiti.add_text_episode.await_args.kwargs["name"]
+    episode_kwargs = graphiti.add_text_episode.await_args.kwargs
+    episode_name = episode_kwargs["name"]
     assert episode_name.startswith("email_")
-    body = graphiti.add_text_episode.await_args.kwargs["body"]
-    assert "test" in body
+    assert episode_kwargs["contact_crm_id"] == "contact-1"
+    assert "test" in episode_kwargs["body"]
 
 
 @pytest.mark.asyncio

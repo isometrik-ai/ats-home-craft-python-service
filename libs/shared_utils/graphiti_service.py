@@ -9,9 +9,11 @@ from typing import Any
 
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
+from graphiti_core.driver.driver import GraphProvider
 from graphiti_core.driver.falkordb_driver import FalkorDriver
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.llm_client import LLMConfig, OpenAIClient
+from graphiti_core.models.nodes.node_db_queries import get_episode_node_save_query
 from graphiti_core.nodes import EntityNode, EpisodeType, EpisodicNode
 from graphiti_core.search.search_config_recipes import COMBINED_HYBRID_SEARCH_RRF
 from graphiti_core.utils.datetime_utils import utc_now
@@ -23,8 +25,8 @@ from libs.shared_utils.graphiti_crm_models import (
     CrmEntityType,
     CrmSnapshot,
     LeadSnapshot,
-    custom_id_for_entity,
     deterministic_association_edge_uuid,
+    deterministic_email_mentions_edge_uuid,
     deterministic_entity_uuid,
     deterministic_episode_uuid,
     entity_label_for_crm_type,
@@ -54,8 +56,18 @@ _graphiti_state = _GraphitiState()
 
 
 def container_tag_for_organization(organization_id: str) -> str:
-    """Graphiti ``group_id`` scoped to one CRM tenant."""
+    """Tenant ``group_id`` stored on nodes inside the single FalkorDB graph.
+
+    This is **not** the FalkorDB graph/database name (see ``FALKOR_DATABASE``).
+    All CRM and email data lives in one graph; ``group_id`` scopes queries per org.
+    """
     return f"org_{organization_id}"
+
+
+def canonical_falkor_database(settings: SharedAppSettings | None = None) -> str:
+    """Return the sole FalkorDB graph name used for all CRM and email data."""
+    cfg = (settings or shared_settings).graphiti
+    return cfg.falkor_database
 
 
 def is_graphiti_configured(settings: SharedAppSettings | None = None) -> bool:
@@ -204,15 +216,31 @@ OPTIONAL MATCH (n:Entity {uuid: $entity_uuid})
 WHERE n IS NULL OR n.group_id = $group_id
 OPTIONAL MATCH (n)-[rel:RELATES_TO]-(:Entity)
 WHERE rel IS NULL OR rel.group_id = $group_id
-WITH snap.content AS snapshot_content, collect(DISTINCT rel.fact) AS raw_edge_facts
-OPTIONAL MATCH (mail:Episodic)
-WHERE mail.group_id = $group_id
-  AND mail.name STARTS WITH 'email_'
-  AND mail.content CONTAINS $entity_marker
+WITH snap.content AS snapshot_content, collect(DISTINCT rel.fact) AS raw_edge_facts, n
+OPTIONAL MATCH (mail:Episodic)-[:MENTIONS]->(n)
+WHERE mail IS NULL OR (
+    mail.group_id = $group_id
+    AND mail.name STARTS WITH 'email_'
+)
 WITH snapshot_content, raw_edge_facts, mail.content AS email_content, mail.valid_at AS email_valid_at
 ORDER BY email_valid_at ASC
 WITH snapshot_content, raw_edge_facts, collect(DISTINCT email_content) AS raw_email_bodies
 RETURN snapshot_content, raw_edge_facts, raw_email_bodies
+"""
+
+_MENTIONS_EDGE_UPSERT_QUERY = """
+MATCH (episode:Episodic {uuid: $episode_uuid})
+MATCH (entity:Entity {uuid: $entity_uuid, group_id: $group_id})
+MERGE (episode)-[e:MENTIONS {uuid: $uuid}]->(entity)
+SET e.group_id = $group_id,
+    e.created_at = $created_at
+RETURN e.uuid AS uuid
+"""
+
+_EPISODE_EXISTS_QUERY = """
+MATCH (e:Episodic {uuid: $uuid, group_id: $group_id})
+RETURN e.uuid AS uuid
+LIMIT 1
 """
 
 
@@ -220,6 +248,46 @@ def _entity_label_clause(node: EntityNode) -> str:
     """Return FalkorDB label clause for a CRM entity node (e.g. ``Contact:Entity``)."""
     labels = list(set(node.labels + ["Entity"]))
     return ":".join(labels)
+
+
+async def _save_episode_via_driver(driver: FalkorDriver, episode: EpisodicNode) -> None:
+    """Persist an episodic node on the canonical FalkorDB graph (never per-org graphs)."""
+    query = get_episode_node_save_query(GraphProvider.FALKORDB)
+    await driver.execute_query(
+        query,
+        uuid=episode.uuid,
+        name=episode.name,
+        group_id=episode.group_id,
+        source_description=episode.source_description,
+        content=episode.content,
+        entity_edges=episode.entity_edges,
+        created_at=episode.created_at,
+        valid_at=episode.valid_at,
+        source=episode.source.value,
+    )
+
+
+async def _link_episode_to_entity(
+    driver: FalkorDriver,
+    *,
+    group_id: str,
+    episode_uuid: str,
+    entity_uuid: str,
+) -> None:
+    """Create a MENTIONS edge from an email episode to a CRM entity node."""
+    edge_uuid = deterministic_email_mentions_edge_uuid(episode_uuid, entity_uuid)
+    records, _, _ = await driver.execute_query(
+        _MENTIONS_EDGE_UPSERT_QUERY,
+        episode_uuid=episode_uuid,
+        entity_uuid=entity_uuid,
+        uuid=edge_uuid,
+        group_id=group_id,
+        created_at=utc_now(),
+    )
+    if not records:
+        raise RuntimeError(
+            f"Failed to link episode {episode_uuid} to entity {entity_uuid} in group {group_id}"
+        )
 
 
 async def _save_entity_without_embedding(driver: FalkorDriver, node: EntityNode) -> None:
@@ -509,7 +577,7 @@ class GraphitiCrmService:
             created_at=now,
             episode_metadata=snapshot.metadata.model_dump(),
         )
-        await self._graphiti.nodes.episode.save(episode)
+        await _save_episode_via_driver(get_driver(), episode)
         return episode_uuid
 
     async def upsert_entity_node(self, *, group_id: str, snapshot: CrmSnapshot) -> str:
@@ -628,11 +696,12 @@ class GraphitiCrmService:
     async def episode_exists(self, *, group_id: str, episode_name: str) -> bool:
         """Return True when an episodic node with *episode_name* exists."""
         episode_uuid = deterministic_episode_uuid(episode_name)
-        try:
-            episode = await self._graphiti.nodes.episode.get_by_uuid(episode_uuid)
-        except NodeNotFoundError:
-            return False
-        return episode.group_id == group_id
+        records, _, _ = await get_driver().execute_query(
+            _EPISODE_EXISTS_QUERY,
+            uuid=episode_uuid,
+            group_id=group_id,
+        )
+        return bool(records)
 
     async def add_text_episode(
         self,
@@ -642,11 +711,23 @@ class GraphitiCrmService:
         group_id: str,
         reference_time: datetime,
         source_description: str,
+        contact_crm_id: str,
+        contact_crm_type: CrmEntityType = "contact",
     ) -> None:
-        """Persist inbound email text as a structured episodic node (no LLM/embeddings)."""
+        """Persist inbound email text on the canonical graph and link it to the contact entity.
+
+        Writes always go through ``get_driver()`` (``FALKOR_DATABASE``). The ``group_id``
+        is stored as a node property for tenant scoping — it must not be used as a graph name.
+        """
         if reference_time.tzinfo is None:
             reference_time = reference_time.replace(tzinfo=UTC)
+        driver = get_driver()
         episode_uuid = deterministic_episode_uuid(name)
+        contact_entity_uuid = deterministic_entity_uuid(contact_crm_type, contact_crm_id)
+        mentions_edge_uuid = deterministic_email_mentions_edge_uuid(
+            episode_uuid,
+            contact_entity_uuid,
+        )
         episode = EpisodicNode(
             uuid=episode_uuid,
             name=name,
@@ -657,9 +738,19 @@ class GraphitiCrmService:
             content=body,
             valid_at=reference_time,
             created_at=utc_now(),
-            episode_metadata={},
+            entity_edges=[mentions_edge_uuid],
+            episode_metadata={
+                "crm_entity_type": contact_crm_type,
+                "crm_entity_id": contact_crm_id,
+            },
         )
-        await self._graphiti.nodes.episode.save(episode)
+        await _save_episode_via_driver(driver, episode)
+        await _link_episode_to_entity(
+            driver,
+            group_id=group_id,
+            episode_uuid=episode_uuid,
+            entity_uuid=contact_entity_uuid,
+        )
 
     async def get_snapshot_episode(
         self,
@@ -694,7 +785,6 @@ class GraphitiCrmService:
 
         entity_uuid = deterministic_entity_uuid(crm_type, crm_id)
         snapshot_episode_uuid = deterministic_episode_uuid(snapshot_episode_name(crm_type, crm_id))
-        entity_marker = custom_id_for_entity(crm_type, crm_id)
 
         try:
             driver = get_driver()
@@ -703,7 +793,6 @@ class GraphitiCrmService:
                 group_id=group_id,
                 entity_uuid=entity_uuid,
                 snapshot_episode_uuid=snapshot_episode_uuid,
-                entity_marker=entity_marker,
             )
         except Exception:
             logger.warning(

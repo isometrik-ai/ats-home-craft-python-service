@@ -25,6 +25,7 @@ from libs.shared_utils.agentmail_service import (
 from libs.shared_utils.graphiti_crm_models import custom_id_for_entity
 from libs.shared_utils.graphiti_service import (
     GraphitiCrmService,
+    canonical_falkor_database,
     container_tag_for_organization,
     is_graphiti_configured,
 )
@@ -435,19 +436,18 @@ class EmailNotificationService:
         )
         contact_label = snapshot.display_name or record.contact_id
         episode_text = (
-            f"Contact: {contact_label} (crm:contact:{record.contact_id})\n"
-            f"Contact email: {record.from_email}\n\n"
-            f"{email_body}"
+            f"Contact: {contact_label}\nContact email: {record.from_email}\n\n{email_body}"
         )
 
         logger.info(
             "inbound_email_graphiti_adding organization_id=%s contact_id=%s "
-            "message_id=%s episode_name=%s group_id=%s",
+            "message_id=%s episode_name=%s group_id=%s graph=%s",
             organization_id,
             record.contact_id,
             record.message_id,
             episode_name,
             group_id,
+            canonical_falkor_database(),
         )
         try:
             await self._graphiti.add_text_episode(
@@ -456,6 +456,8 @@ class EmailNotificationService:
                 group_id=group_id,
                 reference_time=_parse_reference_time(record.received_at),
                 source_description=f"Inbound email from {record.from_email}",
+                contact_crm_id=record.contact_id,
+                contact_crm_type="contact",
             )
         except Exception:
             logger.warning(
