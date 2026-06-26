@@ -1,4 +1,4 @@
-"""Graphiti + FalkorDB client bootstrap and CRM graph operations."""
+"""Graphiti + FalkorDB client bootstrap and structured CRM graph operations."""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ from typing import Any
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.driver.falkordb_driver import FalkorDriver
-from graphiti_core.edges import EntityEdge
-from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.llm_client import LLMConfig, OpenAIClient
 from graphiti_core.nodes import EntityNode, EpisodeType, EpisodicNode
@@ -20,15 +18,13 @@ from graphiti_core.utils.datetime_utils import utc_now
 
 from libs.shared_config.app_settings import SharedAppSettings, shared_settings
 from libs.shared_utils.graphiti_crm_models import (
-    EDGE_TYPE_MAP,
-    EDGE_TYPES,
-    ENTITY_TYPES,
     CompanySnapshot,
     ContactSnapshot,
     CrmEntityType,
     CrmSnapshot,
     LeadSnapshot,
     custom_id_for_entity,
+    deterministic_association_edge_uuid,
     deterministic_entity_uuid,
     deterministic_episode_uuid,
     entity_label_for_crm_type,
@@ -40,6 +36,7 @@ from libs.shared_utils.graphiti_index_maintenance import (
     ensure_graphiti_indices,
     verify_graphiti_indices,
 )
+from libs.shared_utils.graphiti_noop_embedder import NullEmbedder
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("graphiti_service")
@@ -110,12 +107,7 @@ async def init_graphiti_client(settings: SharedAppSettings | None = None) -> Non
         temperature=graphiti_cfg.llm_temperature,
     )
     client = OpenAIClient(config=llm)
-    embedder = OpenAIEmbedder(
-        config=OpenAIEmbedderConfig(
-            api_key=api_key,
-            embedding_model=graphiti_cfg.embedding_model,
-        )
-    )
+    embedder = NullEmbedder()
     reranker = OpenAIRerankerClient(config=llm)
     driver = FalkorDriver(
         host=graphiti_cfg.falkor_host,
@@ -222,6 +214,79 @@ ORDER BY email_valid_at ASC
 WITH snapshot_content, raw_edge_facts, collect(DISTINCT email_content) AS raw_email_bodies
 RETURN snapshot_content, raw_edge_facts, raw_email_bodies
 """
+
+
+def _entity_label_clause(node: EntityNode) -> str:
+    """Return FalkorDB label clause for a CRM entity node (e.g. ``Contact:Entity``)."""
+    labels = list(set(node.labels + ["Entity"]))
+    return ":".join(labels)
+
+
+async def _save_entity_without_embedding(driver: FalkorDriver, node: EntityNode) -> None:
+    """Persist an entity node without computing or storing ``name_embedding``."""
+    entity_data: dict[str, Any] = {
+        "uuid": node.uuid,
+        "name": node.name,
+        "group_id": node.group_id,
+        "summary": node.summary,
+        "created_at": node.created_at,
+    }
+    entity_data.update(node.attributes or {})
+    entity_data.pop("name_embedding", None)
+
+    label_clause = _entity_label_clause(node)
+    query = f"""
+    MERGE (n:Entity {{uuid: $uuid}})
+    SET n:{label_clause}
+    SET n = $entity_data
+    RETURN n.uuid AS uuid
+    """
+    await driver.execute_query(query, uuid=node.uuid, entity_data=entity_data)
+
+
+_ASSOCIATION_EDGE_UPSERT_QUERY = """
+MATCH (source:Entity {uuid: $source_uuid})
+MATCH (target:Entity {uuid: $target_uuid})
+MERGE (source)-[e:RELATES_TO {uuid: $uuid}]->(target)
+SET e.name = $name,
+    e.fact = $fact,
+    e.group_id = $group_id,
+    e.created_at = $created_at,
+    e.valid_at = $valid_at
+RETURN e.uuid AS uuid
+"""
+
+
+async def _upsert_association_edge(
+    driver: FalkorDriver,
+    graphiti: Graphiti,
+    *,
+    group_id: str,
+    source_uuid: str,
+    target_uuid: str,
+    edge_name: str,
+    fact: str,
+    reference_time: datetime,
+) -> None:
+    """Upsert one CRM association edge without embeddings or LLM deduplication."""
+    try:
+        await graphiti.nodes.entity.get_by_uuid(source_uuid)
+        await graphiti.nodes.entity.get_by_uuid(target_uuid)
+    except NodeNotFoundError:
+        return
+
+    edge_uuid = deterministic_association_edge_uuid(source_uuid, target_uuid, edge_name)
+    await driver.execute_query(
+        _ASSOCIATION_EDGE_UPSERT_QUERY,
+        source_uuid=source_uuid,
+        target_uuid=target_uuid,
+        uuid=edge_uuid,
+        name=edge_name,
+        fact=fact,
+        group_id=group_id,
+        created_at=utc_now(),
+        valid_at=reference_time,
+    )
 
 
 def _coerce_string_list(raw: Any) -> list[str]:
@@ -401,7 +466,7 @@ def snapshot_to_synthesis_text(snapshot: CrmSnapshot) -> str:
 
 
 class GraphitiCrmService:
-    """CRM graph operations on top of the shared Graphiti client."""
+    """CRM graph operations: JSON snapshots, entity nodes, and edges without vector embeddings."""
 
     def __init__(self, graphiti: Graphiti | None = None) -> None:
         self._graphiti_override = graphiti
@@ -463,7 +528,7 @@ class GraphitiCrmService:
             summary="",
             attributes=falkordb_entity_attributes(snapshot),
         )
-        await self._graphiti.nodes.entity.save(node)
+        await _save_entity_without_embedding(get_driver(), node)
         return entity_uuid
 
     async def upsert_association_edges(
@@ -474,6 +539,8 @@ class GraphitiCrmService:
     ) -> None:
         """Create association edges from snapshot linkage fields."""
         ref_time = _reference_time(snapshot)
+        driver = get_driver()
+        graphiti = self._graphiti
 
         if isinstance(snapshot, ContactSnapshot):
             contact_uuid = deterministic_entity_uuid("contact", snapshot.crm_id)
@@ -499,7 +566,9 @@ class GraphitiCrmService:
                 primary_note = (
                     " (primary CRM link)" if primary_ref and primary_ref.is_primary else ""
                 )
-                await self._add_triplet(
+                await _upsert_association_edge(
+                    driver,
+                    graphiti,
                     group_id=group_id,
                     source_uuid=contact_uuid,
                     target_uuid=company_uuid,
@@ -521,7 +590,9 @@ class GraphitiCrmService:
                     continue
                 contact_uuid = deterministic_entity_uuid("contact", cid)
                 label = contact.label or "associated"
-                await self._add_triplet(
+                await _upsert_association_edge(
+                    driver,
+                    graphiti,
                     group_id=group_id,
                     source_uuid=lead_uuid,
                     target_uuid=contact_uuid,
@@ -537,7 +608,9 @@ class GraphitiCrmService:
                 if not cid:
                     continue
                 company_uuid = deterministic_entity_uuid("company", cid)
-                await self._add_triplet(
+                await _upsert_association_edge(
+                    driver,
+                    graphiti,
                     group_id=group_id,
                     source_uuid=lead_uuid,
                     target_uuid=company_uuid,
@@ -570,21 +643,23 @@ class GraphitiCrmService:
         reference_time: datetime,
         source_description: str,
     ) -> None:
-        """Ingest unstructured text with LLM entity extraction."""
+        """Persist inbound email text as a structured episodic node (no LLM/embeddings)."""
         if reference_time.tzinfo is None:
             reference_time = reference_time.replace(tzinfo=UTC)
-        await self._graphiti.add_episode(
+        episode_uuid = deterministic_episode_uuid(name)
+        episode = EpisodicNode(
+            uuid=episode_uuid,
             name=name,
-            episode_body=body,
+            group_id=group_id,
+            labels=[],
             source=EpisodeType.text,
             source_description=source_description,
-            reference_time=reference_time,
-            group_id=group_id,
-            entity_types=ENTITY_TYPES,
-            edge_types=EDGE_TYPES,
-            edge_type_map=EDGE_TYPE_MAP,
-            update_communities=False,
+            content=body,
+            valid_at=reference_time,
+            created_at=utc_now(),
+            episode_metadata={},
         )
+        await self._graphiti.nodes.episode.save(episode)
 
     async def get_snapshot_episode(
         self,
@@ -697,41 +772,3 @@ class GraphitiCrmService:
             meta = episode.episode_metadata if isinstance(episode.episode_metadata, dict) else None
             hits.append(GraphitiSearchHit(id=episode.uuid, text=text, metadata=meta))
         return hits
-
-    async def _add_triplet(
-        self,
-        *,
-        group_id: str,
-        source_uuid: str,
-        target_uuid: str,
-        edge_name: str,
-        fact: str,
-        reference_time: datetime,
-    ) -> None:
-        """Best-effort association edge between two deterministic entity UUIDs."""
-        try:
-            source = await self._graphiti.nodes.entity.get_by_uuid(source_uuid)
-            target = await self._graphiti.nodes.entity.get_by_uuid(target_uuid)
-        except NodeNotFoundError:
-            return
-
-        edge = EntityEdge(
-            group_id=group_id,
-            source_node_uuid=source.uuid,
-            target_node_uuid=target.uuid,
-            created_at=utc_now(),
-            name=edge_name,
-            fact=fact,
-            valid_at=reference_time,
-            reference_time=reference_time,
-        )
-        try:
-            await self._graphiti.add_triplet(source, edge, target)
-        except Exception:
-            logger.warning(
-                "graphiti_add_triplet_failed source=%s target=%s edge=%s",
-                source_uuid,
-                target_uuid,
-                edge_name,
-                exc_info=True,
-            )

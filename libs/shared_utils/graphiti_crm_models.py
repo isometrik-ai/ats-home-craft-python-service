@@ -339,6 +339,15 @@ def deterministic_episode_uuid(episode_name: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"episode:{episode_name}"))
 
 
+def deterministic_association_edge_uuid(
+    source_uuid: str,
+    target_uuid: str,
+    edge_name: str,
+) -> str:
+    """Stable UUID for idempotent CRM association edge upserts."""
+    return str(uuid5(NAMESPACE_URL, f"crm_edge:{source_uuid}:{target_uuid}:{edge_name}"))
+
+
 def work_history_entry_display_line(entry: WorkHistoryEntry) -> str:
     """Format one work-history row using *works at* (current) vs *worked at* (past)."""
     company = (entry.company_name or entry.company or "").strip()

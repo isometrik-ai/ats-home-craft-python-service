@@ -440,6 +440,15 @@ class EmailNotificationService:
             f"{email_body}"
         )
 
+        logger.info(
+            "inbound_email_graphiti_adding organization_id=%s contact_id=%s "
+            "message_id=%s episode_name=%s group_id=%s",
+            organization_id,
+            record.contact_id,
+            record.message_id,
+            episode_name,
+            group_id,
+        )
         try:
             await self._graphiti.add_text_episode(
                 name=episode_name,
@@ -458,6 +467,16 @@ class EmailNotificationService:
                 exc_info=True,
             )
             return "graphiti_write_failed"
+        logger.info(
+            "inbound_email_graphiti_episode_stored organization_id=%s contact_id=%s "
+            "message_id=%s episode_name=%s group_id=%s body_len=%s",
+            organization_id,
+            record.contact_id,
+            record.message_id,
+            episode_name,
+            group_id,
+            len(episode_text),
+        )
         return None
 
     async def _fetch_attachment_blocks(self, record: InboundEmailRecord) -> list[str]:
