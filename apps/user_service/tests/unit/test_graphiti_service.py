@@ -61,6 +61,19 @@ def test_deterministic_association_edge_uuid_stable() -> None:
     assert first == second
 
 
+def test_deterministic_email_mentions_edge_uuid_stable() -> None:
+    """Email MENTIONS edge UUIDs should be deterministic for the same episode and entity."""
+    from libs.shared_utils.graphiti_crm_models import (
+        deterministic_email_mentions_edge_uuid,
+    )
+
+    episode_uuid = "ep-uuid"
+    entity_uuid = deterministic_entity_uuid("contact", "c1")
+    first = deterministic_email_mentions_edge_uuid(episode_uuid, entity_uuid)
+    second = deterministic_email_mentions_edge_uuid(episode_uuid, entity_uuid)
+    assert first == second
+
+
 def test_snapshot_to_synthesis_text_contact() -> None:
     """Contact synthesis text should include profile fields."""
     snapshot = ContactSnapshot(
@@ -240,26 +253,37 @@ def test_parse_snapshot_from_json_contact() -> None:
 
 
 @pytest.mark.asyncio
-async def test_add_text_episode_uses_episodic_without_llm() -> None:
-    """Inbound email episodes are saved as structured episodic nodes."""
+async def test_add_text_episode_uses_driver_and_mentions_edge(monkeypatch) -> None:
+    """Inbound email episodes are saved on FALKOR_DATABASE and linked via MENTIONS."""
     from datetime import UTC, datetime
     from unittest.mock import AsyncMock, MagicMock
 
     from libs.shared_utils.graphiti_service import GraphitiCrmService
 
-    graphiti = MagicMock()
-    graphiti.nodes.episode.save = AsyncMock()
-    service = GraphitiCrmService(graphiti=graphiti)
+    driver = MagicMock()
+    driver.execute_query = AsyncMock(
+        side_effect=[
+            ([{"uuid": "ep-1"}], [], None),
+            ([{"uuid": "edge-1"}], [], None),
+        ]
+    )
+    monkeypatch.setattr("libs.shared_utils.graphiti_service.get_driver", lambda: driver)
+
+    service = GraphitiCrmService(graphiti=MagicMock())
 
     await service.add_text_episode(
         name="email_msg-1",
-        body="Contact: Jane (crm:contact:c1)\n\nHello",
+        body="Contact: Jane\n\nHello",
         group_id="org_org-1",
         reference_time=datetime(2026, 1, 1, tzinfo=UTC),
         source_description="Inbound email",
+        contact_crm_id="c1",
+        contact_crm_type="contact",
     )
 
-    graphiti.nodes.episode.save.assert_awaited_once()
-    episode = graphiti.nodes.episode.save.await_args.args[0]
-    assert episode.name == "email_msg-1"
-    assert "crm:contact:c1" in episode.content
+    assert driver.execute_query.await_count == 2
+    episode_call = driver.execute_query.await_args_list[0]
+    assert episode_call.kwargs["name"] == "email_msg-1"
+    assert episode_call.kwargs["group_id"] == "org_org-1"
+    mentions_call = driver.execute_query.await_args_list[1]
+    assert mentions_call.kwargs["group_id"] == "org_org-1"

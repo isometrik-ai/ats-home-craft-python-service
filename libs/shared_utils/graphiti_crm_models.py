@@ -348,6 +348,11 @@ def deterministic_association_edge_uuid(
     return str(uuid5(NAMESPACE_URL, f"crm_edge:{source_uuid}:{target_uuid}:{edge_name}"))
 
 
+def deterministic_email_mentions_edge_uuid(episode_uuid: str, entity_uuid: str) -> str:
+    """Stable UUID for idempotent email-episode → contact MENTIONS edges."""
+    return str(uuid5(NAMESPACE_URL, f"email_mentions:{episode_uuid}:{entity_uuid}"))
+
+
 def work_history_entry_display_line(entry: WorkHistoryEntry) -> str:
     """Format one work-history row using *works at* (current) vs *worked at* (past)."""
     company = (entry.company_name or entry.company or "").strip()
