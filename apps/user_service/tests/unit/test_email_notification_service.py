@@ -2,7 +2,6 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 from apps.user_service.app.services.email_notification_service import (
@@ -11,7 +10,11 @@ from apps.user_service.app.services.email_notification_service import (
     extract_sender_email,
     normalize_email_address,
 )
-from apps.user_service.app.services.supermemory_sync_service import custom_id_for_entity
+from libs.shared_utils.graphiti_crm_models import (
+    ContactSnapshot,
+    CrmMetadata,
+    custom_id_for_entity,
+)
 
 _EMAIL_SVC = "apps.user_service.app.services.email_notification_service"
 
@@ -37,6 +40,22 @@ SAMPLE_WEBHOOK = {
         ],
     },
 }
+
+
+def _contact_snapshot() -> ContactSnapshot:
+    """Build a minimal contact snapshot for email notification tests."""
+    return ContactSnapshot(
+        crm_id="contact-1",
+        display_name="Sai",
+        metadata=CrmMetadata(
+            entity_type="contact",
+            entity_id="contact-1",
+            organization_id="org-1",
+            status="active",
+            display_name="Sai",
+            updated_at=1,
+        ),
+    )
 
 
 def test_normalize_email_address_from_display_name() -> None:
@@ -77,33 +96,32 @@ def test_record_omits_attachments_default() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_appends_to_contact_custom_id() -> None:
-    """Inbound email is stored on crm:contact:{id}, not a separate document."""
+async def test_process_ingests_graphiti_email_episode() -> None:
+    """Inbound email is stored as a Graphiti text episode linked to the contact."""
     repo = MagicMock()
     repo.get_contact_id_by_email = AsyncMock(return_value="contact-1")
 
-    supermemory = MagicMock()
-    supermemory.get_document_content = AsyncMock(return_value=None)
-    supermemory.add_or_replace_document = AsyncMock(return_value={"id": "doc"})
+    graphiti = MagicMock()
+    graphiti.episode_exists = AsyncMock(return_value=False)
+    graphiti.add_text_episode = AsyncMock()
 
     sync_service = MagicMock()
-    sync_service.load_contact_snapshot = AsyncMock(
-        return_value=("# Contact: Sai\n", {"entity_type": "contact"})
-    )
+    sync_service.load_contact_snapshot = AsyncMock(return_value=_contact_snapshot())
+    sync_service.sync_entity = AsyncMock()
 
     agentmail = MagicMock()
     agentmail.is_configured = False
 
     service = EmailNotificationService(
         db_connection=MagicMock(),
-        supermemory=supermemory,
+        graphiti=graphiti,
         agentmail=agentmail,
         sync_service=sync_service,
     )
     service._contacts_repo = repo
 
     with (
-        patch(f"{_EMAIL_SVC}.is_supermemory_configured", return_value=True),
+        patch(f"{_EMAIL_SVC}.is_graphiti_configured", return_value=True),
         patch(
             f"{_EMAIL_SVC}.is_organization_memory_enabled",
             new=AsyncMock(return_value=True),
@@ -116,31 +134,30 @@ async def test_process_appends_to_contact_custom_id() -> None:
 
     assert result.stored is True
     assert result.supermemory_document_ids == (custom_id_for_entity("contact", "contact-1"),)
-    supermemory.add_or_replace_document.assert_awaited_once()
-    custom_id = supermemory.add_or_replace_document.await_args.kwargs["custom_id"]
-    assert custom_id == "crm:contact:contact-1"
-    content = supermemory.add_or_replace_document.await_args.kwargs["content"]
-    assert "## Inbound emails" in content
-    assert "test" in content
+    graphiti.add_text_episode.assert_awaited_once()
+    episode_name = graphiti.add_text_episode.await_args.kwargs["name"]
+    assert episode_name.startswith("email_")
+    body = graphiti.add_text_episode.await_args.kwargs["body"]
+    assert "test" in body
 
 
 @pytest.mark.asyncio
 async def test_process_skips_unknown_contact() -> None:
-    """No contact match skips Supermemory writes."""
+    """No contact match skips Graphiti writes."""
     repo = MagicMock()
     repo.get_contact_id_by_email = AsyncMock(return_value=None)
 
-    supermemory = MagicMock()
-    supermemory.add_or_replace_document = AsyncMock()
+    graphiti = MagicMock()
+    graphiti.add_text_episode = AsyncMock()
 
     service = EmailNotificationService(
         db_connection=MagicMock(),
-        supermemory=supermemory,
+        graphiti=graphiti,
     )
     service._contacts_repo = repo
 
     with (
-        patch(f"{_EMAIL_SVC}.is_supermemory_configured", return_value=True),
+        patch(f"{_EMAIL_SVC}.is_graphiti_configured", return_value=True),
         patch(
             f"{_EMAIL_SVC}.is_organization_memory_enabled",
             new=AsyncMock(return_value=True),
@@ -153,39 +170,32 @@ async def test_process_skips_unknown_contact() -> None:
 
     assert result.contact_id is None
     assert result.stored is False
-    supermemory.add_or_replace_document.assert_not_awaited()
+    graphiti.add_text_episode.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_process_continues_when_supermemory_write_fails() -> None:
-    """Supermemory errors are isolated; contact match and skip reason are still returned."""
+async def test_process_continues_when_graphiti_write_fails() -> None:
+    """Graphiti errors are isolated; contact match and skip reason are still returned."""
     repo = MagicMock()
     repo.get_contact_id_by_email = AsyncMock(return_value="contact-1")
 
-    supermemory = MagicMock()
-    supermemory.get_document_content = AsyncMock(return_value=None)
-    supermemory.add_or_replace_document = AsyncMock(
-        side_effect=httpx.HTTPStatusError(
-            "402 Payment Required",
-            request=MagicMock(),
-            response=MagicMock(status_code=402),
-        )
-    )
+    graphiti = MagicMock()
+    graphiti.episode_exists = AsyncMock(return_value=False)
+    graphiti.add_text_episode = AsyncMock(side_effect=RuntimeError("graph down"))
 
     sync_service = MagicMock()
-    sync_service.load_contact_snapshot = AsyncMock(
-        return_value=("# Contact: Sai\n", {"entity_type": "contact"})
-    )
+    sync_service.load_contact_snapshot = AsyncMock(return_value=_contact_snapshot())
+    sync_service.sync_entity = AsyncMock()
 
     service = EmailNotificationService(
         db_connection=MagicMock(),
-        supermemory=supermemory,
+        graphiti=graphiti,
         sync_service=sync_service,
     )
     service._contacts_repo = repo
 
     with (
-        patch(f"{_EMAIL_SVC}.is_supermemory_configured", return_value=True),
+        patch(f"{_EMAIL_SVC}.is_graphiti_configured", return_value=True),
         patch(
             f"{_EMAIL_SVC}.is_organization_memory_enabled",
             new=AsyncMock(return_value=True),
@@ -198,4 +208,4 @@ async def test_process_continues_when_supermemory_write_fails() -> None:
 
     assert result.contact_id == "contact-1"
     assert result.stored is False
-    assert result.skipped_reason == "supermemory_write_failed"
+    assert result.skipped_reason == "graphiti_write_failed"
