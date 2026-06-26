@@ -8,7 +8,7 @@ from apps.user_service.app.services.org_memory_query_service import (
     _drop_deleted_and_empty,
     _prioritize_intel_sections_in_snapshot,
 )
-from libs.shared_utils.graphiti_service import GraphitiSearchHit, container_tag_for_organization
+from libs.shared_utils.graphiti_service import GraphitiSearchHit
 
 
 def test_prioritize_sections_sales_first() -> None:

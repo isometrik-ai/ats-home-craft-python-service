@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
@@ -16,13 +15,15 @@ from libs.shared_utils.graphiti_consumer_support import (
 
 
 def test_is_retryable_sync_error_connection_errors() -> None:
+    """Connection and timeout errors are retryable."""
     assert is_retryable_sync_error(ConnectionError("refused")) is True
     assert is_retryable_sync_error(TimeoutError()) is True
     assert is_retryable_sync_error(ValueError("bad payload")) is False
 
 
 @pytest.mark.asyncio
-async def test_run_with_retries_succeeds_after_transient_failure() -> None:
+async def test_retries_succeed_after_transient_err() -> None:
+    """Transient failures should be retried until success."""
     attempts = 0
 
     async def operation() -> None:
@@ -36,7 +37,8 @@ async def test_run_with_retries_succeeds_after_transient_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_with_retries_raises_non_retryable_immediately() -> None:
+async def test_retries_raise_non_retryable_fast() -> None:
+    """Non-retryable errors should fail immediately."""
     calls = 0
 
     async def operation() -> None:
@@ -50,6 +52,7 @@ async def test_run_with_retries_raises_non_retryable_immediately() -> None:
 
 
 def test_decode_crm_event_payload_requires_object() -> None:
+    """Decoded payloads must be JSON objects."""
     payload = decode_crm_event_payload(
         json.dumps({"event_id": "e1", "organization_id": "org-1"}).encode()
     )
@@ -59,7 +62,8 @@ def test_decode_crm_event_payload_requires_object() -> None:
         decode_crm_event_payload(json.dumps(["bad"]).encode())
 
 
-def test_build_graphiti_dlq_envelope_includes_source_metadata() -> None:
+def test_dlq_envelope_includes_source_meta() -> None:
+    """DLQ envelopes should preserve Kafka source metadata."""
     envelope = build_graphiti_dlq_envelope(
         source_topic="crm.events.dev",
         source_partition=1,

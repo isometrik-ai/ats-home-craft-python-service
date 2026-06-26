@@ -33,6 +33,8 @@ class CrmMetadata(BaseModel):
 
 
 class PhoneEntry(BaseModel):
+    """A phone number attached to a CRM entity."""
+
     phone_number: str | None = None
     phone_isd_code: str | None = None
     label: str | None = None
@@ -40,6 +42,8 @@ class PhoneEntry(BaseModel):
 
 
 class AddressEntry(BaseModel):
+    """A postal address attached to a CRM entity."""
+
     address_line1: str | None = None
     address_line2: str | None = None
     city: str | None = None
@@ -50,17 +54,23 @@ class AddressEntry(BaseModel):
 
 
 class NoteEntry(BaseModel):
+    """A free-form note on a CRM entity."""
+
     title: str | None = None
     content: str | None = None
 
 
 class WebsiteEntry(BaseModel):
+    """A website URL attached to a CRM entity."""
+
     url: str | None = None
     type: str | None = None
     is_primary: bool | None = None
 
 
 class SocialPageEntry(BaseModel):
+    """A social profile link attached to a CRM entity."""
+
     platform: str | None = None
     url: str | None = None
 
@@ -79,6 +89,8 @@ class WorkHistoryEntry(BaseModel):
 
 
 class EducationEntry(BaseModel):
+    """An education history row on a contact."""
+
     institution: str | None = None
     school: str | None = None
     university: str | None = None
@@ -112,6 +124,8 @@ class LinkedCompanyRef(BaseModel):
 
 
 class LinkedLeadRef(BaseModel):
+    """A lead linked to a contact."""
+
     lead_id: str | None = None
     name: str | None = None
     stage_name: str | None = None
@@ -120,6 +134,8 @@ class LinkedLeadRef(BaseModel):
 
 
 class LinkedContactRef(BaseModel):
+    """A contact linked to a company or lead."""
+
     id: str | None = None
     full_name: str | None = None
     first_name: str | None = None
@@ -134,6 +150,8 @@ class LinkedContactRef(BaseModel):
 
 
 class InboundEmailEntry(BaseModel):
+    """Normalized inbound email payload for contact memory."""
+
     message_id: str
     subject: str | None = None
     from_header: str | None = None
@@ -146,6 +164,8 @@ class InboundEmailEntry(BaseModel):
 
 
 class ContactSnapshot(BaseModel):
+    """Canonical JSON snapshot of a CRM contact."""
+
     crm_id: str
     prefix: str | None = None
     first_name: str | None = None
@@ -177,6 +197,8 @@ class ContactSnapshot(BaseModel):
 
 
 class CompanySnapshot(BaseModel):
+    """Canonical JSON snapshot of a CRM company."""
+
     crm_id: str
     name: str = ""
     display_name: str = ""
@@ -195,6 +217,8 @@ class CompanySnapshot(BaseModel):
 
 
 class LeadSnapshot(BaseModel):
+    """Canonical JSON snapshot of a CRM lead."""
+
     crm_id: str
     name: str = ""
     display_name: str = ""

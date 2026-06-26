@@ -15,6 +15,7 @@ from libs.shared_utils.graphiti_event_replay import (
 
 
 def test_event_envelope_prefers_jsonb_payload() -> None:
+    """Replay envelopes should prefer nested JSONB payload fields."""
     envelope = _event_envelope(
         {
             "event_id": "e1",
@@ -35,7 +36,8 @@ def test_event_envelope_prefers_jsonb_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_replay_stored_crm_events_processes_matching_rows() -> None:
+async def test_replay_crm_events_processes_rows() -> None:
+    """Mapped CRM events should be replayed and marked synced."""
     sync_service = MagicMock()
     sync_service.process_crm_event = AsyncMock()
     conn = MagicMock()
@@ -57,9 +59,7 @@ async def test_replay_stored_crm_events_processes_matching_rows() -> None:
     ]
 
     with (
-        patch(
-            "libs.shared_utils.graphiti_event_replay.EventsRepository"
-        ) as repo_cls,
+        patch("libs.shared_utils.graphiti_event_replay.EventsRepository") as repo_cls,
         patch(
             "libs.shared_utils.graphiti_event_replay.is_organization_memory_enabled",
             new=AsyncMock(return_value=True),
@@ -76,7 +76,8 @@ async def test_replay_stored_crm_events_processes_matching_rows() -> None:
 
 
 @pytest.mark.asyncio
-async def test_replay_stored_crm_events_skips_unmapped_event_types() -> None:
+async def test_replay_crm_events_skips_unmapped() -> None:
+    """Events without sync targets should be skipped."""
     sync_service = MagicMock()
     sync_service.process_crm_event = AsyncMock()
     conn = MagicMock()
@@ -110,6 +111,7 @@ async def test_replay_stored_crm_events_skips_unmapped_event_types() -> None:
 
 @pytest.mark.asyncio
 async def test_startup_backfill_skipped_when_disabled() -> None:
+    """Startup backfill should no-op when disabled in settings."""
     with patch(
         "libs.shared_utils.graphiti_event_replay.shared_settings.graphiti.startup_backfill_enabled",
         False,
@@ -120,10 +122,12 @@ async def test_startup_backfill_skipped_when_disabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_startup_backfill_runs_pending_events_when_enabled() -> None:
+async def test_startup_backfill_runs_when_enabled() -> None:
+    """Startup backfill should replay pending events when enabled."""
     with (
         patch(
-            "libs.shared_utils.graphiti_event_replay.shared_settings.graphiti.startup_backfill_enabled",
+            "libs.shared_utils.graphiti_event_replay.shared_settings.graphiti."
+            "startup_backfill_enabled",
             True,
         ),
         patch(

@@ -121,11 +121,14 @@ class EventsRepository:
     ) -> list[dict[str, Any]]:
         """Load stored CRM Kafka envelopes for Graphiti replay/backfill."""
         order_clause = (
-            "organization_id, aggregate_id, (payload->>'occurred_at') DESC NULLS LAST, event_id DESC"
+            "organization_id, aggregate_id, "
+            "(payload->>'occurred_at') DESC NULLS LAST, event_id DESC"
             if latest_per_aggregate
             else "(payload->>'occurred_at') ASC NULLS LAST, event_id ASC"
         )
-        distinct_clause = "DISTINCT ON (organization_id, aggregate_id)" if latest_per_aggregate else ""
+        distinct_clause = (
+            "DISTINCT ON (organization_id, aggregate_id)" if latest_per_aggregate else ""
+        )
         query = f"""
             SELECT {distinct_clause}
                 event_id,

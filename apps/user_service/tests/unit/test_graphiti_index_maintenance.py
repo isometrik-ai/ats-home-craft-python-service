@@ -13,7 +13,8 @@ from libs.shared_utils.graphiti_index_maintenance import (
 )
 
 
-def test_crm_supplemental_indices_include_group_id_and_crm_id() -> None:
+def test_crm_supplemental_indices_fields() -> None:
+    """Supplemental indices should cover CRM lookup fields."""
     joined = "\n".join(CRM_SUPPLEMENTAL_RANGE_INDICES)
     assert "group_id" in joined
     assert "crm_id" in joined
@@ -25,6 +26,7 @@ def test_crm_supplemental_indices_include_group_id_and_crm_id() -> None:
 
 
 def test_indexed_fields_by_label_parses_range_indexes() -> None:
+    """Range index metadata should be parsed into field sets by label."""
     records = [
         {
             "label": "Entity",
@@ -42,7 +44,7 @@ def test_indexed_fields_by_label_parses_range_indexes() -> None:
     assert by_label["Episodic"] == {"group_id", "name"}
 
 
-def test_indexed_fields_by_label_parses_composite_properties_and_query() -> None:
+def test_indexed_fields_parses_composite() -> None:
     """Composite indexes may expose fields via properties/query rather than types."""
     records = [
         {
@@ -63,11 +65,17 @@ def test_indexed_fields_by_label_parses_composite_properties_and_query() -> None
 
 
 @pytest.mark.asyncio
-async def test_ensure_crm_supplemental_indices_executes_all_queries() -> None:
+async def test_ensure_crm_supplemental_runs_all() -> None:
+    """All supplemental index queries should be executed."""
     queries: list[str] = []
 
     class _FakeDriver:
-        async def execute_query(self, query: str, **_kwargs: object) -> tuple[list[object], list[str], None]:
+        """Driver stub that records executed index queries."""
+
+        async def execute_query(
+            self, query: str, **_kwargs: object
+        ) -> tuple[list[object], list[str], None]:
+            """Record and acknowledge supplemental index queries."""
             queries.append(query)
             return [], [], None
 
@@ -77,43 +85,63 @@ async def test_ensure_crm_supplemental_indices_executes_all_queries() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ensure_graphiti_indices_calls_core_and_supplements() -> None:
-    calls: list[str] = []
+async def test_ensure_graphiti_indices_core_and_sup() -> None:
+    """Core and supplemental index setup should both run."""
 
     class _FakeGraphiti:
+        """Graphiti stub that records core index build."""
+
         async def build_indices_and_constraints(self) -> None:
+            """Record core Graphiti index build."""
             calls.append("core")
 
     class _FakeDriver:
-        async def execute_query(self, query: str, **_kwargs: object) -> tuple[list[object], list[str], None]:
+        """Driver stub that records supplemental index execution."""
+
+        async def execute_query(
+            self, _query: str, **_kwargs: object
+        ) -> tuple[list[object], list[str], None]:
+            """Record supplemental index execution."""
             calls.append("supplement")
             return [], [], None
 
+    calls: list[str] = []
     await ensure_graphiti_indices(_FakeGraphiti(), driver=_FakeDriver())  # type: ignore[arg-type]
     assert calls[0] == "core"
     assert calls.count("supplement") == len(CRM_SUPPLEMENTAL_RANGE_INDICES)
 
 
 @pytest.mark.asyncio
-async def test_verify_graphiti_indices_ok_when_required_fields_present() -> None:
+async def test_verify_indices_ok_required_fields() -> None:
+    """Verification should pass when required indexed fields are present."""
+
     class _FakeDriver:
-        async def execute_query(self, query: str, **_kwargs: object) -> tuple[list[dict], list[str], None]:
+        """Driver stub returning complete index metadata."""
+
+        async def execute_query(
+            self, query: str, **_kwargs: object
+        ) -> tuple[list[dict], list[str], None]:
+            """Return complete FalkorDB index metadata."""
             assert query == "CALL db.indexes()"
-            return [
-                {
-                    "label": "Entity",
-                    "types": {
-                        "group_id": "RANGE",
-                        "crm_id": "RANGE",
-                        "uuid": "RANGE",
-                        "name": "RANGE",
+            return (
+                [
+                    {
+                        "label": "Entity",
+                        "types": {
+                            "group_id": "RANGE",
+                            "crm_id": "RANGE",
+                            "uuid": "RANGE",
+                            "name": "RANGE",
+                        },
                     },
-                },
-                {
-                    "label": "Episodic",
-                    "types": {"group_id": "RANGE", "name": "RANGE", "uuid": "RANGE"},
-                },
-            ], [], None
+                    {
+                        "label": "Episodic",
+                        "types": {"group_id": "RANGE", "name": "RANGE", "uuid": "RANGE"},
+                    },
+                ],
+                [],
+                None,
+            )
 
     summary = await verify_graphiti_indices(_FakeDriver())  # type: ignore[arg-type]
     assert summary["ok"] is True
@@ -123,8 +151,15 @@ async def test_verify_graphiti_indices_ok_when_required_fields_present() -> None
 
 @pytest.mark.asyncio
 async def test_verify_graphiti_indices_reports_missing_fields() -> None:
+    """Verification should report missing required indexed fields."""
+
     class _FakeDriver:
-        async def execute_query(self, query: str, **_kwargs: object) -> tuple[list[dict], list[str], None]:
+        """Driver stub returning incomplete index metadata."""
+
+        async def execute_query(
+            self, _query: str, **_kwargs: object
+        ) -> tuple[list[dict], list[str], None]:
+            """Return incomplete FalkorDB index metadata."""
             return [{"label": "Entity", "types": {"uuid": "RANGE"}}], [], None
 
     summary = await verify_graphiti_indices(_FakeDriver())  # type: ignore[arg-type]
@@ -134,32 +169,42 @@ async def test_verify_graphiti_indices_reports_missing_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_verify_graphiti_indices_ok_with_falkordb_like_entity_fields() -> None:
+async def test_verify_indices_ok_falkordb_fields() -> None:
     """Regression: FalkorDB may omit crm_id/name from types until single-field indexes exist."""
+
     class _FakeDriver:
-        async def execute_query(self, query: str, **_kwargs: object) -> tuple[list[dict], list[str], None]:
-            return [
-                {
-                    "label": "Entity",
-                    "types": {
-                        "created_at": "RANGE",
-                        "group_id": "RANGE",
-                        "name": "RANGE",
-                        "uuid": "RANGE",
+        """Driver stub returning FalkorDB-like index metadata."""
+
+        async def execute_query(
+            self, _query: str, **_kwargs: object
+        ) -> tuple[list[dict], list[str], None]:
+            """Return FalkorDB-like index metadata with query hints."""
+            return (
+                [
+                    {
+                        "label": "Entity",
+                        "types": {
+                            "created_at": "RANGE",
+                            "group_id": "RANGE",
+                            "name": "RANGE",
+                            "uuid": "RANGE",
+                        },
+                        "query": "CREATE INDEX FOR (n:Entity) ON (n.crm_id)",
                     },
-                    "query": "CREATE INDEX FOR (n:Entity) ON (n.crm_id)",
-                },
-                {
-                    "label": "Episodic",
-                    "types": {
-                        "created_at": "RANGE",
-                        "group_id": "RANGE",
-                        "uuid": "RANGE",
-                        "valid_at": "RANGE",
+                    {
+                        "label": "Episodic",
+                        "types": {
+                            "created_at": "RANGE",
+                            "group_id": "RANGE",
+                            "uuid": "RANGE",
+                            "valid_at": "RANGE",
+                        },
+                        "query": "CREATE INDEX FOR (n:Episodic) ON (n.name)",
                     },
-                    "query": "CREATE INDEX FOR (n:Episodic) ON (n.name)",
-                },
-            ], [], None
+                ],
+                [],
+                None,
+            )
 
     summary = await verify_graphiti_indices(_FakeDriver())  # type: ignore[arg-type]
     assert summary["ok"] is True

@@ -99,6 +99,7 @@ class CrmSupermemoryConsumer:
         return bool(kafka_settings.enabled and is_graphiti_configured())
 
     def _graphiti_settings(self):
+        """Return Graphiti settings from shared app configuration."""
         return shared_settings.graphiti
 
     def _build_consumer_kwargs(self) -> dict[str, Any]:
@@ -236,7 +237,9 @@ class CrmSupermemoryConsumer:
         )
         partition_key = None
         if original_event is not None:
-            partition_key = str(original_event.get("aggregate_id") or original_event.get("event_id") or "")
+            partition_key = str(
+                original_event.get("aggregate_id") or original_event.get("event_id") or ""
+            )
         try:
             await publish_graphiti_dlq(
                 ctx.kafka_service,
@@ -260,6 +263,7 @@ class CrmSupermemoryConsumer:
         ctx: _ConsumerRunContext,
         payload_dict: dict[str, Any],
     ) -> None:
+        """Run Graphiti sync for one decoded CRM event with retry and timeout."""
         settings = self._graphiti_settings()
 
         async def _run_sync() -> None:

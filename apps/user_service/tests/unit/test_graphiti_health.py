@@ -10,7 +10,8 @@ from libs.shared_utils.graphiti_health import run_readiness_checks
 
 
 @pytest.mark.asyncio
-async def test_run_readiness_checks_ready_when_graphiti_disabled() -> None:
+async def test_readiness_ready_when_graphiti_off() -> None:
+    """Readiness should pass when Graphiti is disabled."""
     with (
         patch(
             "libs.shared_utils.graphiti_health.check_database_readiness",
@@ -29,13 +30,17 @@ async def test_run_readiness_checks_ready_when_graphiti_disabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_readiness_checks_not_ready_when_database_fails() -> None:
-    with patch(
-        "libs.shared_utils.graphiti_health.check_database_readiness",
-        new=AsyncMock(side_effect=RuntimeError("db down")),
-    ), patch(
-        "libs.shared_utils.graphiti_health.is_graphiti_configured",
-        return_value=False,
+async def test_readiness_not_ready_on_db_fail() -> None:
+    """Readiness should fail when the database check errors."""
+    with (
+        patch(
+            "libs.shared_utils.graphiti_health.check_database_readiness",
+            new=AsyncMock(side_effect=RuntimeError("db down")),
+        ),
+        patch(
+            "libs.shared_utils.graphiti_health.is_graphiti_configured",
+            return_value=False,
+        ),
     ):
         summary = await run_readiness_checks()
 

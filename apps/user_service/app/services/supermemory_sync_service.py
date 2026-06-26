@@ -33,7 +33,10 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_field,
 )
-from libs.shared_utils.graphiti_crm_models import WorkHistoryEntry, work_history_entry_display_line
+from libs.shared_utils.graphiti_crm_models import (
+    WorkHistoryEntry,
+    work_history_entry_display_line,
+)
 
 EntityType = Literal["contact", "company", "lead"]
 _SCHEMA_VERSION = 2

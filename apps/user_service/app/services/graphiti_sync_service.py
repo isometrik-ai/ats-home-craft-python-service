@@ -6,7 +6,10 @@ from typing import Any, Literal
 
 import asyncpg
 
-from apps.user_service.app.db.repositories import CompaniesRepository, ContactsRepository
+from apps.user_service.app.db.repositories import (
+    CompaniesRepository,
+    ContactsRepository,
+)
 from apps.user_service.app.db.repositories.lead_repository import LeadRepository
 from apps.user_service.app.services.organization_memory_service import (
     is_organization_memory_enabled,
@@ -141,6 +144,7 @@ class GraphitiSyncService:
         organization_id: str,
         payload: dict[str, Any],
     ) -> None:
+        """Sync companies and contacts referenced in event side-effect lists."""
         seen: set[tuple[EntityType, str]] = set()
         for company_id in payload.get("affected_company_ids") or []:
             cid = str(company_id or "").strip()
@@ -178,6 +182,7 @@ class GraphitiSyncService:
         organization_id: str,
         contact_id: str,
     ) -> None:
+        """Re-sync companies and leads linked to a contact."""
         repo = ContactsRepository(db_connection=db_connection)
         details = await repo.get_contact_details(
             contact_id=contact_id,
@@ -217,6 +222,7 @@ class GraphitiSyncService:
         organization_id: str,
         company_id: str,
     ) -> None:
+        """Re-sync contacts linked to a company."""
         repo = CompaniesRepository(db_connection=db_connection)
         details = await repo.get_company_details(
             company_id=company_id,
@@ -246,6 +252,7 @@ class GraphitiSyncService:
         organization_id: str,
         lead_id: str,
     ) -> None:
+        """Re-sync companies and contacts linked to a lead."""
         lead_repo = LeadRepository(db_connection=db_connection)
         row = await lead_repo.get_lead_detail_with_contacts_by_id(
             organization_id,
@@ -307,7 +314,9 @@ class GraphitiSyncService:
         if not await is_organization_memory_enabled(db_connection, organization_id):
             return
         if not self._graphiti.is_configured:
-            logger.warning("graphiti_sync_skipped_not_configured type=%s id=%s", entity_type, entity_id)
+            logger.warning(
+                "graphiti_sync_skipped_not_configured type=%s id=%s", entity_type, entity_id
+            )
             return
 
         snapshot = await self._load_snapshot(
@@ -397,6 +406,7 @@ class GraphitiSyncService:
         entity_type: EntityType,
         entity_id: str,
     ) -> CrmSnapshot | None:
+        """Load the canonical snapshot for one CRM entity type."""
         if entity_type == "contact":
             return await build_contact_snapshot(
                 db_connection,

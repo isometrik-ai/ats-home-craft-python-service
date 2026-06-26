@@ -24,13 +24,13 @@ from apps.user_service.app.utils.common_utils import (
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.graphiti_service import is_graphiti_configured
 from libs.shared_utils.http_exceptions import (
     ForbiddenException,
     ServiceUnavailableException,
 )
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
-from libs.shared_utils.graphiti_service import is_graphiti_configured
 
 router = APIRouter(prefix="/organization/memory", tags=["Organization Memory"])
 

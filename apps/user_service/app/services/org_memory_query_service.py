@@ -17,8 +17,6 @@ from apps.user_service.app.schemas.ai_overview_settings import AiOverviewSetting
 from apps.user_service.app.services.organization_service import OrganizationService
 from apps.user_service.app.utils.common_utils import parse_json_field
 from libs.shared_config.app_settings import shared_settings
-from libs.shared_utils.logger import get_logger
-from libs.shared_utils.openai_chat_service import create_chat_completion
 from libs.shared_utils.graphiti_crm_models import CrmEntityType
 from libs.shared_utils.graphiti_service import (
     GraphitiCrmService,
@@ -26,6 +24,8 @@ from libs.shared_utils.graphiti_service import (
     container_tag_for_organization,
     snapshot_to_synthesis_text,
 )
+from libs.shared_utils.logger import get_logger
+from libs.shared_utils.openai_chat_service import create_chat_completion
 
 logger = get_logger("org_memory_query_service")
 
@@ -153,9 +153,12 @@ def _snapshot_section_sort_key(heading: str) -> int:
     heading_lower = heading.casefold()
     if heading_lower.startswith("notes"):
         return 0
-    if heading_lower.startswith("linked lead") or heading_lower.startswith(
-        "companies"
-    ) or heading_lower.startswith("crm company") or heading_lower.startswith("work history"):
+    if (
+        heading_lower.startswith("linked lead")
+        or heading_lower.startswith("companies")
+        or heading_lower.startswith("crm company")
+        or heading_lower.startswith("work history")
+    ):
         return 1
     if heading_lower.startswith("email"):
         return 2
@@ -405,6 +408,7 @@ def _unique_graph_fact_lines(hits: list[GraphitiSearchHit]) -> list[str]:
 
 
 def _normalize_crm_type(entity_type: str | None) -> CrmEntityType | None:
+    """Map API entity type strings to canonical CRM entity types."""
     normalized = (entity_type or "").strip().lower()
     if normalized in ("contact", "company", "lead"):
         return normalized  # type: ignore[return-value]
@@ -422,6 +426,94 @@ class OrgMemoryQueryService:
     def __init__(self, *, graphiti: GraphitiCrmService | None = None) -> None:
         self._graphiti = graphiti or GraphitiCrmService()
 
+    async def _load_overview_settings(
+        self,
+        db_connection: asyncpg.Connection | None,
+        organization_id: str,
+    ) -> AiOverviewSettings:
+        """Load org-specific AI overview settings, or defaults when no DB connection."""
+        if db_connection is not None:
+            return await _load_effective_ai_overview_settings(db_connection, organization_id)
+        return OrganizationService.default_ai_overview_settings()
+
+    async def _resolve_entity_context(
+        self,
+        *,
+        organization_id: str,
+        entity_id: str | None,
+        entity_type: str | None,
+        user_message: str,
+    ) -> tuple[str | None, str, str, str | None]:
+        """Return group_id, snapshot text, entity name, and optional center node UUID."""
+        group_id = container_tag_for_organization(organization_id)
+        crm_type = _normalize_crm_type(entity_type)
+        center_node_uuid: str | None = None
+        snapshot_text = ""
+        entity_name = user_message
+
+        if not (entity_id and crm_type):
+            return group_id, snapshot_text, entity_name, center_node_uuid
+
+        snapshot = await self._graphiti.get_snapshot_episode(
+            group_id=group_id,
+            crm_type=crm_type,
+            crm_id=entity_id.strip(),
+        )
+        if snapshot is not None and str(snapshot.metadata.status).lower() != "deleted":
+            snapshot_text = snapshot_to_synthesis_text(snapshot)
+            if snapshot.display_name:
+                entity_name = snapshot.display_name
+        center_node_uuid = self._graphiti.resolve_entity_uuid(
+            crm_type=crm_type,
+            crm_id=entity_id.strip(),
+        )
+        return group_id, snapshot_text, entity_name, center_node_uuid
+
+    async def _search_graph_facts(
+        self,
+        *,
+        group_id: str,
+        entity_name: str,
+        center_node_uuid: str | None,
+    ) -> list[GraphitiSearchHit]:
+        """Run hardcoded hybrid searches and return deduplicated graph hits."""
+        search_queries = _build_hardcoded_queries(entity_name)
+        all_search_sets = await asyncio.gather(
+            *[
+                self._graphiti.search_hybrid(
+                    query=query,
+                    group_id=group_id,
+                    center_node_uuid=center_node_uuid,
+                    limit=_LOOKUP_SEARCH_LIMIT,
+                )
+                for query in search_queries
+            ]
+        )
+        raw_hits: list[GraphitiSearchHit] = []
+        for subset in all_search_sets:
+            raw_hits.extend(subset)
+        return _drop_deleted_and_empty(_dedupe_hits(raw_hits))
+
+    @staticmethod
+    def _build_notes_context(
+        snapshot_text: str,
+        fact_lines: list[str],
+    ) -> tuple[str, bool]:
+        """Assemble truncated synthesis notes from snapshot text and graph facts."""
+        notes_parts: list[str] = []
+        if snapshot_text:
+            notes_parts.append(_prioritize_intel_sections_in_snapshot(snapshot_text))
+        if fact_lines:
+            notes_parts.append("## Graph facts\n" + "\n".join(f"- {line}" for line in fact_lines))
+
+        if not notes_parts:
+            return "", False
+
+        notes = "\n\n---\n\n".join(notes_parts)
+        if len(notes) > _SYNTH_CONTEXT_CHAR_LIMIT:
+            return notes[:_SYNTH_CONTEXT_CHAR_LIMIT], True
+        return notes, False
+
     async def run(
         self,
         *,
@@ -434,82 +526,30 @@ class OrgMemoryQueryService:
         """Return a sales intelligence markdown briefing for the queried entity."""
         user_message = user_message.strip()
         model = shared_settings.org_memory_llm_model
-
-        if db_connection is not None:
-            overview_settings = await _load_effective_ai_overview_settings(
-                db_connection,
-                organization_id,
-            )
-        else:
-            overview_settings = OrganizationService.default_ai_overview_settings()
-
+        overview_settings = await self._load_overview_settings(db_connection, organization_id)
         prompt_entity_type = _resolve_overview_entity_type(entity_type)
 
-        group_id = container_tag_for_organization(organization_id)
-        crm_type = _normalize_crm_type(entity_type)
-        center_node_uuid: str | None = None
-        snapshot_text = ""
-        entity_name = user_message
-
-        if entity_id and crm_type:
-            snapshot = await self._graphiti.get_snapshot_episode(
-                group_id=group_id,
-                crm_type=crm_type,
-                crm_id=entity_id.strip(),
-            )
-            if snapshot is not None:
-                if str(snapshot.metadata.status).lower() != "deleted":
-                    snapshot_text = snapshot_to_synthesis_text(snapshot)
-                    if snapshot.display_name:
-                        entity_name = snapshot.display_name
-            center_node_uuid = self._graphiti.resolve_entity_uuid(
-                crm_type=crm_type,
-                crm_id=entity_id.strip(),
-            )
-
-        search_queries = _build_hardcoded_queries(entity_name)
-
-        all_search_sets = await asyncio.gather(
-            *[
-                self._graphiti.search_hybrid(
-                    query=q,
-                    group_id=group_id,
-                    center_node_uuid=center_node_uuid,
-                    limit=_LOOKUP_SEARCH_LIMIT,
-                )
-                for q in search_queries
-            ]
+        group_id, snapshot_text, entity_name, center_node_uuid = await self._resolve_entity_context(
+            organization_id=organization_id,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            user_message=user_message,
         )
 
-        raw_hits: list[GraphitiSearchHit] = []
-        for subset in all_search_sets:
-            raw_hits.extend(subset)
-
+        cleaned_hits = await self._search_graph_facts(
+            group_id=group_id,
+            entity_name=entity_name,
+            center_node_uuid=center_node_uuid,
+        )
         logger.info(
             "org_memory_search organization_id=%s entity_id=%s raw_hits=%s",
             organization_id,
             entity_id,
-            len(raw_hits),
+            len(cleaned_hits),
         )
 
-        cleaned = _drop_deleted_and_empty(_dedupe_hits(raw_hits))
-        fact_lines = _unique_graph_fact_lines(cleaned)
-
-        notes_parts: list[str] = []
-        if snapshot_text:
-            notes_parts.append(_prioritize_intel_sections_in_snapshot(snapshot_text))
-        if fact_lines:
-            notes_parts.append("## Graph facts\n" + "\n".join(f"- {line}" for line in fact_lines))
-
-        notes_truncated = False
-        if notes_parts:
-            notes = "\n\n---\n\n".join(notes_parts)
-            if len(notes) > _SYNTH_CONTEXT_CHAR_LIMIT:
-                notes = notes[:_SYNTH_CONTEXT_CHAR_LIMIT]
-                notes_truncated = True
-        else:
-            notes = ""
-
+        fact_lines = _unique_graph_fact_lines(cleaned_hits)
+        notes, notes_truncated = self._build_notes_context(snapshot_text, fact_lines)
         usable_count = (1 if snapshot_text else 0) + len(fact_lines)
 
         synth_system = _build_synth_system_prompt(
@@ -550,7 +590,7 @@ class OrgMemoryQueryService:
             "entities=%s notes_len=%s notes_truncated=%s used_fallback=%s answer_len=%s",
             organization_id,
             prompt_entity_type,
-            len(raw_hits),
+            len(cleaned_hits),
             usable_count,
             len(notes),
             notes_truncated,

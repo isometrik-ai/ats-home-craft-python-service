@@ -7,7 +7,10 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.db.repositories import CompaniesRepository, ContactsRepository
+from apps.user_service.app.db.repositories import (
+    CompaniesRepository,
+    ContactsRepository,
+)
 from apps.user_service.app.db.repositories.lead_repository import LeadRepository
 from apps.user_service.app.schemas.enums import EntityType as CustomFieldEntityType
 from apps.user_service.app.services.supermemory_sync_service import (
@@ -30,7 +33,7 @@ from apps.user_service.app.services.typesense_index_service import (
     _extract_contact_company_linkage,
     _extract_contact_websites,
 )
-from apps.user_service.app.utils.common_utils import UserContext, parse_json_field
+from apps.user_service.app.utils.common_utils import parse_json_field
 from libs.shared_utils.graphiti_crm_models import (
     AddressEntry,
     CompanySnapshot,
@@ -64,6 +67,7 @@ def _base_metadata(
     related_contact_ids: str = "",
     tags: str = "",
 ) -> CrmMetadata:
+    """Build shared CRM metadata for snapshot episodes."""
     meta: dict[str, Any] = {
         "entity_type": entity_type,
         "entity_id": entity_id,
@@ -85,6 +89,7 @@ def _base_metadata(
 
 
 def _phones_from_display(phones_display: list[dict[str, Any]]) -> list[PhoneEntry]:
+    """Convert display phone dicts into snapshot phone entries."""
     return [
         PhoneEntry(
             phone_number=str(p.get("phone_number") or "") or None,
@@ -98,6 +103,7 @@ def _phones_from_display(phones_display: list[dict[str, Any]]) -> list[PhoneEntr
 
 
 def _notes_from_raw(notes: Any) -> list[NoteEntry]:
+    """Parse raw CRM notes JSON into snapshot note entries."""
     items: list[NoteEntry] = []
     for item in _parse_json_list(notes):
         if not isinstance(item, dict):
@@ -112,6 +118,7 @@ def _notes_from_raw(notes: Any) -> list[NoteEntry]:
 
 
 def _custom_fields_from_resolved(resolved: list[dict[str, Any]]) -> list[ResolvedCustomField]:
+    """Convert resolved custom-field dicts into snapshot entries."""
     return [ResolvedCustomField.model_validate(node) for node in resolved if isinstance(node, dict)]
 
 
@@ -122,6 +129,7 @@ def _tombstone_snapshot(
     organization_id: str,
     display_name: str,
 ) -> ContactSnapshot | CompanySnapshot | LeadSnapshot:
+    """Build a deleted-entity placeholder snapshot."""
     metadata = _base_metadata(
         entity_type=entity_type,
         entity_id=entity_id,
@@ -140,6 +148,89 @@ def _tombstone_snapshot(
     return LeadSnapshot(
         crm_id=entity_id, name=display_name, display_name=display_name, metadata=metadata
     )
+
+
+def _linked_companies_from_prepared(prepared: dict[str, Any]) -> list[LinkedCompanyRef]:
+    """Parse linked company refs from prepared contact row data."""
+    linked_companies: list[LinkedCompanyRef] = []
+    for entry in _parse_json_list(prepared.get("companies")):
+        if isinstance(entry, dict):
+            linked_companies.append(
+                LinkedCompanyRef(
+                    name=str(entry.get("name") or "") or None,
+                    industry=str(entry.get("industry") or "") or None,
+                    is_primary=bool(entry.get("is_primary"))
+                    if entry.get("is_primary") is not None
+                    else None,
+                    company_id=str(entry.get("id") or entry.get("company_id") or "") or None,
+                )
+            )
+    return linked_companies
+
+
+def _linked_leads_from_prepared(prepared: dict[str, Any]) -> list[LinkedLeadRef]:
+    """Parse linked lead refs from prepared contact row data."""
+    linked_leads: list[LinkedLeadRef] = []
+    for entry in _parse_json_list(prepared.get("leads")):
+        if isinstance(entry, dict):
+            linked_leads.append(
+                LinkedLeadRef(
+                    lead_id=str(entry.get("id") or "").strip() or None,
+                    name=str(entry.get("name") or "").strip() or None,
+                    stage_name=str(entry.get("stage_name") or "").strip() or None,
+                    stage_id=str(entry.get("stage_id") or "").strip() or None,
+                    amount=entry.get("amount"),
+                )
+            )
+    return linked_leads
+
+
+def _addresses_from_prepared(prepared: dict[str, Any]) -> list[AddressEntry]:
+    """Parse address entries from prepared contact row data."""
+    return [
+        AddressEntry(
+            address_line1=str(a.get("address_line1") or "") or None,
+            address_line2=str(a.get("address_line2") or "") or None,
+            city=str(a.get("city") or "") or None,
+            state=str(a.get("state") or "") or None,
+            country=str(a.get("country") or "") or None,
+            postal_code=str(a.get("postal_code") or "") or None,
+            is_primary=bool(a.get("is_primary")) if a.get("is_primary") is not None else None,
+        )
+        for a in _parse_json_list(prepared.get("addresses"))
+        if isinstance(a, dict)
+    ]
+
+
+def _websites_from_additional(additional: dict[str, Any]) -> list[WebsiteEntry]:
+    """Parse website entries from contact additional_data."""
+    websites: list[WebsiteEntry] = []
+    for item in _parse_json_list(additional.get("websites")):
+        if isinstance(item, dict):
+            websites.append(
+                WebsiteEntry(
+                    url=str(item.get("url") or "").strip() or None,
+                    type=str(item.get("type") or "").strip() or None,
+                    is_primary=bool(item.get("is_primary"))
+                    if item.get("is_primary") is not None
+                    else None,
+                )
+            )
+    return websites
+
+
+def _social_pages_from_prepared(prepared: dict[str, Any]) -> list[SocialPageEntry]:
+    """Parse social page entries from prepared contact row data."""
+    social_pages: list[SocialPageEntry] = []
+    for item in _parse_json_list(prepared.get("social_pages")):
+        if isinstance(item, dict):
+            social_pages.append(
+                SocialPageEntry(
+                    platform=str(item.get("platform") or "").strip() or None,
+                    url=str(item.get("url") or item.get("link") or "").strip() or None,
+                )
+            )
+    return social_pages
 
 
 async def build_contact_snapshot(
@@ -182,69 +273,11 @@ async def build_contact_snapshot(
     additional = _parse_json_dict(prepared.get("additional_data"))
     _, phones_display = _extract_phone_numbers_and_display(prepared)
 
-    linked_companies: list[LinkedCompanyRef] = []
-    for entry in _parse_json_list(prepared.get("companies")):
-        if isinstance(entry, dict):
-            linked_companies.append(
-                LinkedCompanyRef(
-                    name=str(entry.get("name") or "") or None,
-                    industry=str(entry.get("industry") or "") or None,
-                    is_primary=bool(entry.get("is_primary"))
-                    if entry.get("is_primary") is not None
-                    else None,
-                    company_id=str(entry.get("id") or entry.get("company_id") or "") or None,
-                )
-            )
-
-    linked_leads: list[LinkedLeadRef] = []
-    for entry in _parse_json_list(prepared.get("leads")):
-        if isinstance(entry, dict):
-            linked_leads.append(
-                LinkedLeadRef(
-                    lead_id=str(entry.get("id") or "").strip() or None,
-                    name=str(entry.get("name") or "").strip() or None,
-                    stage_name=str(entry.get("stage_name") or "").strip() or None,
-                    stage_id=str(entry.get("stage_id") or "").strip() or None,
-                    amount=entry.get("amount"),
-                )
-            )
-
-    addresses = [
-        AddressEntry(
-            address_line1=str(a.get("address_line1") or "") or None,
-            address_line2=str(a.get("address_line2") or "") or None,
-            city=str(a.get("city") or "") or None,
-            state=str(a.get("state") or "") or None,
-            country=str(a.get("country") or "") or None,
-            postal_code=str(a.get("postal_code") or "") or None,
-            is_primary=bool(a.get("is_primary")) if a.get("is_primary") is not None else None,
-        )
-        for a in _parse_json_list(prepared.get("addresses"))
-        if isinstance(a, dict)
-    ]
-
-    websites: list[WebsiteEntry] = []
-    for item in _parse_json_list(additional.get("websites")):
-        if isinstance(item, dict):
-            websites.append(
-                WebsiteEntry(
-                    url=str(item.get("url") or "").strip() or None,
-                    type=str(item.get("type") or "").strip() or None,
-                    is_primary=bool(item.get("is_primary"))
-                    if item.get("is_primary") is not None
-                    else None,
-                )
-            )
-
-    social_pages: list[SocialPageEntry] = []
-    for item in _parse_json_list(prepared.get("social_pages")):
-        if isinstance(item, dict):
-            social_pages.append(
-                SocialPageEntry(
-                    platform=str(item.get("platform") or "").strip() or None,
-                    url=str(item.get("url") or item.get("link") or "").strip() or None,
-                )
-            )
+    linked_companies = _linked_companies_from_prepared(prepared)
+    linked_leads = _linked_leads_from_prepared(prepared)
+    addresses = _addresses_from_prepared(prepared)
+    websites = _websites_from_additional(additional)
+    social_pages = _social_pages_from_prepared(prepared)
 
     work_history = [
         WorkHistoryEntry.model_validate(item)

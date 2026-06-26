@@ -10,7 +10,11 @@ from apps.user_service.app.services.email_notification_service import (
     extract_sender_email,
     normalize_email_address,
 )
-from libs.shared_utils.graphiti_crm_models import ContactSnapshot, CrmMetadata, custom_id_for_entity
+from libs.shared_utils.graphiti_crm_models import (
+    ContactSnapshot,
+    CrmMetadata,
+    custom_id_for_entity,
+)
 
 _EMAIL_SVC = "apps.user_service.app.services.email_notification_service"
 
@@ -39,6 +43,7 @@ SAMPLE_WEBHOOK = {
 
 
 def _contact_snapshot() -> ContactSnapshot:
+    """Build a minimal contact snapshot for email notification tests."""
     return ContactSnapshot(
         crm_id="contact-1",
         display_name="Sai",

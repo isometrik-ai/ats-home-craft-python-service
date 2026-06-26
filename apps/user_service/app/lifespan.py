@@ -13,6 +13,10 @@ from apps.user_service.app.db.repositories import init_session_repo
 from apps.user_service.app.dependencies.audit_logs.audit_logger import audit_logger
 from libs.shared_db.drivers.asyncpg_client import close_pool, get_pool
 from libs.shared_db.drivers.redis_client import init_redis
+from libs.shared_utils.graphiti_service import (
+    close_graphiti_client,
+    init_graphiti_client,
+)
 from libs.shared_utils.isometrik_strands_client import (
     close_strands_http_client,
     init_strands_http_client,
@@ -21,10 +25,6 @@ from libs.shared_utils.logger import app_logger
 from libs.shared_utils.openai_chat_service import (
     close_openai_http_client,
     init_openai_http_client,
-)
-from libs.shared_utils.graphiti_service import (
-    close_graphiti_client,
-    init_graphiti_client,
 )
 from libs.shared_utils.telemetry_config import telemetry_config
 from libs.shared_utils.typesense_service import (

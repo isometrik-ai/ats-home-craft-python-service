@@ -14,8 +14,8 @@ from libs.shared_utils.graphiti_crm_models import (
     deterministic_entity_uuid,
     falkordb_entity_attributes,
     snapshot_episode_name,
-    work_history_entry_display_line,
     work_history_display_lines,
+    work_history_entry_display_line,
 )
 from libs.shared_utils.graphiti_service import (
     container_tag_for_organization,
@@ -25,24 +25,29 @@ from libs.shared_utils.graphiti_service import (
 
 
 def test_container_tag_for_organization() -> None:
+    """Organization tags should be prefixed with org_."""
     assert container_tag_for_organization("abc-123") == "org_abc-123"
 
 
 def test_custom_id_for_entity() -> None:
+    """Custom IDs should follow the crm:type:id format."""
     assert custom_id_for_entity("contact", "c1") == "crm:contact:c1"
 
 
 def test_snapshot_episode_name() -> None:
+    """Snapshot episode names should be stable per entity."""
     assert snapshot_episode_name("contact", "c1") == "crm_snapshot:contact:c1"
 
 
 def test_deterministic_entity_uuid_stable() -> None:
+    """Entity UUIDs should be deterministic for the same CRM id."""
     first = deterministic_entity_uuid("contact", "c1")
     second = deterministic_entity_uuid("contact", "c1")
     assert first == second
 
 
 def test_snapshot_to_synthesis_text_contact() -> None:
+    """Contact synthesis text should include profile fields."""
     snapshot = ContactSnapshot(
         crm_id="c1",
         display_name="Jane Doe",
@@ -62,20 +67,24 @@ def test_snapshot_to_synthesis_text_contact() -> None:
 
 
 def test_is_graphiti_configured_false_when_disabled() -> None:
-    from libs.shared_config.app_settings import SharedAppSettings, GraphitiSettings
+    """Graphiti should be unconfigured when disabled in settings."""
+    from libs.shared_config.app_settings import GraphitiSettings, SharedAppSettings
 
     settings = SharedAppSettings()
     settings.graphiti = GraphitiSettings(enabled=False)
     assert is_graphiti_configured(settings) is False
 
 
-def test_falkordb_entity_attributes_flattens_nested_fields() -> None:
+def test_falkordb_attrs_flattens_nested() -> None:
+    """Nested snapshot fields should be flattened for FalkorDB."""
     snapshot = ContactSnapshot(
         crm_id="c1",
         display_name="Jane Doe",
         email="jane@example.com",
         tags=["vip", "legal"],
-        phones=[PhoneEntry(phone_number="555", phone_isd_code="+1", label="mobile", is_primary=True)],
+        phones=[
+            PhoneEntry(phone_number="555", phone_isd_code="+1", label="mobile", is_primary=True)
+        ],
         notes=[NoteEntry(title="Note", content="Follow up")],
         linked_companies=[
             LinkedCompanyRef(company_id="co-1", name="Acme", industry="Tech", is_primary=True)
@@ -104,7 +113,10 @@ def test_falkordb_entity_attributes_flattens_nested_fields() -> None:
 
 
 def test_custom_fields_from_resolved_dicts() -> None:
-    from libs.shared_utils.graphiti_snapshot_builders import _custom_fields_from_resolved
+    """Resolved custom-field dicts should become snapshot entries."""
+    from libs.shared_utils.graphiti_snapshot_builders import (
+        _custom_fields_from_resolved,
+    )
 
     resolved = [{"label": "Insurer", "field_key": "insurer", "value": "ACKO"}]
     fields = _custom_fields_from_resolved(resolved)
@@ -113,7 +125,8 @@ def test_custom_fields_from_resolved_dicts() -> None:
     assert fields[0].value == "ACKO"
 
 
-def test_work_history_entry_display_line_current_vs_past() -> None:
+def test_work_history_line_current_vs_past() -> None:
+    """Work history lines should use works at vs worked at."""
     current = WorkHistoryEntry(
         job_title="Engineer",
         company="Acme",
@@ -132,6 +145,7 @@ def test_work_history_entry_display_line_current_vs_past() -> None:
 
 
 def test_work_history_display_lines_skips_empty() -> None:
+    """Empty work-history rows should be omitted from display lines."""
     lines = work_history_display_lines(
         [
             WorkHistoryEntry(company="SoloCo", current=False),
@@ -141,7 +155,8 @@ def test_work_history_display_lines_skips_empty() -> None:
     assert lines == ["worked at SoloCo"]
 
 
-def test_snapshot_to_synthesis_text_separates_crm_and_work_history() -> None:
+def test_synthesis_text_separates_crm_work() -> None:
+    """Synthesis text should separate CRM companies from work history."""
     snapshot = ContactSnapshot(
         crm_id="c1",
         display_name="Jane Doe",
