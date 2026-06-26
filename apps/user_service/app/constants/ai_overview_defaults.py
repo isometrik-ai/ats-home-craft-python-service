@@ -3,8 +3,8 @@
 These strings are **agent prompts** (instructions passed to the LLM when generating
 an AI Overview). They are not Supermemory search queries.
 
-Supermemory retrieval uses fixed search query templates in
-``org_memory_query_service``. Stored ``overview_prompts`` are used there as the
+Entity-scoped retrieval loads the canonical Graphiti snapshot for the requested
+``entity_id`` (no embedding search). Stored ``overview_prompts`` are used as the
 LLM system prompt for synthesis (per entity type). ``{{entity_name}}`` is
 replaced with the record display name from the request.
 """

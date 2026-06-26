@@ -18,6 +18,9 @@ from libs.shared_utils.graphiti_crm_models import (
     work_history_entry_display_line,
 )
 from libs.shared_utils.graphiti_service import (
+    EntityGraphContext,
+    _coerce_string_list,
+    _parse_snapshot_from_json,
     container_tag_for_organization,
     is_graphiti_configured,
     snapshot_to_synthesis_text,
@@ -183,3 +186,42 @@ def test_synthesis_text_separates_crm_work() -> None:
     assert "Engineer worked at Past Inc" in text
     assert "Lead works at Acme CRM" in text
     assert "## Companies" not in text
+
+
+def test_entity_graph_context_supplement_markdown() -> None:
+    """Supplement markdown includes inbound emails and association facts."""
+    context = EntityGraphContext(
+        snapshot=None,
+        edge_facts=["Jane is associated with CRM company Acme (co-1)"],
+        email_bodies=["### Email — Hello\nFrom: jane@example.com"],
+    )
+    markdown = context.supplement_markdown()
+    assert "Inbound emails" in markdown
+    assert "jane@example.com" in markdown
+    assert "Graph associations" in markdown
+    assert "Acme" in markdown
+
+
+def test_coerce_string_list_dedupes() -> None:
+    """FalkorDB list fields are normalized to unique non-empty strings."""
+    assert _coerce_string_list(["a", "a", "", None, "b"]) == ["a", "b"]
+
+
+def test_parse_snapshot_from_json_contact() -> None:
+    """Snapshot JSON is parsed into a typed contact snapshot."""
+    snapshot = ContactSnapshot(
+        crm_id="c1",
+        display_name="Jane",
+        metadata=CrmMetadata(
+            entity_type="contact",
+            entity_id="c1",
+            organization_id="org-1",
+            status="active",
+            display_name="Jane",
+            updated_at=1,
+        ),
+    )
+    parsed = _parse_snapshot_from_json(snapshot.model_dump_json(), crm_type="contact")
+    assert parsed is not None
+    assert parsed.crm_id == "c1"
+    assert parsed.display_name == "Jane"

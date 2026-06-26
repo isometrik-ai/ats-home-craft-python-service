@@ -28,6 +28,7 @@ from libs.shared_utils.graphiti_crm_models import (
     CrmEntityType,
     CrmSnapshot,
     LeadSnapshot,
+    custom_id_for_entity,
     deterministic_entity_uuid,
     deterministic_episode_uuid,
     entity_label_for_crm_type,
@@ -177,6 +178,85 @@ class GraphitiSearchHit:
     id: str
     text: str
     metadata: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class EntityGraphContext:
+    """Entity-scoped graph payload loaded in one FalkorDB round trip."""
+
+    snapshot: CrmSnapshot | None
+    edge_facts: list[str]
+    email_bodies: list[str]
+
+    def supplement_markdown(self) -> str:
+        """Render inbound emails and association facts for LLM context."""
+        sections: list[str] = []
+        if self.email_bodies:
+            sections.append("## Inbound emails\n" + "\n\n".join(self.email_bodies))
+        if self.edge_facts:
+            sections.append(
+                "## Graph associations\n" + "\n".join(f"- {fact}" for fact in self.edge_facts)
+            )
+        return "\n\n".join(sections)
+
+    @property
+    def has_data(self) -> bool:
+        """Return True when any snapshot, email, or edge fact is present."""
+        return self.snapshot is not None or bool(self.email_bodies) or bool(self.edge_facts)
+
+
+_ENTITY_GRAPH_CONTEXT_QUERY = """
+OPTIONAL MATCH (snap:Episodic {uuid: $snapshot_episode_uuid})
+WHERE snap IS NULL OR snap.group_id = $group_id
+OPTIONAL MATCH (n:Entity {uuid: $entity_uuid})
+WHERE n IS NULL OR n.group_id = $group_id
+OPTIONAL MATCH (n)-[rel:RELATES_TO]-(:Entity)
+WHERE rel IS NULL OR rel.group_id = $group_id
+WITH snap.content AS snapshot_content, collect(DISTINCT rel.fact) AS raw_edge_facts
+OPTIONAL MATCH (mail:Episodic)
+WHERE mail.group_id = $group_id
+  AND mail.name STARTS WITH 'email_'
+  AND mail.content CONTAINS $entity_marker
+WITH snapshot_content, raw_edge_facts, mail.content AS email_content, mail.valid_at AS email_valid_at
+ORDER BY email_valid_at ASC
+WITH snapshot_content, raw_edge_facts, collect(DISTINCT email_content) AS raw_email_bodies
+RETURN snapshot_content, raw_edge_facts, raw_email_bodies
+"""
+
+
+def _coerce_string_list(raw: Any) -> list[str]:
+    """Return deduplicated non-empty strings from a FalkorDB list field."""
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    items: list[str] = []
+    for value in raw:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        items.append(text)
+    return items
+
+
+def _parse_snapshot_from_json(
+    raw_content: Any,
+    *,
+    crm_type: CrmEntityType,
+) -> CrmSnapshot | None:
+    """Parse a CRM snapshot JSON episodic body."""
+    content = str(raw_content or "").strip()
+    if not content:
+        return None
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    if crm_type == "contact":
+        return ContactSnapshot.model_validate(data)
+    if crm_type == "company":
+        return CompanySnapshot.model_validate(data)
+    return LeadSnapshot.model_validate(data)
 
 
 def _snapshot_crm_type(snapshot: CrmSnapshot) -> CrmEntityType:
@@ -514,23 +594,69 @@ class GraphitiCrmService:
         crm_id: str,
     ) -> CrmSnapshot | None:
         """Load latest JSON snapshot episode for a CRM entity."""
-        name = snapshot_episode_name(crm_type, crm_id)
-        episode_uuid = deterministic_episode_uuid(name)
+        context = await self.get_entity_graph_context(
+            group_id=group_id,
+            crm_type=crm_type,
+            crm_id=crm_id,
+        )
+        return context.snapshot
+
+    async def get_entity_graph_context(
+        self,
+        *,
+        group_id: str,
+        crm_type: CrmEntityType,
+        crm_id: str,
+    ) -> EntityGraphContext:
+        """Load snapshot JSON, inbound emails, and edge facts for one CRM entity.
+
+        Uses a single FalkorDB query scoped by deterministic UUIDs and
+        ``crm:{type}:{id}`` markers (no embedding search).
+        """
+        empty = EntityGraphContext(snapshot=None, edge_facts=[], email_bodies=[])
+        if not is_graphiti_initialized():
+            return empty
+
+        entity_uuid = deterministic_entity_uuid(crm_type, crm_id)
+        snapshot_episode_uuid = deterministic_episode_uuid(snapshot_episode_name(crm_type, crm_id))
+        entity_marker = custom_id_for_entity(crm_type, crm_id)
+
         try:
-            episode = await self._graphiti.nodes.episode.get_by_uuid(episode_uuid)
-        except NodeNotFoundError:
-            return None
-        if episode.group_id != group_id:
-            return None
-        try:
-            data = json.loads(episode.content)
-        except json.JSONDecodeError:
-            return None
-        if crm_type == "contact":
-            return ContactSnapshot.model_validate(data)
-        if crm_type == "company":
-            return CompanySnapshot.model_validate(data)
-        return LeadSnapshot.model_validate(data)
+            driver = get_driver()
+            result = await driver.execute_query(
+                _ENTITY_GRAPH_CONTEXT_QUERY,
+                group_id=group_id,
+                entity_uuid=entity_uuid,
+                snapshot_episode_uuid=snapshot_episode_uuid,
+                entity_marker=entity_marker,
+            )
+        except Exception:
+            logger.warning(
+                "graphiti_entity_context_load_failed group_id=%s crm_type=%s crm_id=%s",
+                group_id,
+                crm_type,
+                crm_id,
+                exc_info=True,
+            )
+            return empty
+
+        records = result[0] if result else []
+        if not records:
+            return empty
+
+        record = records[0]
+        if not isinstance(record, dict):
+            return empty
+
+        snapshot = _parse_snapshot_from_json(
+            record.get("snapshot_content"),
+            crm_type=crm_type,
+        )
+        return EntityGraphContext(
+            snapshot=snapshot,
+            edge_facts=_coerce_string_list(record.get("raw_edge_facts")),
+            email_bodies=_coerce_string_list(record.get("raw_email_bodies")),
+        )
 
     def resolve_entity_uuid(self, *, crm_type: CrmEntityType, crm_id: str) -> str:
         """Return the deterministic Graphiti entity UUID for a CRM record."""

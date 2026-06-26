@@ -49,7 +49,7 @@ async def post_org_memory_query(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Graphiti hybrid search + snapshot context → grounded answer (OpenAI)."""
+    """Graphiti entity snapshot → grounded answer (OpenAI). No embedding search."""
     user_context = await extract_user_context(current_user, db_connection)
     await require_org_memory_query_access(
         db_connection=db_connection,

@@ -1,8 +1,6 @@
-"""Natural-language CRM Q&A scoped to one org via Graphiti + OpenAI."""
+"""Natural-language CRM Q&A scoped to one org via Graphiti snapshot + OpenAI."""
 
 from __future__ import annotations
-
-import asyncio
 
 import asyncpg
 
@@ -20,7 +18,6 @@ from libs.shared_config.app_settings import shared_settings
 from libs.shared_utils.graphiti_crm_models import CrmEntityType
 from libs.shared_utils.graphiti_service import (
     GraphitiCrmService,
-    GraphitiSearchHit,
     container_tag_for_organization,
     snapshot_to_synthesis_text,
 )
@@ -29,39 +26,17 @@ from libs.shared_utils.openai_chat_service import create_chat_completion
 
 logger = get_logger("org_memory_query_service")
 
-_INTENT_MAX_TOKENS = 2048
 _SYNTH_MAX_TOKENS = 4096
 _SYNTH_CONTEXT_CHAR_LIMIT = 14_000
-_LOOKUP_SEARCH_LIMIT = 25
-_AGGREGATION_SEARCH_LIMIT = 50
-_MAX_SYNTH_ENTITY_SNIPPETS = 10
-_ENTITY_HEADER_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("# Contact:", "contact"),
-    ("# Company:", "company"),
-    ("# Lead:", "lead"),
-)
-_STRUCTURED_SECTION_MARKERS = ("## Profile", "## Companies", "## CRM company associations")
-
-# ---------------------------------------------------------------------------
-# Hardcoded search query templates
-# ---------------------------------------------------------------------------
-# Three queries per lookup give broad semantic coverage:
-#   1. Identity recall — who the entity is
-#   2. Notes / email signals — what has been said and committed
-#   3. Leads / company associations — pipeline and org context
-# {name} is substituted at runtime with the entity display name or user message.
-_DEFAULT_QUERY_TEMPLATES: tuple[str, str, str] = (
-    "{name}",
-    "{name} notes emails follow-up objections interests business",
-    "{name} pipeline stage company association lead",
-)
-
+_NO_DATA_BY_ENTITY_TYPE: dict[str, str] = {
+    "contact": "We don't have data for this contact.",
+    "company": "We don't have data for this company.",
+    "lead": "We don't have data for this lead.",
+}
+_DEFAULT_NO_DATA_MESSAGE = "We don't have data for this record."
 _ENTITY_NAME_PLACEHOLDER = "{{entity_name}}"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 def _resolve_overview_entity_type(entity_type: str | None) -> EntityOverviewType:
     """Map request entity_type to the overview prompt key (defaults to contact)."""
     normalized = (entity_type or "").strip().lower()
@@ -111,17 +86,11 @@ def _build_synth_user_message(
     if entity_id and entity_type:
         parts.append(f"Answer only about this CRM {entity_type} (id {entity_id}).")
     parts.append(f"Question: {user_message}")
-    if notes:
-        parts.append(
-            "Use only the CRM data below. Follow the system instructions for "
-            "sections and format.\n\n"
-            f"CRM data:\n{notes}"
-        )
-    else:
-        parts.append(
-            "No matching CRM data was retrieved. "
-            "Reply in one short neutral sentence that the information is not available."
-        )
+    parts.append(
+        "Use only the CRM data below. Follow the system instructions for "
+        "sections and format.\n\n"
+        f"CRM data:\n{notes}"
+    )
     return "\n\n".join(parts)
 
 
@@ -138,14 +107,18 @@ async def _load_effective_ai_overview_settings(
     return OrganizationService._resolve_effective_ai_overview_settings(settings)
 
 
-def _build_hardcoded_queries(entity_name: str) -> list[str]:
-    """Return three Supermemory search queries for ``entity_name``.
+def _no_data_message(entity_type: str | None) -> str:
+    """Return a stable user-facing message when no CRM data exists for the scope."""
+    normalized = (entity_type or "").strip().lower()
+    return _NO_DATA_BY_ENTITY_TYPE.get(normalized, _DEFAULT_NO_DATA_MESSAGE)
 
-    Replaces the LLM intent planner for entity-scoped lookups. The three templates
-    cover: identity recall, notes/email signals, and pipeline/company context.
-    """
-    name = entity_name.strip()
-    return [template.format(name=name) for template in _DEFAULT_QUERY_TEMPLATES]
+
+def _normalize_crm_type(entity_type: str | None) -> CrmEntityType | None:
+    """Map API entity type strings to canonical CRM entity types."""
+    normalized = (entity_type or "").strip().lower()
+    if normalized in ("contact", "company", "lead"):
+        return normalized  # type: ignore[return-value]
+    return None
 
 
 def _snapshot_section_sort_key(heading: str) -> int:
@@ -191,237 +164,8 @@ def _prioritize_intel_sections_in_snapshot(text: str) -> str:
     return "\n\n".join(parts)
 
 
-def _dedupe_hits(hits: list[GraphitiSearchHit]) -> list[GraphitiSearchHit]:
-    """Return hits in first-seen order, one row per Graphiti hit id."""
-    seen: set[str] = set()
-    ordered: list[GraphitiSearchHit] = []
-    for hit in hits:
-        if hit.id in seen:
-            continue
-        seen.add(hit.id)
-        ordered.append(hit)
-    return ordered
-
-
-def _drop_deleted_and_empty(hits: list[GraphitiSearchHit]) -> list[GraphitiSearchHit]:
-    """Omit empty text and tombstone records (metadata status deleted)."""
-    kept: list[GraphitiSearchHit] = []
-    for hit in hits:
-        if not hit.text.strip():
-            continue
-        meta = hit.metadata or {}
-        if str(meta.get("status") or "").lower() == "deleted":
-            continue
-        kept.append(hit)
-    return kept
-
-
-def _entity_key_from_header(text: str) -> str | None:
-    """Parse # Contact: / # Company: / # Lead: header when metadata is missing."""
-    trimmed = text.lstrip()
-    for prefix, kind in _ENTITY_HEADER_PREFIXES:
-        if trimmed.startswith(prefix):
-            name = trimmed[len(prefix) :].strip()[:120]
-            if name:
-                return f"{kind}:{name}"
-    return None
-
-
-def _entity_key_from_hit(hit: GraphitiSearchHit) -> str | None:
-    """Stable key per CRM record so fragments collapse to one richest snippet."""
-    meta = hit.metadata or {}
-    entity_id = str(meta.get("entity_id") or "").strip()
-    entity_type = str(meta.get("entity_type") or "").strip().lower()
-    if entity_id and entity_type:
-        return f"{entity_type}:{entity_id}"
-    return _entity_key_from_header(hit.text)
-
-
-def _hit_quality_score(text: str) -> int:
-    """Prefer full CRM markdown snapshots over short extracted memory lines."""
-    score = len(text)
-    if not text:
-        return score
-    trimmed = text.lstrip()
-    for prefix, _ in _ENTITY_HEADER_PREFIXES:
-        if trimmed.startswith(prefix):
-            score += 10_000
-            break
-    if "## Profile" in text:
-        score += 2_000
-    for marker in (
-        "## Companies",
-        "## CRM company associations",
-        "## Work history",
-        "## Phones",
-        "## Social",
-        "## Tags",
-        "## Custom fields",
-    ):
-        if marker in text:
-            score += 500
-    return score
-
-
-def _is_authoritative_crm_snapshot(hit: GraphitiSearchHit) -> bool:
-    """True when the hit is a CRM sync snapshot header, not a short extracted memory line."""
-    trimmed = hit.text.lstrip()
-    for prefix, _ in _ENTITY_HEADER_PREFIXES:
-        if trimmed.startswith(prefix):
-            return any(marker in hit.text for marker in _STRUCTURED_SECTION_MARKERS)
-    return False
-
-
-def _metadata_updated_at(hit: GraphitiSearchHit) -> int:
-    """Unix updated_at from sync metadata (0 when missing)."""
-    meta = hit.metadata or {}
-    raw = meta.get("updated_at")
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return int(raw)
-    return 0
-
-
-def _sync_generation_hits(hits: list[GraphitiSearchHit]) -> list[GraphitiSearchHit]:
-    """Return every search hit from the newest CRM sync generation for one entity.
-
-    Hybrid search often returns multiple chunks of the same document. Keeping only the
-    highest-scoring chunk dropped Notes, pipeline, and profile sections in sibling
-    chunks. When updated_at is present, all hits at that timestamp are merged;
-    otherwise only scored snapshot fragments are used.
-    """
-    snapshots = [hit for hit in hits if _is_authoritative_crm_snapshot(hit)]
-    if not snapshots:
-        return []
-    newest = max(_metadata_updated_at(hit) for hit in snapshots)
-    if newest > 0:
-        return [hit for hit in hits if _metadata_updated_at(hit) == newest]
-    return snapshots
-
-
-def _merge_unique_snippet_texts(hits: list[GraphitiSearchHit]) -> str:
-    """Join hit texts in quality order, skipping exact duplicates."""
-    ordered = sorted(hits, key=lambda hit: _hit_quality_score(hit.text), reverse=True)
-    seen: set[str] = set()
-    parts: list[str] = []
-    for hit in ordered:
-        text = hit.text.strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        parts.append(text)
-    return "\n\n".join(parts)
-
-
-def _should_append_supplemental_fragment(text: str, base: str) -> bool:
-    """Allow extra search chunks that add detail without stale one-line associations."""
-    if not text or text in base:
-        return False
-    if len(text) < 150 and not text.lstrip().startswith("#"):
-        for marker in _STRUCTURED_SECTION_MARKERS:
-            if marker in base:
-                return False
-    return True
-
-
-def _metadata_filters_for_entity(
-    entity_type: str,
-    entity_id: str,
-) -> dict[str, object]:
-    """Supermemory metadata filter matching sync _base_metadata fields."""
-    return {
-        "AND": [
-            {"key": "entity_type", "value": entity_type},
-            {"key": "entity_id", "value": entity_id},
-        ]
-    }
-
-
-def _merge_entity_snippets(hits: list[GraphitiSearchHit]) -> str:
-    """Combine search fragments for one CRM record.
-
-    When sync snapshots exist, merge every chunk from the newest updated_at so hybrid
-    search recall is not truncated to a single section. Short unstructured lines from
-    older extracted memories (e.g. removed company associations) are still excluded.
-    """
-    snapshot_hits = _sync_generation_hits(hits)
-    if snapshot_hits:
-        sync_ids = {hit.id for hit in snapshot_hits}
-        base = _merge_unique_snippet_texts(snapshot_hits)
-        extras: list[str] = []
-        for hit in sorted(hits, key=lambda h: _hit_quality_score(h.text), reverse=True):
-            if hit.id in sync_ids:
-                continue
-            text = hit.text.strip()
-            if not _should_append_supplemental_fragment(text, base):
-                continue
-            extras.append(text)
-        if extras:
-            return base + "\n\n" + "\n\n".join(extras)
-        return base
-
-    return _merge_unique_snippet_texts(hits)
-
-
-def _collapse_hits_by_entity(hits: list[GraphitiSearchHit]) -> list[GraphitiSearchHit]:
-    """Merge fragments per contact/company/lead instead of dropping smaller chunks."""
-    groups: dict[str, list[GraphitiSearchHit]] = {}
-    ungrouped: list[GraphitiSearchHit] = []
-
-    for hit in hits:
-        key = _entity_key_from_hit(hit)
-        if not key:
-            ungrouped.append(hit)
-            continue
-        groups.setdefault(key, []).append(hit)
-
-    merged: list[GraphitiSearchHit] = []
-    for key, group in groups.items():
-        combined = _merge_entity_snippets(group)
-        if not combined:
-            continue
-        merged.append(
-            GraphitiSearchHit(
-                id=key,
-                text=combined,
-                metadata=group[0].metadata,
-            )
-        )
-
-    merged.extend(ungrouped)
-    merged.sort(key=lambda hit: _hit_quality_score(hit.text), reverse=True)
-    return merged[:_MAX_SYNTH_ENTITY_SNIPPETS]
-
-
-def _unique_graph_fact_lines(hits: list[GraphitiSearchHit]) -> list[str]:
-    """Return deduplicated short fact lines from hybrid search edge hits."""
-    seen: set[str] = set()
-    facts: list[str] = []
-    for hit in hits:
-        text = hit.text.strip()
-        if not text or text.startswith("{"):
-            continue
-        if text in seen:
-            continue
-        seen.add(text)
-        facts.append(text)
-    return facts
-
-
-def _normalize_crm_type(entity_type: str | None) -> CrmEntityType | None:
-    """Map API entity type strings to canonical CRM entity types."""
-    normalized = (entity_type or "").strip().lower()
-    if normalized in ("contact", "company", "lead"):
-        return normalized  # type: ignore[return-value]
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
-
-
 class OrgMemoryQueryService:
-    """Graphiti focal search + snapshot JSON → markdown AI Overview."""
+    """Entity-scoped Graphiti snapshot JSON → markdown AI Overview."""
 
     def __init__(self, *, graphiti: GraphitiCrmService | None = None) -> None:
         self._graphiti = graphiti or GraphitiCrmService()
@@ -436,80 +180,53 @@ class OrgMemoryQueryService:
             return await _load_effective_ai_overview_settings(db_connection, organization_id)
         return OrganizationService.default_ai_overview_settings()
 
-    async def _resolve_entity_context(
+    async def _load_entity_overview_context(
         self,
         *,
         organization_id: str,
-        entity_id: str | None,
+        entity_id: str,
         entity_type: str | None,
         user_message: str,
-    ) -> tuple[str | None, str, str, str | None]:
-        """Return group_id, snapshot text, entity name, and optional center node UUID."""
+    ) -> tuple[str, str, str]:
+        """Load snapshot markdown, supplement markdown, and display name for one entity."""
         group_id = container_tag_for_organization(organization_id)
         crm_type = _normalize_crm_type(entity_type)
-        center_node_uuid: str | None = None
-        snapshot_text = ""
-        entity_name = user_message
+        if not crm_type:
+            return "", "", user_message
 
-        if not (entity_id and crm_type):
-            return group_id, snapshot_text, entity_name, center_node_uuid
-
-        snapshot = await self._graphiti.get_snapshot_episode(
+        graph_context = await self._graphiti.get_entity_graph_context(
             group_id=group_id,
             crm_type=crm_type,
             crm_id=entity_id.strip(),
         )
+
+        snapshot_text = ""
+        entity_name = user_message
+        snapshot = graph_context.snapshot
         if snapshot is not None and str(snapshot.metadata.status).lower() != "deleted":
             snapshot_text = snapshot_to_synthesis_text(snapshot)
             if snapshot.display_name:
                 entity_name = snapshot.display_name
-        center_node_uuid = self._graphiti.resolve_entity_uuid(
-            crm_type=crm_type,
-            crm_id=entity_id.strip(),
-        )
-        return group_id, snapshot_text, entity_name, center_node_uuid
 
-    async def _search_graph_facts(
-        self,
-        *,
-        group_id: str,
-        entity_name: str,
-        center_node_uuid: str | None,
-    ) -> list[GraphitiSearchHit]:
-        """Run hardcoded hybrid searches and return deduplicated graph hits."""
-        search_queries = _build_hardcoded_queries(entity_name)
-        all_search_sets = await asyncio.gather(
-            *[
-                self._graphiti.search_hybrid(
-                    query=query,
-                    group_id=group_id,
-                    center_node_uuid=center_node_uuid,
-                    limit=_LOOKUP_SEARCH_LIMIT,
-                )
-                for query in search_queries
-            ]
-        )
-        raw_hits: list[GraphitiSearchHit] = []
-        for subset in all_search_sets:
-            raw_hits.extend(subset)
-        return _drop_deleted_and_empty(_dedupe_hits(raw_hits))
+        supplement_text = graph_context.supplement_markdown()
+        return snapshot_text, supplement_text, entity_name
 
     @staticmethod
     def _build_notes_context(
         snapshot_text: str,
-        fact_lines: list[str],
+        supplement_text: str = "",
     ) -> tuple[str, bool]:
-        """Assemble truncated synthesis notes from snapshot text and graph facts."""
-        notes_parts: list[str] = []
-        if snapshot_text:
-            notes_parts.append(_prioritize_intel_sections_in_snapshot(snapshot_text))
-        if fact_lines:
-            notes_parts.append("## Graph facts\n" + "\n".join(f"- {line}" for line in fact_lines))
+        """Assemble CRM context from the entity snapshot plus entity-scoped graph supplements."""
+        parts: list[str] = []
+        if snapshot_text.strip():
+            parts.append(_prioritize_intel_sections_in_snapshot(snapshot_text))
+        if supplement_text.strip():
+            parts.append(supplement_text.strip())
 
-        if not notes_parts:
+        if not parts:
             return "", False
 
-        notes = "\n\n---\n\n".join(notes_parts)
+        notes = "\n\n---\n\n".join(parts)
         if len(notes) > _SYNTH_CONTEXT_CHAR_LIMIT:
             return notes[:_SYNTH_CONTEXT_CHAR_LIMIT], True
         return notes, False
@@ -528,29 +245,34 @@ class OrgMemoryQueryService:
         model = shared_settings.org_memory_llm_model
         overview_settings = await self._load_overview_settings(db_connection, organization_id)
         prompt_entity_type = _resolve_overview_entity_type(entity_type)
+        crm_type = _normalize_crm_type(entity_type)
 
-        group_id, snapshot_text, entity_name, center_node_uuid = await self._resolve_entity_context(
+        if not (entity_id and entity_id.strip() and crm_type):
+            logger.info(
+                "org_memory_query_no_scope organization_id=%s entity_id=%s entity_type=%s",
+                organization_id,
+                entity_id,
+                entity_type,
+            )
+            return _no_data_message(entity_type)
+
+        snapshot_text, supplement_text, entity_name = await self._load_entity_overview_context(
             organization_id=organization_id,
-            entity_id=entity_id,
+            entity_id=entity_id.strip(),
             entity_type=entity_type,
             user_message=user_message,
         )
 
-        cleaned_hits = await self._search_graph_facts(
-            group_id=group_id,
-            entity_name=entity_name,
-            center_node_uuid=center_node_uuid,
-        )
-        logger.info(
-            "org_memory_search organization_id=%s entity_id=%s raw_hits=%s",
-            organization_id,
-            entity_id,
-            len(cleaned_hits),
-        )
+        if not snapshot_text.strip() and not supplement_text.strip():
+            logger.info(
+                "org_memory_query_no_data organization_id=%s entity_id=%s entity_type=%s",
+                organization_id,
+                entity_id.strip(),
+                crm_type,
+            )
+            return _no_data_message(entity_type)
 
-        fact_lines = _unique_graph_fact_lines(cleaned_hits)
-        notes, notes_truncated = self._build_notes_context(snapshot_text, fact_lines)
-        usable_count = (1 if snapshot_text else 0) + len(fact_lines)
+        notes, notes_truncated = self._build_notes_context(snapshot_text, supplement_text)
 
         synth_system = _build_synth_system_prompt(
             entity_type=entity_type,
@@ -576,22 +298,16 @@ class OrgMemoryQueryService:
             )
         ).strip()
 
-        used_fallback = False
-        if not answer:
-            used_fallback = True
-            answer = (
-                "No matching information is available."
-                if not notes
-                else "No answer could be formed from the available records."
-            )
+        used_fallback = not bool(answer)
+        if used_fallback:
+            answer = _no_data_message(entity_type)
 
         logger.info(
-            "org_memory_query organization_id=%s prompt_entity_type=%s search_hits=%s "
-            "entities=%s notes_len=%s notes_truncated=%s used_fallback=%s answer_len=%s",
+            "org_memory_query organization_id=%s entity_id=%s prompt_entity_type=%s "
+            "notes_len=%s notes_truncated=%s used_fallback=%s answer_len=%s",
             organization_id,
+            entity_id,
             prompt_entity_type,
-            len(cleaned_hits),
-            usable_count,
             len(notes),
             notes_truncated,
             used_fallback,
