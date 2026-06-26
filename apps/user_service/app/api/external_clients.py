@@ -648,6 +648,53 @@ async def external_get_company_details(
     )
 
 
+@handle_api_exceptions("external get contact details by email")
+@router.get(
+    "/contacts/by-email",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get contact details by email (external auth)",
+    description=(
+        "Fetch a single person client (contact) by email for the organization resolved from "
+        "Isometrik credentials (`licenseKey`/`appSecret`). Email matching is case-insensitive."
+    ),
+    responses={
+        http_status.HTTP_200_OK: {"description": "Contact retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Client not found"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+    },
+)
+@limiter.limit("200/minute")
+async def external_get_contact_details_by_email(
+    request: Request,
+    email: str = Query(..., min_length=3, description="Contact email address"),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    organization_id: str = Depends(get_organization_context),
+):
+    """External get contact details by email endpoint (Isometrik credential auth)."""
+    service = ContactsService(
+        db_connection=db_connection,
+        user_context=_external_user_context(
+            organization_id=organization_id,
+            actor_email=getattr(request.state, "external_actor_email", None),
+        ),
+    )
+    details = await service.get_contact_details_by_email(email=email)
+    return success_response(
+        request=request,
+        message_key="clients.success.client_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=ContactDetailsResponse.model_validate(details).model_dump(
+            exclude_none=True,
+            mode="json",
+        ),
+    )
+
+
 @handle_api_exceptions("external get contact details")
 @router.get(
     "/contacts/{client_id}",
