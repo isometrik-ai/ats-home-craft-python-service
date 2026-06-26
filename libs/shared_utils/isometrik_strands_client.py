@@ -66,9 +66,9 @@ def _strands_timeout() -> httpx.Timeout:
 
 
 async def init_strands_http_client() -> None:
-    """Eagerly create the Strands HTTP client at application startup."""
-    if not shared_settings.isometrik.strands_auth_token.strip():
-        logger.info("strands_http_client_init_skipped_not_configured")
+    """Eagerly create the Isometrik admin HTTP client at application startup."""
+    if not shared_settings.isometrik.is_enabled:
+        logger.info("strands_http_client_init_skipped_disabled")
         return
     await get_strands_http_client()
     logger.info("strands_http_client_initialized")

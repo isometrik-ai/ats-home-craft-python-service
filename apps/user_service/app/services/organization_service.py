@@ -50,6 +50,9 @@ from apps.user_service.app.services.ai_overview_settings_ops import (
     parse_stored_ai_overview_settings,
     resolve_effective_ai_overview_settings,
 )
+from apps.user_service.app.services.isometrik_pulse_agent_service import (
+    IsometrikPulseAgentService,
+)
 from apps.user_service.app.services.organization_memory_service import (
     effective_organization_memory_enabled,
 )
@@ -221,6 +224,19 @@ class OrganizationService:
             actor_user_id=self.user_context.user_id,
         )
 
+    async def _create_isometrik_ai_agent_best_effort(
+        self,
+        *,
+        organization_id: str,
+        isometrik_details: dict | None,
+    ) -> None:
+        """Create Pulse Agent after org create (best-effort; never raises)."""
+        await IsometrikPulseAgentService.create_for_organization_best_effort(
+            organization_id=organization_id,
+            isometrik_details=isometrik_details,
+            organization_repository=self.organization_repository,
+        )
+
     async def create_organization(
         self,
         body: NewOrganizationBody,
@@ -302,6 +318,11 @@ class OrganizationService:
             settings=settings,
         )
 
+        await self._create_isometrik_ai_agent_best_effort(
+            organization_id=organization_id,
+            isometrik_details=isometrik_details,
+        )
+
         # Match API response shape
         return {
             "organization_id": organization_id,
@@ -372,6 +393,11 @@ class OrganizationService:
             organization_name=created["name"],
             organization_website=body.company_data.website_url,
             settings=settings,
+        )
+
+        await self._create_isometrik_ai_agent_best_effort(
+            organization_id=organization_id,
+            isometrik_details=isometrik_details,
         )
 
         return {

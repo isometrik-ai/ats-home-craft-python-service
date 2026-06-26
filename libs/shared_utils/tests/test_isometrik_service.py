@@ -8,6 +8,7 @@ import pytest
 from libs.shared_utils import isometrik_service
 from libs.shared_utils.isometrik_service import (
     ISOMETRIK_AUDIENCE,
+    create_isometrik_ai_agent,
     create_isometrik_token,
     create_isometrik_user,
 )
@@ -17,9 +18,11 @@ class _DummyIsometrikSettings:
     """Minimal settings object for Isometrik tests."""
 
     api_url = "https://isometrik.example.com"
+    admin_api_url = "https://admin-apis.isometrik.io"
     client_name = "isometrik-client"
     private_key = "test-private-key"
     token_exp_minutes = 540
+    is_enabled = True
 
 
 class _DummySharedSettings:
@@ -43,22 +46,36 @@ class _DummyResponse:
         return self._data
 
 
-class _DummyAsyncClient:
-    """Async client stub that records request parameters."""
+class _DummyContextAsyncClient:
+    """Async context-manager client stub for one-off httpx calls."""
 
     def __init__(self, calls: dict) -> None:
         self._calls = calls
         self._response = _DummyResponse({"userId": "isometrik-123"})
 
-    async def __aenter__(self) -> "_DummyAsyncClient":
+    async def __aenter__(self) -> "_DummyContextAsyncClient":
         return self
 
     async def __aexit__(self, exc_type, exc, traceback) -> None:
-        """Exit context manager."""
         return None
 
     async def post(self, url: str, json: dict, headers: dict) -> _DummyResponse:
-        """Post request."""
+        """Record POST parameters and return a stub response."""
+        self._calls["url"] = url
+        self._calls["json"] = json
+        self._calls["headers"] = headers
+        return self._response
+
+
+class _DummyAdminHttpClient:
+    """Async client stub for cached Isometrik admin HTTP client."""
+
+    def __init__(self, calls: dict) -> None:
+        self._calls = calls
+        self._response = _DummyResponse({"agentId": "agent-1"})
+
+    async def post(self, url: str, json: dict, headers: dict) -> _DummyResponse:
+        """Record POST parameters and return a stub response."""
         self._calls["url"] = url
         self._calls["json"] = json
         self._calls["headers"] = headers
@@ -74,7 +91,7 @@ async def test_create_isometrik_user_default_avatar(monkeypatch) -> None:
     monkeypatch.setattr(
         isometrik_service.httpx,
         "AsyncClient",
-        lambda *args, **kwargs: _DummyAsyncClient(calls),
+        lambda *args, **kwargs: _DummyContextAsyncClient(calls),
     )
 
     user = {
@@ -108,7 +125,7 @@ async def test_create_isometrik_user_custom_avatar(monkeypatch) -> None:
     monkeypatch.setattr(
         isometrik_service.httpx,
         "AsyncClient",
-        lambda *args, **kwargs: _DummyAsyncClient(calls),
+        lambda *args, **kwargs: _DummyContextAsyncClient(calls),
     )
 
     user = {
@@ -156,3 +173,30 @@ def test_create_isometrik_token(monkeypatch) -> None:
     assert claims["nbf"] == claims["iat"] - 1
     assert claims["exp"] == claims["iat"] + 540 * 60
     assert isinstance(claims["jti"], str)
+
+
+@pytest.mark.asyncio
+async def test_create_isometrik_ai_agent_posts_to_admin_api(monkeypatch) -> None:
+    """create_isometrik_ai_agent posts payload with org credentials."""
+    calls: dict = {}
+
+    async def _fake_admin_client() -> _DummyAdminHttpClient:
+        return _DummyAdminHttpClient(calls)
+
+    monkeypatch.setattr(
+        isometrik_service,
+        "get_strands_http_client",
+        _fake_admin_client,
+    )
+
+    result = await create_isometrik_ai_agent(
+        payload={"project_id": "project-1", "name": "Pulse Agent"},
+        app_secret="app-secret",
+        license_key="license-key",
+    )
+
+    assert result == {"agentId": "agent-1"}
+    assert calls["url"] == "/v1/ai-agent"
+    assert calls["headers"]["appsecret"] == "app-secret"
+    assert calls["headers"]["licensekey"] == "license-key"
+    assert calls["json"]["project_id"] == "project-1"

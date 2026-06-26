@@ -5,6 +5,9 @@ from apps.user_service.app.constants.ai_overview_defaults import (
     DEFAULT_CONTACT_OVERVIEW_PROMPT,
     DEFAULT_LEAD_OVERVIEW_PROMPT,
 )
+from apps.user_service.app.services.ai_overview_settings_ops import (
+    set_pulse_agent_id_in_settings,
+)
 from apps.user_service.app.services.organization_service import OrganizationService
 
 
@@ -28,6 +31,42 @@ def test_resolve_effective_merges_stored_overrides() -> None:
     assert effective.business_overview == "Healthcare SaaS"
     assert effective.overview_prompts.lead == "Custom lead prompt for {{entity_name}}"
     assert effective.overview_prompts.contact == DEFAULT_CONTACT_OVERVIEW_PROMPT
+
+
+def test_resolve_effective_includes_pulse_agent_id() -> None:
+    """Stored pulse_agent_id is returned on AI overview settings."""
+    settings = {AI_OVERVIEW_SETTINGS_KEY: {"pulse_agent_id": "6a3e9155420a8d04e3c08494"}}
+    effective = OrganizationService._resolve_effective_ai_overview_settings(settings)
+    assert effective.pulse_agent_id == "6a3e9155420a8d04e3c08494"
+
+
+def test_set_pulse_agent_id_in_settings() -> None:
+    """Pulse agent id is stored under ai_overview_settings."""
+    settings: dict = {}
+    set_pulse_agent_id_in_settings(settings, "6a3e9155420a8d04e3c08494")
+    assert settings[AI_OVERVIEW_SETTINGS_KEY]["pulse_agent_id"] == "6a3e9155420a8d04e3c08494"
+
+
+def test_merge_updates_pulse_agent_id() -> None:
+    """Organization PATCH can set or clear pulse_agent_id."""
+    settings: dict = {}
+    OrganizationService._merge_ai_overview_settings_into_settings(
+        settings,
+        {"pulse_agent_id": "6a3e9155420a8d04e3c08494"},
+    )
+    assert settings[AI_OVERVIEW_SETTINGS_KEY]["pulse_agent_id"] == "6a3e9155420a8d04e3c08494"
+
+    OrganizationService._merge_ai_overview_settings_into_settings(
+        settings,
+        {"pulse_agent_id": "new-agent-id"},
+    )
+    assert settings[AI_OVERVIEW_SETTINGS_KEY]["pulse_agent_id"] == "new-agent-id"
+
+    OrganizationService._merge_ai_overview_settings_into_settings(
+        settings,
+        {"pulse_agent_id": None},
+    )
+    assert AI_OVERVIEW_SETTINGS_KEY not in settings
 
 
 def test_merge_clears_overview_fields() -> None:
@@ -101,12 +140,14 @@ def test_update_persists_ai_overview() -> None:
         update_data={
             "ai_overview_settings": {
                 "business_overview": "HRssr org - Healthcare",
+                "pulse_agent_id": "6a3e9155420a8d04e3c08494",
                 "overview_prompts": {"lead": "Lead prompt {{entity_name}}"},
             }
         },
     )
     stored = db_payload["settings"][AI_OVERVIEW_SETTINGS_KEY]
     assert stored["business_overview"] == "HRssr org - Healthcare"
+    assert stored["pulse_agent_id"] == "6a3e9155420a8d04e3c08494"
     assert stored["overview_prompts"]["lead"] == "Lead prompt {{entity_name}}"
     assert db_payload["settings"]["organization_memory"] is True
 

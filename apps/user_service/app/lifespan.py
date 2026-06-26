@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     app_logger.info("OpenAI HTTP client startup complete")
 
     await init_strands_http_client()
-    app_logger.info("Isometrik Strands HTTP client startup complete")
+    app_logger.info("Isometrik admin HTTP client startup complete")
 
     await init_redis()
     app_logger.info("Redis client initialized successfully")
@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
         # Shutdown (if needed)
         app_logger.info("Shutting down user service application")
         await close_strands_http_client()
-        app_logger.info("Isometrik Strands HTTP client closed successfully")
+        app_logger.info("Isometrik admin HTTP client closed successfully")
         await close_openai_http_client()
         app_logger.info("OpenAI HTTP client closed successfully")
         await close_graphiti_client()
