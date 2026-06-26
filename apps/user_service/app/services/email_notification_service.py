@@ -1,44 +1,39 @@
-"""Process inbound email webhooks and append messages to the contact Supermemory document."""
+"""Process inbound email webhooks and ingest messages as Graphiti text episodes."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from email.utils import parseaddr
+from datetime import UTC, datetime
+from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any
 
 import asyncpg
 
 from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
+from apps.user_service.app.services.graphiti_sync_service import GraphitiSyncService
 from apps.user_service.app.services.organization_memory_service import (
     is_organization_memory_enabled,
-)
-from apps.user_service.app.services.supermemory_sync_service import (
-    SupermemorySyncService,
-    custom_id_for_entity,
 )
 from apps.user_service.app.utils.inbound_email_memory import (
     format_attachment_block,
     format_inbound_email_entry,
-    merge_contact_content_with_inbound_email,
 )
 from libs.shared_utils.agentmail_service import (
     AgentMailService,
     normalize_attachment_meta,
 )
-from libs.shared_utils.logger import get_logger
-from libs.shared_utils.supermemory_service import (
-    SupermemoryService,
+from libs.shared_utils.graphiti_crm_models import custom_id_for_entity
+from libs.shared_utils.graphiti_service import (
+    GraphitiCrmService,
     container_tag_for_organization,
-    is_supermemory_configured,
+    is_graphiti_configured,
 )
+from libs.shared_utils.logger import get_logger
 
 logger = get_logger("email_notification_service")
 
 MESSAGE_RECEIVED_EVENT = "message.received"
 _MAX_BODY_CHARS = 100_000
-_ENTITY_CONTEXT = (
-    "Legal CRM contact record including profile, notes, deals, and appended inbound emails."
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +48,7 @@ class InboundEmailProcessResult:
 
 @dataclass(frozen=True, slots=True)
 class InboundEmailRecord:
-    """Normalized inbound message ready to append on the contact document."""
+    """Normalized inbound message ready for Graphiti ingestion."""
 
     message_id: str
     contact_id: str
@@ -98,10 +93,10 @@ def _log_inbound_email_skip(
     message_id: str | None = None,
     custom_id: str | None = None,
 ) -> InboundEmailProcessResult:
-    """Log why Supermemory was not updated and return a skip result."""
+    """Log why Graphiti was not updated and return a skip result."""
     event_id, event_type = _webhook_event_context(webhook_body or {})
     logger.info(
-        "inbound_email_supermemory_skipped organization_id=%s reason=%s "
+        "inbound_email_graphiti_skipped organization_id=%s reason=%s "
         "event_id=%s event_type=%s contact_id=%s sender=%s message_id=%s custom_id=%s",
         organization_id,
         reason,
@@ -190,6 +185,26 @@ def _resolve_thread_id(webhook_body: dict[str, Any], message: dict[str, Any]) ->
     return message_thread or None
 
 
+def _parse_reference_time(received_at: str | None) -> datetime:
+    """Parse email timestamp for Graphiti ``reference_time``."""
+    if received_at:
+        try:
+            dt = parsedate_to_datetime(received_at)
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=UTC)
+            return dt
+        except (TypeError, ValueError):
+            try:
+                normalized = received_at.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(normalized)
+                if dt.tzinfo is None:
+                    return dt.replace(tzinfo=UTC)
+                return dt
+            except ValueError:
+                pass
+    return datetime.now(UTC)
+
+
 def build_inbound_email_record(
     *,
     webhook_body: dict[str, Any],
@@ -228,21 +243,21 @@ def build_inbound_email_record(
 
 
 class EmailNotificationService:
-    """Match inbound senders to contacts and append email content on the contact memory doc."""
+    """Match inbound senders to contacts and ingest email content into Graphiti."""
 
     def __init__(
         self,
         db_connection: asyncpg.Connection,
         *,
-        supermemory: SupermemoryService | None = None,
+        graphiti: GraphitiCrmService | None = None,
         agentmail: AgentMailService | None = None,
-        sync_service: SupermemorySyncService | None = None,
+        sync_service: GraphitiSyncService | None = None,
     ) -> None:
         self._db_connection = db_connection
         self._contacts_repo = ContactsRepository(db_connection=db_connection)
-        self._supermemory = supermemory or SupermemoryService.from_settings()
+        self._graphiti = graphiti or GraphitiCrmService()
         self._agentmail = agentmail or AgentMailService.from_settings()
-        self._sync_service = sync_service or SupermemorySyncService(supermemory=self._supermemory)
+        self._sync_service = sync_service or GraphitiSyncService(graphiti=self._graphiti)
 
     @property
     def _attachments_enabled(self) -> bool:
@@ -255,15 +270,15 @@ class EmailNotificationService:
         organization_id: str,
         webhook_body: dict[str, Any],
     ) -> InboundEmailProcessResult:
-        """Append inbound email content to the contact's Supermemory document."""
+        """Ingest inbound email content as a Graphiti text episode linked to the contact."""
         event_id, event_type = _webhook_event_context(webhook_body)
         logger.info(
             "inbound_email_processing_started organization_id=%s event_id=%s event_type=%s "
-            "supermemory_configured=%s",
+            "graphiti_configured=%s",
             organization_id,
             event_id,
             event_type,
-            is_supermemory_configured(),
+            is_graphiti_configured(),
         )
 
         if event_type not in ("-", MESSAGE_RECEIVED_EVENT):
@@ -273,10 +288,10 @@ class EmailNotificationService:
                 webhook_body=webhook_body,
             )
 
-        if not is_supermemory_configured():
+        if not is_graphiti_configured():
             return _log_inbound_email_skip(
                 organization_id=organization_id,
-                reason="supermemory_not_configured",
+                reason="graphiti_not_configured",
                 webhook_body=webhook_body,
             )
 
@@ -334,14 +349,14 @@ class EmailNotificationService:
             contact_custom_id,
         )
 
-        append_failure = await self._append_to_contact_document(
+        ingest_failure = await self._ingest_email_episode(
             organization_id=organization_id,
             record=record,
         )
-        if append_failure:
+        if ingest_failure:
             return _log_inbound_email_skip(
                 organization_id=organization_id,
-                reason=append_failure,
+                reason=ingest_failure,
                 webhook_body=webhook_body,
                 contact_id=contact_id,
                 sender_email=sender_email,
@@ -350,7 +365,7 @@ class EmailNotificationService:
             )
 
         logger.info(
-            "inbound_email_supermemory_stored organization_id=%s event_id=%s contact_id=%s "
+            "inbound_email_graphiti_stored organization_id=%s event_id=%s contact_id=%s "
             "sender=%s message_id=%s custom_id=%s",
             organization_id,
             event_id,
@@ -365,18 +380,23 @@ class EmailNotificationService:
             supermemory_document_ids=(contact_custom_id,),
         )
 
-    async def _append_to_contact_document(
+    async def _ingest_email_episode(
         self,
         *,
         organization_id: str,
         record: InboundEmailRecord,
     ) -> str | None:
-        """Rebuild CRM snapshot, append the email block, and replace the contact document.
+        """Sync contact snapshot and add a deduplicated email text episode.
 
         Returns:
             ``None`` on success, or a stable skip/failure reason string.
         """
-        contact_custom_id = custom_id_for_entity("contact", record.contact_id)
+        group_id = container_tag_for_organization(organization_id)
+        episode_name = f"email_{record.message_id}"
+
+        if await self._graphiti.episode_exists(group_id=group_id, episode_name=episode_name):
+            return "duplicate_message_id"
+
         snapshot = await self._sync_service.load_contact_snapshot(
             self._db_connection,
             organization_id=organization_id,
@@ -385,26 +405,24 @@ class EmailNotificationService:
         if snapshot is None:
             return "contact_snapshot_not_found"
 
-        base_content, metadata = snapshot
         try:
-            existing_content = await self._supermemory.get_document_content(
-                custom_id=contact_custom_id,
+            await self._sync_service.sync_entity(
+                self._db_connection,
                 organization_id=organization_id,
+                entity_type="contact",
+                entity_id=record.contact_id,
             )
         except Exception:
             logger.warning(
-                "inbound_email_supermemory_read_failed organization_id=%s contact_id=%s "
-                "message_id=%s custom_id=%s",
+                "inbound_email_contact_sync_failed organization_id=%s contact_id=%s message_id=%s",
                 organization_id,
                 record.contact_id,
                 record.message_id,
-                contact_custom_id,
                 exc_info=True,
             )
-            return "supermemory_read_failed"
 
         attachment_blocks = await self._fetch_attachment_blocks(record)
-        new_entry = format_inbound_email_entry(
+        email_body = format_inbound_email_entry(
             subject=record.subject,
             from_header=record.from_header,
             from_email=record.from_email,
@@ -415,42 +433,31 @@ class EmailNotificationService:
             body=record.body,
             attachment_blocks=attachment_blocks or None,
         )
-        merged_content, appended = merge_contact_content_with_inbound_email(
-            base_content=base_content,
-            existing_document_content=existing_content,
-            new_entry=new_entry,
-            message_id=record.message_id,
+        contact_label = snapshot.display_name or record.contact_id
+        episode_text = (
+            f"Contact: {contact_label} (crm:contact:{record.contact_id})\n"
+            f"Contact email: {record.from_email}\n\n"
+            f"{email_body}"
         )
-        if not appended:
-            return "duplicate_message_id"
 
-        logger.info(
-            "inbound_email_supermemory_upsert organization_id=%s contact_id=%s "
-            "message_id=%s custom_id=%s",
-            organization_id,
-            record.contact_id,
-            record.message_id,
-            contact_custom_id,
-        )
         try:
-            await self._supermemory.add_or_replace_document(
-                content=merged_content,
-                container_tag=container_tag_for_organization(organization_id),
-                custom_id=contact_custom_id,
-                metadata=metadata,
-                entity_context=_ENTITY_CONTEXT,
+            await self._graphiti.add_text_episode(
+                name=episode_name,
+                body=episode_text,
+                group_id=group_id,
+                reference_time=_parse_reference_time(record.received_at),
+                source_description=f"Inbound email from {record.from_email}",
             )
         except Exception:
             logger.warning(
-                "inbound_email_supermemory_write_failed organization_id=%s contact_id=%s "
-                "message_id=%s custom_id=%s",
+                "inbound_email_graphiti_write_failed organization_id=%s contact_id=%s "
+                "message_id=%s",
                 organization_id,
                 record.contact_id,
                 record.message_id,
-                contact_custom_id,
                 exc_info=True,
             )
-            return "supermemory_write_failed"
+            return "graphiti_write_failed"
         return None
 
     async def _fetch_attachment_blocks(self, record: InboundEmailRecord) -> list[str]:

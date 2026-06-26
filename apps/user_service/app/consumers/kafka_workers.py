@@ -1,7 +1,12 @@
 """Run all user_service Kafka consumers in one process.
 
-Used by the bulk-upload worker entrypoint so contacts import, CRM→Supermemory sync,
+Used by the bulk-upload worker entrypoint so contacts import, CRM→Graphiti sync,
 and post-create org enrichment share one container / ``python -m`` command.
+
+Production: run this worker as an always-on process when ``KAFKA_ENABLED`` and
+``GRAPHITI_ENABLED`` are true::
+
+    python -m apps.user_service.app.consumers.contacts_import_consumer
 """
 
 from __future__ import annotations

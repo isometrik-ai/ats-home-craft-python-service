@@ -22,9 +22,9 @@ from libs.shared_utils.openai_chat_service import (
     close_openai_http_client,
     init_openai_http_client,
 )
-from libs.shared_utils.supermemory_service import (
-    close_supermemory_http_client,
-    init_supermemory_http_client,
+from libs.shared_utils.graphiti_service import (
+    close_graphiti_client,
+    init_graphiti_client,
 )
 from libs.shared_utils.telemetry_config import telemetry_config
 from libs.shared_utils.typesense_service import (
@@ -53,9 +53,9 @@ async def lifespan(app: FastAPI):
     await get_typesense_http_client()
     app_logger.info("Typesense HTTP client initialized successfully")
 
-    # Initialize Supermemory HTTP client when enabled (connection pooled)
-    await init_supermemory_http_client()
-    app_logger.info("Supermemory HTTP client startup complete")
+    # Initialize Graphiti + FalkorDB client when enabled
+    await init_graphiti_client()
+    app_logger.info("Graphiti client startup complete")
 
     await init_openai_http_client()
     app_logger.info("OpenAI HTTP client startup complete")
@@ -78,8 +78,8 @@ async def lifespan(app: FastAPI):
         app_logger.info("Isometrik Strands HTTP client closed successfully")
         await close_openai_http_client()
         app_logger.info("OpenAI HTTP client closed successfully")
-        await close_supermemory_http_client()
-        app_logger.info("Supermemory HTTP client closed successfully")
+        await close_graphiti_client()
+        app_logger.info("Graphiti client closed successfully")
         await close_typesense_http_client()
         app_logger.info("Typesense HTTP client closed successfully")
         await close_pool()

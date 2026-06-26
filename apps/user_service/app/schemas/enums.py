@@ -451,6 +451,7 @@ class KafkaTopics(str, Enum):
     """
 
     CRM_EVENTS = "crm.events.dev"
+    CRM_GRAPHITI_DLQ = "crm.graphiti.dlq.dev"
     ORG_ENRICHMENT = "org.enrichment.dev"
 
 

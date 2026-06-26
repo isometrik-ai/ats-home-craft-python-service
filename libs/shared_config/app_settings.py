@@ -128,24 +128,36 @@ class AgentMailSettings(BaseSettings):
     request_timeout_seconds: float = config("AGENTMAIL_REQUEST_TIMEOUT_SECONDS", default=30.0)
 
 
-class SupermemorySettings(BaseSettings):
-    """Supermemory API configuration for CRM entity memory sync."""
+class GraphitiSettings(BaseSettings):
+    """Graphiti + FalkorDB configuration for CRM entity memory sync."""
 
-    api_key: str = config("SUPERMEMORY_API_KEY", default="")
-    enabled: bool = config("SUPERMEMORY_ENABLED", default=False)
-    base_url: str = config("SUPERMEMORY_BASE_URL", default="https://api.supermemory.ai")
+    enabled: bool = config("GRAPHITI_ENABLED", default=False)
+    falkor_host: str = config("FALKOR_HOST", default="localhost")
+    falkor_port: int = config("FALKOR_PORT", default=6379)
+    falkor_database: str = config("FALKOR_DATABASE", default="default_db")
+    llm_model: str = config("GRAPHITI_LLM_MODEL", default="gpt-5-nano")
+    llm_small_model: str = config("GRAPHITI_LLM_SMALL_MODEL", default="gpt-5-nano")
+    llm_temperature: float = config("GRAPHITI_LLM_TEMPERATURE", default=1.0)
+    embedding_model: str = config("GRAPHITI_EMBEDDING_MODEL", default="text-embedding-3-small")
     consumer_group_id: str = config(
-        "SUPERMEMORY_CONSUMER_GROUP_ID",
-        default="crm-supermemory-sync",
+        "GRAPHITI_CONSUMER_GROUP_ID",
+        default="crm-graphiti-sync",
     )
-    request_timeout_seconds: float = config(
-        "SUPERMEMORY_REQUEST_TIMEOUT_SECONDS",
-        default=30.0,
+    dlq_topic: str = config("GRAPHITI_DLQ_TOPIC", default="crm.graphiti.dlq.dev")
+    sync_max_retries: int = config("GRAPHITI_SYNC_MAX_RETRIES", default=3)
+    sync_retry_base_delay_seconds: float = config(
+        "GRAPHITI_SYNC_RETRY_BASE_DELAY_SECONDS",
+        default=0.5,
     )
-    num_retries: int = config("SUPERMEMORY_NUM_RETRIES", default=3)
-    retry_interval_seconds: float = config(
-        "SUPERMEMORY_RETRY_INTERVAL_SECONDS",
-        default=1.0,
+    consumer_max_concurrency: int = config("GRAPHITI_CONSUMER_MAX_CONCURRENCY", default=4)
+    strict_index_verify: bool = config("GRAPHITI_STRICT_INDEX_VERIFY", default=False)
+    sync_timeout_seconds: float = config("GRAPHITI_SYNC_TIMEOUT_SECONDS", default=60.0)
+    crm_events_topic: str = config("GRAPHITI_CRM_EVENTS_TOPIC", default="crm.events.dev")
+    startup_backfill_enabled: bool = config("GRAPHITI_STARTUP_BACKFILL_ENABLED", default=False)
+    startup_backfill_limit: int = config("GRAPHITI_STARTUP_BACKFILL_LIMIT", default=500)
+    startup_backfill_mode: str = config(
+        "GRAPHITI_STARTUP_BACKFILL_MODE",
+        default="pending",
     )
 
 
@@ -217,7 +229,7 @@ class SharedAppSettings(BaseSettings):
     cloudflare_r2: CloudflareR2Settings = CloudflareR2Settings()
     typesense: TypesenseSettings = TypesenseSettings()
     agentmail: AgentMailSettings = AgentMailSettings()
-    supermemory: SupermemorySettings = SupermemorySettings()
+    graphiti: GraphitiSettings = GraphitiSettings()
     telemetry: TelemetrySettings = TelemetrySettings()
     environment: EnvironmentOption = config("ENVIRONMENT", default=EnvironmentOption.LOCAL)
     log_level: LogLevelOption = config("LOG_LEVEL", default=LogLevelOption.INFO.value)

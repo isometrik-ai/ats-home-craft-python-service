@@ -1,4 +1,4 @@
-"""Organization memory (Supermemory) natural-language CRM query API."""
+"""Organization memory (Graphiti) natural-language CRM query API."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
-from libs.shared_utils.supermemory_service import is_supermemory_configured
+from libs.shared_utils.graphiti_service import is_graphiti_configured
 
 router = APIRouter(prefix="/organization/memory", tags=["Organization Memory"])
 
@@ -49,18 +49,18 @@ async def post_org_memory_query(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Plan → Supermemory hybrid search → grounded answer (OpenAI + Supermemory)."""
+    """Graphiti hybrid search + snapshot context → grounded answer (OpenAI)."""
     user_context = await extract_user_context(current_user, db_connection)
     await require_org_memory_query_access(
         db_connection=db_connection,
         user_context=user_context,
     )
 
-    if not is_supermemory_configured():
+    if not is_graphiti_configured():
         raise ServiceUnavailableException(
             message_key="errors.service_unavailable",
             custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
-            params={"reason": "supermemory_not_configured"},
+            params={"reason": "graphiti_not_configured"},
         )
 
     org_id = user_context.organization_id
