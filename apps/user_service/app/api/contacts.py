@@ -1,7 +1,5 @@
 """Contacts API."""
 
-from typing import Any
-
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status

@@ -7,7 +7,12 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-from apps.user_service.app.schemas.common import NoteItem, PhoneInput, SocialPage, Website
+from apps.user_service.app.schemas.common import (
+    NoteItem,
+    PhoneInput,
+    SocialPage,
+    Website,
+)
 from apps.user_service.app.schemas.enums import ClientStatus, ContactType
 from apps.user_service.app.schemas.list_filters import DropdownCustomFieldFilter
 from apps.user_service.app.utils.common_utils import parse_flexible_date

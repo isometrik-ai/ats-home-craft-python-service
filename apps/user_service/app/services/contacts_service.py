@@ -11,10 +11,20 @@ from asyncpg import UniqueViolationError
 from supabase import AsyncClient
 
 from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
-from apps.user_service.app.db.repositories.organization_repository import OrganizationRepository
+from apps.user_service.app.db.repositories.organization_repository import (
+    OrganizationRepository,
+)
 from apps.user_service.app.db.repositories.user_repository import UserRepository
-from apps.user_service.app.schemas.contacts import CreateContactRequest, UpdateContactRequest
-from apps.user_service.app.schemas.enums import ClientStatus, ContactType, EntityType, IsometrikRole
+from apps.user_service.app.schemas.contacts import (
+    CreateContactRequest,
+    UpdateContactRequest,
+)
+from apps.user_service.app.schemas.enums import (
+    ClientStatus,
+    ContactType,
+    EntityType,
+    IsometrikRole,
+)
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -31,7 +41,10 @@ from libs.shared_utils.http_exceptions import (
     ServiceUnavailableException,
     ValidationException,
 )
-from libs.shared_utils.isometrik_service import create_isometrik_user, get_isometrik_data_from_settings
+from libs.shared_utils.isometrik_service import (
+    create_isometrik_user,
+    get_isometrik_data_from_settings,
+)
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -39,10 +52,12 @@ logger = get_logger("contacts_service")
 
 
 def _emails_jsonb(primary_email: str) -> list[dict[str, Any]]:
+    """Serialize primary email to jsonb."""
     return [{"email": primary_email.strip().lower(), "is_primary": True}]
 
 
 def _primary_email(emails: Any) -> str | None:
+    """Get primary email from emails jsonb."""
     items = parse_json_any(emails, default=[])
     if not isinstance(items, list):
         return None
@@ -55,6 +70,7 @@ def _primary_email(emails: Any) -> str | None:
 
 
 def _serialize_phones(phones: list[Any] | None) -> list[dict[str, Any]]:
+    """Serialize phones to jsonb."""
     out: list[dict[str, Any]] = []
     for phone in phones or []:
         if hasattr(phone, "model_dump"):
@@ -65,6 +81,7 @@ def _serialize_phones(phones: list[Any] | None) -> list[dict[str, Any]]:
 
 
 def _serialize_notes(notes: list[Any] | None) -> list[dict[str, Any]]:
+    """Serialize notes to jsonb."""
     out: list[dict[str, Any]] = []
     for note in notes or []:
         if hasattr(note, "model_dump"):
@@ -75,6 +92,7 @@ def _serialize_notes(notes: list[Any] | None) -> list[dict[str, Any]]:
 
 
 def _serialize_social_pages(pages: list[Any] | None) -> list[dict[str, Any]]:
+    """Serialize social pages to jsonb."""
     out: list[dict[str, Any]] = []
     for page in pages or []:
         if hasattr(page, "model_dump"):
@@ -85,6 +103,7 @@ def _serialize_social_pages(pages: list[Any] | None) -> list[dict[str, Any]]:
 
 
 def _serialize_websites(websites: list[Any] | None) -> list[dict[str, Any]]:
+    """Serialize websites to jsonb."""
     out: list[dict[str, Any]] = []
     for site in websites or []:
         if hasattr(site, "model_dump"):
@@ -111,6 +130,7 @@ class ContactsService:
         self.org_repo = OrganizationRepository(db_connection)
 
     def _normalize_details(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Normalize contact details."""
         details = dict(row)
         for key in ("id", "organization_id", "user_id", "isometrik_user_id"):
             if details.get(key) is not None:
@@ -125,6 +145,7 @@ class ContactsService:
         return details
 
     def _summary_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Get summary from contact row."""
         return {
             "id": str(row["id"]),
             "organization_id": str(row["organization_id"]),
@@ -142,6 +163,7 @@ class ContactsService:
         }
 
     async def _assert_email_unique(self, *, organization_id: str, email: str) -> None:
+        """Assert email is unique."""
         existing = await self.contacts_repo.get_contact_id_by_email(
             organization_id=organization_id,
             email=email,
@@ -158,6 +180,7 @@ class ContactsService:
         *,
         stored: Any = None,
     ) -> list[dict[str, Any]]:
+        """Validate custom fields."""
         if not payload:
             return []
         cfs = CustomFieldService(
@@ -177,6 +200,7 @@ class ContactsService:
         last_name: str | None,
         prefix: str | None,
     ) -> tuple[str, str | None, str | None]:
+        """Provision contact auth identity."""
         if not self.supabase_client:
             raise ServiceUnavailableException(
                 message_key="contacts.errors.auth_user_creation_failed",
@@ -247,6 +271,7 @@ class ContactsService:
         return user_id, isometrik_user_id, created_password
 
     async def create_contact(self, body: CreateContactRequest) -> dict[str, Any]:
+        """Create a contact."""
         org_id = self.user_context.organization_id
         email_norm = body.email.strip().lower()
         if not email_norm:
@@ -264,7 +289,11 @@ class ContactsService:
         created_password: str | None = None
 
         if body.portal_access:
-            user_id, isometrik_user_id, created_password = await self._provision_contact_auth_identity(
+            (
+                user_id,
+                isometrik_user_id,
+                created_password,
+            ) = await self._provision_contact_auth_identity(
                 contact_id=contact_id,
                 email=email_norm,
                 first_name=body.first_name,
@@ -325,7 +354,11 @@ class ContactsService:
             "new_data": self._normalize_details(inserted),
         }
 
-    async def update_contact(self, *, contact_id: str, body: UpdateContactRequest) -> dict[str, Any]:
+    async def update_contact(
+        self, *, contact_id: str, body: UpdateContactRequest
+    ) -> dict[str, Any]:
+        """Update a contact."""
+        # pylint: disable=too-complex
         org_id = self.user_context.organization_id
         current = await self.contacts_repo.get_contact_for_update(
             contact_id=contact_id,
@@ -388,6 +421,7 @@ class ContactsService:
         }
 
     async def get_contact_details(self, *, contact_id: str) -> dict[str, Any]:
+        """Get contact details."""
         org_id = self.user_context.organization_id
         row = await self.contacts_repo.get_contact_details(
             contact_id=contact_id,
@@ -410,6 +444,7 @@ class ContactsService:
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
+        """List contacts."""
         rows, total = await self.contacts_repo.list_contacts(
             organization_id=self.user_context.organization_id,
             search=search,
@@ -425,6 +460,7 @@ class ContactsService:
         }
 
     async def soft_delete_contact(self, *, contact_id: str) -> dict[str, Any]:
+        """Soft delete a contact."""
         org_id = self.user_context.organization_id
         current = await self.contacts_repo.get_contact_for_update(
             contact_id=contact_id,

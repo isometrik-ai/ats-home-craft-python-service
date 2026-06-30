@@ -966,16 +966,11 @@ class VerificationCodeService:
         # Send verification code email if type is EMAIL
         if data.type == VerificationType.EMAIL:
             verification_code = verification_record.get("verification_code")
-            email_sent = send_verification_code_email(
+            send_verification_code_email(
                 email=given_input,
                 otp_code=verification_code,
                 expiry_minutes=app_settings.two_fa_settings.verification_code_expiry_minutes,
             )
-            if not email_sent:
-                raise InternalServerErrorException(
-                    message_key="errors.internal_server_error",
-                    custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
-                )
 
         # Return response data
         return {

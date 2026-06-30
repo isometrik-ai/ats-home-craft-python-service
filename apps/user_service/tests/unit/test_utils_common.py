@@ -6,6 +6,7 @@ import uuid
 import pytest
 
 from apps.user_service.app.schemas.contacts import CreateContactRequest
+from apps.user_service.app.schemas.enums import ContactType
 from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_flexible_date,
@@ -78,5 +79,9 @@ def test_parse_flexible_date_invalid_raises():
 
 def test_create_contact_flexible_dob():
     """CreateContactRequest normalizes flexible DOB strings to date objects."""
-    model = CreateContactRequest(email="user@example.com", date_of_birth="11/2/1992")
+    model = CreateContactRequest(
+        email="user@example.com",
+        contact_type=ContactType.OWNER,
+        date_of_birth="11/2/1992",
+    )
     assert model.date_of_birth == dt.date(1992, 11, 2)

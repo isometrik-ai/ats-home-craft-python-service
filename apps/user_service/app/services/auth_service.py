@@ -1051,6 +1051,9 @@ class AuthService:
 
         Raises:
             ValidationException: For validation errors
+            BadRequestException: If Supabase rejects the signup request
+            ConflictException: If the email is already registered
+            TooManyRequestsException: If signup rate limit is exceeded
             InternalServerErrorException: For database or Supabase errors
         """
         self._validate_password_strength(signup_data.password)
@@ -1061,7 +1064,44 @@ class AuthService:
             verification_code=signup_data.verification_code,
         )
 
-        signup_result = await sign_up_supabase_user(signup_data, self.supabase_client)
+        try:
+            if self.supabase_admin_client:
+                signup_result = await self._create_confirmed_user_and_sign_in(signup_data)
+            else:
+                signup_result = await sign_up_supabase_user(signup_data, self.supabase_client)
+        except AuthApiError as auth_error:
+            logger.warning(
+                "Signup Auth API error for email %s (code=%s): %s",
+                signup_data.email,
+                getattr(auth_error, "code", None),
+                str(auth_error),
+            )
+            code = getattr(auth_error, "code", None)
+            if code in ("email_exists", "user_already_exists"):
+                raise ConflictException(
+                    message_key="auth.errors.email_already_registered",
+                    custom_code=CustomStatusCode.CONFLICT,
+                ) from auth_error
+            if code == "weak_password":
+                raise ValidationException(
+                    message_key="auth.errors.password_strength",
+                    custom_code=CustomStatusCode.BAD_REQUEST,
+                ) from auth_error
+            if code in ("over_request_rate_limit", "over_email_send_rate_limit"):
+                raise TooManyRequestsException(
+                    message_key="errors.rate_limit_exceeded",
+                    custom_code=CustomStatusCode.RATE_LIMIT_EXCEEDED,
+                ) from auth_error
+            raise BadRequestException(
+                message_key="auth.errors.authentication_failed",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+                errors=[
+                    {
+                        "code": code,
+                        "message": getattr(auth_error, "message", str(auth_error)),
+                    }
+                ],
+            ) from auth_error
 
         session = self._get_session_after_signup(signup_result=signup_result)
 

@@ -201,9 +201,7 @@ class ContactsRepository(BaseRepository):
             if col in {"id", "organization_id", "created_at"}:
                 continue
             set_parts.append(
-                f"{col} = ${idx}"
-                if col not in CONTACT_JSONB_COLUMNS
-                else f"{col} = ${idx}::jsonb"
+                f"{col} = ${idx}" if col not in CONTACT_JSONB_COLUMNS else f"{col} = ${idx}::jsonb"
             )
             values.append(serialize_jsonb_param(col, val, CONTACT_JSONB_COLUMNS))
             idx += 1
