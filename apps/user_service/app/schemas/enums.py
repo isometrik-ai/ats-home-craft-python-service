@@ -383,8 +383,18 @@ class ClientStatus(str, Enum):
 
     ACTIVE = "active"
     INACTIVE = "inactive"
-    PROSPECT = "prospect"
     DELETED = "deleted"
+
+
+class ContactType(str, Enum):
+    """Contact type stored on public.contacts.contact_type."""
+
+    OWNER = "Owner"
+    TENANT = "Tenant"
+    FAMILY = "Family"
+    GUEST = "Guest"
+    VENDOR = "Vendor"
+    STAFF = "Staff"
 
 
 class ClientUserStatus(str, Enum):
