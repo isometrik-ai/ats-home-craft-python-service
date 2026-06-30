@@ -243,21 +243,28 @@ class SocialPageUpdateItem(BaseModel):
 
 
 class Phone(BaseModel):
-    """Phone number item: id, phone_number, phone_isd_code, label, is_primary."""
+    """Phone number item stored in JSONB (full number including country/ISD code)."""
 
-    id: str | None = Field(None, description="Phone item ID")
-    phone_number: str = Field(..., description="Phone number", max_length=50)
-    phone_isd_code: str = Field(..., description="Phone ISD code", max_length=10)
-    label: str | None = Field(None, description="Label (e.g. mobile, work)", max_length=50)
+    model_config = ConfigDict(extra="ignore")
+
+    phone_number: str = Field(
+        ...,
+        description="Full phone number including country/ISD code (e.g. +14155550100)",
+        max_length=25,
+    )
     is_primary: bool = Field(default=False, description="Primary phone flag")
 
 
 class PhoneInput(BaseModel):
-    """Phone input for add operation (no id)."""
+    """Phone input for add operation."""
 
-    phone_number: str = Field(..., max_length=50, description="Phone number")
-    phone_isd_code: str = Field(..., max_length=10, description="Phone ISD code")
-    label: str | None = Field(None, max_length=50, description="Label (e.g. mobile, work)")
+    model_config = ConfigDict(extra="forbid")
+
+    phone_number: str = Field(
+        ...,
+        max_length=25,
+        description="Full phone number including country/ISD code (e.g. +14155550100)",
+    )
     is_primary: bool = Field(default=False, description="Primary phone flag")
 
 
@@ -265,9 +272,11 @@ class PhoneUpdateItem(BaseModel):
     """Phone update item; only provided fields are updated."""
 
     id: str = Field(..., description="Phone item ID to update")
-    phone_number: str | None = Field(None, max_length=50)
-    phone_isd_code: str | None = Field(None, max_length=10)
-    label: str | None = Field(None, max_length=50)
+    phone_number: str | None = Field(
+        None,
+        max_length=25,
+        description="Full phone number including country/ISD code",
+    )
     is_primary: bool | None = None
 
 

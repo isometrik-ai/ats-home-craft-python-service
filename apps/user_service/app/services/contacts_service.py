@@ -69,47 +69,14 @@ def _primary_email(emails: Any) -> str | None:
     return None
 
 
-def _serialize_phones(phones: list[Any] | None) -> list[dict[str, Any]]:
-    """Serialize phones to jsonb."""
+def _serialize_jsonb_list(items: list[Any] | None) -> list[dict[str, Any]]:
+    """Serialize pydantic models or dicts for JSONB list columns."""
     out: list[dict[str, Any]] = []
-    for phone in phones or []:
-        if hasattr(phone, "model_dump"):
-            out.append(phone.model_dump(exclude_none=True))
-        elif isinstance(phone, dict):
-            out.append(phone)
-    return out
-
-
-def _serialize_notes(notes: list[Any] | None) -> list[dict[str, Any]]:
-    """Serialize notes to jsonb."""
-    out: list[dict[str, Any]] = []
-    for note in notes or []:
-        if hasattr(note, "model_dump"):
-            out.append(note.model_dump())
-        elif isinstance(note, dict):
-            out.append(note)
-    return out
-
-
-def _serialize_social_pages(pages: list[Any] | None) -> list[dict[str, Any]]:
-    """Serialize social pages to jsonb."""
-    out: list[dict[str, Any]] = []
-    for page in pages or []:
-        if hasattr(page, "model_dump"):
-            out.append(page.model_dump(exclude_none=True))
-        elif isinstance(page, dict):
-            out.append(page)
-    return out
-
-
-def _serialize_websites(websites: list[Any] | None) -> list[dict[str, Any]]:
-    """Serialize websites to jsonb."""
-    out: list[dict[str, Any]] = []
-    for site in websites or []:
-        if hasattr(site, "model_dump"):
-            out.append(site.model_dump(exclude_none=True))
-        elif isinstance(site, dict):
-            out.append(site)
+    for item in items or []:
+        if hasattr(item, "model_dump"):
+            out.append(item.model_dump(exclude_none=True))
+        elif isinstance(item, dict):
+            out.append(item)
     return out
 
 
@@ -142,6 +109,11 @@ class ContactsService:
             details[ts_key] = format_iso_datetime(details.get(ts_key))
         if details.get("tags") is None:
             details["tags"] = []
+        if details.get("phones") is None:
+            details["phones"] = []
+        for object_field in ("social_pages", "documents"):
+            if details.get(object_field) == []:
+                details[object_field] = {}
         return details
 
     def _summary_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -156,7 +128,7 @@ class ContactsService:
             "title": row.get("title"),
             "email": _primary_email(row.get("emails")),
             "profile_photo_url": row.get("profile_photo_url"),
-            "phones": parse_json_any(row.get("phones"), default=[]),
+            "phones": list(row.get("phones") or []),
             "tags": list(row.get("tags") or []),
             "created_at": format_iso_datetime(row.get("created_at")),
             "updated_at": format_iso_datetime(row.get("updated_at")),
@@ -284,22 +256,14 @@ class ContactsService:
         validated_custom_fields = await self._validate_custom_fields(body.custom_fields)
 
         contact_id = str(uuid.uuid4())
-        user_id: str | None = None
-        isometrik_user_id: str | None = None
-        created_password: str | None = None
 
-        if body.portal_access:
-            (
-                user_id,
-                isometrik_user_id,
-                created_password,
-            ) = await self._provision_contact_auth_identity(
-                contact_id=contact_id,
-                email=email_norm,
-                first_name=body.first_name,
-                last_name=body.last_name,
-                prefix=body.prefix,
-            )
+        user_id, isometrik_user_id, created_password = await self._provision_contact_auth_identity(
+            contact_id=contact_id,
+            email=email_norm,
+            first_name=body.first_name,
+            last_name=body.last_name,
+            prefix=body.prefix,
+        )
 
         contact_row = {
             "id": contact_id,
@@ -315,16 +279,16 @@ class ContactsService:
             "title": body.title,
             "date_of_birth": body.date_of_birth,
             "profile_photo_url": body.profile_photo_url,
-            "phones": _serialize_phones(body.phones),
+            "phones": _serialize_jsonb_list(body.phones),
             "emails": _emails_jsonb(email_norm),
             "tags": body.tags,
             "custom_fields": validated_custom_fields,
             "additional_data": body.additional_data,
-            "social_pages": _serialize_social_pages(body.social_pages),
+            "social_pages": _serialize_jsonb_list(body.social_pages),
             "documents": body.documents,
             "description": body.description,
-            "websites": _serialize_websites(body.websites),
-            "notes": _serialize_notes(body.notes),
+            "websites": _serialize_jsonb_list(body.websites),
+            "notes": _serialize_jsonb_list(body.notes),
         }
 
         try:
@@ -338,7 +302,7 @@ class ContactsService:
             raise
 
         organization = await self.org_repo.get_organization_by_id(org_id)
-        if body.portal_access and organization:
+        if organization:
             try:
                 send_client_creation_email(
                     email=email_norm,
@@ -392,13 +356,11 @@ class ContactsService:
         if "status" in patch and hasattr(patch["status"], "value"):
             patch["status"] = patch["status"].value
         if "phones" in patch:
-            patch["phones"] = _serialize_phones(patch["phones"])
+            patch["phones"] = _serialize_jsonb_list(patch["phones"])
         if "notes" in patch:
-            patch["notes"] = _serialize_notes(patch["notes"])
-        if "social_pages" in patch:
-            patch["social_pages"] = _serialize_social_pages(patch["social_pages"])
+            patch["notes"] = _serialize_jsonb_list(patch["notes"])
         if "websites" in patch:
-            patch["websites"] = _serialize_websites(patch["websites"])
+            patch["websites"] = _serialize_jsonb_list(patch["websites"])
         if "custom_fields" in patch:
             patch["custom_fields"] = await self._validate_custom_fields(
                 patch["custom_fields"],

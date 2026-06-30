@@ -38,6 +38,9 @@ class ContactsRepository(BaseRepository):
         for field in CONTACT_JSONB_COLUMNS:
             parsed = parse_json_any(out.get(field), default=out.get(field))
             out[field] = parsed
+        for object_field in ("social_pages", "documents"):
+            if out.get(object_field) == []:
+                out[object_field] = {}
         if out.get("tags") is None:
             out["tags"] = []
         return out

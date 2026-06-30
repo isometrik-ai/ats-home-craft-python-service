@@ -85,3 +85,41 @@ def test_create_contact_flexible_dob():
         date_of_birth="11/2/1992",
     )
     assert model.date_of_birth == dt.date(1992, 11, 2)
+
+
+def test_create_contact_accepts_crm_fields():
+    """DB-mapped CRM fields are accepted on create."""
+    model = CreateContactRequest(
+        email="user@example.com",
+        contact_type=ContactType.OWNER,
+        websites=[],
+        custom_fields=[{"field_id": "cf-1", "value": "test"}],
+        additional_data={"source": "import"},
+    )
+    assert model.custom_fields[0]["field_id"] == "cf-1"
+
+
+def test_contact_phone_rejects_extra_fields():
+    """Contact phones only allow phone_number and is_primary."""
+    with pytest.raises(ValueError):
+        CreateContactRequest(
+            email="user@example.com",
+            contact_type=ContactType.OWNER,
+            phones=[
+                {
+                    "phone_number": "+14155550100",
+                    "phone_isd_code": "+1",
+                    "is_primary": True,
+                }
+            ],
+        )
+
+
+def test_contact_phone_accepts_full_number():
+    """Contact phones accept ISD code embedded in phone_number."""
+    model = CreateContactRequest(
+        email="user@example.com",
+        contact_type=ContactType.OWNER,
+        phones=[{"phone_number": "+14155550100", "is_primary": True}],
+    )
+    assert model.phones[0].phone_number == "+14155550100"
