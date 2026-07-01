@@ -242,6 +242,24 @@ class SocialPageUpdateItem(BaseModel):
     url: str | None = Field(None, max_length=500)
 
 
+class Email(BaseModel):
+    """Email item stored in contacts.emails JSONB."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    email: str = Field(..., description="Email address", max_length=255)
+    is_primary: bool = Field(default=False, description="Primary email flag")
+
+
+class EmailInput(BaseModel):
+    """Email input for contact create/update."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(..., max_length=255, description="Email address")
+    is_primary: bool = Field(default=False, description="Primary email flag")
+
+
 class Phone(BaseModel):
     """Phone number item stored in JSONB (full number including country/ISD code)."""
 

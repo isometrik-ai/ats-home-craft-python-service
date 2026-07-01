@@ -24,7 +24,7 @@ def _user_context() -> UserContext:
 def _minimal_body() -> CreateContactRequest:
     """Build a minimal valid create-contact request."""
     return CreateContactRequest(
-        email="jane@example.com",
+        emails=[{"email": "jane@example.com", "is_primary": True}],
         contact_type=ContactType.OWNER,
         first_name="Jane",
     )
@@ -48,7 +48,10 @@ async def test_create_contact_inserts_full_row():
             "isometrik_user_id": "isometrik-1",
             "status": "active",
             "contact_type": "Owner",
-            "emails": [{"email": "jane@example.com", "is_primary": True}],
+            "emails": [
+                {"email": "jane@example.com", "is_primary": True},
+                {"email": "jane.work@example.com", "is_primary": False},
+            ],
             "phones": [],
             "tags": [],
             "created_at": None,
@@ -56,18 +59,34 @@ async def test_create_contact_inserts_full_row():
         }
     )
 
+    body = CreateContactRequest(
+        emails=[
+            {"email": "jane@example.com", "is_primary": True},
+            {"email": "jane.work@example.com", "is_primary": False},
+        ],
+        contact_type=ContactType.OWNER,
+        first_name="Jane",
+    )
+
     with patch(
         "apps.user_service.app.services.contacts_service.send_client_creation_email"
     ) as send_email:
-        result = await service.create_contact(_minimal_body())
+        result = await service.create_contact(body)
 
     assert result["contact_id"]
     assert result["old_data"] is None
     assert result["new_data"]["email"] == "jane@example.com"
     service._provision_contact_auth_identity.assert_awaited_once()
+    service.contacts_repo.get_contact_id_by_email.assert_awaited_once_with(
+        organization_id="org-1",
+        email="jane@example.com",
+    )
     inserted = service.contacts_repo.insert_contact.await_args.args[0]
     assert inserted["contact_type"] == "Owner"
-    assert inserted["emails"] == [{"email": "jane@example.com", "is_primary": True}]
+    assert inserted["emails"] == [
+        {"email": "jane@example.com", "is_primary": True},
+        {"email": "jane.work@example.com", "is_primary": False},
+    ]
     assert inserted["custom_fields"] == []
     assert inserted["user_id"] == "auth-user-1"
     assert inserted["isometrik_user_id"] == "isometrik-1"
@@ -76,7 +95,7 @@ async def test_create_contact_inserts_full_row():
 
 @pytest.mark.asyncio
 async def test_create_contact_duplicate_email_conflict():
-    """Duplicate email in org raises ConflictException."""
+    """Duplicate primary email in org raises ConflictException."""
     service = ContactsService(db_connection=MagicMock(), user_context=_user_context())
     service.contacts_repo.get_contact_id_by_email = AsyncMock(return_value="existing-id")
     service.contacts_repo.insert_contact = AsyncMock()

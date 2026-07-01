@@ -8,6 +8,8 @@ from typing import Annotated, Any
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from apps.user_service.app.schemas.common import (
+    Email,
+    EmailInput,
     NoteItem,
     Phone,
     PhoneInput,
@@ -37,12 +39,57 @@ def _validate_single_primary_phone(
     return phones
 
 
+def _validate_create_emails(emails: list[EmailInput]) -> list[EmailInput]:
+    """Require exactly one primary email and no duplicates."""
+    if sum(1 for item in emails if item.is_primary) != 1:
+        raise ValidationException(
+            message_key="contacts.errors.only_one_primary_email",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+    seen: set[str] = set()
+    for item in emails:
+        normalized = item.email.strip().lower()
+        if normalized in seen:
+            raise ValidationException(
+                message_key="contacts.errors.invalid_email",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        seen.add(normalized)
+    return emails
+
+
+def _validate_update_emails(emails: list[EmailInput] | None) -> list[EmailInput] | None:
+    """Ensure at most one primary email and no duplicates on update."""
+    if not emails:
+        return emails
+    if sum(1 for item in emails if item.is_primary) > 1:
+        raise ValidationException(
+            message_key="contacts.errors.only_one_primary_email",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+    seen: set[str] = set()
+    for item in emails:
+        normalized = item.email.strip().lower()
+        if normalized in seen:
+            raise ValidationException(
+                message_key="contacts.errors.invalid_email",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        seen.add(normalized)
+    return emails
+
+
 class CreateContactRequest(BaseModel):
     """Create a contact (public.contacts)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    email: str = Field(..., description="Primary email address (stored in emails jsonb).")
+    emails: list[EmailInput] = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="Contact emails; exactly one must be marked primary.",
+    )
     contact_type: ContactType = Field(..., description="Contact type (Owner, Tenant, etc.).")
 
     prefix: str | None = Field(None, max_length=50)
@@ -67,6 +114,12 @@ class CreateContactRequest(BaseModel):
     additional_data: dict[str, Any] = Field(default_factory=dict)
     notes: list[NoteItem] = Field(default_factory=list)
 
+    @field_validator("emails")
+    @classmethod
+    def validate_emails(cls, emails: list[EmailInput]) -> list[EmailInput]:
+        """Validate create emails: exactly one primary, no duplicates."""
+        return _validate_create_emails(emails)
+
     @field_validator("phones")
     @classmethod
     def validate_phones(cls, phones: list[PhoneInput]) -> list[PhoneInput]:
@@ -79,7 +132,11 @@ class UpdateContactRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    email: str | None = Field(None, description="Updates primary email in emails jsonb.")
+    emails: list[EmailInput] | None = Field(
+        None,
+        max_length=20,
+        description="Replace contact emails; at most one may be primary.",
+    )
     contact_type: ContactType | None = None
     status: ClientStatus | None = None
     prefix: str | None = None
@@ -98,6 +155,12 @@ class UpdateContactRequest(BaseModel):
     custom_fields: list[dict[str, Any]] | None = None
     additional_data: dict[str, Any] | None = None
     notes: list[NoteItem] | None = None
+
+    @field_validator("emails")
+    @classmethod
+    def validate_emails(cls, emails: list[EmailInput] | None) -> list[EmailInput] | None:
+        """Validate update emails: at most one primary, no duplicates."""
+        return _validate_update_emails(emails)
 
     @field_validator("phones")
     @classmethod
@@ -161,7 +224,7 @@ class ContactDetailsResponse(BaseModel):
 
     email: str | None = None
     phones: list[Phone] = Field(default_factory=list)
-    emails: list[Any] = Field(default_factory=list)
+    emails: list[Email] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     custom_fields: list[Any] = Field(default_factory=list)
     additional_data: dict[str, Any] = Field(default_factory=dict)

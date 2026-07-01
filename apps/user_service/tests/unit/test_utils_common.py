@@ -80,7 +80,7 @@ def test_parse_flexible_date_invalid_raises():
 def test_create_contact_flexible_dob():
     """CreateContactRequest normalizes flexible DOB strings to date objects."""
     model = CreateContactRequest(
-        email="user@example.com",
+        emails=[{"email": "user@example.com", "is_primary": True}],
         contact_type=ContactType.OWNER,
         date_of_birth="11/2/1992",
     )
@@ -90,7 +90,7 @@ def test_create_contact_flexible_dob():
 def test_create_contact_accepts_crm_fields():
     """DB-mapped CRM fields are accepted on create."""
     model = CreateContactRequest(
-        email="user@example.com",
+        emails=[{"email": "user@example.com", "is_primary": True}],
         contact_type=ContactType.OWNER,
         websites=[],
         custom_fields=[{"field_id": "cf-1", "value": "test"}],
@@ -99,11 +99,23 @@ def test_create_contact_accepts_crm_fields():
     assert model.custom_fields[0]["field_id"] == "cf-1"
 
 
+def test_create_contact_requires_one_primary_email():
+    """Exactly one email must be marked primary on create."""
+    with pytest.raises(ValidationException):
+        CreateContactRequest(
+            emails=[
+                {"email": "user@example.com", "is_primary": False},
+                {"email": "other@example.com", "is_primary": False},
+            ],
+            contact_type=ContactType.OWNER,
+        )
+
+
 def test_contact_phone_rejects_extra_fields():
     """Contact phones only allow phone_number and is_primary."""
     with pytest.raises(ValueError):
         CreateContactRequest(
-            email="user@example.com",
+            emails=[{"email": "user@example.com", "is_primary": True}],
             contact_type=ContactType.OWNER,
             phones=[
                 {
@@ -118,7 +130,7 @@ def test_contact_phone_rejects_extra_fields():
 def test_contact_phone_accepts_full_number():
     """Contact phones accept ISD code embedded in phone_number."""
     model = CreateContactRequest(
-        email="user@example.com",
+        emails=[{"email": "user@example.com", "is_primary": True}],
         contact_type=ContactType.OWNER,
         phones=[{"phone_number": "+14155550100", "is_primary": True}],
     )

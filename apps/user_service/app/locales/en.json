@@ -254,6 +254,7 @@
       "email_already_exists": "A user with this email already exists in our system",
       "external_contact_id_already_exists": "A contact with this external contact ID already exists in your organization.",
       "phone_not_found": "Phone number not found",
+      "only_one_primary_email": "Exactly one email must be marked as primary",
       "social_page_not_found": "Social page not found",
       "only_one_primary_phone": "Only one phone number can be marked as primary",
       "work_history_item_not_found": "Work history item not found",

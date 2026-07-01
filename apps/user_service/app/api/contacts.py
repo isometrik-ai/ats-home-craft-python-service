@@ -50,8 +50,8 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     status_code=http_status.HTTP_201_CREATED,
     summary="Create a contact",
     description=(
-        "Creates a contact in public.contacts. Requires contact_type and email. "
-        "Provisions a Supabase auth user and Isometrik identity for every contact."
+        "Creates a contact in public.contacts. Requires contact_type and emails "
+        "(exactly one primary). Provisions a Supabase auth user and Isometrik identity."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )

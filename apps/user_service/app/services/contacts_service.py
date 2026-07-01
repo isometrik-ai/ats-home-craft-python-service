@@ -51,9 +51,21 @@ from libs.shared_utils.status_codes import CustomStatusCode
 logger = get_logger("contacts_service")
 
 
-def _emails_jsonb(primary_email: str) -> list[dict[str, Any]]:
-    """Serialize primary email to jsonb."""
-    return [{"email": primary_email.strip().lower(), "is_primary": True}]
+def _serialize_emails_jsonb(items: list[Any] | None) -> list[dict[str, Any]]:
+    """Serialize contact emails for JSONB storage (lowercased addresses)."""
+    out: list[dict[str, Any]] = []
+    for item in items or []:
+        if hasattr(item, "model_dump"):
+            data = item.model_dump(exclude_none=True)
+        elif isinstance(item, dict):
+            data = item
+        else:
+            continue
+        email = str(data.get("email", "")).strip().lower()
+        if not email:
+            continue
+        out.append({"email": email, "is_primary": bool(data.get("is_primary", False))})
+    return out
 
 
 def _primary_email(emails: Any) -> str | None:
@@ -245,21 +257,22 @@ class ContactsService:
     async def create_contact(self, body: CreateContactRequest) -> dict[str, Any]:
         """Create a contact."""
         org_id = self.user_context.organization_id
-        email_norm = body.email.strip().lower()
-        if not email_norm:
+        serialized_emails = _serialize_emails_jsonb(body.emails)
+        primary_email = _primary_email(serialized_emails)
+        if not primary_email:
             raise ValidationException(
                 message_key="contacts.errors.invalid_email",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-        await self._assert_email_unique(organization_id=org_id, email=email_norm)
+        await self._assert_email_unique(organization_id=org_id, email=primary_email)
         validated_custom_fields = await self._validate_custom_fields(body.custom_fields)
 
         contact_id = str(uuid.uuid4())
 
         user_id, isometrik_user_id, created_password = await self._provision_contact_auth_identity(
             contact_id=contact_id,
-            email=email_norm,
+            email=primary_email,
             first_name=body.first_name,
             last_name=body.last_name,
             prefix=body.prefix,
@@ -280,7 +293,7 @@ class ContactsService:
             "date_of_birth": body.date_of_birth,
             "profile_photo_url": body.profile_photo_url,
             "phones": _serialize_jsonb_list(body.phones),
-            "emails": _emails_jsonb(email_norm),
+            "emails": serialized_emails,
             "tags": body.tags,
             "custom_fields": validated_custom_fields,
             "additional_data": body.additional_data,
@@ -305,7 +318,7 @@ class ContactsService:
         if organization:
             try:
                 send_client_creation_email(
-                    email=email_norm,
+                    email=primary_email,
                     organization_name=str(organization.get("name") or ""),
                     password=created_password,
                 )
@@ -338,18 +351,20 @@ class ContactsService:
         if not patch:
             return {"old_data": current, "new_data": self._normalize_details(current)}
 
-        if "email" in patch:
-            email_norm = patch.pop("email").strip().lower()
-            existing_id = await self.contacts_repo.get_contact_id_by_email(
-                organization_id=org_id,
-                email=email_norm,
-            )
-            if existing_id and existing_id != contact_id:
-                raise ConflictException(
-                    message_key="contacts.errors.contact_user_already_exists",
-                    custom_code=CustomStatusCode.CONFLICT,
+        if "emails" in patch:
+            serialized_emails = _serialize_emails_jsonb(patch["emails"])
+            primary_email = _primary_email(serialized_emails)
+            if primary_email:
+                existing_id = await self.contacts_repo.get_contact_id_by_email(
+                    organization_id=org_id,
+                    email=primary_email,
                 )
-            patch["emails"] = _emails_jsonb(email_norm)
+                if existing_id and existing_id != contact_id:
+                    raise ConflictException(
+                        message_key="contacts.errors.contact_user_already_exists",
+                        custom_code=CustomStatusCode.CONFLICT,
+                    )
+            patch["emails"] = serialized_emails
 
         if "contact_type" in patch and isinstance(patch["contact_type"], ContactType):
             patch["contact_type"] = patch["contact_type"].value
