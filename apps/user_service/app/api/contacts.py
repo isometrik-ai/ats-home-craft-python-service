@@ -345,29 +345,28 @@ async def update_contact(
 async def delete_contact(
     request: Request,
     contact_id: str = Path(..., description="Contact identifier (UUID string)."),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Soft-delete a contact."""
-    async with db_connection.transaction():
-        user_context = await check_permissions(
-            current_user=current_user,
-            db_connection=db_connection,
-            permission_codes=CONTACTS_MANAGEMENT_DELETE,
-        )
-        service = ContactsService(db_connection=db_connection, user_context=user_context)
-        request.state.audit_table = "contacts"
-        request.state.audit_requested_id = contact_id
-        request.state.audit_description = f"Deleted contact: {contact_id}"
-        request.state.audit_risk_level = "high"
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id,
-        }
-        deleted = await service.soft_delete_contact(contact_id=contact_id)
-        request.state.raw_audit_old_data = deleted.get("old_data")
-        request.state.raw_audit_new_data = deleted.get("new_data")
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_DELETE,
+    )
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
+    request.state.audit_table = "contacts"
+    request.state.audit_requested_id = contact_id
+    request.state.audit_description = f"Deleted contact: {contact_id}"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+    deleted = await service.soft_delete_contact(contact_id=contact_id)
+    request.state.raw_audit_old_data = deleted.get("old_data")
+    request.state.raw_audit_new_data = deleted.get("new_data")
 
     return success_response(
         request=request,

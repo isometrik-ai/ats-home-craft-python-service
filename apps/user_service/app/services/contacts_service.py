@@ -184,7 +184,7 @@ class ContactsService:
             )
 
         user_repo = UserRepository(db_connection=self.db_connection)
-        phone_number = phone.phone_isd_code + phone.phone_number
+        phone_number = f"{phone.phone_isd_code}{phone.phone_number}".strip()
         existing_user = await user_repo.get_auth_user_by_phone(phone_number)
         created_password: str | None = None
         if existing_user and existing_user.get("id"):
@@ -201,7 +201,7 @@ class ContactsService:
                 user_metadata["salutation"] = prefix
             auth_user = await create_user(
                 sb_client=self.supabase_client,
-                phone=phone_number.strip(),
+                phone=phone_number,
                 password=password,
                 user_metadata=user_metadata,
             )

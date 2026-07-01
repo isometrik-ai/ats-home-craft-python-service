@@ -80,8 +80,14 @@ def test_parse_flexible_date_invalid_raises():
 def test_create_contact_flexible_dob():
     """CreateContactRequest normalizes flexible DOB strings to date objects."""
     model = CreateContactRequest(
-        email="user@example.com",
         contact_type=ContactType.OWNER,
         date_of_birth="11/2/1992",
+        phones=[
+            {
+                "phone_number": "1234567890",
+                "phone_isd_code": "+1",
+                "is_primary": True,
+            }
+        ],
     )
     assert model.date_of_birth == dt.date(1992, 11, 2)
