@@ -378,7 +378,7 @@ class ClientType(str, Enum):
     COMPANY = "company"
 
 
-class ClientStatus(str, Enum):
+class ContactStatus(str, Enum):
     """Client status enumeration."""
 
     ACTIVE = "active"

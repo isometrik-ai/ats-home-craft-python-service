@@ -193,6 +193,7 @@ async def update_phone(
     Returns:
         bool: True if phone updated successfully, False otherwise
     """
+    full_phone = f"{phone_isd_code}{phone_number}".strip()
     updated_metadata = {
         **(existing_metadata or {}),
         "phone_number": phone_number,
@@ -200,7 +201,10 @@ async def update_phone(
     }
     result = await client.auth.admin.update_user_by_id(
         user_id,
-        {"user_metadata": updated_metadata},
+        {
+            "phone": full_phone,
+            "user_metadata": updated_metadata,
+        },
     )
     return result.user is not None
 

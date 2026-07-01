@@ -14,7 +14,7 @@ from apps.user_service.app.schemas.common import (
     SocialPage,
     Website,
 )
-from apps.user_service.app.schemas.enums import ClientStatus, ContactType
+from apps.user_service.app.schemas.enums import ContactStatus, ContactType
 from apps.user_service.app.schemas.list_filters import DropdownCustomFieldFilter
 from apps.user_service.app.utils.common_utils import parse_flexible_date
 from libs.shared_utils.http_exceptions import ValidationException
@@ -82,7 +82,7 @@ class UpdateContactRequest(BaseModel):
 
     emails: list[Email] | None = None
     contact_type: ContactType | None = None
-    status: ClientStatus | None = None
+    status: ContactStatus | None = None
     prefix: str | None = None
     first_name: str | None = None
     middle_name: str | None = None
@@ -115,7 +115,7 @@ class ListContactsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     search: str | None = Field(default=None, min_length=2)
-    status: ClientStatus | None = None
+    status: ContactStatus | None = None
     contact_type: ContactType | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
@@ -134,9 +134,9 @@ class ContactSummaryResponse(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     title: str | None = None
-    email: str | None = None
     profile_photo_url: str | None = None
     phones: list[Any] = Field(default_factory=list)
+    emails: list[Any] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -162,7 +162,6 @@ class ContactDetailsResponse(BaseModel):
     date_of_birth: str | None = None
     profile_photo_url: str | None = None
 
-    email: str | None = None
     phones: list[Any] = Field(default_factory=list)
     emails: list[Any] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)

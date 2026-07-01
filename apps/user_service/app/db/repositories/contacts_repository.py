@@ -7,7 +7,7 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
-from apps.user_service.app.schemas.enums import ClientStatus
+from apps.user_service.app.schemas.enums import ContactStatus
 from apps.user_service.app.utils.common_utils import parse_json_any
 from libs.shared_utils.custom_field_filtering import build_dropdown_jsonb_where
 
@@ -59,7 +59,7 @@ class ContactsRepository(BaseRepository):
             LIMIT 1
             """,
             organization_id,
-            ClientStatus.DELETED.value,
+            ContactStatus.DELETED.value,
             email_norm,
         )
         return str(fetched_row["id"]) if fetched_row and fetched_row.get("id") else None
@@ -84,7 +84,7 @@ class ContactsRepository(BaseRepository):
             """,
             user_id,
             organization_id,
-            ClientStatus.DELETED.value,
+            ContactStatus.DELETED.value,
         )
         return row is not None
 
@@ -153,7 +153,7 @@ class ContactsRepository(BaseRepository):
             """,
             contact_id,
             organization_id,
-            ClientStatus.DELETED.value,
+            ContactStatus.DELETED.value,
         )
         return self._normalize_row(dict(row)) if row else None
 
@@ -174,7 +174,7 @@ class ContactsRepository(BaseRepository):
             """,
             contact_id,
             organization_id,
-            ClientStatus.DELETED.value,
+            ContactStatus.DELETED.value,
         )
         return self._normalize_row(dict(row)) if row else None
 
@@ -207,7 +207,7 @@ class ContactsRepository(BaseRepository):
             idx += 1
 
         set_parts.append("updated_at = now()")
-        values.extend([contact_id, organization_id, ClientStatus.DELETED.value])
+        values.extend([contact_id, organization_id, ContactStatus.DELETED.value])
 
         row = await self.db_connection.fetchrow(
             f"""
@@ -242,8 +242,8 @@ class ContactsRepository(BaseRepository):
             """,
             contact_id,
             organization_id,
-            ClientStatus.DELETED.value,
-            ClientStatus.DELETED.value,
+            ContactStatus.DELETED.value,
+            ContactStatus.DELETED.value,
         )
         return self._normalize_row(dict(row)) if row else None
 
@@ -260,7 +260,7 @@ class ContactsRepository(BaseRepository):
     ) -> tuple[list[dict[str, Any]], int]:
         """List contacts with search and pagination."""
         offset = (page - 1) * page_size
-        args: list[Any] = [organization_id, ClientStatus.DELETED.value]
+        args: list[Any] = [organization_id, ContactStatus.DELETED.value]
         where = ["ct.organization_id = $1::uuid", "ct.status != $2"]
         next_param_index = 3
 
