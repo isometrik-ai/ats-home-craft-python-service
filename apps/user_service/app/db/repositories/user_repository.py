@@ -130,6 +130,29 @@ class UserRepository:
 
         return None
 
+    async def get_auth_user_by_phone(self, phone: str) -> dict | None:
+        """Get a user from the 'auth.users' table by phone.
+
+        Args:
+            phone: The phone of the user.
+
+        Returns:
+            dict | None: User data as dictionary if found, else None.
+        """
+        query = """
+            SELECT *
+            FROM auth.users
+            WHERE phone = $1
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(query, phone)
+
+        if row:
+            # Convert asyncpg Record to standard dict
+            return dict(row)
+
+        return None
+
     async def get_user_details_by_id(
         self,
         user_id: str,

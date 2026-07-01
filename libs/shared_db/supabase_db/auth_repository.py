@@ -16,7 +16,7 @@ from libs.shared_utils.response_factory import CustomStatusCode
 
 async def create_user(
     sb_client: AsyncClient,
-    email: str,
+    email: str | None = None,
     password: str | None = None,
     user_metadata: dict[str, Any] | None = None,
     phone: str | None = None,
@@ -33,6 +33,11 @@ async def create_user(
     Returns:
         dict[str, Any]: User data
     """
+    if not email and not phone:
+        raise BadRequestException(
+            message_key="auth.errors.email_or_phone_required",
+            custom_code=CustomStatusCode.BAD_REQUEST,
+        )
     resp = await sb_client.auth.admin.create_user(
         {
             "email": email,

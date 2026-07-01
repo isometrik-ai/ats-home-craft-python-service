@@ -249,7 +249,7 @@ async def create_isometrik_user(
     """
     try:
         user_id = str(user["user_id"])
-        email = user["email"]
+        email = user.get("email", None)
         organization_id = str(user["organization_id"])
         role = user["role"]
         first_name = user.get("first_name")

@@ -15,6 +15,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
+from apps.user_service.app.schemas.common import Phone
 from apps.user_service.app.schemas.contacts import (
     CreateContactRequest,
     UpdateContactRequest,
@@ -33,7 +34,6 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_any,
     parse_json_field,
 )
-from apps.user_service.app.utils.email_utils import send_client_creation_email
 from libs.shared_db.supabase_db.auth_repository import create_user
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -51,65 +51,14 @@ from libs.shared_utils.status_codes import CustomStatusCode
 logger = get_logger("contacts_service")
 
 
-def _emails_jsonb(primary_email: str) -> list[dict[str, Any]]:
-    """Serialize primary email to jsonb."""
-    return [{"email": primary_email.strip().lower(), "is_primary": True}]
-
-
-def _primary_email(emails: Any) -> str | None:
-    """Get primary email from emails jsonb."""
-    items = parse_json_any(emails, default=[])
-    if not isinstance(items, list):
-        return None
-    for item in items:
-        if isinstance(item, dict) and item.get("is_primary") and item.get("email"):
-            return str(item["email"])
-    if items and isinstance(items[0], dict) and items[0].get("email"):
-        return str(items[0]["email"])
-    return None
-
-
-def _serialize_phones(phones: list[Any] | None) -> list[dict[str, Any]]:
-    """Serialize phones to jsonb."""
+def _serialize_jsonb_list(items: list[Any] | None) -> list[dict[str, Any]]:
+    """Serialize pydantic models or dicts for JSONB list columns."""
     out: list[dict[str, Any]] = []
-    for phone in phones or []:
-        if hasattr(phone, "model_dump"):
-            out.append(phone.model_dump(exclude_none=True))
-        elif isinstance(phone, dict):
-            out.append(phone)
-    return out
-
-
-def _serialize_notes(notes: list[Any] | None) -> list[dict[str, Any]]:
-    """Serialize notes to jsonb."""
-    out: list[dict[str, Any]] = []
-    for note in notes or []:
-        if hasattr(note, "model_dump"):
-            out.append(note.model_dump())
-        elif isinstance(note, dict):
-            out.append(note)
-    return out
-
-
-def _serialize_social_pages(pages: list[Any] | None) -> list[dict[str, Any]]:
-    """Serialize social pages to jsonb."""
-    out: list[dict[str, Any]] = []
-    for page in pages or []:
-        if hasattr(page, "model_dump"):
-            out.append(page.model_dump(exclude_none=True))
-        elif isinstance(page, dict):
-            out.append(page)
-    return out
-
-
-def _serialize_websites(websites: list[Any] | None) -> list[dict[str, Any]]:
-    """Serialize websites to jsonb."""
-    out: list[dict[str, Any]] = []
-    for site in websites or []:
-        if hasattr(site, "model_dump"):
-            out.append(site.model_dump(exclude_none=True))
-        elif isinstance(site, dict):
-            out.append(site)
+    for item in items or []:
+        if hasattr(item, "model_dump"):
+            out.append(item.model_dump(exclude_none=True))
+        elif isinstance(item, dict):
+            out.append(item)
     return out
 
 
@@ -135,7 +84,6 @@ class ContactsService:
         for key in ("id", "organization_id", "user_id", "isometrik_user_id"):
             if details.get(key) is not None:
                 details[key] = str(details[key])
-        details["email"] = _primary_email(details.get("emails"))
         if isinstance(details.get("date_of_birth"), date):
             details["date_of_birth"] = details["date_of_birth"].isoformat()
         for ts_key in ("created_at", "updated_at"):
@@ -154,25 +102,13 @@ class ContactsService:
             "first_name": row.get("first_name"),
             "last_name": row.get("last_name"),
             "title": row.get("title"),
-            "email": _primary_email(row.get("emails")),
             "profile_photo_url": row.get("profile_photo_url"),
             "phones": parse_json_any(row.get("phones"), default=[]),
+            "emails": parse_json_any(row.get("emails"), default=[]),
             "tags": list(row.get("tags") or []),
             "created_at": format_iso_datetime(row.get("created_at")),
             "updated_at": format_iso_datetime(row.get("updated_at")),
         }
-
-    async def _assert_email_unique(self, *, organization_id: str, email: str) -> None:
-        """Assert email is unique."""
-        existing = await self.contacts_repo.get_contact_id_by_email(
-            organization_id=organization_id,
-            email=email,
-        )
-        if existing:
-            raise ConflictException(
-                message_key="contacts.errors.contact_user_already_exists",
-                custom_code=CustomStatusCode.CONFLICT,
-            )
 
     async def _validate_custom_fields(
         self,
@@ -195,7 +131,7 @@ class ContactsService:
         self,
         *,
         contact_id: str,
-        email: str,
+        phone: Phone,
         first_name: str | None,
         last_name: str | None,
         prefix: str | None,
@@ -215,9 +151,9 @@ class ContactsService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        email_norm = email.strip().lower()
         user_repo = UserRepository(db_connection=self.db_connection)
-        existing_user = await user_repo.get_auth_user_by_email(email_norm)
+        phone_number = phone.phone_isd_code + phone.phone_number
+        existing_user = await user_repo.get_auth_user_by_phone(phone_number)
         created_password: str | None = None
         if existing_user and existing_user.get("id"):
             user_id = str(existing_user["id"])
@@ -233,9 +169,8 @@ class ContactsService:
                 user_metadata["salutation"] = prefix
             auth_user = await create_user(
                 sb_client=self.supabase_client,
-                email=email_norm,
+                phone=phone_number.strip(),
                 password=password,
-                email_confirm=True,
                 user_metadata=user_metadata,
             )
             if not auth_user or not auth_user.get("id"):
@@ -250,7 +185,6 @@ class ContactsService:
         isometrik_response = await create_isometrik_user(
             user={
                 "user_id": contact_id,
-                "email": email_norm,
                 "organization_id": org_id,
                 "role": IsometrikRole.CLIENT.value,
                 "first_name": first_name,
@@ -273,29 +207,28 @@ class ContactsService:
     async def create_contact(self, body: CreateContactRequest) -> dict[str, Any]:
         """Create a contact."""
         org_id = self.user_context.organization_id
-        email_norm = body.email.strip().lower()
-        if not email_norm:
-            raise ValidationException(
-                message_key="contacts.errors.invalid_email",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
-        await self._assert_email_unique(organization_id=org_id, email=email_norm)
         validated_custom_fields = await self._validate_custom_fields(body.custom_fields)
 
         contact_id = str(uuid.uuid4())
         user_id: str | None = None
         isometrik_user_id: str | None = None
-        created_password: str | None = None
+
+        phone = next((phone for phone in body.phones if phone.is_primary), None)
+
+        if not phone:
+            raise ValidationException(
+                message_key="contacts.errors.exactly_one_primary_phone",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
 
         if body.portal_access:
             (
                 user_id,
                 isometrik_user_id,
-                created_password,
+                _,
             ) = await self._provision_contact_auth_identity(
                 contact_id=contact_id,
-                email=email_norm,
+                phone=phone,
                 first_name=body.first_name,
                 last_name=body.last_name,
                 prefix=body.prefix,
@@ -315,16 +248,16 @@ class ContactsService:
             "title": body.title,
             "date_of_birth": body.date_of_birth,
             "profile_photo_url": body.profile_photo_url,
-            "phones": _serialize_phones(body.phones),
-            "emails": _emails_jsonb(email_norm),
+            "phones": _serialize_jsonb_list(body.phones),
+            "emails": _serialize_jsonb_list(body.emails),
             "tags": body.tags,
             "custom_fields": validated_custom_fields,
             "additional_data": body.additional_data,
-            "social_pages": _serialize_social_pages(body.social_pages),
+            "social_pages": _serialize_jsonb_list(body.social_pages),
             "documents": body.documents,
             "description": body.description,
-            "websites": _serialize_websites(body.websites),
-            "notes": _serialize_notes(body.notes),
+            "websites": _serialize_jsonb_list(body.websites),
+            "notes": _serialize_jsonb_list(body.notes),
         }
 
         try:
@@ -337,16 +270,16 @@ class ContactsService:
                 ) from exc
             raise
 
-        organization = await self.org_repo.get_organization_by_id(org_id)
-        if body.portal_access and organization:
-            try:
-                send_client_creation_email(
-                    email=email_norm,
-                    organization_name=str(organization.get("name") or ""),
-                    password=created_password,
-                )
-            except Exception as send_error:
-                logger.error("Failed to send contact creation email: %s", send_error)
+        await self.org_repo.get_organization_by_id(org_id)
+        # if body.portal_access and organization:
+        #     try:
+        #         send_client_creation_email(
+        #             email=email_norm,
+        #             organization_name=str(organization.get("name") or ""),
+        #             password=created_password,
+        #         )
+        #     except Exception as send_error:
+        #         logger.error("Failed to send contact creation email: %s", send_error)
 
         return {
             "contact_id": contact_id,
@@ -385,20 +318,20 @@ class ContactsService:
                     message_key="contacts.errors.contact_user_already_exists",
                     custom_code=CustomStatusCode.CONFLICT,
                 )
-            patch["emails"] = _emails_jsonb(email_norm)
+            patch["emails"] = _serialize_jsonb_list(body.emails)
 
         if "contact_type" in patch and isinstance(patch["contact_type"], ContactType):
             patch["contact_type"] = patch["contact_type"].value
         if "status" in patch and hasattr(patch["status"], "value"):
             patch["status"] = patch["status"].value
         if "phones" in patch:
-            patch["phones"] = _serialize_phones(patch["phones"])
+            patch["phones"] = _serialize_jsonb_list(patch["phones"])
         if "notes" in patch:
-            patch["notes"] = _serialize_notes(patch["notes"])
+            patch["notes"] = _serialize_jsonb_list(patch["notes"])
         if "social_pages" in patch:
-            patch["social_pages"] = _serialize_social_pages(patch["social_pages"])
+            patch["social_pages"] = _serialize_jsonb_list(patch["social_pages"])
         if "websites" in patch:
-            patch["websites"] = _serialize_websites(patch["websites"])
+            patch["websites"] = _serialize_jsonb_list(patch["websites"])
         if "custom_fields" in patch:
             patch["custom_fields"] = await self._validate_custom_fields(
                 patch["custom_fields"],

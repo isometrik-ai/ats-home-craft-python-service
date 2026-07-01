@@ -110,16 +110,13 @@ class NoteItem(BaseModel):
 class Website(BaseModel):
     """Website schema."""
 
-    id: str | None = Field(None, description="Website ID")
     url: str = Field(..., description="Website URL", max_length=500)
     type: str = Field(..., description="Website type", max_length=50)
-    is_primary: bool = Field(default=False, description="Primary website flag")
 
 
 class SocialPage(BaseModel):
     """Social media page schema: platform (e.g. linkedin, instagram, twitter) and URL."""
 
-    id: str | None = Field(None, description="Social page ID")
     platform: str = Field(..., description="Platform name", max_length=50)
     url: str = Field(..., description="Profile/page URL", max_length=500)
 
@@ -245,44 +242,44 @@ class SocialPageUpdateItem(BaseModel):
 class Phone(BaseModel):
     """Phone number item: id, phone_number, phone_isd_code, label, is_primary."""
 
-    id: str | None = Field(None, description="Phone item ID")
-    phone_number: str = Field(..., description="Phone number", max_length=50)
-    phone_isd_code: str = Field(..., description="Phone ISD code", max_length=10)
-    label: str | None = Field(None, description="Label (e.g. mobile, work)", max_length=50)
+    phone_number: str = Field(..., description="Phone number", min_length=1, max_length=15)
+    phone_isd_code: str = Field(..., description="Phone ISD code", min_length=1, max_length=5)
+    label: str | None = Field(
+        None, description="Label (e.g. mobile, work)", min_length=1, max_length=20
+    )
     is_primary: bool = Field(default=False, description="Primary phone flag")
 
 
-class PhoneInput(BaseModel):
-    """Phone input for add operation (no id)."""
+class Email(BaseModel):
+    """Email address item: id, email, label, is_primary."""
 
-    phone_number: str = Field(..., max_length=50, description="Phone number")
-    phone_isd_code: str = Field(..., max_length=10, description="Phone ISD code")
-    label: str | None = Field(None, max_length=50, description="Label (e.g. mobile, work)")
-    is_primary: bool = Field(default=False, description="Primary phone flag")
+    email: str = Field(..., description="Email address", min_length=1, max_length=255)
+    label: str | None = Field(
+        None, description="Label (e.g. personal, work)", min_length=1, max_length=20
+    )
+    is_primary: bool = Field(default=False, description="Primary email flag")
 
 
 class PhoneUpdateItem(BaseModel):
     """Phone update item; only provided fields are updated."""
 
     id: str = Field(..., description="Phone item ID to update")
-    phone_number: str | None = Field(None, max_length=50)
-    phone_isd_code: str | None = Field(None, max_length=10)
-    label: str | None = Field(None, max_length=50)
+    phone_number: str | None = Field(None, max_length=15)
+    phone_isd_code: str | None = Field(None, max_length=5)
+    label: str | None = Field(None, max_length=20)
     is_primary: bool | None = None
 
 
 class PhonesUpdate(BaseModel):
     """Batch phone operations: add, update, and/or remove (primary contact)."""
 
-    add: list[PhoneInput] | None = Field(None, max_length=20)
+    add: list[Phone] | None = Field(None, max_length=20)
     update: list[PhoneUpdateItem] | None = Field(None, max_length=20)
     remove: list[str] | None = Field(None, max_length=20)
 
     @field_validator("add")
     @classmethod
-    def validate_primary_phone_add(
-        cls, add_list: list[PhoneInput] | None
-    ) -> list[PhoneInput] | None:
+    def validate_primary_phone_add(cls, add_list: list[Phone] | None) -> list[Phone] | None:
         """Validate only one primary phone on add."""
         if not add_list:
             return add_list
