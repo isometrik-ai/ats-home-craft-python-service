@@ -307,17 +307,7 @@ class ContactsService:
         if not patch:
             return {"old_data": current, "new_data": self._normalize_details(current)}
 
-        if "email" in patch:
-            email_norm = patch.pop("email").strip().lower()
-            existing_id = await self.contacts_repo.get_contact_id_by_email(
-                organization_id=org_id,
-                email=email_norm,
-            )
-            if existing_id and existing_id != contact_id:
-                raise ConflictException(
-                    message_key="contacts.errors.contact_user_already_exists",
-                    custom_code=CustomStatusCode.CONFLICT,
-                )
+        if "emails" in patch:
             patch["emails"] = _serialize_jsonb_list(body.emails)
 
         if "contact_type" in patch and isinstance(patch["contact_type"], ContactType):

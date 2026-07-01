@@ -42,28 +42,6 @@ class ContactsRepository(BaseRepository):
             out["tags"] = []
         return out
 
-    async def get_contact_id_by_email(self, *, organization_id: str, email: str) -> str | None:
-        """Return an existing contact id for email within an organization (case-insensitive)."""
-        email_norm = (email or "").strip().lower()
-        if not email_norm:
-            return None
-        fetched_row = await self.db_connection.fetchrow(
-            """
-            SELECT ct.id::text AS id
-            FROM contacts ct
-            LEFT JOIN auth.users au
-              ON au.id = ct.user_id
-            WHERE ct.organization_id = $1::uuid
-              AND ct.status != $2
-              AND LOWER(COALESCE(au.email::text, '')) = $3
-            LIMIT 1
-            """,
-            organization_id,
-            ClientStatus.DELETED.value,
-            email_norm,
-        )
-        return str(fetched_row["id"]) if fetched_row and fetched_row.get("id") else None
-
     async def is_active_contact_user_for_organization(
         self,
         *,
@@ -283,6 +261,14 @@ class ContactsRepository(BaseRepository):
                     SELECT 1
                     FROM jsonb_array_elements(COALESCE(ct.emails, '[]'::jsonb)) AS e(item)
                     WHERE COALESCE(e.item->>'email', '') ILIKE ${next_param_index}
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(COALESCE(ct.phones, '[]'::jsonb)) AS p(item)
+                    WHERE (
+                      COALESCE(p.item->>'phone_isd_code', '')
+                      || COALESCE(p.item->>'phone_number', '')
+                    ) ILIKE ${next_param_index}
                   )
                 )"""
             )

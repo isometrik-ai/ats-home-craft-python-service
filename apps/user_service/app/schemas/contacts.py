@@ -134,9 +134,9 @@ class ContactSummaryResponse(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     title: str | None = None
-    email: str | None = None
     profile_photo_url: str | None = None
     phones: list[Any] = Field(default_factory=list)
+    emails: list[Any] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -162,7 +162,6 @@ class ContactDetailsResponse(BaseModel):
     date_of_birth: str | None = None
     profile_photo_url: str | None = None
 
-    email: str | None = None
     phones: list[Any] = Field(default_factory=list)
     emails: list[Any] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)

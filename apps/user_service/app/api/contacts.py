@@ -50,8 +50,9 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     status_code=http_status.HTTP_201_CREATED,
     summary="Create a contact",
     description=(
-        "Creates a contact in public.contacts. Requires contact_type and email. "
-        "Email is stored in the emails jsonb column."
+        "Creates a contact in public.contacts. Requires contact_type and at least one phone "
+        "with exactly one marked as primary. Emails are optional and stored in the emails jsonb "
+        "column. When portal_access is true (default), provisions auth via the primary phone."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -109,7 +110,7 @@ async def create_contact(
     "/list",
     status_code=http_status.HTTP_200_OK,
     summary="List contacts (database)",
-    description="Returns paginated contacts from PostgreSQL.",
+    description="Returns paginated contacts from PostgreSQL. Search matches name, email, or phone.",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
@@ -275,8 +276,8 @@ async def get_contact_details(
     status_code=http_status.HTTP_200_OK,
     summary="Update a contact",
     description=(
-        "Updates contact fields and related nested data (e.g., addresses). "
-        "May also apply company association changes when `company_association` is provided."
+        "Updates contact fields and nested data (phones, emails, tags, etc.). "
+        "When phones or emails are provided, exactly one phone must be primary."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -291,30 +292,29 @@ async def get_contact_details(
 async def update_contact(
     request: Request,
     contact_id: str = Path(..., description="Contact identifier (UUID string)."),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
     body: UpdateContactRequest = Body(...),
 ):
     """Update a contact."""
-    async with db_connection.transaction():
-        user_context = await check_permissions(
-            current_user=current_user,
-            db_connection=db_connection,
-            permission_codes=CONTACTS_MANAGEMENT_EDIT,
-        )
-        service = ContactsService(db_connection=db_connection, user_context=user_context)
-        request.state.audit_table = "contacts"
-        request.state.audit_requested_id = contact_id
-        request.state.audit_description = f"Updated contact: {contact_id}"
-        request.state.audit_risk_level = "medium"
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id,
-        }
-        result = await service.update_contact(contact_id=contact_id, body=body)
-        request.state.raw_audit_old_data = result.get("old_data")
-        request.state.raw_audit_new_data = result.get("new_data")
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+    )
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
+    request.state.audit_table = "contacts"
+    request.state.audit_requested_id = contact_id
+    request.state.audit_description = f"Updated contact: {contact_id}"
+    request.state.audit_risk_level = "medium"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+    result = await service.update_contact(contact_id=contact_id, body=body)
+    request.state.raw_audit_old_data = result.get("old_data")
+    request.state.raw_audit_new_data = result.get("new_data")
 
     return success_response(
         request=request,
@@ -343,29 +343,28 @@ async def update_contact(
 async def delete_contact(
     request: Request,
     contact_id: str = Path(..., description="Contact identifier (UUID string)."),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Soft-delete a contact."""
-    async with db_connection.transaction():
-        user_context = await check_permissions(
-            current_user=current_user,
-            db_connection=db_connection,
-            permission_codes=CONTACTS_MANAGEMENT_DELETE,
-        )
-        service = ContactsService(db_connection=db_connection, user_context=user_context)
-        request.state.audit_table = "contacts"
-        request.state.audit_requested_id = contact_id
-        request.state.audit_description = f"Deleted contact: {contact_id}"
-        request.state.audit_risk_level = "high"
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id,
-        }
-        deleted = await service.soft_delete_contact(contact_id=contact_id)
-        request.state.raw_audit_old_data = deleted.get("old_data")
-        request.state.raw_audit_new_data = deleted.get("new_data")
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_DELETE,
+    )
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
+    request.state.audit_table = "contacts"
+    request.state.audit_requested_id = contact_id
+    request.state.audit_description = f"Deleted contact: {contact_id}"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+    deleted = await service.soft_delete_contact(contact_id=contact_id)
+    request.state.raw_audit_old_data = deleted.get("old_data")
+    request.state.raw_audit_new_data = deleted.get("new_data")
 
     return success_response(
         request=request,

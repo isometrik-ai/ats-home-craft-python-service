@@ -133,19 +133,23 @@ class UserRepository:
     async def get_auth_user_by_phone(self, phone: str) -> dict | None:
         """Get a user from the 'auth.users' table by phone.
 
+        Normalizes the phone by stripping the leading '+' before comparison
+        because Supabase may store phone without '+' (e.g. '919876543210').
+
         Args:
-            phone: The phone of the user.
+            phone: The phone of the user (with or without leading '+').
 
         Returns:
             dict | None: User data as dictionary if found, else None.
         """
+        phone_normalized = self._normalize_phone(phone)
         query = """
             SELECT *
             FROM auth.users
-            WHERE phone = $1
+            WHERE REPLACE(phone, '+', '') = $1
             LIMIT 1
         """
-        row = await self.db_connection.fetchrow(query, phone)
+        row = await self.db_connection.fetchrow(query, phone_normalized)
 
         if row:
             # Convert asyncpg Record to standard dict
