@@ -89,6 +89,30 @@ class ContactsRepository(BaseRepository):
         )
         return row is not None
 
+    async def get_active_contact_by_user_id(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+    ) -> dict[str, Any] | None:
+        """Return active contact for auth user within organization."""
+        if not user_id or not organization_id:
+            return None
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT *
+            FROM contacts
+            WHERE user_id = $1::uuid
+              AND organization_id = $2::uuid
+              AND status != $3
+            LIMIT 1
+            """,
+            user_id,
+            organization_id,
+            ContactStatus.DELETED.value,
+        )
+        return self._normalize_row(dict(row)) if row else None
+
     async def insert_contact(self, contact_data: dict[str, Any]) -> dict[str, Any]:
         """Insert one contact row and return it."""
         columns = [

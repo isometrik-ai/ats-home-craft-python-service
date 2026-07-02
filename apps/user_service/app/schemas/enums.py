@@ -418,6 +418,60 @@ class ContactBloodGroup(str, Enum):
     AB_NEGATIVE = "AB-"
 
 
+class SetupStepStatus(str, Enum):
+    """Wizard step status (Postgres setup_step_status enum)."""
+
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+
+
+class ContactOnboardingStep(str, Enum):
+    """Contact onboarding wizard step keys."""
+
+    SELECT_PROPERTIES = "select_properties"
+    COMPLETE_PROFILE = "complete_profile"
+    VEHICLES = "vehicles"
+    HOUSEHOLD = "household"
+    CHOOSE_UNIT = "choose_unit"
+    REVIEW = "review"
+
+
+class ContactUnitStatus(str, Enum):
+    """Contact-unit link status."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    MOVED_OUT = "moved_out"
+
+
+class ContactUnitRelationship(str, Enum):
+    """Relationship of contact to unit."""
+
+    SELF = "self"
+    SPOUSE = "spouse"
+    CHILD = "child"
+    PARENT = "parent"
+    SIBLING = "sibling"
+    IN_LAW = "in_law"
+    OTHER = "other"
+
+
+class VehicleType(str, Enum):
+    """Vehicle type."""
+
+    TWO_WHEELER = "two_wheeler"
+    FOUR_WHEELER = "four_wheeler"
+
+
+class VehicleStatus(str, Enum):
+    """Vehicle record status."""
+
+    ACTIVE = "active"
+    REMOVED = "removed"
+
+
 class ClientUserStatus(str, Enum):
     """Client user status enumeration."""
 

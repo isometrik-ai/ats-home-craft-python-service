@@ -4,6 +4,9 @@ from fastapi import APIRouter
 
 from apps.user_service.app.api.audit_logs import router as audit_logs_router
 from apps.user_service.app.api.auth import router as auth_router
+from apps.user_service.app.api.contact_onboarding import (
+    router as contact_onboarding_router,
+)
 from apps.user_service.app.api.contacts import router as contacts_router
 from apps.user_service.app.api.custom_fields import router as custom_fields_router
 from apps.user_service.app.api.invites import router as invites_router
@@ -36,6 +39,7 @@ router.include_router(presigned_url_router)
 router.include_router(verification_codes_router)
 router.include_router(teams_router)
 router.include_router(contacts_router)
+router.include_router(contact_onboarding_router)
 router.include_router(custom_fields_router)
 
 
@@ -56,6 +60,7 @@ async def api_status():
             "/invite",
             "/teams",
             "/contacts",
+            "/contact-onboarding",
             "/custom-fields",
             "/superadmin/organizations",
         ],

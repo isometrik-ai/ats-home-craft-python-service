@@ -9,6 +9,7 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_service
+from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
 from apps.user_service.app.schemas.contacts import (
     ContactDetailsResponse,
     ContactSummaryResponse,
@@ -17,6 +18,7 @@ from apps.user_service.app.schemas.contacts import (
     UpdateContactRequest,
 )
 from apps.user_service.app.services.activity_service import ActivityService
+from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -323,6 +325,57 @@ async def update_contact(
         message_key="contacts.success.contact_updated",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("assign unit to contact")
+@router.post(
+    "/{contact_id}/units",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Pre-assign a unit to a contact (admin allotment)",
+    description="Creates a pending contact_units row for contact onboarding.",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contact_units",
+    category="CONTACT",
+)
+async def assign_unit_to_contact(
+    request: Request,
+    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: AdminAssignUnitRequest = Body(...),
+):
+    """Admin pre-allotment of a unit to a contact."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+    )
+    request.state.audit_table = "contact_units"
+    request.state.audit_requested_id = contact_id
+    request.state.audit_description = f"Assigned unit to contact: {contact_id}"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+    units_service = ContactUnitsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await units_service.admin_assign_unit(contact_id=contact_id, body=body)
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.unit_assigned",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=data,
     )
 
 
