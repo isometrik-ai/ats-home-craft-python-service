@@ -1,56 +1,19 @@
 services:
-  apps:
-    image: appscrip007/legalai-fast-api:development      # 👈 tells Compose how to tag the built image
-    build:
-      context: .
-      dockerfile: ./Dockerfile
-    container_name: legalai-service
-    restart: unless-stopped
+  ats-home-craft-python-service:
+    container_name: ats-home-craft-python-service
+    restart: always
+    image: appscrip007/ats-home-craft-python-service:latest
+    networks:
+      - ats_home_craft_network
+    ports:
+      - "5000:5000"
     env_file:
       - .env
-      # Python configuration
-      # - PYTHONPATH=/app
-      # - PYTHONUNBUFFERED=1
-      # - PYTHONDONTWRITEBYTECODE=1
-
-      # Database configuration (from Bitbucket secrets)
-      # - DB_HOST=${DB_HOST}
-      # - DB_PORT=${DB_PORT}
-      # - DB_DATABASE=${DB_DATABASE}
-      # - DB_USER=${DB_USER}
-      # - DB_PASSWORD=${DB_PASSWORD}
-
-      # Supabase configuration (from Bitbucket secrets)
-      # - SUPABASE_URL=${SUPABASE_URL}
-      # - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      # - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
-      # - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
-
-      # JWT configuration (from Bitbucket secrets)
-      # - JWT_SECRET=${JWT_SECRET}
-
-      # Application configuration
-      # - ENVIRONMENT=${ENVIRONMENT:-production}
-      # - LOG_LEVEL=${LOG_LEVEL:-INFO}
-
-    ports:
-      - '5001:5000'
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:5000/health']
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     logging:
-      driver: 'json-file'
       options:
-        max-size: '10m'
-        max-file: '3'
-        labels: 'app=legalai-service-python'
-        env: 'production'
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
+        max-size: "1m"
+        max-file: "3"
+
+networks:
+  ats_home_craft_network:
+    external: true

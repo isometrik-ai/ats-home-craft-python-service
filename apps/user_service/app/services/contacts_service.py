@@ -122,6 +122,8 @@ class ContactsService:
             details[ts_key] = format_iso_datetime(details.get(ts_key))
         if details.get("tags") is None:
             details["tags"] = []
+        if details.get("portal_access") is None:
+            details["portal_access"] = True
         return details
 
     def _summary_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -131,6 +133,7 @@ class ContactsService:
             "organization_id": str(row["organization_id"]),
             "status": row.get("status"),
             "contact_type": row.get("contact_type"),
+            "portal_access": bool(row.get("portal_access", True)),
             "first_name": row.get("first_name"),
             "last_name": row.get("last_name"),
             "title": row.get("title"),
@@ -290,18 +293,17 @@ class ContactsService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-        if body.portal_access:
-            (
-                user_id,
-                isometrik_user_id,
-                _,
-            ) = await self._provision_contact_auth_identity(
-                contact_id=contact_id,
-                phone=phone,
-                first_name=body.first_name,
-                last_name=body.last_name,
-                prefix=body.prefix,
-            )
+        (
+            user_id,
+            isometrik_user_id,
+            _,
+        ) = await self._provision_contact_auth_identity(
+            contact_id=contact_id,
+            phone=phone,
+            first_name=body.first_name,
+            last_name=body.last_name,
+            prefix=body.prefix,
+        )
 
         contact_row = {
             "id": contact_id,
@@ -310,6 +312,7 @@ class ContactsService:
             "isometrik_user_id": isometrik_user_id,
             "status": ContactStatus.ACTIVE.value,
             "contact_type": body.contact_type.value,
+            "portal_access": body.portal_access,
             "prefix": body.prefix,
             "first_name": body.first_name,
             "middle_name": body.middle_name,
@@ -373,6 +376,9 @@ class ContactsService:
             )
 
         patch = body.model_dump(exclude_unset=True, exclude_none=True)
+        if "portal_access" in body.model_fields_set:
+            patch["portal_access"] = body.portal_access
+
         if not patch:
             return {"old_data": current, "new_data": self._normalize_details(current)}
 

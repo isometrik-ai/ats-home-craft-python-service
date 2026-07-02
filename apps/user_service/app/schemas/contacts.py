@@ -83,6 +83,10 @@ class UpdateContactRequest(BaseModel):
     emails: list[Email] | None = None
     contact_type: ContactType | None = None
     status: ContactStatus | None = None
+    portal_access: bool | None = Field(
+        None,
+        description="If true, provisions auth user + Isometrik when not yet linked.",
+    )
     prefix: str | None = None
     first_name: str | None = None
     middle_name: str | None = None
@@ -131,6 +135,7 @@ class ContactSummaryResponse(BaseModel):
     organization_id: str
     status: str
     contact_type: str
+    portal_access: bool = True
     first_name: str | None = None
     last_name: str | None = None
     title: str | None = None
@@ -153,6 +158,7 @@ class ContactDetailsResponse(BaseModel):
     isometrik_user_id: str | None = None
     status: str
     contact_type: str
+    portal_access: bool = True
 
     prefix: str | None = None
     first_name: str | None = None
