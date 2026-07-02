@@ -153,6 +153,42 @@ class UserRepository:
 
         return None
 
+    async def get_auth_users_by_phone_or_email(
+        self,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+    ) -> list[dict]:
+        """Find auth users matching a phone and/or email in a single query.
+
+        Args:
+            phone: Normalized phone number to match against auth.users.phone.
+            email: Email address to match against auth.users.email.
+
+        Returns:
+            list[dict]: Matching auth user rows (may be empty, one, or two).
+        """
+        conditions: list[str] = []
+        args: list[str] = []
+
+        if phone:
+            conditions.append(f"phone = ${len(args) + 1}")
+            args.append(phone)
+        if email:
+            conditions.append(f"email = ${len(args) + 1}")
+            args.append(email)
+
+        if not conditions:
+            return []
+
+        query = f"""
+            SELECT *
+            FROM auth.users
+            WHERE {" OR ".join(conditions)}
+        """
+        rows = await self.db_connection.fetch(query, *args)
+        return [dict(row) for row in rows]
+
     async def get_user_details_by_id(
         self,
         user_id: str,

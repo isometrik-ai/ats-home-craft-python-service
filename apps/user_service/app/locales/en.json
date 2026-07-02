@@ -257,6 +257,7 @@
       "social_page_not_found": "Social page not found",
       "only_one_primary_phone": "Only one phone number can be marked as primary",
       "exactly_one_primary_phone": "Exactly one phone number must be marked as primary in the phones list.",
+      "primary_email_phone_auth_mismatch": "The provided primary email and phone belong to different accounts.",
       "work_history_item_not_found": "Work history item not found",
       "educational_history_item_not_found": "Educational history item not found"
     },

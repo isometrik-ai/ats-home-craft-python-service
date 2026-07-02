@@ -16,7 +16,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
-from apps.user_service.app.schemas.common import Phone
+from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import (
     CreateContactRequest,
     UpdateContactRequest,
@@ -81,6 +81,15 @@ def _normalize_full_phone(phone_isd_code: str, phone_number: str) -> str:
     combined = f"{phone_isd_code or ''}{phone_number or ''}".strip()
     digits = re.sub(r"\D", "", combined)
     return digits if digits else ""
+
+
+def _get_primary_email(emails: list[Email] | None) -> str | None:
+    """Return normalized primary email when one is marked is_primary."""
+    for item in emails or []:
+        if item.is_primary:
+            normalized = item.email.strip().lower()
+            return normalized or None
+    return None
 
 
 def _get_primary_phone_identity(phones: list[Any] | None) -> tuple[str, str] | None:
@@ -217,7 +226,8 @@ class ContactsService:
         self,
         *,
         contact_id: str,
-        phone: Phone,
+        phone: str,
+        email: str | None = None,
         first_name: str | None,
         last_name: str | None,
         prefix: str | None,
@@ -238,11 +248,22 @@ class ContactsService:
             )
 
         user_repo = UserRepository(db_connection=self.db_connection)
-        phone_number = _normalize_full_phone(phone.phone_isd_code, phone.phone_number)
-        existing_user = await user_repo.get_auth_user_by_phone(phone_number)
+        auth_matches = await user_repo.get_auth_users_by_phone_or_email(
+            phone=phone,
+            email=email,
+        )
+        matched_user_ids = {
+            str(match["id"]) for match in auth_matches if match.get("id") is not None
+        }
+
         created_password: str | None = None
-        if existing_user and existing_user.get("id"):
-            user_id = str(existing_user["id"])
+        if len(matched_user_ids) > 1:
+            raise ConflictException(
+                message_key="contacts.errors.primary_email_phone_auth_mismatch",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        if len(matched_user_ids) == 1:
+            user_id = next(iter(matched_user_ids))
         else:
             password = generate_random_password()
             created_password = password
@@ -255,7 +276,8 @@ class ContactsService:
                 user_metadata["salutation"] = prefix
             auth_user = await create_user(
                 sb_client=self.supabase_client,
-                phone=phone_number,
+                email=email,
+                phone=phone,
                 password=password,
                 user_metadata=user_metadata,
             )
@@ -344,13 +366,16 @@ class ContactsService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
+        primary_email = _get_primary_email(body.emails)
+
         (
             user_id,
             isometrik_user_id,
             _,
         ) = await self._provision_contact_auth_identity(
             contact_id=contact_id,
-            phone=phone,
+            phone=_normalize_full_phone(phone.phone_isd_code, phone.phone_number),
+            email=primary_email,
             first_name=body.first_name,
             last_name=body.last_name,
             prefix=body.prefix,
