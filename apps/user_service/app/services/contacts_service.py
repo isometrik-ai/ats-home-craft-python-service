@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date
 from typing import Any
@@ -75,6 +76,13 @@ def _normalize_phone_item(phone: Any) -> dict[str, Any]:
     return {}
 
 
+def _normalize_full_phone(phone_isd_code: str, phone_number: str) -> str:
+    """Combine ISD + number and strip formatting characters for E.164 storage."""
+    combined = f"{phone_isd_code or ''}{phone_number or ''}".strip()
+    digits = re.sub(r"\D", "", combined)
+    return digits if digits else ""
+
+
 def _get_primary_phone_identity(phones: list[Any] | None) -> tuple[str, str] | None:
     """Return (phone_isd_code, phone_number) for the primary phone, if any."""
     for phone in phones or []:
@@ -92,6 +100,40 @@ def _primary_phone_changed(old_phones: Any, new_phones: list[Any]) -> bool:
     old_primary = _get_primary_phone_identity(parse_json_any(old_phones, default=[]))
     new_primary = _get_primary_phone_identity(new_phones)
     return old_primary != new_primary
+
+
+def _serialize_contact_update_patch(patch: dict[str, Any]) -> dict[str, Any]:
+    """Normalize enum and JSONB list fields in a contact update payload."""
+    if "contact_type" in patch and isinstance(patch["contact_type"], ContactType):
+        patch["contact_type"] = patch["contact_type"].value
+    if "status" in patch and hasattr(patch["status"], "value"):
+        patch["status"] = patch["status"].value
+    if "gender" in patch:
+        patch["gender"] = patch["gender"].value
+    if "blood_group" in patch:
+        patch["blood_group"] = patch["blood_group"].value
+    if "communication_preferences" in patch:
+        patch["communication_preferences"] = parse_json_any(
+            patch["communication_preferences"],
+            default=patch["communication_preferences"],
+        )
+    for key in ("emails", "notes", "social_pages", "websites"):
+        if key in patch:
+            patch[key] = _serialize_jsonb_list(patch[key])
+    return patch
+
+
+def _contact_phone_sync_info(
+    *,
+    current: dict[str, Any],
+    phones: list[Phone],
+) -> tuple[bool, Phone | None]:
+    """Return whether auth phone should sync and the new primary phone."""
+    sync_auth_phone = bool(current.get("user_id")) and _primary_phone_changed(
+        current.get("phones"), phones
+    )
+    primary_phone = next(phone for phone in phones if phone.is_primary) if sync_auth_phone else None
+    return sync_auth_phone, primary_phone
 
 
 class ContactsService:
@@ -124,6 +166,15 @@ class ContactsService:
             details["tags"] = []
         if details.get("portal_access") is None:
             details["portal_access"] = True
+        if details.get("gender") is not None:
+            details["gender"] = str(details["gender"])
+        if details.get("blood_group") is not None:
+            details["blood_group"] = str(details["blood_group"])
+        if details.get("communication_preferences") is not None:
+            details["communication_preferences"] = parse_json_any(
+                details["communication_preferences"],
+                default=details["communication_preferences"],
+            )
         return details
 
     def _summary_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -187,7 +238,7 @@ class ContactsService:
             )
 
         user_repo = UserRepository(db_connection=self.db_connection)
-        phone_number = f"{phone.phone_isd_code}{phone.phone_number}".strip()
+        phone_number = _normalize_full_phone(phone.phone_isd_code, phone.phone_number)
         existing_user = await user_repo.get_auth_user_by_phone(phone_number)
         created_password: str | None = None
         if existing_user and existing_user.get("id"):
@@ -247,7 +298,7 @@ class ContactsService:
                 custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
             )
 
-        full_phone = (phone.phone_isd_code + phone.phone_number).strip()
+        full_phone = _normalize_full_phone(phone.phone_isd_code, phone.phone_number)
         user_repo = UserRepository(db_connection=self.db_connection)
         existing_user = await user_repo.get_auth_user_by_phone(full_phone)
         if existing_user and str(existing_user["id"]) != user_id:
@@ -319,6 +370,11 @@ class ContactsService:
             "last_name": body.last_name,
             "title": body.title,
             "date_of_birth": body.date_of_birth,
+            "gender": body.gender.value if body.gender else None,
+            "blood_group": body.blood_group.value if body.blood_group else None,
+            "communication_preferences": body.communication_preferences.model_dump()
+            if body.communication_preferences
+            else {},
             "profile_photo_url": body.profile_photo_url,
             "phones": _serialize_jsonb_list(body.phones),
             "emails": _serialize_jsonb_list(body.emails),
@@ -363,7 +419,6 @@ class ContactsService:
         self, *, contact_id: str, body: UpdateContactRequest
     ) -> dict[str, Any]:
         """Update a contact."""
-        # pylint: disable=too-complex
         org_id = self.user_context.organization_id
         current = await self.contacts_repo.get_contact_for_update(
             contact_id=contact_id,
@@ -382,31 +437,17 @@ class ContactsService:
         if not patch:
             return {"old_data": current, "new_data": self._normalize_details(current)}
 
-        if "contact_type" in patch and isinstance(patch["contact_type"], ContactType):
-            patch["contact_type"] = patch["contact_type"].value
-        if "status" in patch and hasattr(patch["status"], "value"):
-            patch["status"] = patch["status"].value
-        if "emails" in patch:
-            patch["emails"] = _serialize_jsonb_list(patch["emails"])
-        if "notes" in patch:
-            patch["notes"] = _serialize_jsonb_list(patch["notes"])
-        if "social_pages" in patch:
-            patch["social_pages"] = _serialize_jsonb_list(patch["social_pages"])
-        if "websites" in patch:
-            patch["websites"] = _serialize_jsonb_list(patch["websites"])
+        patch = _serialize_contact_update_patch(patch)
+
+        sync_auth_phone = False
+        primary_phone: Phone | None = None
         if "phones" in patch and body.phones is not None:
             patch["phones"] = _serialize_jsonb_list(body.phones)
-            sync_auth_phone = bool(current.get("user_id")) and _primary_phone_changed(
-                current.get("phones"), body.phones
+            sync_auth_phone, primary_phone = _contact_phone_sync_info(
+                current=current,
+                phones=body.phones,
             )
-            primary_phone = (
-                next(phone for phone in body.phones if phone.is_primary)
-                if sync_auth_phone
-                else None
-            )
-        else:
-            sync_auth_phone = False
-            primary_phone = None
+
         if "custom_fields" in patch:
             patch["custom_fields"] = await self._validate_custom_fields(
                 patch["custom_fields"],

@@ -82,6 +82,9 @@ def test_create_contact_flexible_dob():
     model = CreateContactRequest(
         contact_type=ContactType.OWNER,
         date_of_birth="11/2/1992",
+        gender="male",
+        blood_group="B+",
+        communication_preferences={"email": True, "sms": False, "push": True},
         phones=[
             {
                 "phone_number": "1234567890",
@@ -91,3 +94,25 @@ def test_create_contact_flexible_dob():
         ],
     )
     assert model.date_of_birth == dt.date(1992, 11, 2)
+    assert model.gender.value == "male"
+    assert model.blood_group.value == "B+"
+    assert model.communication_preferences.email is True
+    assert model.communication_preferences.sms is False
+    assert model.communication_preferences.push is True
+
+
+def test_create_contact_default_comm_prefs():
+    """CreateContactRequest stores default communication preferences when omitted."""
+    model = CreateContactRequest(
+        contact_type=ContactType.OWNER,
+        phones=[
+            {
+                "phone_number": "1234567890",
+                "phone_isd_code": "+1",
+                "is_primary": True,
+            }
+        ],
+    )
+    assert model.communication_preferences.email is True
+    assert model.communication_preferences.sms is True
+    assert model.communication_preferences.push is False

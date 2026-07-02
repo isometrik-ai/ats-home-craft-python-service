@@ -397,6 +397,27 @@ class ContactType(str, Enum):
     STAFF = "Staff"
 
 
+class ContactGender(str, Enum):
+    """Gender stored on public.contacts.gender (Postgres contact_gender enum)."""
+
+    MALE = "male"
+    FEMALE = "female"
+    OTHER = "other"
+
+
+class ContactBloodGroup(str, Enum):
+    """Blood group stored on public.contacts.blood_group (Postgres contact_blood_group enum)."""
+
+    A_POSITIVE = "A+"
+    A_NEGATIVE = "A-"
+    B_POSITIVE = "B+"
+    B_NEGATIVE = "B-"
+    O_POSITIVE = "O+"
+    O_NEGATIVE = "O-"
+    AB_POSITIVE = "AB+"
+    AB_NEGATIVE = "AB-"
+
+
 class ClientUserStatus(str, Enum):
     """Client user status enumeration."""
 

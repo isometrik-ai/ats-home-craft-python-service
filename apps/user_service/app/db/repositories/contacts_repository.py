@@ -21,6 +21,7 @@ CONTACT_JSONB_COLUMNS: frozenset[str] = frozenset(
         "documents",
         "websites",
         "notes",
+        "communication_preferences",
     }
 )
 
@@ -105,6 +106,9 @@ class ContactsRepository(BaseRepository):
             "title",
             "date_of_birth",
             "profile_photo_url",
+            "gender",
+            "blood_group",
+            "communication_preferences",
             "phones",
             "emails",
             "tags",
