@@ -14,7 +14,12 @@ from apps.user_service.app.schemas.common import (
     SocialPage,
     Website,
 )
-from apps.user_service.app.schemas.enums import ContactStatus, ContactType
+from apps.user_service.app.schemas.enums import (
+    ContactBloodGroup,
+    ContactGender,
+    ContactStatus,
+    ContactType,
+)
 from apps.user_service.app.schemas.list_filters import DropdownCustomFieldFilter
 from apps.user_service.app.utils.common_utils import parse_flexible_date
 from libs.shared_utils.http_exceptions import ValidationException
@@ -32,6 +37,16 @@ def _validate_exactly_one_primary_phone(phones: list[Phone]) -> list[Phone]:
             custom_code=CustomStatusCode.VALIDATION_ERROR,
         )
     return phones
+
+
+class CommunicationPreferences(BaseModel):
+    """Notification channel toggles stored on contacts.communication_preferences."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: bool = Field(default=True, description="Receive email notifications.")
+    sms: bool = Field(default=True, description="Receive SMS notifications.")
+    push: bool = Field(default=False, description="Receive push notifications.")
 
 
 class CreateContactRequest(BaseModel):
@@ -52,6 +67,12 @@ class CreateContactRequest(BaseModel):
     title: str | None = Field(None, max_length=100)
     date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = Field(None, max_length=500)
+    gender: ContactGender | None = Field(None, description="Optional gender.")
+    blood_group: ContactBloodGroup | None = Field(None, description="Optional blood group.")
+    communication_preferences: CommunicationPreferences = Field(
+        default_factory=CommunicationPreferences,
+        description="Notification channel preferences; defaults to email+sms on, push off.",
+    )
 
     emails: list[Email] = Field(default_factory=list, max_length=20)
     phones: list[Phone] = Field(..., min_length=1, max_length=20)
@@ -83,6 +104,10 @@ class UpdateContactRequest(BaseModel):
     emails: list[Email] | None = None
     contact_type: ContactType | None = None
     status: ContactStatus | None = None
+    portal_access: bool | None = Field(
+        None,
+        description="If true, provisions auth user + Isometrik when not yet linked.",
+    )
     prefix: str | None = None
     first_name: str | None = None
     middle_name: str | None = None
@@ -90,6 +115,9 @@ class UpdateContactRequest(BaseModel):
     title: str | None = None
     date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = None
+    gender: ContactGender | None = None
+    blood_group: ContactBloodGroup | None = None
+    communication_preferences: CommunicationPreferences | None = None
     phones: list[Phone] | None = None
     tags: list[str] | None = None
     social_pages: list[SocialPage] | None = None
@@ -131,6 +159,7 @@ class ContactSummaryResponse(BaseModel):
     organization_id: str
     status: str
     contact_type: str
+    portal_access: bool = True
     first_name: str | None = None
     last_name: str | None = None
     title: str | None = None
@@ -153,6 +182,7 @@ class ContactDetailsResponse(BaseModel):
     isometrik_user_id: str | None = None
     status: str
     contact_type: str
+    portal_access: bool = True
 
     prefix: str | None = None
     first_name: str | None = None
@@ -161,6 +191,12 @@ class ContactDetailsResponse(BaseModel):
     title: str | None = None
     date_of_birth: str | None = None
     profile_photo_url: str | None = None
+    gender: str | None = None
+    blood_group: str | None = None
+    communication_preferences: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Notification channel preferences; defaults to email+sms on, push off.",
+    )
 
     phones: list[Any] = Field(default_factory=list)
     emails: list[Any] = Field(default_factory=list)

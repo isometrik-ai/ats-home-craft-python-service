@@ -21,6 +21,7 @@ CONTACT_JSONB_COLUMNS: frozenset[str] = frozenset(
         "documents",
         "websites",
         "notes",
+        "communication_preferences",
     }
 )
 
@@ -97,6 +98,7 @@ class ContactsRepository(BaseRepository):
             "isometrik_user_id",
             "status",
             "contact_type",
+            "portal_access",
             "prefix",
             "first_name",
             "middle_name",
@@ -104,6 +106,9 @@ class ContactsRepository(BaseRepository):
             "title",
             "date_of_birth",
             "profile_photo_url",
+            "gender",
+            "blood_group",
+            "communication_preferences",
             "phones",
             "emails",
             "tags",
@@ -312,6 +317,7 @@ class ContactsRepository(BaseRepository):
               ct.organization_id::text AS organization_id,
               ct.status,
               ct.contact_type,
+              ct.portal_access,
               ct.first_name,
               ct.last_name,
               ct.title,
