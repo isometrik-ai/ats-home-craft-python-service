@@ -280,6 +280,7 @@ class ContactsService:
                 phone=phone,
                 password=password,
                 user_metadata=user_metadata,
+                email_confirm=True,
             )
             if not auth_user or not auth_user.get("id"):
                 raise ServiceUnavailableException(
