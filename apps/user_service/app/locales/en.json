@@ -505,5 +505,39 @@
       "list_updated": "List updated successfully.",
       "list_deleted": "List deleted successfully."
     }
+  },
+  "contact_onboarding": {
+    "errors": {
+      "contact_not_found": "No active contact was found for your account in this organization.",
+      "contact_unit_not_found": "One or more selected properties could not be found.",
+      "unit_not_assigned": "The selected unit is not assigned to your account.",
+      "unit_not_found": "The unit you selected does not exist.",
+      "already_completed": "Contact onboarding has already been completed.",
+      "vehicle_registration_duplicate": "A vehicle with this registration number already exists in the project.",
+      "vehicle_not_found": "The vehicle you are trying to access does not exist.",
+      "no_default_unit": "Please choose a default unit before completing onboarding.",
+      "no_active_units": "At least one confirmed property is required to complete onboarding.",
+      "invalid_step": "The onboarding step is not valid.",
+      "step_not_skippable": "This onboarding step cannot be skipped.",
+      "step_prerequisite": "Please complete the {step_key} step before finishing onboarding."
+    },
+    "success": {
+      "status_retrieved": "Onboarding status retrieved successfully.",
+      "properties_retrieved": "Your properties retrieved successfully.",
+      "properties_confirmed": "Properties confirmed successfully.",
+      "profile_updated": "Profile updated successfully.",
+      "vehicles_retrieved": "Vehicles retrieved successfully.",
+      "vehicle_created": "Vehicle added successfully.",
+      "vehicle_updated": "Vehicle updated successfully.",
+      "vehicle_removed": "Vehicle removed successfully.",
+      "step_completed": "Onboarding step completed successfully.",
+      "step_skipped": "Onboarding step skipped successfully.",
+      "household_retrieved": "Household members retrieved successfully.",
+      "household_member_added": "Household member added successfully.",
+      "default_unit_set": "Default unit set successfully.",
+      "review_retrieved": "Onboarding review retrieved successfully.",
+      "onboarding_completed": "Contact onboarding completed successfully.",
+      "unit_assigned": "Unit assigned to contact successfully."
+    }
   }
 }

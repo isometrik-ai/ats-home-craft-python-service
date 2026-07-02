@@ -343,6 +343,38 @@ async def check_permissions(
     return user_context
 
 
+async def extract_onboarding_contact_context(
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    request: Request | None = None,
+) -> tuple[UserContext, dict[str, Any]]:
+    """Resolve JWT user to active contact within selected organization."""
+    from apps.user_service.app.db.repositories.contacts_repository import (
+        ContactsRepository,
+    )
+
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    if not user_context.organization_id:
+        raise ValidationException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+
+    contacts_repo = ContactsRepository(db_connection)
+    contact = await contacts_repo.get_active_contact_by_user_id(
+        user_id=user_context.user_id,
+        organization_id=user_context.organization_id,
+    )
+    if not contact:
+        from libs.shared_utils.http_exceptions import NotFoundException
+
+        raise NotFoundException(
+            message_key="contact_onboarding.errors.contact_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    return user_context, contact
+
+
 async def require_organization_creator(
     user_context: UserContext,
     organization_id: str,
