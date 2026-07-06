@@ -1089,3 +1089,187 @@ class ContactsImportKafkaStream(str, Enum):
     """Kafka topic and outbox ``event_type`` for contacts import (same string for both)."""
 
     CONTACTS_IMPORT_REQUESTED = "contacts.import.requested"
+
+
+# ============================================================================
+# PROJECT SETUP (PROPERTY) ENUMS — mirror Postgres property_setup enums
+# ============================================================================
+
+
+class PropertyProjectStatus(str, Enum):
+    """Project lifecycle status (Postgres project_status enum)."""
+
+    ACTIVE = "active"
+    ONBOARDING = "onboarding"
+    SUSPENDED = "suspended"
+
+
+class PropertyType(str, Enum):
+    """Property type for a project (Postgres property_type enum)."""
+
+    RESIDENTIAL = "residential"
+    COMMERCIAL = "commercial"
+    PLOTS = "plots"
+
+
+class MeasurementUnit(str, Enum):
+    """Primary measurement unit (Postgres measurement_unit enum)."""
+
+    SQ_FT = "sq_ft"
+    SQ_M = "sq_m"
+    GAJ = "gaj"
+
+
+class ProjectSetupStep(str, Enum):
+    """Project setup wizard step keys (Postgres project_setup_step enum)."""
+
+    PROJECT_BASICS = "project_basics"
+    TOWER_BUILDER = "tower_builder"
+    APARTMENT_CONFIG = "apartment_config"
+    COMMERCIAL_CONFIG = "commercial_config"
+    PLOT_CONFIG = "plot_config"
+    INVENTORIES = "inventories"
+    FACILITIES = "facilities"
+    FLOOR_PLANS = "floor_plans"
+    SITE_MAP = "site_map"
+
+
+class ProjectMediaKind(str, Enum):
+    """Project media kind (Postgres project_media_kind enum)."""
+
+    COVER_IMAGE = "cover_image"
+    LOGO = "logo"
+    VIDEO = "video"
+    SITE_MAP = "site_map"
+
+
+class ConfigMediaKind(str, Enum):
+    """Config media kind (Postgres config_media_kind enum)."""
+
+    FLOOR_PLAN = "floor_plan"
+    LAYOUT_PLAN = "layout_plan"
+    UNIT_DRAWING = "unit_drawing"
+
+
+class TowerType(str, Enum):
+    """Tower type (Postgres tower_type enum)."""
+
+    RESIDENTIAL = "residential"
+    COMMERCIAL = "commercial"
+    CLUBHOUSE = "clubhouse"
+    MIXED = "mixed"
+
+
+class UnitNumberingPattern(str, Enum):
+    """Unit numbering pattern (Postgres unit_numbering_pattern enum)."""
+
+    FLOOR_UNIT = "floor_unit"
+    SEQUENTIAL = "sequential"
+    CUSTOM = "custom"
+
+
+class GateType(str, Enum):
+    """Gate type (Postgres gate_type enum)."""
+
+    ENTRY = "entry"
+    EXIT = "exit"
+    BOTH = "both"
+
+
+class GateStatus(str, Enum):
+    """Gate status (Postgres gate_status enum)."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+
+class LiftType(str, Enum):
+    """Lift type (Postgres lift_type enum)."""
+
+    PASSENGER = "passenger"
+    SERVICE = "service"
+    FREIGHT = "freight"
+
+
+class LiftStatus(str, Enum):
+    """Lift status (Postgres lift_status enum)."""
+
+    OPERATIONAL = "operational"
+    MAINTENANCE = "maintenance"
+    INACTIVE = "inactive"
+
+
+class UnitConfigKind(str, Enum):
+    """Unit configuration kind (Postgres unit_config_kind enum)."""
+
+    APARTMENT = "apartment"
+    COMMERCIAL = "commercial"
+    PLOT = "plot"
+
+
+class Facing(str, Enum):
+    """Compass facing (Postgres facing enum)."""
+
+    NORTH = "north"
+    SOUTH = "south"
+    EAST = "east"
+    WEST = "west"
+    NORTH_EAST = "north_east"
+    NORTH_WEST = "north_west"
+    SOUTH_EAST = "south_east"
+    SOUTH_WEST = "south_west"
+
+
+class CommercialUnitType(str, Enum):
+    """Commercial unit type (Postgres commercial_unit_type enum)."""
+
+    RETAIL_SHOP = "retail_shop"
+    OFFICE = "office"
+    FOOD_COURT = "food_court"
+    ANCHOR_STORE = "anchor_store"
+    CLINIC = "clinic"
+    KIOSK = "kiosk"
+    WAREHOUSE = "warehouse"
+    OTHER = "other"
+
+
+class PlotType(str, Enum):
+    """Plot type (Postgres plot_type enum)."""
+
+    RESIDENTIAL = "residential"
+    COMMERCIAL = "commercial"
+    VILLA = "villa"
+
+
+class PlotItemStatus(str, Enum):
+    """Plot item status (Postgres plot_item_status enum)."""
+
+    EMPTY = "empty"
+    UNDER_CONSTRUCTION = "under_construction"
+    CONSTRUCTED = "constructed"
+
+
+class UnitStatus(str, Enum):
+    """Unit status (Postgres unit_status enum)."""
+
+    VACANT = "vacant"
+    OCCUPIED = "occupied"
+    UNDER_MAINTENANCE = "under_maintenance"
+    BLOCKED = "blocked"
+
+
+class FacilityStatus(str, Enum):
+    """Facility status (Postgres facility_status enum)."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    UNDER_MAINTENANCE = "under_maintenance"
+
+
+class FacilityLocationType(str, Enum):
+    """Facility location type (Postgres facility_location_type enum)."""
+
+    OUTDOOR_STANDALONE = "outdoor_standalone"
+    INDOOR_CLUBHOUSE = "indoor_clubhouse"
+    IN_TOWER = "in_tower"
+    OTHER = "other"
