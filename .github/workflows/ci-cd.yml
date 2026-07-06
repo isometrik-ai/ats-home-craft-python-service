@@ -122,5 +122,5 @@ jobs:
           script: |
             echo "${{ secrets.DOCKERHUB_PASSWORD }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
             cd /var/www/html/backend-services/python-service
-            sudo docker-compose pull && sudo docker-compose down && sudo docker-compose up -d
+            sudo docker compose pull && sudo docker compose down && sudo docker compose up -d
             echo "✅ Deployment completed successfully!"
