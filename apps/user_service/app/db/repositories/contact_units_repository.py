@@ -362,6 +362,81 @@ class ContactUnitsRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def get_household_link(
+        self,
+        *,
+        organization_id: str,
+        primary_contact_id: str,
+        contact_unit_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch a household link if it belongs to a unit the primary owns.
+
+        Ensures the target link is a Family contact (not the primary's own link)
+        on a unit the primary contact is actively linked to.
+        """
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+              cu.id::text AS contact_unit_id,
+              cu.contact_id::text AS contact_id,
+              cu.unit_id::text AS unit_id
+            FROM contact_units cu
+            JOIN contacts c ON c.id = cu.contact_id
+            JOIN contact_units primary_cu
+              ON primary_cu.unit_id = cu.unit_id
+             AND primary_cu.organization_id = cu.organization_id
+            WHERE cu.organization_id = $1::uuid
+              AND cu.id = $2::uuid
+              AND cu.contact_id != $3::uuid
+              AND c.contact_type = 'Family'
+              AND primary_cu.contact_id = $3::uuid
+              AND primary_cu.status = $4::contact_unit_status
+            LIMIT 1
+            """,
+            organization_id,
+            contact_unit_id,
+            primary_contact_id,
+            ContactUnitStatus.ACTIVE.value,
+        )
+        return dict(row) if row else None
+
+    async def delete_link(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_id: str,
+    ) -> bool:
+        """Delete a contact_unit link. Returns True if a row was removed."""
+        result = await self.db_connection.execute(
+            """
+            DELETE FROM contact_units
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+            """,
+            organization_id,
+            contact_unit_id,
+        )
+        return result.upper().startswith("DELETE") and not result.endswith(" 0")
+
+    async def count_links_for_contact(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> int:
+        """Count remaining contact_unit links for a contact."""
+        count = await self.db_connection.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM contact_units
+            WHERE organization_id = $1::uuid
+              AND contact_id = $2::uuid
+            """,
+            organization_id,
+            contact_id,
+        )
+        return int(count or 0)
+
     async def get_unit_project(
         self,
         *,
