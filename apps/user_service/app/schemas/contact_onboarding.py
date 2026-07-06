@@ -149,6 +149,7 @@ class CreateHouseholdMemberRequest(BaseModel):
     first_name: str = Field(..., max_length=100)
     last_name: str | None = Field(None, max_length=100)
     phones: list[Phone] = Field(..., min_length=1, max_length=20)
+    emails: list[Email] | None = Field(None, max_length=20)
     relationship: ContactUnitRelationship
     portal_access: bool = False
 

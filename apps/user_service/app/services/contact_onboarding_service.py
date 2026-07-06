@@ -215,6 +215,7 @@ class ContactOnboardingService:
                 first_name=body.first_name,
                 last_name=body.last_name,
                 phones=body.phones,
+                emails=body.emails,
             )
         )
         family_contact_id = create_result["contact_id"]
