@@ -111,3 +111,16 @@ jobs:
           echo "   - ${{ env.IMAGE_NAME }}:latest"
           echo "   - ${{ env.IMAGE_NAME }}:prod-${{ github.run_number }}"
           echo "🔗 Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+
+      - name: Deploy to Ubuntu Server
+        if: ${{ github.event_name == 'push' }}
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          script: |
+            echo "${{ secrets.DOCKERHUB_PASSWORD }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            cd /var/www/html/backend-services/python-service
+            sudo docker-compose pull && sudo docker-compose down && sudo docker-compose up -d
+            echo "✅ Deployment completed successfully!"
