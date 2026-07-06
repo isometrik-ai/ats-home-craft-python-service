@@ -102,24 +102,25 @@ ______________________________________________________________________
 All routes under `/v1/contact-onboarding`. The acting contact is resolved from the JWT, so
 most endpoints take **no** contact id in the path.
 
-| Method | Path                                              | Step / purpose                                                    |
-| ------ | ------------------------------------------------- | ----------------------------------------------------------------- |
-| GET    | `/v1/contact-onboarding/status`                   | Wizard progress + derived current step                            |
-| GET    | `/v1/contact-onboarding/properties`               | List pre‑allotted units to confirm (step 1)                       |
-| POST   | `/v1/contact-onboarding/properties/confirm`       | Confirm selected units (step 1)                                   |
-| PATCH  | `/v1/contact-onboarding/profile`                  | Update profile + complete `complete_profile` (step 2)             |
-| GET    | `/v1/contact-onboarding/vehicles`                 | List vehicles                                                     |
-| POST   | `/v1/contact-onboarding/vehicles`                 | Add a vehicle                                                     |
-| PATCH  | `/v1/contact-onboarding/vehicles/{vehicle_id}`    | Update a vehicle                                                  |
-| DELETE | `/v1/contact-onboarding/vehicles/{vehicle_id}`    | Remove a vehicle                                                  |
-| POST   | `/v1/contact-onboarding/steps/vehicles/complete`  | Complete the `vehicles` step                                      |
-| POST   | `/v1/contact-onboarding/steps/skip`               | Skip an optional step (`vehicles` or `household`)                 |
-| GET    | `/v1/contact-onboarding/household`                | List household/family members                                     |
-| POST   | `/v1/contact-onboarding/household`                | Add a family member to a unit                                     |
-| POST   | `/v1/contact-onboarding/steps/household/complete` | Complete the `household` step                                     |
-| POST   | `/v1/contact-onboarding/default-unit`             | Choose default login unit (step 5)                                |
-| GET    | `/v1/contact-onboarding/review`                   | Aggregate review (contact + units + vehicles + household + steps) |
-| POST   | `/v1/contact-onboarding/complete`                 | Finalize onboarding → activate unit links                         |
+| Method | Path                                                 | Step / purpose                                                    |
+| ------ | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| GET    | `/v1/contact-onboarding/status`                      | Wizard progress + derived current step                            |
+| GET    | `/v1/contact-onboarding/properties`                  | List pre‑allotted units to confirm (step 1)                       |
+| POST   | `/v1/contact-onboarding/properties/confirm`          | Confirm selected units (step 1)                                   |
+| PATCH  | `/v1/contact-onboarding/profile`                     | Update profile + complete `complete_profile` (step 2)             |
+| GET    | `/v1/contact-onboarding/vehicles`                    | List vehicles                                                     |
+| POST   | `/v1/contact-onboarding/vehicles`                    | Add a vehicle                                                     |
+| PATCH  | `/v1/contact-onboarding/vehicles/{vehicle_id}`       | Update a vehicle                                                  |
+| DELETE | `/v1/contact-onboarding/vehicles/{vehicle_id}`       | Remove a vehicle                                                  |
+| POST   | `/v1/contact-onboarding/steps/vehicles/complete`     | Complete the `vehicles` step                                      |
+| POST   | `/v1/contact-onboarding/steps/skip`                  | Skip an optional step (`vehicles` or `household`)                 |
+| GET    | `/v1/contact-onboarding/household`                   | List household/family members                                     |
+| POST   | `/v1/contact-onboarding/household`                   | Add a family member to a unit                                     |
+| DELETE | `/v1/contact-onboarding/household/{contact_unit_id}` | Remove a family member (deletes orphaned family contact)          |
+| POST   | `/v1/contact-onboarding/steps/household/complete`    | Complete the `household` step                                     |
+| POST   | `/v1/contact-onboarding/default-unit`                | Choose default login unit (step 5)                                |
+| GET    | `/v1/contact-onboarding/review`                      | Aggregate review (contact + units + vehicles + household + steps) |
+| POST   | `/v1/contact-onboarding/complete`                    | Finalize onboarding → activate unit links                         |
 
 ______________________________________________________________________
 
@@ -134,6 +135,10 @@ Enforced in `contact_onboarding_service.py`:
 - **Household requires an assigned unit:** adding a member checks the primary contact has an
   active link to that unit (`contact_onboarding.errors.unit_not_assigned`) and the unit exists
   (`contact_onboarding.errors.unit_not_found`).
+- **Household removal is ownership‑scoped:** removing a member only works on a `Family` link
+  that sits on a unit the primary contact actively owns
+  (`contact_onboarding.errors.household_member_not_found`). The `contact_units` link is deleted,
+  and if the family contact has no remaining links it is soft‑deleted.
 - **Finalize (`complete_onboarding`) prerequisites:**
   - not already completed (`already_completed`),
   - at least one active unit (`no_active_units`),

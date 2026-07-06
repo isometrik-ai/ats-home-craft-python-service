@@ -232,6 +232,47 @@ class ContactOnboardingService:
             "contact": create_result["new_data"],
         }
 
+    async def remove_household_member(
+        self,
+        *,
+        primary_contact_id: str,
+        contact_unit_id: str,
+    ) -> dict[str, Any]:
+        """Remove a family member's link; delete the contact if now orphaned."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        link = await self.contact_units_repo.get_household_link(
+            organization_id=org_id,
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        if not link:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.household_member_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        family_contact_id = link["contact_id"]
+        await self.contact_units_repo.delete_link(
+            organization_id=org_id,
+            contact_unit_id=contact_unit_id,
+        )
+
+        remaining = await self.contact_units_repo.count_links_for_contact(
+            organization_id=org_id,
+            contact_id=family_contact_id,
+        )
+        if remaining == 0:
+            await self.contacts_repo.soft_delete_contact(
+                contact_id=family_contact_id,
+                organization_id=org_id,
+            )
+        return {
+            "contact_unit_id": contact_unit_id,
+            "contact_id": family_contact_id,
+            "contact_deleted": remaining == 0,
+        }
+
     async def complete_household_step(self, *, contact_id: str) -> None:
         """Mark the household onboarding step complete."""
         org_id = self.user_context.organization_id
