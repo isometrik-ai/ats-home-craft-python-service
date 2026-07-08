@@ -28,10 +28,14 @@ from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
     ContactType,
     ContactUnitStatus,
+    HouseholdMemberStatus,
     SetupStepStatus,
 )
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.services.contacts_service import ContactsService
+from apps.user_service.app.services.household_invitation_service import (
+    HouseholdInvitationService,
+)
 from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -75,6 +79,11 @@ class ContactOnboardingService:
         self.vehicles_service = VehiclesService(
             db_connection=db_connection,
             user_context=user_context,
+        )
+        self.household_invitation_service = HouseholdInvitationService(
+            db_connection=db_connection,
+            user_context=user_context,
+            supabase_client=supabase_client,
         )
 
     async def _ensure_onboarding(self, contact_id: str) -> None:
@@ -158,18 +167,35 @@ class ContactOnboardingService:
         )
         out: list[dict[str, Any]] = []
         for row in rows:
-            out.append(
-                {
-                    "contact_id": str(row["contact_id"]),
-                    "contact_unit_id": str(row["contact_unit_id"]),
-                    "unit_id": str(row["unit_id"]),
-                    "first_name": row.get("first_name"),
-                    "last_name": row.get("last_name"),
-                    "relationship": row.get("relationship"),
-                    "portal_access": bool(row.get("portal_access", True)),
-                    "phones": parse_json_any(row.get("phones"), default=[]),
-                }
+            portal_access = bool(row.get("portal_access", False))
+            unit_link_status = str(row.get("unit_link_status") or ContactUnitStatus.ACTIVE.value)
+            member_status = HouseholdInvitationService.derive_member_status(
+                portal_access=portal_access,
+                unit_link_status=unit_link_status,
             )
+            item: dict[str, Any] = {
+                "contact_id": str(row["contact_id"]),
+                "contact_unit_id": str(row["contact_unit_id"]),
+                "unit_id": str(row["unit_id"]),
+                "first_name": row.get("first_name"),
+                "last_name": row.get("last_name"),
+                "relationship": row.get("relationship"),
+                "portal_access": portal_access,
+                "member_status": member_status,
+                "phones": parse_json_any(row.get("phones"), default=[]),
+            }
+            if (
+                member_status == HouseholdMemberStatus.INVITED.value
+                and row.get("invitation_status") == "pending"
+                and row.get("invitation_token")
+            ):
+                item["invite_url"] = HouseholdInvitationService._generate_invite_url(
+                    str(row["invitation_token"])
+                )
+                item["invitation_expires_at"] = format_iso_datetime(
+                    row.get("invitation_expires_at")
+                )
+            out.append(item)
         return out
 
     async def add_household_member(
@@ -208,6 +234,8 @@ class ContactOnboardingService:
             user_context=self.user_context,
             supabase_client=self.supabase_client,
         )
+        primary_contact = await contacts_service.get_contact_details(contact_id=primary_contact_id)
+
         create_result = await contacts_service.create_contact(
             CreateContactRequest(
                 contact_type=ContactType.FAMILY,
@@ -216,22 +244,72 @@ class ContactOnboardingService:
                 last_name=body.last_name,
                 phones=body.phones,
                 emails=body.emails,
-            )
+            ),
+            provision_auth=not body.portal_access,
         )
         family_contact_id = create_result["contact_id"]
+        link_status = (
+            ContactUnitStatus.PENDING.value
+            if body.portal_access
+            else ContactUnitStatus.ACTIVE.value
+        )
         link = await self.contact_units_repo.insert_household_link(
             organization_id=org_id,
             project_id=unit["project_id"],
             unit_id=body.unit_id,
             contact_id=family_contact_id,
             relationship=body.relationship.value,
-            status=ContactUnitStatus.ACTIVE.value,
+            status=link_status,
         )
+
+        member_status = HouseholdMemberStatus.JOINED.value
+        invitation_data: dict[str, Any] | None = None
+        if body.portal_access:
+            primary_phone = next(
+                (phone for phone in body.phones if phone.is_primary),
+                body.phones[0],
+            )
+            invitation_data = await self.household_invitation_service.create_and_send(
+                primary_contact_id=primary_contact_id,
+                family_contact_id=family_contact_id,
+                contact_unit_id=link["id"],
+                phone_isd_code=primary_phone.phone_isd_code,
+                phone_number=primary_phone.phone_number,
+                invitee_first_name=body.first_name,
+                invitee_last_name=body.last_name,
+                inviter_first_name=primary_contact.get("first_name"),
+                inviter_last_name=primary_contact.get("last_name"),
+            )
+            member_status = invitation_data["member_status"]
+
         return {
             "contact_id": family_contact_id,
             "contact_unit_id": link["id"],
+            "member_status": member_status,
+            "invitation_id": invitation_data.get("invitation_id") if invitation_data else None,
+            "phone_masked": invitation_data.get("phone_masked") if invitation_data else None,
+            "invite_url": invitation_data.get("invite_url") if invitation_data else None,
             "contact": create_result["new_data"],
         }
+
+    async def resend_household_invitation(
+        self,
+        *,
+        primary_contact_id: str,
+        contact_unit_id: str,
+    ) -> dict[str, Any]:
+        """Resend a pending portal invitation for a household member."""
+        primary_contact = await ContactsService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+            supabase_client=self.supabase_client,
+        ).get_contact_details(contact_id=primary_contact_id)
+        return await self.household_invitation_service.resend(
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+            inviter_first_name=primary_contact.get("first_name"),
+            inviter_last_name=primary_contact.get("last_name"),
+        )
 
     async def remove_household_member(
         self,
@@ -254,6 +332,10 @@ class ContactOnboardingService:
             )
 
         family_contact_id = link["contact_id"]
+        await self.household_invitation_service.cancel_for_contact_unit(
+            organization_id=org_id,
+            contact_unit_id=contact_unit_id,
+        )
         await self.contact_units_repo.delete_link(
             organization_id=org_id,
             contact_unit_id=contact_unit_id,

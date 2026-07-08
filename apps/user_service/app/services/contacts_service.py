@@ -231,6 +231,7 @@ class ContactsService:
         first_name: str | None,
         last_name: str | None,
         prefix: str | None,
+        password: str | None = None,
     ) -> tuple[str, str | None, str | None]:
         """Provision contact auth identity."""
         if not self.supabase_client:
@@ -265,8 +266,8 @@ class ContactsService:
         if len(matched_user_ids) == 1:
             user_id = next(iter(matched_user_ids))
         else:
-            password = generate_random_password()
-            created_password = password
+            auth_password = password or generate_random_password()
+            created_password = auth_password
             user_metadata: dict[str, Any] = {
                 "timezone": "UTC",
                 "first_name": first_name,
@@ -278,7 +279,7 @@ class ContactsService:
                 sb_client=self.supabase_client,
                 email=email,
                 phone=phone,
-                password=password,
+                password=auth_password,
                 user_metadata=user_metadata,
                 email_confirm=True,
             )
@@ -350,8 +351,17 @@ class ContactsService:
                 custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
             )
 
-    async def create_contact(self, body: CreateContactRequest) -> dict[str, Any]:
-        """Create a contact."""
+    async def create_contact(
+        self,
+        body: CreateContactRequest,
+        *,
+        provision_auth: bool = True,
+    ) -> dict[str, Any]:
+        """Create a contact.
+
+        When ``provision_auth`` is False, the contact row is created without
+        Supabase/Isometrik identity (used for pending household invitations).
+        """
         org_id = self.user_context.organization_id
         validated_custom_fields = await self._validate_custom_fields(body.custom_fields)
 
@@ -369,18 +379,19 @@ class ContactsService:
 
         primary_email = _get_primary_email(body.emails)
 
-        (
-            user_id,
-            isometrik_user_id,
-            _,
-        ) = await self._provision_contact_auth_identity(
-            contact_id=contact_id,
-            phone=_normalize_full_phone(phone.phone_isd_code, phone.phone_number),
-            email=primary_email,
-            first_name=body.first_name,
-            last_name=body.last_name,
-            prefix=body.prefix,
-        )
+        if provision_auth:
+            (
+                user_id,
+                isometrik_user_id,
+                _,
+            ) = await self._provision_contact_auth_identity(
+                contact_id=contact_id,
+                phone=_normalize_full_phone(phone.phone_isd_code, phone.phone_number),
+                email=primary_email,
+                first_name=body.first_name,
+                last_name=body.last_name,
+                prefix=body.prefix,
+            )
 
         contact_row = {
             "id": contact_id,
@@ -440,6 +451,62 @@ class ContactsService:
             "old_data": None,
             "new_data": self._normalize_details(inserted),
         }
+
+    async def provision_auth_for_existing_contact(
+        self,
+        *,
+        contact_id: str,
+        password: str | None = None,
+    ) -> dict[str, Any]:
+        """Provision Supabase/Isometrik identity for an existing contact without auth."""
+        org_id = self.user_context.organization_id
+        current = await self.contacts_repo.get_contact_for_update(
+            contact_id=contact_id,
+            organization_id=org_id,
+        )
+        if not current:
+            raise NotFoundException(
+                message_key="contacts.errors.contact_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if current.get("user_id"):
+            return self._normalize_details(current)
+
+        phones = parse_json_any(current.get("phones"), default=[])
+        primary_phone = next((p for p in phones if p.get("is_primary")), None)
+        if not primary_phone:
+            raise ValidationException(
+                message_key="contacts.errors.exactly_one_primary_phone",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        emails = parse_json_any(current.get("emails"), default=[])
+        primary_email = next(
+            (e.get("email") for e in emails if e.get("is_primary")),
+            emails[0].get("email") if emails else None,
+        )
+
+        user_id, isometrik_user_id, _ = await self._provision_contact_auth_identity(
+            contact_id=contact_id,
+            phone=_normalize_full_phone(
+                primary_phone["phone_isd_code"],
+                primary_phone["phone_number"],
+            ),
+            email=primary_email,
+            first_name=current.get("first_name"),
+            last_name=current.get("last_name"),
+            prefix=current.get("prefix"),
+            password=password,
+        )
+        updated = await self.contacts_repo.update_contact(
+            contact_id=contact_id,
+            organization_id=org_id,
+            update_data={
+                "user_id": user_id,
+                "isometrik_user_id": isometrik_user_id,
+            },
+        )
+        return self._normalize_details(updated or current)
 
     async def update_contact(
         self, *, contact_id: str, body: UpdateContactRequest

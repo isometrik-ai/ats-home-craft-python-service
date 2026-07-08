@@ -10,6 +10,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.contact_onboarding import (
+    AcceptHouseholdInvitationRequest,
     CompleteProfileRequest,
     CompleteStepRequest,
     ConfirmPropertiesRequest,
@@ -17,11 +18,15 @@ from apps.user_service.app.schemas.contact_onboarding import (
     CreateVehicleRequest,
     SetDefaultUnitRequest,
     UpdateVehicleRequest,
+    ValidateHouseholdInvitationRequest,
 )
 from apps.user_service.app.services.contact_onboarding_service import (
     ContactOnboardingService,
 )
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
+from apps.user_service.app.services.household_invitation_service import (
+    HouseholdInvitationService,
+)
 from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import (
     extract_onboarding_contact_context,
@@ -488,6 +493,110 @@ async def add_household_member(
         message_key="contact_onboarding.success.household_member_added",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
+        data=data,
+    )
+
+
+def _invitation_service(
+    *,
+    db_connection: asyncpg.Connection,
+    sb_client: AsyncClient | None = None,
+) -> HouseholdInvitationService:
+    """Build HouseholdInvitationService for public invitation endpoints."""
+    return HouseholdInvitationService(
+        db_connection=db_connection,
+        user_context=None,
+        supabase_client=sb_client,
+    )
+
+
+@handle_api_exceptions("validate household invitation")
+@router.post(
+    "/household/invitations/validate",
+    status_code=http_status.HTTP_200_OK,
+    summary="Validate household invitation token",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def validate_household_invitation(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    body: ValidateHouseholdInvitationRequest = Body(...),
+):
+    """Validate an SMS deep-link token before the invitee accepts."""
+    service = _invitation_service(db_connection=db_connection)
+    data = await service.validate_token(token=body.token)
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.invitation_validated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("accept household invitation")
+@router.post(
+    "/household/invitations/accept",
+    status_code=http_status.HTTP_200_OK,
+    summary="Accept household invitation",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="household_invitations",
+    category="CONTACT_ONBOARDING",
+)
+async def accept_household_invitation(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    sb_client: AsyncClient = Depends(supabase_service),
+    body: AcceptHouseholdInvitationRequest = Body(...),
+):
+    """Accept a phone invitation, activate the unit link, and seed onboarding."""
+    service = _invitation_service(db_connection=db_connection, sb_client=sb_client)
+    data = await service.accept(token=body.token)
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.invitation_accepted",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("resend household invitation")
+@router.post(
+    "/household/{contact_unit_id}/resend-invitation",
+    status_code=http_status.HTTP_200_OK,
+    summary="Resend household invitation SMS",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("10/minute")
+async def resend_household_invitation(
+    request: Request,
+    contact_unit_id: str = Path(..., description="Household member's contact_unit id"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Resend the SMS invitation for a pending portal-access household member."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = _service(
+        db_connection=db_connection,
+        user_context=user_context,
+        sb_client=None,
+    )
+    data = await service.resend_household_invitation(
+        primary_contact_id=str(contact["id"]),
+        contact_unit_id=contact_unit_id,
+    )
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.invitation_resent",
+        custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )
 
