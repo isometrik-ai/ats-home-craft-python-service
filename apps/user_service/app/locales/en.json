@@ -600,7 +600,10 @@
       "invalid_step": "The onboarding step is not valid.",
       "step_not_skippable": "This onboarding step cannot be skipped.",
       "step_prerequisite": "Please complete the {step_key} step before finishing onboarding.",
-      "household_member_not_found": "The household member you are trying to remove does not exist."
+      "household_member_not_found": "The household member you are trying to remove does not exist.",
+      "invitation_invalid_or_expired": "This household invitation is invalid or has expired.",
+      "invitation_already_accepted": "This household invitation has already been accepted.",
+      "invitation_not_found": "No pending household invitation was found."
     },
     "success": {
       "status_retrieved": "Onboarding status retrieved successfully.",
@@ -616,6 +619,9 @@
       "household_retrieved": "Household members retrieved successfully.",
       "household_member_added": "Household member added successfully.",
       "household_member_removed": "Household member removed successfully.",
+      "invitation_validated": "Household invitation validated successfully.",
+      "invitation_accepted": "Household invitation accepted successfully.",
+      "invitation_resent": "Household invitation resent successfully.",
       "default_unit_set": "Default unit set successfully.",
       "review_retrieved": "Onboarding review retrieved successfully.",
       "onboarding_completed": "Contact onboarding completed successfully.",

@@ -150,6 +150,22 @@ class InviteStatus(str, Enum):
     ACCEPTED = "accepted"
 
 
+class HouseholdInvitationStatus(str, Enum):
+    """Household invitation status (Postgres household_invitation_status enum)."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class HouseholdMemberStatus(str, Enum):
+    """Derived household member status for API responses."""
+
+    INVITED = "invited"
+    JOINED = "joined"
+
+
 class InviteAcceptAuthKind(str, Enum):
     """How the invitee was authenticated when accepting an organization invitation."""
 

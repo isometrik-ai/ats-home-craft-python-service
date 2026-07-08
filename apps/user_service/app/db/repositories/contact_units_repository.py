@@ -325,6 +325,29 @@ class ContactUnitsRepository(BaseRepository):
         )
         return dict(row)
 
+    async def activate_contact_unit(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_id: str,
+    ) -> dict[str, Any] | None:
+        """Activate a pending contact_unit link after invitation acceptance."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE contact_units
+            SET status = $3::contact_unit_status,
+                activated_at = COALESCE(activated_at, now()),
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+            RETURNING id::text AS id, status::text AS status
+            """,
+            organization_id,
+            contact_unit_id,
+            ContactUnitStatus.ACTIVE.value,
+        )
+        return dict(row) if row else None
+
     async def list_household_by_primary(
         self,
         *,
@@ -339,26 +362,35 @@ class ContactUnitsRepository(BaseRepository):
               cu.unit_id::text AS unit_id,
               cu.contact_id::text AS contact_id,
               cu.relationship::text AS relationship,
+              cu.status::text AS unit_link_status,
               c.first_name,
               c.last_name,
               c.portal_access,
-              c.phones
+              c.phones,
+              c.user_id::text AS user_id,
+              hi.status::text AS invitation_status,
+              hi.token AS invitation_token,
+              hi.expires_at AS invitation_expires_at
             FROM contact_units primary_cu
             JOIN contact_units cu
               ON cu.unit_id = primary_cu.unit_id
              AND cu.organization_id = primary_cu.organization_id
             JOIN contacts c ON c.id = cu.contact_id
+            LEFT JOIN household_invitations hi
+              ON hi.contact_unit_id = cu.id
+             AND hi.organization_id = cu.organization_id
             WHERE primary_cu.organization_id = $1::uuid
               AND primary_cu.contact_id = $2::uuid
               AND primary_cu.status = $3::contact_unit_status
               AND cu.contact_id != $2::uuid
               AND c.contact_type = 'Family'
-              AND cu.status = $3::contact_unit_status
+              AND cu.status = ANY($4::contact_unit_status[])
             ORDER BY cu.created_at
             """,
             organization_id,
             primary_contact_id,
             ContactUnitStatus.ACTIVE.value,
+            [ContactUnitStatus.ACTIVE.value, ContactUnitStatus.PENDING.value],
         )
         return [dict(row) for row in rows]
 

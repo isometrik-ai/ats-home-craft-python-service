@@ -212,7 +212,45 @@ class HouseholdMemberResponse(BaseModel):
     last_name: str | None = None
     relationship: str
     portal_access: bool = False
+    member_status: str
     phones: list[Any] = Field(default_factory=list)
+    invite_url: str | None = None
+    invitation_expires_at: str | None = None
+
+
+class AcceptHouseholdInvitationRequest(BaseModel):
+    """Accept a household invitation via SMS deep-link token."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(..., min_length=1)
+
+
+class ValidateHouseholdInvitationRequest(BaseModel):
+    """Validate a household invitation token."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(..., min_length=1)
+
+
+class HouseholdInvitationValidateResponse(BaseModel):
+    """Invitation details shown before acceptance."""
+
+    invitee_name: str | None = None
+    organization_name: str | None = None
+    phone_masked: str | None = None
+    expires_at: str | None = None
+
+
+class HouseholdInvitationAcceptResponse(BaseModel):
+    """Result after a household invitation is accepted."""
+
+    contact_id: str
+    organization_id: str
+    contact_unit_id: str
+    member_status: str
+    phone_masked: str | None = None
 
 
 class OnboardingReviewResponse(BaseModel):
