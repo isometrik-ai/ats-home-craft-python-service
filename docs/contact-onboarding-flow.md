@@ -120,6 +120,7 @@ most endpoints take **no** contact id in the path.
 | POST   | `/v1/contact-onboarding/household/{contact_unit_id}/resend-invitation` | Resend SMS for a pending portal invite                            |
 | POST   | `/v1/contact-onboarding/household/invitations/validate`                | Validate SMS deep-link token (public)                             |
 | POST   | `/v1/contact-onboarding/household/invitations/accept`                  | Accept invitation via token (public)                              |
+| POST   | `/v1/contact-onboarding/household/invitations/decline`                 | Decline invitation via token (public)                             |
 | POST   | `/v1/contact-onboarding/steps/household/complete`                      | Complete the `household` step                                     |
 | POST   | `/v1/contact-onboarding/default-unit`                                  | Choose default login unit (step 5)                                |
 | GET    | `/v1/contact-onboarding/review`                                        | Aggregate review (contact + units + vehicles + household + steps) |
@@ -151,6 +152,10 @@ Enforced in `contact_onboarding_service.py`:
   - `GET /household` includes `invite_url` + `invitation_expires_at` for pending invites (copy/share manually).
   - Accept: invitee opens SMS link → `POST .../invitations/accept { token, password }` → auth provisioned from phone,
     password set, session tokens returned (phone login), unit activated, family member onboarding seeded.
+  - Decline: invitee opens SMS link → `POST .../invitations/decline { token }` → invitation marked `declined`,
+    pending unit link removed, orphan family contact soft-deleted (member disappears from primary's `GET /household`).
+  - Inviter cancel vs invitee decline: primary `DELETE /household/{contact_unit_id}` sets invitation `cancelled`;
+    invitee decline sets invitation `declined`.
   - SMS provider: wire in `app/utils/household_invitation_sms.py` (currently logs in dev).
 - **Finalize (`complete_onboarding`) prerequisites:**
   - not already completed (`already_completed`),

@@ -16,6 +16,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     ConfirmPropertiesRequest,
     CreateHouseholdMemberRequest,
     CreateVehicleRequest,
+    DeclineHouseholdInvitationRequest,
     SetDefaultUnitRequest,
     UpdateVehicleRequest,
     ValidateHouseholdInvitationRequest,
@@ -579,6 +580,37 @@ async def accept_household_invitation(
     return success_response(
         request=request,
         message_key="contact_onboarding.success.invitation_accepted",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("decline household invitation")
+@router.post(
+    "/household/invitations/decline",
+    status_code=http_status.HTTP_200_OK,
+    summary="Decline household invitation",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="household_invitations",
+    category="CONTACT_ONBOARDING",
+)
+async def decline_household_invitation(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    body: DeclineHouseholdInvitationRequest = Body(...),
+):
+    """Decline a phone invitation; removes the pending link and orphan contact."""
+    service = _invitation_service(db_connection=db_connection)
+    data = await service.decline(token=body.token)
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.invitation_declined",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )

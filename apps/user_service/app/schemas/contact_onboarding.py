@@ -247,6 +247,14 @@ class ValidateHouseholdInvitationRequest(BaseModel):
     token: str = Field(..., min_length=1)
 
 
+class DeclineHouseholdInvitationRequest(BaseModel):
+    """Decline a household invitation via SMS deep-link token."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(..., min_length=1)
+
+
 class HouseholdInvitationValidateResponse(BaseModel):
     """Invitation details shown before acceptance."""
 
@@ -254,6 +262,16 @@ class HouseholdInvitationValidateResponse(BaseModel):
     organization_name: str | None = None
     phone_masked: str | None = None
     expires_at: str | None = None
+
+
+class HouseholdInvitationDeclineResponse(BaseModel):
+    """Result after a household invitation is declined by the invitee."""
+
+    contact_id: str
+    organization_id: str
+    contact_unit_id: str
+    invitation_status: str
+    contact_deleted: bool = False
 
 
 class HouseholdInvitationUserInfo(BaseModel):

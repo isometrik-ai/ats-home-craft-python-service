@@ -119,6 +119,11 @@ class HouseholdInvitationService:
                 message_key="contact_onboarding.errors.invitation_already_accepted",
                 custom_code=CustomStatusCode.CONFLICT,
             )
+        if status == HouseholdInvitationStatus.DECLINED.value:
+            raise GoneException(
+                message_key="contact_onboarding.errors.invitation_already_declined",
+                custom_code=CustomStatusCode.GONE,
+            )
         if status != HouseholdInvitationStatus.PENDING.value:
             raise GoneException(
                 message_key="contact_onboarding.errors.invitation_invalid_or_expired",
@@ -368,6 +373,67 @@ class HouseholdInvitationService:
                 "phone_number": user_metadata.get("phone_number") or phone_number,
                 "phone_isd_code": user_metadata.get("phone_isd_code") or phone_isd_code,
             },
+        }
+
+    async def decline(self, *, token: str) -> dict[str, Any]:
+        """Decline a phone invitation: mark declined, remove link, delete orphan contact."""
+        invitation = await self.invitations_repo.get_by_token_hash(
+            hash_token(token),
+            for_update=True,
+        )
+        if not invitation:
+            raise GoneException(
+                message_key="contact_onboarding.errors.invitation_invalid_or_expired",
+                custom_code=CustomStatusCode.GONE,
+            )
+
+        status = invitation.get("status")
+        org_id = str(invitation["organization_id"])
+        contact_id = str(invitation["contact_id"])
+        contact_unit_id = str(invitation["contact_unit_id"])
+
+        if status == HouseholdInvitationStatus.DECLINED.value:
+            return {
+                "contact_id": contact_id,
+                "organization_id": org_id,
+                "contact_unit_id": contact_unit_id,
+                "invitation_status": HouseholdInvitationStatus.DECLINED.value,
+                "contact_deleted": False,
+            }
+
+        invitation = self._validate_invitation(invitation)
+
+        declined = await self.invitations_repo.mark_declined(
+            invitation_id=str(invitation["id"]),
+        )
+        if not declined:
+            raise GoneException(
+                message_key="contact_onboarding.errors.invitation_invalid_or_expired",
+                custom_code=CustomStatusCode.GONE,
+            )
+
+        await self.contact_units_repo.delete_link(
+            organization_id=org_id,
+            contact_unit_id=contact_unit_id,
+        )
+        remaining = await self.contact_units_repo.count_links_for_contact(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        contact_deleted = False
+        if remaining == 0:
+            await self.contacts_repo.soft_delete_contact(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
+            contact_deleted = True
+
+        return {
+            "contact_id": contact_id,
+            "organization_id": org_id,
+            "contact_unit_id": contact_unit_id,
+            "invitation_status": HouseholdInvitationStatus.DECLINED.value,
+            "contact_deleted": contact_deleted,
         }
 
     async def resend(

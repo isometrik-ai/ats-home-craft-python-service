@@ -151,3 +151,24 @@ class HouseholdInvitationsRepository(BaseRepository):
             HouseholdInvitationStatus.ACCEPTED.value,
         )
         return dict(row) if row else None
+
+    async def mark_declined(
+        self,
+        *,
+        invitation_id: str,
+    ) -> dict[str, Any] | None:
+        """Mark a pending invitation declined by the invitee."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE household_invitations
+            SET status = $2::household_invitation_status,
+                updated_at = now()
+            WHERE id = $1::uuid
+              AND status = $3::household_invitation_status
+            RETURNING *
+            """,
+            invitation_id,
+            HouseholdInvitationStatus.DECLINED.value,
+            HouseholdInvitationStatus.PENDING.value,
+        )
+        return dict(row) if row else None
