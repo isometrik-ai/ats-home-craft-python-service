@@ -370,6 +370,23 @@ async def login_user(
     return result
 
 
+async def login_user_with_phone(
+    phone: str,
+    password: str,
+    sb_client: AsyncClient,
+) -> Any:
+    """Log in with phone + password (anon client).
+
+    Args:
+        phone: E.164-style phone stored in Supabase Auth (digits, no formatting).
+        password: User's password
+        sb_client: Supabase anon client
+    Returns:
+        Supabase authentication result (session + user)
+    """
+    return await sb_client.auth.sign_in_with_password({"phone": phone, "password": password})
+
+
 async def send_password_reset_email(email: str, sb_client: AsyncClient):
     """Send password reset email using Supabase Auth Admin API
     Args:

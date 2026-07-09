@@ -157,6 +157,7 @@ class HouseholdInvitationStatus(str, Enum):
     ACCEPTED = "accepted"
     EXPIRED = "expired"
     CANCELLED = "cancelled"
+    DECLINED = "declined"
 
 
 class HouseholdMemberStatus(str, Enum):

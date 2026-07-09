@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -224,10 +225,30 @@ class AcceptHouseholdInvitationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     token: str = Field(..., min_length=1)
+    password: str = Field(..., description="Password for the new household member account")
+
+    @classmethod
+    @field_validator("password")
+    def validate_password(cls, value: str) -> str:
+        """Validate password meets minimum length requirements."""
+        if len(value) < 6:
+            raise ValidationException(
+                message_key="errors.password_too_short",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+        return value
 
 
 class ValidateHouseholdInvitationRequest(BaseModel):
     """Validate a household invitation token."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(..., min_length=1)
+
+
+class DeclineHouseholdInvitationRequest(BaseModel):
+    """Decline a household invitation via SMS deep-link token."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -243,6 +264,27 @@ class HouseholdInvitationValidateResponse(BaseModel):
     expires_at: str | None = None
 
 
+class HouseholdInvitationDeclineResponse(BaseModel):
+    """Result after a household invitation is declined by the invitee."""
+
+    contact_id: str
+    organization_id: str
+    contact_unit_id: str
+    invitation_status: str
+    contact_deleted: bool = False
+
+
+class HouseholdInvitationUserInfo(BaseModel):
+    """Authenticated household member after invitation acceptance."""
+
+    id: str
+    email: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone_number: str | None = None
+    phone_isd_code: str | None = None
+
+
 class HouseholdInvitationAcceptResponse(BaseModel):
     """Result after a household invitation is accepted."""
 
@@ -251,6 +293,11 @@ class HouseholdInvitationAcceptResponse(BaseModel):
     contact_unit_id: str
     member_status: str
     phone_masked: str | None = None
+    access_token: str
+    refresh_token: str | None = None
+    expires_in: int | None = None
+    expires_at: datetime | None = None
+    user: HouseholdInvitationUserInfo
 
 
 class OnboardingReviewResponse(BaseModel):

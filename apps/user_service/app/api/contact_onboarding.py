@@ -8,7 +8,7 @@ from supabase import AsyncClient
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.dependencies.supabase import supabase_service
+from apps.user_service.app.dependencies.supabase import supabase_anon, supabase_service
 from apps.user_service.app.schemas.contact_onboarding import (
     AcceptHouseholdInvitationRequest,
     CompleteProfileRequest,
@@ -16,6 +16,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     ConfirmPropertiesRequest,
     CreateHouseholdMemberRequest,
     CreateVehicleRequest,
+    DeclineHouseholdInvitationRequest,
     SetDefaultUnitRequest,
     UpdateVehicleRequest,
     ValidateHouseholdInvitationRequest,
@@ -34,6 +35,10 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.response_factory import list_response, success_response
+from libs.shared_utils.session_context_cache import (
+    extract_session_id_from_access_token,
+    warm_session_context_after_auth,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/contact-onboarding", tags=["Contact Onboarding"])
@@ -501,12 +506,14 @@ def _invitation_service(
     *,
     db_connection: asyncpg.Connection,
     sb_client: AsyncClient | None = None,
+    sb_anon_client: AsyncClient | None = None,
 ) -> HouseholdInvitationService:
     """Build HouseholdInvitationService for public invitation endpoints."""
     return HouseholdInvitationService(
         db_connection=db_connection,
         user_context=None,
         supabase_client=sb_client,
+        supabase_anon_client=sb_anon_client,
     )
 
 
@@ -553,14 +560,57 @@ async def accept_household_invitation(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
     sb_client: AsyncClient = Depends(supabase_service),
+    sb_anon_client: AsyncClient = Depends(supabase_anon),
     body: AcceptHouseholdInvitationRequest = Body(...),
 ):
-    """Accept a phone invitation, activate the unit link, and seed onboarding."""
-    service = _invitation_service(db_connection=db_connection, sb_client=sb_client)
-    data = await service.accept(token=body.token)
+    """Accept a phone invitation, set password, sign in, and seed onboarding."""
+    service = _invitation_service(
+        db_connection=db_connection,
+        sb_client=sb_client,
+        sb_anon_client=sb_anon_client,
+    )
+    data = await service.accept(token=body.token, password=body.password)
+
+    session_id = extract_session_id_from_access_token(data.get("access_token"))
+    await warm_session_context_after_auth(
+        session_id=session_id,
+        organization_id=data.get("organization_id"),
+    )
+
     return success_response(
         request=request,
         message_key="contact_onboarding.success.invitation_accepted",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("decline household invitation")
+@router.post(
+    "/household/invitations/decline",
+    status_code=http_status.HTTP_200_OK,
+    summary="Decline household invitation",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="household_invitations",
+    category="CONTACT_ONBOARDING",
+)
+async def decline_household_invitation(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    body: DeclineHouseholdInvitationRequest = Body(...),
+):
+    """Decline a phone invitation; removes the pending link and orphan contact."""
+    service = _invitation_service(db_connection=db_connection)
+    data = await service.decline(token=body.token)
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.invitation_declined",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )
