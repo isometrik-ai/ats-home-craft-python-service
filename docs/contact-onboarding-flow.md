@@ -149,8 +149,8 @@ Enforced in `contact_onboarding_service.py`:
     SMS sent to the member's phone with a deep link (`household_invitation_service.py`).
   - `member_status` in list/add responses: `joined` (no portal / accepted) or `invited` (portal, pending).
   - `GET /household` includes `invite_url` + `invitation_expires_at` for pending invites (copy/share manually).
-  - Accept: invitee opens SMS link → `POST .../invitations/accept { token }` → auth provisioned from phone,
-    unit activated, family member onboarding seeded.
+  - Accept: invitee opens SMS link → `POST .../invitations/accept { token, password }` → auth provisioned from phone,
+    password set, session tokens returned (phone login), unit activated, family member onboarding seeded.
   - SMS provider: wire in `app/utils/household_invitation_sms.py` (currently logs in dev).
 - **Finalize (`complete_onboarding`) prerequisites:**
   - not already completed (`already_completed`),
