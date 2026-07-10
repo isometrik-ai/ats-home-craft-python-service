@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 
 from apps.user_service.app.db.repositories.passes_repository import PassesRepository
-from apps.user_service.app.schemas.enums import PassListBucket, PassStatus
+from apps.user_service.app.schemas.enums import (
+    PassDisplayStatus,
+    PassListBucket,
+    PassStatus,
+    PassValidityType,
+)
 
 
 class _FakeConn:
@@ -78,6 +83,57 @@ async def test_list_by_contact_active_bucket_filter():
     assert "p.valid_from <= now()" in count_query
     assert "p.valid_until >= now()" in count_query
     assert PassStatus.ACTIVE.value in count_args
+
+
+@pytest.mark.asyncio
+async def test_list_display_status_cancelled():
+    """Cancelled display_status filters by cancelled pass status."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+    await repo.list_by_contact(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        display_status=PassDisplayStatus.CANCELLED.value,
+        page=1,
+        page_size=20,
+    )
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "p.status = $3::pass_status" in count_query
+    assert count_args[2] == PassStatus.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_list_display_status_used():
+    """Used display_status matches completed or one-time entry passes."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+    await repo.list_by_contact(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        display_status=PassDisplayStatus.USED.value,
+        page=1,
+        page_size=20,
+    )
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "p.entry_count > 0" in count_query
+    assert PassStatus.COMPLETED.value in count_args
+    assert PassValidityType.ONE_TIME.value in count_args
+
+
+@pytest.mark.asyncio
+async def test_list_display_status_upcoming():
+    """Upcoming display_status filters future validity windows."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+    await repo.list_by_contact(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        display_status=PassDisplayStatus.UPCOMING.value,
+        page=1,
+        page_size=20,
+    )
+    count_query, _ = conn.fetchval_calls[0]
+    assert "p.valid_from > now()" in count_query
 
 
 @pytest.mark.asyncio

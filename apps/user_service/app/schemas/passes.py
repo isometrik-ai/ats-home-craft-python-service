@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.user_service.app.schemas.enums import (
+    PassDisplayStatus,
     PassListBucket,
     PassType,
     PassValidityType,
@@ -134,6 +135,7 @@ class PassListItemResponse(BaseModel):
     tower_name: str | None = None
     valid_from: str | None = None
     valid_until: str | None = None
+    validity_type: str
     status: str
     display_status: str
     entry_count: int
@@ -146,6 +148,7 @@ class PassListQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     bucket: PassListBucket | None = None
+    display_status: PassDisplayStatus | None = None
     unit_id: str | None = None
     pass_type: PassType | None = None
     page: int = Field(1, ge=1)
