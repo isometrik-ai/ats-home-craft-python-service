@@ -106,7 +106,9 @@ class _FakePassesRepo:
         return self.update_result
 
     async def cancel(self, **_kwargs):
-        """Return configured cancel result."""
+        """Return configured cancel result and mirror cancelled status on the row."""
+        if self.row is not None:
+            self.row = {**self.row, "status": PassStatus.CANCELLED.value}
         return self.cancel_result
 
 
@@ -288,7 +290,7 @@ async def test_cancel_pass_records_event():
     """Successful cancel records a cancelled timeline event."""
     passes_repo = _FakePassesRepo()
     events_repo = _FakeEventsRepo()
-    passes_repo.row = _pass_row(status=PassStatus.CANCELLED.value)
+    passes_repo.row = _pass_row(status=PassStatus.ACTIVE.value)
     svc = _service(passes_repo=passes_repo, events_repo=events_repo)
     result = await svc.cancel_pass(contact_id="contact-1", pass_id="pass-1")
     assert result["status"] == PassStatus.CANCELLED.value
