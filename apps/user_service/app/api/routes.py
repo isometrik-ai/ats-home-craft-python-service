@@ -11,6 +11,7 @@ from apps.user_service.app.api.contacts import router as contacts_router
 from apps.user_service.app.api.custom_fields import router as custom_fields_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.organization import router as organization_router
+from apps.user_service.app.api.passes import router as passes_router
 from apps.user_service.app.api.permissions import router as permissions_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
 from apps.user_service.app.api.projects import router as projects_router
@@ -41,6 +42,7 @@ router.include_router(verification_codes_router)
 router.include_router(teams_router)
 router.include_router(contacts_router)
 router.include_router(contact_onboarding_router)
+router.include_router(passes_router)
 router.include_router(custom_fields_router)
 router.include_router(projects_router)
 
@@ -63,6 +65,7 @@ async def api_status():
             "/teams",
             "/contacts",
             "/contact-onboarding",
+            "/passes",
             "/custom-fields",
             "/projects",
             "/superadmin/organizations",
