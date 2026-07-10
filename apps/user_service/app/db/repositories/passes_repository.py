@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
-from apps.user_service.app.schemas.enums import PassListBucket, PassStatus
+from apps.user_service.app.schemas.enums import (
+    PassDisplayStatus,
+    PassListBucket,
+    PassStatus,
+    PassValidityType,
+)
 
 _PASS_SELECT_SQL = """
 SELECT
@@ -87,6 +92,73 @@ class PassesRepository(BaseRepository):
             )
         return "", []
 
+    @staticmethod
+    def _display_status_predicate(
+        display_status: str | None,
+        *,
+        param_index: int,
+    ) -> tuple[str, list[Any]]:
+        """Build SQL fragment matching PassesService.derive_display_status."""
+        if not display_status:
+            return "", []
+
+        if display_status == PassDisplayStatus.CANCELLED.value:
+            return (
+                f"p.status = ${param_index}::pass_status",
+                [PassStatus.CANCELLED.value],
+            )
+
+        if display_status == PassDisplayStatus.USED.value:
+            return (
+                "("
+                f"  p.status = ${param_index}::pass_status"
+                f"  OR (p.validity_type = ${param_index + 1}::pass_validity_type"
+                " AND p.entry_count > 0)"
+                ")",
+                [PassStatus.COMPLETED.value, PassValidityType.ONE_TIME.value],
+            )
+
+        not_cancelled_idx = param_index
+        not_completed_idx = param_index + 1
+        one_time_idx = param_index + 2
+        expired_status_idx = param_index + 3
+        not_used = (
+            f"p.status <> ${not_cancelled_idx}::pass_status"
+            f" AND p.status <> ${not_completed_idx}::pass_status"
+            f" AND NOT (p.validity_type = ${one_time_idx}::pass_validity_type"
+            " AND p.entry_count > 0)"
+        )
+        not_used_args = [
+            PassStatus.CANCELLED.value,
+            PassStatus.COMPLETED.value,
+            PassValidityType.ONE_TIME.value,
+        ]
+
+        if display_status == PassDisplayStatus.EXPIRED.value:
+            return (
+                f"({not_used} AND (p.valid_until < now()"
+                f" OR p.status = ${expired_status_idx}::pass_status))",
+                [*not_used_args, PassStatus.EXPIRED.value],
+            )
+
+        if display_status == PassDisplayStatus.UPCOMING.value:
+            return (
+                f"({not_used} AND p.valid_until >= now()"
+                f" AND p.status <> ${expired_status_idx}::pass_status"
+                " AND p.valid_from > now())",
+                [*not_used_args, PassStatus.EXPIRED.value],
+            )
+
+        if display_status == PassDisplayStatus.ACTIVE.value:
+            return (
+                f"({not_used} AND p.valid_until >= now()"
+                f" AND p.status <> ${expired_status_idx}::pass_status"
+                " AND p.valid_from <= now())",
+                [*not_used_args, PassStatus.EXPIRED.value],
+            )
+
+        return "", []
+
     async def insert(self, data: dict[str, Any]) -> dict[str, Any]:
         """Insert a pass row."""
         row = await self.db_connection.fetchrow(
@@ -162,6 +234,7 @@ class PassesRepository(BaseRepository):
         organization_id: str,
         host_contact_id: str,
         bucket: str | None = None,
+        display_status: str | None = None,
         unit_id: str | None = None,
         pass_type: str | None = None,
         page: int = 1,
@@ -177,6 +250,15 @@ class PassesRepository(BaseRepository):
             where.append(bucket_sql)
         args.extend(bucket_args)
         idx += len(bucket_args)
+
+        display_sql, display_args = self._display_status_predicate(
+            display_status,
+            param_index=idx,
+        )
+        if display_sql:
+            where.append(display_sql)
+        args.extend(display_args)
+        idx += len(display_args)
 
         if unit_id:
             where.append(f"p.unit_id = ${idx}::uuid")

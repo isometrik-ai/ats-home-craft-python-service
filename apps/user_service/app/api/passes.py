@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.schemas.enums import PassListBucket, PassType
-from apps.user_service.app.schemas.passes import CreatePassRequest, UpdatePassRequest
+from apps.user_service.app.schemas.passes import (
+    CreatePassRequest,
+    PassListQuery,
+    UpdatePassRequest,
+)
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.utils.common_utils import (
     extract_onboarding_contact_context,
@@ -47,11 +50,7 @@ def _service(*, db_connection: asyncpg.Connection, user_context) -> PassesServic
 @limiter.limit("100/minute")
 async def list_passes(
     request: Request,
-    bucket: PassListBucket | None = Query(None),
-    unit_id: str | None = Query(None),
-    pass_type: PassType | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    query: PassListQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -62,18 +61,19 @@ async def list_passes(
     service = _service(db_connection=db_connection, user_context=user_context)
     items, total = await service.list_passes(
         contact_id=str(contact["id"]),
-        bucket=bucket.value if bucket else None,
-        unit_id=unit_id,
-        pass_type=pass_type.value if pass_type else None,
-        page=page,
-        page_size=page_size,
+        bucket=query.bucket.value if query.bucket else None,
+        display_status=query.display_status.value if query.display_status else None,
+        unit_id=query.unit_id,
+        pass_type=query.pass_type.value if query.pass_type else None,
+        page=query.page,
+        page_size=query.page_size,
     )
     return list_response(
         request=request,
         items=items,
         total=total,
-        page=page,
-        page_size=page_size,
+        page=query.page,
+        page_size=query.page_size,
         message_key="passes.success.list_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
     )
