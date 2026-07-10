@@ -1290,3 +1290,71 @@ class FacilityLocationType(str, Enum):
     INDOOR_CLUBHOUSE = "indoor_clubhouse"
     IN_TOWER = "in_tower"
     OTHER = "other"
+
+
+# ============================================================================
+# VISITOR PASSES ENUMS — mirror Postgres visitor_passes enums
+# ============================================================================
+
+
+class PassType(str, Enum):
+    """Visitor pass type (Postgres pass_type enum)."""
+
+    GUEST = "guest"
+    DELIVERY = "delivery"
+    CAB = "cab"
+    SERVICE = "service"
+    OTHER = "other"
+
+
+class PassValidityType(str, Enum):
+    """Pass validity model (Postgres pass_validity_type enum)."""
+
+    ONE_TIME = "one_time"
+    RECURRING = "recurring"
+
+
+class PassStatus(str, Enum):
+    """Persisted pass status (Postgres pass_status enum)."""
+
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class PassEventType(str, Enum):
+    """Pass timeline event (Postgres pass_event_type enum)."""
+
+    CREATED = "created"
+    CHECKED_IN = "checked_in"
+    CHECKED_OUT = "checked_out"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+    EXTENDED = "extended"
+
+
+class PassActorType(str, Enum):
+    """Who logged a pass event (Postgres pass_actor_type enum)."""
+
+    RESIDENT = "resident"
+    STAFF = "staff"
+    SYSTEM = "system"
+
+
+class PassDisplayStatus(str, Enum):
+    """Derived UI bucket for a pass (not stored in DB)."""
+
+    UPCOMING = "upcoming"
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    USED = "used"
+    CANCELLED = "cancelled"
+
+
+class PassListBucket(str, Enum):
+    """List filter buckets for GET /passes."""
+
+    UPCOMING = "upcoming"
+    ACTIVE = "active"
+    EXPIRED = "expired"

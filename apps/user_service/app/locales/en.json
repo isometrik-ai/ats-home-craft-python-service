@@ -629,5 +629,24 @@
       "onboarding_completed": "Contact onboarding completed successfully.",
       "unit_assigned": "Unit assigned to contact successfully."
     }
+  },
+  "passes": {
+    "errors": {
+      "unit_not_owned": "You do not have an active assignment to the selected unit.",
+      "pass_not_found": "The visitor pass could not be found.",
+      "invalid_validity": "The pass end time must be after the start time.",
+      "pass_not_editable": "This pass can no longer be edited or cancelled.",
+      "pass_invalid_or_expired": "This pass is invalid or has expired.",
+      "max_entries_reached": "This pass has reached the maximum number of entries.",
+      "code_generation_failed": "Unable to generate a unique pass code. Please try again."
+    },
+    "success": {
+      "pass_created": "Visitor pass created successfully.",
+      "pass_updated": "Visitor pass updated successfully.",
+      "pass_cancelled": "Visitor pass cancelled successfully.",
+      "pass_retrieved": "Visitor pass retrieved successfully.",
+      "list_retrieved": "Visitor passes retrieved successfully.",
+      "events_retrieved": "Pass timeline retrieved successfully."
+    }
   }
 }
