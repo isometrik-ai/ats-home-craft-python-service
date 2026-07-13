@@ -366,6 +366,7 @@
     "success": {
       "project_created": "Project created successfully.",
       "projects_retrieved": "Projects retrieved successfully.",
+      "my_projects_retrieved": "Your assigned projects retrieved successfully.",
       "project_retrieved": "Project retrieved successfully.",
       "project_updated": "Project updated successfully.",
       "project_deleted": "Project deleted successfully.",

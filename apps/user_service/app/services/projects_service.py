@@ -108,6 +108,13 @@ class ProjectsService:
             "created_at": format_iso_datetime(row.get("created_at")),
         }
 
+    @staticmethod
+    def _my_project_summary_from_row(row: dict[str, Any]) -> dict[str, Any]:
+        """Serialize an assigned-project list row."""
+        summary = ProjectsService._summary_from_row(row)
+        summary["role"] = str(row.get("role") or "")
+        return summary
+
     async def _ensure_community_admin_is_org_member(self, *, user_id: str) -> None:
         """Require the selected community admin to be an active org member."""
         org_id = self.user_context.organization_id
@@ -282,6 +289,37 @@ class ProjectsService:
         )
         return {
             "items": [self._summary_from_row(row) for row in rows],
+            "total": total,
+        }
+
+    async def list_my_projects(
+        self,
+        *,
+        search: str | None,
+        status: str | None,
+        property_type: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any]:
+        """List projects assigned to the current user in the active organization."""
+        org_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+        if not org_id or not user_id:
+            raise ValidationException(
+                message_key="auth.errors.session_not_found",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            )
+        rows, total = await self.projects_repo.list_projects_for_member(
+            organization_id=org_id,
+            user_id=user_id,
+            search=search,
+            status=status,
+            property_type=property_type,
+            page=page,
+            page_size=page_size,
+        )
+        return {
+            "items": [self._my_project_summary_from_row(row) for row in rows],
             "total": total,
         }
 

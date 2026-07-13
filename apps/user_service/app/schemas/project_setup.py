@@ -116,6 +116,12 @@ class ProjectSummaryResponse(BaseModel):
     updated_at: str
 
 
+class MyProjectSummaryResponse(ProjectSummaryResponse):
+    """Project list row for projects assigned to the current user."""
+
+    role: str
+
+
 class ProjectDetailsResponse(BaseModel):
     """Full project detail row."""
 

@@ -107,6 +107,30 @@ async def test_list_projects_without_filters():
 
 
 @pytest.mark.asyncio
+async def test_list_projects_for_member_joins_project_members():
+    """Assigned-project list scopes by active project_members row."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = ProjectsRepository(db_connection=conn)
+
+    await repo.list_projects_for_member(
+        organization_id="org-1",
+        user_id="user-1",
+        search=None,
+        status=None,
+        property_type=None,
+        page=1,
+        page_size=20,
+    )
+
+    count_query, _ = conn.fetchval_calls[0]
+    list_query, _ = conn.fetch_calls[0]
+    assert "INNER JOIN project_members pm" in count_query
+    assert "pm.user_id = $2::uuid" in count_query
+    assert "pm.status = 'active'" in count_query
+    assert "pm.role" in list_query
+
+
+@pytest.mark.asyncio
 async def test_recompute_units_count_returns_int():
     """Recompute returns an integer count."""
     conn = _FakeConn(val=5)

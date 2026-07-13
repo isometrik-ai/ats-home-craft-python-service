@@ -31,6 +31,7 @@ from apps.user_service.app.schemas.project_setup import (
     CreateTowerLiftRequest,
     CreateTowerRequest,
     CreateTowerWingRequest,
+    MyProjectSummaryResponse,
     ProjectDetailsResponse,
     ProjectMediaRequest,
     ProjectMediaResponse,
@@ -50,6 +51,7 @@ from apps.user_service.app.services.units_service import UnitsService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     check_permissions,
+    extract_user_context,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -203,6 +205,67 @@ async def list_projects(
         page=page,
         page_size=page_size,
         message_key="project_setup.success.projects_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("list my projects")
+@router.get(
+    "/mine",
+    status_code=http_status.HTTP_200_OK,
+    summary="List projects assigned to me",
+    description="Returns paginated projects where the current user is an active project member.",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_my_projects(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    search: str | None = Query(
+        default=None, min_length=2, description="Name/code/developer search."
+    ),
+    status: PropertyProjectStatus | None = Query(default=None, description="Filter by status."),
+    property_type: PropertyType | None = Query(
+        default=None, description="Filter by property type."
+    ),
+    page: int = Query(default=1, ge=1, description="Page number."),
+    page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
+):
+    """List projects assigned to the logged-in user via project_members."""
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    service = ProjectsService(db_connection=db_connection, user_context=user_context)
+    result = await service.list_my_projects(
+        search=search,
+        status=status.value if status else None,
+        property_type=property_type.value if property_type else None,
+        page=page,
+        page_size=page_size,
+    )
+    items = [
+        MyProjectSummaryResponse.model_validate(row).model_dump(exclude_none=True)
+        for row in result["items"]
+    ]
+    total = int(result["total"])
+    if not items:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+        )
+    return list_response(
+        request=request,
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        message_key="project_setup.success.my_projects_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
