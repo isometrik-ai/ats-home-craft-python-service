@@ -19,7 +19,7 @@ _PROJECT_INSERT_COLUMNS: tuple[str, ...] = (
     "code",
     "name",
     "developer_name",
-    "community_admin_email",
+    "community_admin_user_id",
     "gstin",
     "possession_date",
     "address_line_1",

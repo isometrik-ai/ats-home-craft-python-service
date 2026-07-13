@@ -360,7 +360,8 @@
       "facility_not_found": "Facility not found.",
       "unit_not_found": "Unit not found.",
       "parking_zone_not_found": "Parking zone not found.",
-      "overlay_not_found": "Site map overlay not found."
+      "overlay_not_found": "Site map overlay not found.",
+      "community_admin_not_org_member": "The selected community admin must be an active member of this organization."
     },
     "success": {
       "project_created": "Project created successfully.",

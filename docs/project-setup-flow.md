@@ -187,6 +187,11 @@ ______________________________________________________________________
 - **Rate limiting:** endpoints use `@limiter.limit`.
 - **Serialization:** DB rows are converted with `app/utils/project_serialization.py`
   (handles UUID, Decimal, date/datetime, lists, dicts).
+- **Community admin on create/update:** `community_admin_user_id` is the Supabase auth user id
+  of an **active** `organization_members` row in the same org. The UI should let project
+  creators pick from org members; the API rejects non-members
+  (`project_setup.errors.community_admin_not_org_member`). On create/update the selected user
+  is also upserted into `project_members` with role `community_admin`.
 - **Enums:** Python enums in `schemas/enums.py` mirror Postgres enums; repositories cast
   explicitly (e.g. `$3::project_media_kind`, `::property_type[]`).
 

@@ -44,7 +44,7 @@ async def test_insert_project_only_includes_present_columns():
             "code": "A1",
             "name": "Alpha",
             "developer_name": "Dev",
-            "community_admin_email": "a@b.com",
+            "community_admin_user_id": "00000000-0000-4000-8000-000000000001",
             "gstin": "123456789012345",
             "address_line_1": "L1",
             "pin_code": "111",
