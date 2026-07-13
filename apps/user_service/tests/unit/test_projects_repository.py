@@ -44,7 +44,7 @@ async def test_insert_project_only_includes_present_columns():
             "code": "A1",
             "name": "Alpha",
             "developer_name": "Dev",
-            "community_admin_email": "a@b.com",
+            "community_admin_user_id": "00000000-0000-4000-8000-000000000001",
             "gstin": "123456789012345",
             "address_line_1": "L1",
             "pin_code": "111",
@@ -104,6 +104,30 @@ async def test_list_projects_without_filters():
     assert list_args[0] == "org-1"
     assert list_args[-2] == 10  # offset = (2-1)*10
     assert list_args[-1] == 10  # page_size
+
+
+@pytest.mark.asyncio
+async def test_list_projects_for_member_joins_project_members():
+    """Assigned-project list scopes by active project_members row."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = ProjectsRepository(db_connection=conn)
+
+    await repo.list_projects_for_member(
+        organization_id="org-1",
+        user_id="user-1",
+        search=None,
+        status=None,
+        property_type=None,
+        page=1,
+        page_size=20,
+    )
+
+    count_query, _ = conn.fetchval_calls[0]
+    list_query, _ = conn.fetch_calls[0]
+    assert "INNER JOIN project_members pm" in count_query
+    assert "pm.user_id = $2::uuid" in count_query
+    assert "pm.status = 'active'" in count_query
+    assert "pm.role" in list_query
 
 
 @pytest.mark.asyncio

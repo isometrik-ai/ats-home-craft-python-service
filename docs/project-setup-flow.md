@@ -124,6 +124,7 @@ All routes are under `/v1/projects` and require authentication + an org context.
 | ------ | ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | POST   | `/v1/projects`                                        | Create project (seeds applicable steps)                                                |
 | GET    | `/v1/projects`                                        | List projects — query params: `search`, `status`, `property_type`, `page`, `page_size` |
+| GET    | `/v1/projects/mine`                                   | List projects assigned to the current user (`project_members`)                         |
 | GET    | `/v1/projects/{project_id}`                           | Project details                                                                        |
 | PATCH  | `/v1/projects/{project_id}`                           | Update project (re‑syncs steps if `property_types` change)                             |
 | DELETE | `/v1/projects/{project_id}`                           | Delete project                                                                         |
@@ -187,6 +188,14 @@ ______________________________________________________________________
 - **Rate limiting:** endpoints use `@limiter.limit`.
 - **Serialization:** DB rows are converted with `app/utils/project_serialization.py`
   (handles UUID, Decimal, date/datetime, lists, dicts).
+- **Community admin on create/update:** `community_admin_user_id` is the Supabase auth user id
+  of an **active** `organization_members` row in the same org. The UI should let project
+  creators pick from org members; the API rejects non-members
+  (`project_setup.errors.community_admin_not_org_member`). On create/update the selected user
+  is also upserted into `project_members` with role `community_admin`.
+- **Assigned vs org-wide project lists:** `GET /v1/projects` returns all projects in the org
+  (requires `PROJECTS_MANAGEMENT_VIEW`). `GET /v1/projects/mine` returns only projects where
+  the current user has an **active** `project_members` row (no special RBAC — org session only).
 - **Enums:** Python enums in `schemas/enums.py` mirror Postgres enums; repositories cast
   explicitly (e.g. `$3::project_media_kind`, `::property_type[]`).
 

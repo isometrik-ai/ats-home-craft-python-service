@@ -19,7 +19,7 @@ _PROJECT_INSERT_COLUMNS: tuple[str, ...] = (
     "code",
     "name",
     "developer_name",
-    "community_admin_email",
+    "community_admin_user_id",
     "gstin",
     "possession_date",
     "address_line_1",
@@ -243,6 +243,87 @@ class ProjectsRepository(BaseRepository):
               p.created_at,
               p.updated_at
             FROM projects p
+            WHERE {where_sql}
+            ORDER BY p.created_at DESC
+            OFFSET ${next_param} LIMIT ${next_param + 1}
+            """,
+            *(args + [offset, page_size]),
+        )
+        return [dict(row) for row in rows], int(total or 0)
+
+    async def list_projects_for_member(
+        self,
+        *,
+        organization_id: str,
+        user_id: str,
+        search: str | None,
+        status: str | None,
+        property_type: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List projects assigned to a user via project_members."""
+        offset = (page - 1) * page_size
+        args: list[Any] = [organization_id, user_id]
+        where = [
+            "p.organization_id = $1::uuid",
+            "pm.user_id = $2::uuid",
+            "pm.status = 'active'",
+        ]
+        next_param = 3
+
+        if status:
+            where.append(f"p.status = ${next_param}::project_status")
+            args.append(status)
+            next_param += 1
+
+        if property_type:
+            where.append(f"${next_param}::property_type = ANY(p.property_types)")
+            args.append(property_type)
+            next_param += 1
+
+        if search:
+            where.append(
+                f"(p.name ILIKE ${next_param} OR p.code ILIKE ${next_param}"
+                f" OR p.developer_name ILIKE ${next_param})"
+            )
+            args.append(f"%{search.strip()}%")
+            next_param += 1
+
+        where_sql = " AND ".join(where)
+        total = await self.db_connection.fetchval(
+            f"""
+            SELECT COUNT(1)
+            FROM projects p
+            INNER JOIN project_members pm
+              ON pm.project_id = p.id
+             AND pm.organization_id = p.organization_id
+            WHERE {where_sql}
+            """,
+            *args,
+        )
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              p.id::text AS id,
+              p.organization_id::text AS organization_id,
+              p.code,
+              p.name,
+              p.developer_name,
+              p.city,
+              p.state,
+              p.status::text AS status,
+              p.property_types,
+              p.primary_measurement_unit::text AS primary_measurement_unit,
+              p.units_count,
+              p.setup_current_step::text AS setup_current_step,
+              p.created_at,
+              p.updated_at,
+              pm.role
+            FROM projects p
+            INNER JOIN project_members pm
+              ON pm.project_id = p.id
+             AND pm.organization_id = p.organization_id
             WHERE {where_sql}
             ORDER BY p.created_at DESC
             OFFSET ${next_param} LIMIT ${next_param + 1}

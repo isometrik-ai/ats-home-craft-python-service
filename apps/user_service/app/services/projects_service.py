@@ -10,6 +10,9 @@ from typing import Any
 import asyncpg
 from asyncpg import UniqueViolationError
 
+from apps.user_service.app.db.repositories.organization_member_repository import (
+    OrganizationMemberRepository,
+)
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.schemas.project_setup import (
     CreateProjectRequest,
@@ -18,7 +21,11 @@ from apps.user_service.app.schemas.project_setup import (
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
-from libs.shared_utils.http_exceptions import ConflictException, NotFoundException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -51,7 +58,7 @@ class ProjectsService:
     def _normalize_details(row: dict[str, Any]) -> dict[str, Any]:
         """Serialize a full project row for the API response."""
         out = dict(row)
-        for key in ("id", "organization_id"):
+        for key in ("id", "organization_id", "community_admin_user_id"):
             if out.get(key) is not None:
                 out[key] = str(out[key])
         out["property_types"] = [str(pt) for pt in (out.get("property_types") or [])]
@@ -101,9 +108,35 @@ class ProjectsService:
             "created_at": format_iso_datetime(row.get("created_at")),
         }
 
+    @staticmethod
+    def _my_project_summary_from_row(row: dict[str, Any]) -> dict[str, Any]:
+        """Serialize an assigned-project list row."""
+        summary = ProjectsService._summary_from_row(row)
+        summary["role"] = str(row.get("role") or "")
+        return summary
+
+    async def _ensure_community_admin_is_org_member(self, *, user_id: str) -> None:
+        """Require the selected community admin to be an active org member."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        is_member = await OrganizationMemberRepository(
+            db_connection=self.db_connection
+        ).check_user_membership_by_user_id(
+            user_id=user_id,
+            organization_id=org_id,
+            disallow_suspended=True,
+        )
+        if not is_member:
+            raise ValidationException(
+                message_key="project_setup.errors.community_admin_not_org_member",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
     async def create_project(self, body: CreateProjectRequest) -> dict[str, Any]:
         """Create a project, seed setup steps, and register the creator."""
         org_id = self.user_context.organization_id
+        community_admin_user_id = body.community_admin_user_id
+        await self._ensure_community_admin_is_org_member(user_id=community_admin_user_id)
         project_id = str(uuid.uuid4())
         property_types = [pt.value for pt in body.property_types]
         row_data = {
@@ -112,7 +145,7 @@ class ProjectsService:
             "code": body.code,
             "name": body.name,
             "developer_name": body.developer_name,
-            "community_admin_email": body.community_admin_email,
+            "community_admin_user_id": community_admin_user_id,
             "gstin": body.gstin,
             "possession_date": body.possession_date,
             "address_line_1": body.address_line_1,
@@ -147,6 +180,12 @@ class ProjectsService:
                 project_id=str(inserted["id"]),
                 user_id=self.user_context.user_id,
             )
+        await self.projects_repo.upsert_member(
+            organization_id=org_id,
+            project_id=str(inserted["id"]),
+            user_id=community_admin_user_id,
+            role="community_admin",
+        )
         refreshed = await self.projects_repo.get_project(
             organization_id=org_id, project_id=str(inserted["id"])
         )
@@ -180,6 +219,11 @@ class ProjectsService:
         if "status" in patch and body.status:
             patch["status"] = body.status.value
 
+        if "community_admin_user_id" in patch and patch["community_admin_user_id"]:
+            await self._ensure_community_admin_is_org_member(
+                user_id=str(patch["community_admin_user_id"])
+            )
+
         try:
             updated = await self.projects_repo.update_project(
                 organization_id=org_id,
@@ -199,6 +243,13 @@ class ProjectsService:
             )
             updated = await self.projects_repo.get_project(
                 organization_id=org_id, project_id=project_id
+            )
+        if "community_admin_user_id" in patch and patch["community_admin_user_id"]:
+            await self.projects_repo.upsert_member(
+                organization_id=org_id,
+                project_id=project_id,
+                user_id=str(patch["community_admin_user_id"]),
+                role="community_admin",
             )
         return {
             "old_data": current,
@@ -238,6 +289,37 @@ class ProjectsService:
         )
         return {
             "items": [self._summary_from_row(row) for row in rows],
+            "total": total,
+        }
+
+    async def list_my_projects(
+        self,
+        *,
+        search: str | None,
+        status: str | None,
+        property_type: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any]:
+        """List projects assigned to the current user in the active organization."""
+        org_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+        if not org_id or not user_id:
+            raise ValidationException(
+                message_key="auth.errors.session_not_found",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            )
+        rows, total = await self.projects_repo.list_projects_for_member(
+            organization_id=org_id,
+            user_id=user_id,
+            search=search,
+            status=status,
+            property_type=property_type,
+            page=page,
+            page_size=page_size,
+        )
+        return {
+            "items": [self._my_project_summary_from_row(row) for row in rows],
             "total": total,
         }
 

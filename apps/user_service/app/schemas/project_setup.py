@@ -33,7 +33,12 @@ class CreateProjectRequest(BaseModel):
     code: str = Field(..., min_length=1, max_length=64)
     name: str = Field(..., min_length=1)
     developer_name: str = Field(..., min_length=1)
-    community_admin_email: str = Field(..., min_length=3)
+    community_admin_user_id: str = Field(
+        ...,
+        min_length=36,
+        max_length=36,
+        description="Supabase auth user id of the community admin (must be an org member)",
+    )
     gstin: str = Field(..., min_length=15, max_length=15)
     possession_date: date | None = None
     address_line_1: str = Field(..., min_length=1)
@@ -57,7 +62,12 @@ class UpdateProjectRequest(BaseModel):
     code: str | None = Field(default=None, min_length=1, max_length=64)
     name: str | None = Field(default=None, min_length=1)
     developer_name: str | None = Field(default=None, min_length=1)
-    community_admin_email: str | None = Field(default=None, min_length=3)
+    community_admin_user_id: str | None = Field(
+        default=None,
+        min_length=36,
+        max_length=36,
+        description="Supabase auth user id of the community admin (must be an org member)",
+    )
     gstin: str | None = Field(default=None, min_length=15, max_length=15)
     possession_date: date | None = None
     address_line_1: str | None = Field(default=None, min_length=1)
@@ -106,6 +116,12 @@ class ProjectSummaryResponse(BaseModel):
     updated_at: str
 
 
+class MyProjectSummaryResponse(ProjectSummaryResponse):
+    """Project list row for projects assigned to the current user."""
+
+    role: str
+
+
 class ProjectDetailsResponse(BaseModel):
     """Full project detail row."""
 
@@ -116,7 +132,7 @@ class ProjectDetailsResponse(BaseModel):
     code: str
     name: str
     developer_name: str
-    community_admin_email: str
+    community_admin_user_id: str
     gstin: str
     possession_date: str | None = None
     address_line_1: str
