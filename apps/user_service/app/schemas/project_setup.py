@@ -120,9 +120,6 @@ class MyProjectSummaryResponse(ProjectSummaryResponse):
     """Project list row for projects assigned to the current user."""
 
     role: str
-    community_admin_email: str | None = None
-    community_admin_phone_number: str | None = None
-    community_admin_phone_isd_code: str | None = None
 
 
 class ProjectDetailsResponse(BaseModel):

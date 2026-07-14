@@ -113,9 +113,6 @@ class ProjectsService:
         """Serialize an assigned-project list row."""
         summary = ProjectsService._summary_from_row(row)
         summary["role"] = str(row.get("role") or "")
-        summary["community_admin_email"] = row.get("community_admin_email")
-        summary["community_admin_phone_number"] = row.get("community_admin_phone_number")
-        summary["community_admin_phone_isd_code"] = row.get("community_admin_phone_isd_code")
         return summary
 
     async def _ensure_community_admin_is_org_member(self, *, user_id: str) -> None:
