@@ -91,6 +91,9 @@ class ProjectsService:
             "setup_current_step": str(row.get("setup_current_step")),
             "created_at": format_iso_datetime(row.get("created_at")),
             "updated_at": format_iso_datetime(row.get("updated_at")),
+            "community_admin_email": row.get("community_admin_email"),
+            "community_admin_phone_number": row.get("community_admin_phone_number"),
+            "community_admin_phone_isd_code": row.get("community_admin_phone_isd_code"),
         }
 
     @staticmethod

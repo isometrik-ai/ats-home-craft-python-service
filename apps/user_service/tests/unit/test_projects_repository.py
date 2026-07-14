@@ -100,6 +100,9 @@ async def test_list_projects_without_filters():
     )
 
     _, list_args = conn.fetch_calls[0]
+    list_query, _ = conn.fetch_calls[0]
+    assert "LEFT JOIN organization_members ca" in list_query
+    assert "community_admin_email" in list_query
     # only org id + offset + limit
     assert list_args[0] == "org-1"
     assert list_args[-2] == 10  # offset = (2-1)*10
