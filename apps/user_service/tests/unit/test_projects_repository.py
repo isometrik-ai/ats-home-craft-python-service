@@ -127,6 +127,9 @@ async def test_list_projects_for_member_joins_project_members():
     assert "INNER JOIN project_members pm" in count_query
     assert "pm.user_id = $2::uuid" in count_query
     assert "pm.status = 'active'" in count_query
+    assert "LEFT JOIN organization_members ca" in list_query
+    assert "community_admin_email" in list_query
+    assert "community_admin_phone_number" in list_query
     assert "pm.role" in list_query
 
 

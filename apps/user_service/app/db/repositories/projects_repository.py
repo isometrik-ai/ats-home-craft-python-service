@@ -319,11 +319,18 @@ class ProjectsRepository(BaseRepository):
               p.setup_current_step::text AS setup_current_step,
               p.created_at,
               p.updated_at,
-              pm.role
+              pm.role,
+              ca.email AS community_admin_email,
+              ca.phone_number AS community_admin_phone_number,
+              ca.phone_isd_code AS community_admin_phone_isd_code
             FROM projects p
             INNER JOIN project_members pm
               ON pm.project_id = p.id
              AND pm.organization_id = p.organization_id
+            LEFT JOIN organization_members ca
+              ON ca.user_id = p.community_admin_user_id
+             AND ca.organization_id = p.organization_id
+             AND ca.status != 'deleted'
             WHERE {where_sql}
             ORDER BY p.created_at DESC
             OFFSET ${next_param} LIMIT ${next_param + 1}
