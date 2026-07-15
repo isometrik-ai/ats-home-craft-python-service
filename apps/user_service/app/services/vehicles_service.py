@@ -18,7 +18,11 @@ from apps.user_service.app.schemas.contact_onboarding import (
     CreateVehicleRequest,
     UpdateVehicleRequest,
 )
-from apps.user_service.app.schemas.enums import ContactOnboardingStep, VehicleType
+from apps.user_service.app.schemas.enums import (
+    ContactOnboardingStep,
+    VehicleFuelType,
+    VehicleType,
+)
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -44,6 +48,8 @@ class VehiclesService:
         for key in ("id", "organization_id", "project_id", "contact_id", "unit_id"):
             if out.get(key) is not None:
                 out[key] = str(out[key])
+        photo_paths = out.get("photo_paths") or []
+        out["photo_paths"] = list(photo_paths)
         out["created_at"] = format_iso_datetime(out.get("created_at"))
         out["updated_at"] = format_iso_datetime(out.get("updated_at"))
         return out
@@ -107,7 +113,8 @@ class VehiclesService:
                 make=body.make,
                 model=body.model,
                 color=body.color,
-                photo_path=body.photo_path,
+                photo_paths=body.photo_paths,
+                fuel_type=body.fuel_type.value if body.fuel_type else None,
             )
         except UniqueViolationError as exc:
             raise ConflictException(
@@ -129,6 +136,8 @@ class VehiclesService:
         patch = body.model_dump(exclude_unset=True, exclude_none=True)
         if "vehicle_type" in patch and isinstance(patch["vehicle_type"], VehicleType):
             patch["vehicle_type"] = patch["vehicle_type"].value
+        if "fuel_type" in patch and isinstance(patch["fuel_type"], VehicleFuelType):
+            patch["fuel_type"] = patch["fuel_type"].value
         if "registration_number" in patch and patch["registration_number"]:
             patch["registration_number"] = patch["registration_number"].strip().upper()
         if "unit_id" in patch and patch["unit_id"]:
@@ -157,10 +166,10 @@ class VehiclesService:
         return self._normalize_vehicle(row)
 
     async def remove_vehicle(self, *, contact_id: str, vehicle_id: str) -> dict[str, Any]:
-        """Soft-remove a vehicle owned by the contact."""
+        """Delete a vehicle owned by the contact."""
         org_id = self.user_context.organization_id
         assert org_id
-        row = await self.repo.soft_remove(
+        row = await self.repo.delete(
             organization_id=org_id,
             contact_id=contact_id,
             vehicle_id=vehicle_id,

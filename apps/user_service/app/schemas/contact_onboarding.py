@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.enums import (
     ContactGender,
     ContactOnboardingStep,
     ContactUnitRelationship,
+    VehicleFuelType,
     VehicleType,
 )
 from libs.shared_utils.http_exceptions import ValidationException
@@ -102,7 +103,20 @@ class CreateVehicleRequest(BaseModel):
     make: str | None = Field(None, max_length=100)
     model: str | None = Field(None, max_length=100)
     color: str | None = Field(None, max_length=50)
-    photo_path: str | None = Field(None, max_length=500)
+    photo_paths: list[str] = Field(default_factory=list, max_length=10)
+    fuel_type: VehicleFuelType | None = None
+
+    @field_validator("photo_paths")
+    @classmethod
+    def validate_photo_paths(cls, photo_paths: list[str]) -> list[str]:
+        """Validate storage paths for vehicle images."""
+        for path in photo_paths:
+            if not path or len(path) > 500:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.invalid_vehicle_photo_path",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+        return photo_paths
 
 
 class UpdateVehicleRequest(BaseModel):
@@ -116,7 +130,22 @@ class UpdateVehicleRequest(BaseModel):
     make: str | None = Field(None, max_length=100)
     model: str | None = Field(None, max_length=100)
     color: str | None = Field(None, max_length=50)
-    photo_path: str | None = Field(None, max_length=500)
+    photo_paths: list[str] | None = Field(None, max_length=10)
+    fuel_type: VehicleFuelType | None = None
+
+    @field_validator("photo_paths")
+    @classmethod
+    def validate_photo_paths(cls, photo_paths: list[str] | None) -> list[str] | None:
+        """Validate storage paths for vehicle images."""
+        if photo_paths is None:
+            return photo_paths
+        for path in photo_paths:
+            if not path or len(path) > 500:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.invalid_vehicle_photo_path",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+        return photo_paths
 
 
 class VehicleResponse(BaseModel):
@@ -134,8 +163,10 @@ class VehicleResponse(BaseModel):
     make: str | None = None
     model: str | None = None
     color: str | None = None
-    photo_path: str | None = None
+    photo_paths: list[str] = Field(default_factory=list)
+    fuel_type: str | None = None
     status: str
+    rejection_reason: str | None = None
     sort_order: int = 0
     created_at: str
     updated_at: str
