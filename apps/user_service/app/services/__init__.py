@@ -1,8 +1,19 @@
-"""Services Package."""
+"""Services Package
+This package contains all service classes for the user service.
+Services provide business logic and orchestration of operations.
+"""
 
 from apps.user_service.app.services.auth_service import AuthService
+from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.invite_service import InviteService
-from apps.user_service.app.services.organization_service import OrganizationService
+from apps.user_service.app.services.kafka_event_service import (
+    KafkaEventService,
+    get_kafka_event_service,
+)
+from apps.user_service.app.services.lead_stage_service import LeadStageService
+from apps.user_service.app.services.organization_service import (
+    OrganizationService,
+)
 from apps.user_service.app.services.permission_service import PermissionsService
 from apps.user_service.app.services.role_service import RoleService
 from apps.user_service.app.services.session_service import SessionService
@@ -14,7 +25,10 @@ from apps.user_service.app.services.verification_code_service import (
 
 __all__ = [
     "AuthService",
+    "EventService",
     "InviteService",
+    "KafkaEventService",
+    "LeadStageService",
     "OrganizationService",
     "PermissionsService",
     "RoleService",
@@ -22,4 +36,5 @@ __all__ = [
     "TeamService",
     "UserService",
     "VerificationCodeService",
+    "get_kafka_event_service",
 ]

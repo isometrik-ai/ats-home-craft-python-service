@@ -4,13 +4,31 @@ from fastapi import APIRouter
 
 from apps.user_service.app.api.audit_logs import router as audit_logs_router
 from apps.user_service.app.api.auth import router as auth_router
+from apps.user_service.app.api.companies import router as companies_router
 from apps.user_service.app.api.contact_onboarding import (
     router as contact_onboarding_router,
 )
 from apps.user_service.app.api.contacts import router as contacts_router
+from apps.user_service.app.api.contacts_imports import router as contacts_imports_router
 from apps.user_service.app.api.custom_fields import router as custom_fields_router
+from apps.user_service.app.api.dashboard import router as dashboard_router
+from apps.user_service.app.api.email_templates import router as email_templates_router
+from apps.user_service.app.api.entity_lists import router as entity_lists_router
+from apps.user_service.app.api.external_clients import router as external_clients_router
+from apps.user_service.app.api.external_email_templates import (
+    router as external_email_templates_router,
+)
+from apps.user_service.app.api.external_entity_lists import (
+    router as external_entity_lists_router,
+)
+from apps.user_service.app.api.external_leads import router as external_leads_router
 from apps.user_service.app.api.invites import router as invites_router
+from apps.user_service.app.api.lead_stages import router as lead_stages_router
+from apps.user_service.app.api.leads import router as leads_router
 from apps.user_service.app.api.organization import router as organization_router
+from apps.user_service.app.api.organization_memory import (
+    router as organization_memory_router,
+)
 from apps.user_service.app.api.passes import router as passes_router
 from apps.user_service.app.api.permissions import router as permissions_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
@@ -25,11 +43,13 @@ from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
 )
+from apps.user_service.app.api.webhooks import router as webhooks_router
 
 router = APIRouter(prefix="/v1")
 
 router.include_router(auth_router)
 router.include_router(organization_router)
+router.include_router(organization_memory_router)
 router.include_router(superadmin_organizations_router)
 router.include_router(users_router)
 router.include_router(roles_router)
@@ -45,21 +65,33 @@ router.include_router(contact_onboarding_router)
 router.include_router(passes_router)
 router.include_router(custom_fields_router)
 router.include_router(projects_router)
+router.include_router(external_clients_router)
+router.include_router(external_email_templates_router)
+router.include_router(external_leads_router)
+router.include_router(external_entity_lists_router)
+router.include_router(email_templates_router)
+router.include_router(lead_stages_router)
+router.include_router(leads_router)
+router.include_router(webhooks_router)
+router.include_router(contacts_imports_router)
+router.include_router(companies_router)
+router.include_router(entity_lists_router)
+router.include_router(dashboard_router)
 
 
 @router.get("/status")
 async def api_status():
-    """API status endpoint to verify all routes are working."""
+    """API status endpoint to verify all routes are working"""
     return {
         "message": "API routes are active",
         "status": "success",
         "available_endpoints": [
-            "/auth",
             "/organization",
             "/users",
             "/roles",
             "/sessions",
             "/permissions",
+            "/role-permissions",
             "/audit-logs",
             "/invite",
             "/teams",
@@ -68,6 +100,10 @@ async def api_status():
             "/passes",
             "/custom-fields",
             "/projects",
+            "/companies",
+            "/leads",
+            "/lead-stages",
+            "/dashboard",
             "/superadmin/organizations",
         ],
     }
