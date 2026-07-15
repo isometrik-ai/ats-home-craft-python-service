@@ -30,7 +30,12 @@ class CreateProjectRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    code: str = Field(..., min_length=1, max_length=64)
+    code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Optional project slug. Auto-generated from name when omitted.",
+    )
     name: str = Field(..., min_length=1)
     developer_name: str = Field(..., min_length=1)
     community_admin_user_id: str = Field(
