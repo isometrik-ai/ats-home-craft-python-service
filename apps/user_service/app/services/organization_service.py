@@ -11,12 +11,16 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.db.repositories import (
+    LeadStageRepository,
     OrganizationDeleteRequestRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     PermissionsRepository,
     RoleRepository,
     TeamRepository,
+)
+from apps.user_service.app.db.repositories.email_template_repository import (
+    EmailTemplateRepository,
 )
 from apps.user_service.app.schemas.ai_overview_settings import AiOverviewSettings
 from apps.user_service.app.schemas.common import OrganizationBasicDetails, Subscription
@@ -45,6 +49,9 @@ from apps.user_service.app.services.ai_overview_settings_ops import (
     merge_ai_overview_settings_into_settings,
     parse_stored_ai_overview_settings,
     resolve_effective_ai_overview_settings,
+)
+from apps.user_service.app.services.isometrik_pulse_agent_service import (
+    IsometrikPulseAgentService,
 )
 from apps.user_service.app.services.organization_memory_service import (
     effective_organization_memory_enabled,
@@ -111,6 +118,8 @@ class OrganizationService:
             db_connection=db_connection
         )
         self.team_repository = TeamRepository(db_connection=db_connection)
+        self.lead_stage_repository = LeadStageRepository(db_connection=db_connection)
+        self.email_template_repository = EmailTemplateRepository(db_connection=db_connection)
 
     async def list_organizations(
         self,
@@ -169,11 +178,29 @@ class OrganizationService:
         return resolve_effective_ai_overview_settings(settings)
 
     async def refetch_ai_overview_settings(self, fields: list[str]) -> dict[str, Any]:
-        """Refetch is disabled — enrichment service removed."""
-        raise ServiceUnavailableException(
-            message_key="errors.service_unavailable",
-            custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
-            params={"reason": "ai_overview_refetch_not_available"},
+        """Refetch selected AI overview fields for the session organization."""
+        from apps.user_service.app.services.org_business_overview_enrichment_service import (
+            OrgBusinessOverviewEnrichmentService,
+            strands_enrichment_enabled,
+        )
+
+        organization_id = self.user_context.organization_id
+        if not organization_id:
+            raise BadRequestException(
+                message_key="organizations.errors.user_not_a_member_of_any_organization",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+        if not strands_enrichment_enabled():
+            raise ServiceUnavailableException(
+                message_key="errors.service_unavailable",
+                custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+                params={"reason": "strands_enrichment_not_configured"},
+            )
+
+        return await OrgBusinessOverviewEnrichmentService.refetch_ai_overview_fields(
+            organization_id=organization_id,
+            fields=fields,
+            organization_repository=self.organization_repository,
         )
 
     async def _enqueue_business_overview_enrichment(
@@ -184,7 +211,18 @@ class OrganizationService:
         organization_website: str | None,
         settings: dict[str, Any] | None,
     ) -> None:
-        """No-op — Kafka enrichment removed."""
+        """Publish org enrichment job to Kafka after create (best-effort; never raises)."""
+        from apps.user_service.app.services.org_business_overview_enrichment_service import (
+            OrgBusinessOverviewEnrichmentService,
+        )
+
+        await OrgBusinessOverviewEnrichmentService.enqueue_enrichment_requested(
+            organization_id=organization_id,
+            organization_name=organization_name,
+            organization_website=organization_website,
+            settings=settings,
+            actor_user_id=self.user_context.user_id,
+        )
 
     async def _create_isometrik_ai_agent_best_effort(
         self,
@@ -192,7 +230,12 @@ class OrganizationService:
         organization_id: str,
         isometrik_details: dict | None,
     ) -> None:
-        """No-op — Pulse agent service removed."""
+        """Create Pulse Agent after org create (best-effort; never raises)."""
+        await IsometrikPulseAgentService.create_for_organization_best_effort(
+            organization_id=organization_id,
+            isometrik_details=isometrik_details,
+            organization_repository=self.organization_repository,
+        )
 
     async def create_organization(
         self,
@@ -243,6 +286,11 @@ class OrganizationService:
         )
 
         created = await self.organization_repository.create_organization(org_payload)
+
+        await self.lead_stage_repository.bulk_insert_default_stages_for_organization(
+            organization_id
+        )
+        await self.email_template_repository.insert_default_layout(organization_id)
 
         permission_ids = await self.permissions_repository.create_default_permissions(
             organization_id=organization_id
@@ -323,6 +371,11 @@ class OrganizationService:
         )
 
         created = await self.organization_repository.create_organization(org_payload)
+
+        await self.lead_stage_repository.bulk_insert_default_stages_for_organization(
+            organization_id
+        )
+        await self.email_template_repository.insert_default_layout(organization_id)
 
         permission_ids = await self.permissions_repository.create_default_permissions(
             organization_id=organization_id
