@@ -250,6 +250,15 @@ class Phone(BaseModel):
     is_primary: bool = Field(default=False, description="Primary phone flag")
 
 
+class PhoneInput(BaseModel):
+    """Phone input for add operation (no id)."""
+
+    phone_number: str = Field(..., max_length=50, description="Phone number")
+    phone_isd_code: str = Field(..., max_length=10, description="Phone ISD code")
+    label: str | None = Field(None, max_length=50, description="Label (e.g. mobile, work)")
+    is_primary: bool = Field(default=False, description="Primary phone flag")
+
+
 class Email(BaseModel):
     """Email address item: id, email, label, is_primary."""
 
@@ -273,7 +282,7 @@ class PhoneUpdateItem(BaseModel):
 class PhonesUpdate(BaseModel):
     """Batch phone operations: add, update, and/or remove (primary contact)."""
 
-    add: list[Phone] | None = Field(None, max_length=20)
+    add: list[PhoneInput] | None = Field(None, max_length=20)
     update: list[PhoneUpdateItem] | None = Field(None, max_length=20)
     remove: list[str] | None = Field(None, max_length=20)
 

@@ -77,7 +77,7 @@ Key variables (pulled by `libs/shared_config/app_settings.py` and `apps/user_ser
 - Auth/JWT: `JWT_SECRET` (for middleware), optional 2FA flags `EMAIL_OTP_ENABLED`, `PHONE_OTP_ENABLED`, defaults in `EMAIL_DEFAULT_OTP`, `PHONE_DEFAULT_OTP`
 - Storage: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`, `R2_BUCKET_NAME`
 - Isometrik: `ISOMETRIK_ENABLED`, `ISOMETRIK_ADMIN_API_URL`, `ISOMETRIK_API_URL`, `ISOMETRIK_CLIENT_NAME`, `ISOMETRIK_REGION_ID`, `ISOMETRIK_AUTH_TOKEN`
-- Misc: `WEBSITE_URL`, `COMPANY_*` metadata as needed by services
+- Misc: `WEBSITE_URL`, `COMPANY_*` metadata, `OPENAI_API_KEY`, Typesense/pgvector settings as needed by services
 
 ## Testing
 

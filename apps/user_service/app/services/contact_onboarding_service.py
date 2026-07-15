@@ -243,7 +243,7 @@ class ContactOnboardingService:
                 first_name=body.first_name,
                 last_name=body.last_name,
                 phones=body.phones,
-                emails=body.emails,
+                emails=body.emails or [],
             ),
             provision_auth=not body.portal_access,
         )

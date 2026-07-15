@@ -114,6 +114,9 @@ class ProjectSummaryResponse(BaseModel):
     setup_current_step: str
     created_at: str
     updated_at: str
+    community_admin_email: str | None = None
+    community_admin_phone_number: str | None = None
+    community_admin_phone_isd_code: str | None = None
 
 
 class MyProjectSummaryResponse(ProjectSummaryResponse):
