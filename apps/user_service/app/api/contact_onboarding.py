@@ -344,7 +344,7 @@ async def remove_vehicle(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Soft-remove a vehicle owned by the authenticated contact."""
+    """Delete a vehicle owned by the authenticated contact."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )

@@ -5,23 +5,18 @@ from __future__ import annotations
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
-from apps.user_service.app.schemas.enums import VehicleStatus
+
+_VEHICLE_ENUM_CASTS: dict[str, str] = {
+    "vehicle_type": "::vehicle_type",
+    "fuel_type": "::vehicle_fuel_type",
+    "status": "::vehicle_status",
+}
 
 
 class VehiclesRepository(BaseRepository):
     """Database operations for public.vehicles."""
 
-    async def list_by_contact(
-        self,
-        *,
-        organization_id: str,
-        contact_id: str,
-        status: str = VehicleStatus.ACTIVE.value,
-    ) -> list[dict[str, Any]]:
-        """List vehicles for a contact."""
-        rows = await self.db_connection.fetch(
-            """
-            SELECT
+    _VEHICLE_SELECT_COLUMNS = """
               v.id::text AS id,
               v.organization_id::text AS organization_id,
               v.project_id::text AS project_id,
@@ -32,20 +27,53 @@ class VehiclesRepository(BaseRepository):
               v.make,
               v.model,
               v.color,
-              v.photo_path,
+              v.photo_paths,
+              v.fuel_type::text AS fuel_type,
               v.status::text AS status,
+              v.rejection_reason,
               v.sort_order,
               v.created_at,
               v.updated_at
+    """
+
+    _VEHICLE_RETURNING_COLUMNS = """
+              id::text AS id,
+              organization_id::text AS organization_id,
+              project_id::text AS project_id,
+              contact_id::text AS contact_id,
+              unit_id::text AS unit_id,
+              vehicle_type::text AS vehicle_type,
+              registration_number,
+              make,
+              model,
+              color,
+              photo_paths,
+              fuel_type::text AS fuel_type,
+              status::text AS status,
+              rejection_reason,
+              sort_order,
+              created_at,
+              updated_at
+    """
+
+    async def list_by_contact(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> list[dict[str, Any]]:
+        """List vehicles for a contact."""
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              {self._VEHICLE_SELECT_COLUMNS}
             FROM vehicles v
             WHERE v.organization_id = $1::uuid
               AND v.contact_id = $2::uuid
-              AND v.status = $3::vehicle_status
             ORDER BY v.sort_order, v.created_at
             """,
             organization_id,
             contact_id,
-            status,
         )
         return [dict(row) for row in rows]
 
@@ -58,34 +86,18 @@ class VehiclesRepository(BaseRepository):
     ) -> dict[str, Any] | None:
         """Fetch one vehicle owned by contact."""
         row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT
-              v.id::text AS id,
-              v.organization_id::text AS organization_id,
-              v.project_id::text AS project_id,
-              v.contact_id::text AS contact_id,
-              v.unit_id::text AS unit_id,
-              v.vehicle_type::text AS vehicle_type,
-              v.registration_number,
-              v.make,
-              v.model,
-              v.color,
-              v.photo_path,
-              v.status::text AS status,
-              v.sort_order,
-              v.created_at,
-              v.updated_at
+              {self._VEHICLE_SELECT_COLUMNS}
             FROM vehicles v
             WHERE v.organization_id = $1::uuid
               AND v.contact_id = $2::uuid
               AND v.id = $3::uuid
-              AND v.status != $4::vehicle_status
             LIMIT 1
             """,
             organization_id,
             contact_id,
             vehicle_id,
-            VehicleStatus.REMOVED.value,
         )
         return dict(row) if row else None
 
@@ -101,32 +113,24 @@ class VehiclesRepository(BaseRepository):
         make: str | None,
         model: str | None,
         color: str | None,
-        photo_path: str | None,
+        photo_paths: list[str],
+        fuel_type: str | None,
     ) -> dict[str, Any]:
         """Insert a vehicle."""
         row = await self.db_connection.fetchrow(
-            """
+            f"""
             INSERT INTO vehicles (
                 organization_id, project_id, contact_id, unit_id,
-                vehicle_type, registration_number, make, model, color, photo_path
+                vehicle_type, registration_number, make, model, color,
+                photo_paths, fuel_type
             )
             VALUES (
                 $1::uuid, $2::uuid, $3::uuid, $4::uuid,
-                $5::vehicle_type, $6, $7, $8, $9, $10
+                $5::vehicle_type, $6, $7, $8, $9,
+                $10::text[], $11::vehicle_fuel_type
             )
             RETURNING
-              id::text AS id,
-              organization_id::text AS organization_id,
-              project_id::text AS project_id,
-              contact_id::text AS contact_id,
-              unit_id::text AS unit_id,
-              vehicle_type::text AS vehicle_type,
-              registration_number,
-              make, model, color, photo_path,
-              status::text AS status,
-              sort_order,
-              created_at,
-              updated_at
+              {self._VEHICLE_RETURNING_COLUMNS}
             """,
             organization_id,
             project_id,
@@ -137,7 +141,8 @@ class VehiclesRepository(BaseRepository):
             make,
             model,
             color,
-            photo_path,
+            photo_paths,
+            fuel_type,
         )
         return dict(row)
 
@@ -163,14 +168,15 @@ class VehiclesRepository(BaseRepository):
         for col, val in update_data.items():
             if col in {"id", "organization_id", "contact_id", "created_at"}:
                 continue
-            if col == "vehicle_type":
-                set_parts.append(f"{col} = ${idx}::vehicle_type")
+            cast = _VEHICLE_ENUM_CASTS.get(col, "")
+            if col == "photo_paths":
+                set_parts.append(f"{col} = ${idx}::text[]")
             else:
-                set_parts.append(f"{col} = ${idx}")
+                set_parts.append(f"{col} = ${idx}{cast}")
             values.append(val)
             idx += 1
         set_parts.append("updated_at = now()")
-        values.extend([organization_id, contact_id, vehicle_id, VehicleStatus.REMOVED.value])
+        values.extend([organization_id, contact_id, vehicle_id])
 
         row = await self.db_connection.fetchrow(
             f"""
@@ -179,49 +185,33 @@ class VehiclesRepository(BaseRepository):
             WHERE organization_id = ${idx}::uuid
               AND contact_id = ${idx + 1}::uuid
               AND id = ${idx + 2}::uuid
-              AND status != ${idx + 3}::vehicle_status
             RETURNING
-              id::text AS id,
-              organization_id::text AS organization_id,
-              project_id::text AS project_id,
-              contact_id::text AS contact_id,
-              unit_id::text AS unit_id,
-              vehicle_type::text AS vehicle_type,
-              registration_number,
-              make, model, color, photo_path,
-              status::text AS status,
-              sort_order,
-              created_at,
-              updated_at
+              {self._VEHICLE_RETURNING_COLUMNS}
             """,
             *values,
         )
         return dict(row) if row else None
 
-    async def soft_remove(
+    async def delete(
         self,
         *,
         organization_id: str,
         contact_id: str,
         vehicle_id: str,
     ) -> dict[str, Any] | None:
-        """Mark vehicle removed."""
+        """Hard-delete a vehicle owned by the contact."""
         row = await self.db_connection.fetchrow(
-            """
-            UPDATE vehicles
-            SET status = $4::vehicle_status,
-                updated_at = now()
+            f"""
+            DELETE FROM vehicles
             WHERE organization_id = $1::uuid
               AND contact_id = $2::uuid
               AND id = $3::uuid
-              AND status = $5::vehicle_status
-            RETURNING id::text AS id, status::text AS status
+            RETURNING
+              {self._VEHICLE_RETURNING_COLUMNS}
             """,
             organization_id,
             contact_id,
             vehicle_id,
-            VehicleStatus.REMOVED.value,
-            VehicleStatus.ACTIVE.value,
         )
         return dict(row) if row else None
 
@@ -231,17 +221,15 @@ class VehiclesRepository(BaseRepository):
         organization_id: str,
         contact_id: str,
     ) -> int:
-        """Count active vehicles for contact."""
+        """Count vehicles for contact."""
         count = await self.db_connection.fetchval(
             """
             SELECT COUNT(*)
             FROM vehicles
             WHERE organization_id = $1::uuid
               AND contact_id = $2::uuid
-              AND status = $3::vehicle_status
             """,
             organization_id,
             contact_id,
-            VehicleStatus.ACTIVE.value,
         )
         return int(count or 0)

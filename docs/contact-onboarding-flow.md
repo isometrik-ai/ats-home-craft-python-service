@@ -80,20 +80,38 @@ ______________________________________________________________________
 
 ## 3. Data model
 
-Contact onboarding reuses the existing `contacts` table and adds three tables
-(`20260629111000_resident_onboarding_tables.sql`). All carry `organization_id`.
+Contact onboarding reuses the existing `contacts` table and adds onboarding tables
+(`20260629111000_resident_onboarding_tables.sql`, `20260629113000_household_invitations.sql`).
+All carry `organization_id`.
 
 | Table                      | Purpose                                                                        |
 | -------------------------- | ------------------------------------------------------------------------------ |
 | `contacts` (existing)      | The person being onboarded (and family members)                                |
 | `contact_units`            | Links a contact to a unit (status, is_primary, is_default_login, relationship) |
 | `vehicles`                 | Vehicles registered by the contact for a unit                                  |
+| `household_invitations`    | Phone-based SMS invites for portal-access family members (`20260629113000_*`)  |
 | `contact_onboarding_steps` | Per‑contact wizard step status                                                 |
 
 Key enums: `ContactOnboardingStep`, `ContactUnitStatus` (`pending`/`active`/`moved_out`),
-`ContactUnitRelationship`, `VehicleType`, `VehicleStatus`, `SetupStepStatus`.
+`ContactUnitRelationship`, `VehicleType` (`two_wheeler`/`four_wheeler`),
+`VehicleFuelType` (`petrol`/`diesel`/`electric`/`cng`/`lpg`/`other`),
+`VehicleStatus` (`pending`/`approved`/`rejected`), `SetupStepStatus`,
+`HouseholdInvitationStatus`, `HouseholdMemberStatus`.
 
-Media/files (profile photo, vehicle photo) store **path only** — no raw blobs.
+### `vehicles` columns (contact-facing)
+
+| Column                   | Type    | Notes                                                                     |
+| ------------------------ | ------- | ------------------------------------------------------------------------- |
+| `unit_id`                | uuid FK | Must be a unit actively assigned to the contact                           |
+| `vehicle_type`           | enum    | `two_wheeler`, `four_wheeler`                                             |
+| `registration_number`    | text    | Unique per `(organization_id, project_id)`                                |
+| `make`, `model`, `color` | text    | Optional                                                                  |
+| `photo_paths`            | text[]  | Storage paths only (max 10 per vehicle); not raw blobs                    |
+| `fuel_type`              | enum    | Optional on create; `petrol`, `diesel`, `electric`, `cng`, `lpg`, `other` |
+| `status`                 | enum    | Defaults to `pending` on create; admin sets `approved` / `rejected` later |
+| `rejection_reason`       | text    | Set by admin when `status = rejected` (not contact-editable yet)          |
+
+Media/files (profile photo, vehicle images) store **paths only** — no raw blobs in Postgres.
 
 ______________________________________________________________________
 
@@ -111,7 +129,7 @@ most endpoints take **no** contact id in the path.
 | GET    | `/v1/contact-onboarding/vehicles`                                      | List vehicles                                                     |
 | POST   | `/v1/contact-onboarding/vehicles`                                      | Add a vehicle                                                     |
 | PATCH  | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Update a vehicle                                                  |
-| DELETE | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Remove a vehicle                                                  |
+| DELETE | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Hard-delete a vehicle (row removed from `vehicles`)               |
 | POST   | `/v1/contact-onboarding/steps/vehicles/complete`                       | Complete the `vehicles` step                                      |
 | POST   | `/v1/contact-onboarding/steps/skip`                                    | Skip an optional step (`vehicles` or `household`)                 |
 | GET    | `/v1/contact-onboarding/household`                                     | List household/family members                                     |
@@ -136,6 +154,14 @@ Enforced in `contact_onboarding_service.py`:
 - **Skippable steps only:** `skip_step` rejects anything except `vehicles` / `household`
   (`contact_onboarding.errors.step_not_skippable`) and unknown keys
   (`contact_onboarding.errors.invalid_step`).
+- **Vehicles:**
+  - Each vehicle is tied to a unit the contact actively owns (`unit_not_assigned` / `unit_not_found`).
+  - Create payload: `unit_id`, `vehicle_type`, `registration_number`, optional `make`/`model`/`color`,
+    `fuel_type`, and `photo_paths` (list of storage paths, up to 10).
+  - New vehicles default to `status = pending`. Contacts cannot set `status` or `rejection_reason`;
+    admin approval/rejection APIs are planned separately.
+  - `DELETE /vehicles/{id}` hard-deletes the row (no soft-delete / `removed` status).
+  - Registration numbers are unique per project (`vehicle_registration_duplicate` on conflict).
 - **Household requires an assigned unit:** adding a member checks the primary contact has an
   active link to that unit (`contact_onboarding.errors.unit_not_assigned`) and the unit exists
   (`contact_onboarding.errors.unit_not_found`).
@@ -178,6 +204,8 @@ ______________________________________________________________________
 | Change how "current step" is chosen | `_derive_current_step`                                                         |
 | Add an endpoint                     | route in `api/contact_onboarding.py` → service method → repository method      |
 | Change a user‑facing message        | `app/locales/en.json` under `contact_onboarding.*`                             |
+| Change vehicle approval workflow    | `VehicleStatus` enum + `vehicles.status` column + future admin API             |
+| Wire household SMS delivery         | `app/utils/household_invitation_sms.py`                                        |
 | Change who can act                  | `extract_onboarding_contact_context` (context resolution)                      |
 
 ______________________________________________________________________

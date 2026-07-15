@@ -491,11 +491,23 @@ class VehicleType(str, Enum):
     FOUR_WHEELER = "four_wheeler"
 
 
-class VehicleStatus(str, Enum):
-    """Vehicle record status."""
+class VehicleFuelType(str, Enum):
+    """Vehicle fuel type."""
 
-    ACTIVE = "active"
-    REMOVED = "removed"
+    PETROL = "petrol"
+    DIESEL = "diesel"
+    ELECTRIC = "electric"
+    CNG = "cng"
+    LPG = "lpg"
+    OTHER = "other"
+
+
+class VehicleStatus(str, Enum):
+    """Vehicle approval status."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class ClientUserStatus(str, Enum):
