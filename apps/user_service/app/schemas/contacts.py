@@ -30,7 +30,6 @@ from apps.user_service.app.schemas.common import (
     NoteItem,
     Phone,
     PhoneInput,
-    PhonesUpdate,
     SocialPage,
     SocialPagesUpdate,
     Website,
@@ -364,7 +363,8 @@ class UpdateContactRequest(BaseModel):
     gender: ContactGender | None = None
     blood_group: ContactBloodGroup | None = None
     communication_preferences: CommunicationPreferences | None = None
-    phones: PhonesUpdate | None = None
+    phones: list[Phone] | None = None
+    emails: list[Email] | None = None
     tags: list[str] | None = None
     social_pages: SocialPagesUpdate | None = None
     custom_fields: list[dict[str, Any]] | None = None

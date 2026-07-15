@@ -132,6 +132,22 @@ class ContactOnboardingService:
             "steps": normalized,
         }
 
+    @staticmethod
+    def _to_update_contact_request(body: CompleteProfileRequest) -> UpdateContactRequest:
+        """Map onboarding profile payload to the shared contact update request."""
+        return UpdateContactRequest(
+            prefix=body.prefix,
+            first_name=body.first_name,
+            last_name=body.last_name,
+            date_of_birth=body.date_of_birth,
+            profile_photo_url=body.profile_photo_url,
+            gender=body.gender,
+            blood_group=body.blood_group,
+            communication_preferences=body.communication_preferences,
+            phones=body.phones,
+            emails=body.emails,
+        )
+
     async def complete_profile(
         self,
         *,
@@ -143,20 +159,23 @@ class ContactOnboardingService:
         assert org_id
         await self._ensure_onboarding(contact_id)
 
-        update = UpdateContactRequest(**body.model_dump(exclude_unset=True))
         contacts_service = ContactsService(
             db_connection=self.db_connection,
             user_context=self.user_context,
             supabase_client=self.supabase_client,
         )
-        result = await contacts_service.update_contact(contact_id=contact_id, body=update)
+        await contacts_service.update_contact(
+            contact_id=contact_id,
+            body=self._to_update_contact_request(body),
+        )
+        profile = await contacts_service.get_contact_details(contact_id=contact_id)
 
         await self.onboarding_repo.complete_step(
             organization_id=org_id,
             contact_id=contact_id,
             step_key=ContactOnboardingStep.COMPLETE_PROFILE.value,
         )
-        return result["new_data"]
+        return profile
 
     @staticmethod
     def _format_household_member(row: dict[str, Any]) -> dict[str, Any]:
