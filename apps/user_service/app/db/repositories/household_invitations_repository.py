@@ -132,6 +132,34 @@ class HouseholdInvitationsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def update_pending_phone(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_id: str,
+        phone_isd_code: str,
+        phone_number: str,
+    ) -> dict[str, Any] | None:
+        """Update phone on a pending household invitation."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE household_invitations
+            SET phone_isd_code = $3,
+                phone_number = $4,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND contact_unit_id = $2::uuid
+              AND status = $5::household_invitation_status
+            RETURNING id::text AS id
+            """,
+            organization_id,
+            contact_unit_id,
+            phone_isd_code,
+            phone_number,
+            HouseholdInvitationStatus.PENDING.value,
+        )
+        return dict(row) if row else None
+
     async def mark_accepted(
         self,
         *,

@@ -134,6 +134,7 @@ most endpoints take **no** contact id in the path.
 | POST   | `/v1/contact-onboarding/steps/skip`                                    | Skip an optional step (`vehicles` or `household`)                 |
 | GET    | `/v1/contact-onboarding/household`                                     | List household/family members                                     |
 | POST   | `/v1/contact-onboarding/household`                                     | Add a family member to a unit                                     |
+| PATCH  | `/v1/contact-onboarding/household/{contact_unit_id}`                   | Update a family member (name, relationship, portal_access)        |
 | DELETE | `/v1/contact-onboarding/household/{contact_unit_id}`                   | Remove a family member (deletes orphaned family contact)          |
 | POST   | `/v1/contact-onboarding/household/{contact_unit_id}/resend-invitation` | Resend SMS for a pending portal invite                            |
 | POST   | `/v1/contact-onboarding/household/invitations/validate`                | Validate SMS deep-link token (public)                             |
@@ -182,6 +183,10 @@ Enforced in `contact_onboarding_service.py`:
     pending unit link removed, orphan family contact soft-deleted (member disappears from primary's `GET /household`).
   - Inviter cancel vs invitee decline: primary `DELETE /household/{contact_unit_id}` sets invitation `cancelled`;
     invitee decline sets invitation `declined`.
+  - **Update:** `PATCH /household/{contact_unit_id}` can change `first_name`, `last_name`,
+    `relationship`, and `portal_access`. Enabling `portal_access` requires a primary phone on the
+    member, sets the unit link to `pending`, and sends an SMS invite. Disabling `portal_access`
+    cancels any pending invitation and reactivates the unit link.
   - SMS provider: wire in `app/utils/household_invitation_sms.py` (currently logs in dev).
 - **Finalize (`complete_onboarding`) prerequisites:**
   - not already completed (`already_completed`),

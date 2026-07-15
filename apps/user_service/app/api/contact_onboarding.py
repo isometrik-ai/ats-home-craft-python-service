@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     CreateVehicleRequest,
     DeclineHouseholdInvitationRequest,
     SetDefaultUnitRequest,
+    UpdateHouseholdMemberRequest,
     UpdateVehicleRequest,
     ValidateHouseholdInvitationRequest,
 )
@@ -498,6 +499,51 @@ async def add_household_member(
         message_key="contact_onboarding.success.household_member_added",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
+        data=data,
+    )
+
+
+@handle_api_exceptions("update household member")
+@router.patch(
+    "/household/{contact_unit_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Update household member",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contacts",
+    category="CONTACT_ONBOARDING",
+)
+async def update_household_member(
+    request: Request,
+    contact_unit_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
+    body: UpdateHouseholdMemberRequest = Body(...),
+):
+    """Update a family member on a unit owned by the authenticated contact."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = _service(
+        db_connection=db_connection,
+        user_context=user_context,
+        sb_client=sb_client,
+    )
+    data = await service.update_household_member(
+        primary_contact_id=str(contact["id"]),
+        contact_unit_id=contact_unit_id,
+        body=body,
+    )
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.household_member_updated",
+        custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )
 

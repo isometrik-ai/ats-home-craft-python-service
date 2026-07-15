@@ -19,6 +19,7 @@ from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRe
 from apps.user_service.app.schemas.contact_onboarding import (
     CompleteProfileRequest,
     CreateHouseholdMemberRequest,
+    UpdateHouseholdMemberRequest,
 )
 from apps.user_service.app.schemas.contacts import (
     CreateContactRequest,
@@ -157,6 +158,37 @@ class ContactOnboardingService:
         )
         return result["new_data"]
 
+    @staticmethod
+    def _format_household_member(row: dict[str, Any]) -> dict[str, Any]:
+        """Map a household member query row to API response shape."""
+        portal_access = bool(row.get("portal_access", False))
+        unit_link_status = str(row.get("unit_link_status") or ContactUnitStatus.ACTIVE.value)
+        member_status = HouseholdInvitationService.derive_member_status(
+            portal_access=portal_access,
+            unit_link_status=unit_link_status,
+        )
+        item: dict[str, Any] = {
+            "contact_id": str(row["contact_id"]),
+            "contact_unit_id": str(row["contact_unit_id"]),
+            "unit_id": str(row["unit_id"]),
+            "first_name": row.get("first_name"),
+            "last_name": row.get("last_name"),
+            "relationship": row.get("relationship"),
+            "portal_access": portal_access,
+            "member_status": member_status,
+            "phones": parse_json_any(row.get("phones"), default=[]),
+        }
+        if (
+            member_status == HouseholdMemberStatus.INVITED.value
+            and row.get("invitation_status") == "pending"
+            and row.get("invitation_token")
+        ):
+            item["invite_url"] = HouseholdInvitationService._generate_invite_url(
+                str(row["invitation_token"])
+            )
+            item["invitation_expires_at"] = format_iso_datetime(row.get("invitation_expires_at"))
+        return item
+
     async def list_household(self, *, contact_id: str) -> list[dict[str, Any]]:
         """List family contacts linked to the primary contact's units."""
         org_id = self.user_context.organization_id
@@ -165,38 +197,194 @@ class ContactOnboardingService:
             organization_id=org_id,
             primary_contact_id=contact_id,
         )
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            portal_access = bool(row.get("portal_access", False))
-            unit_link_status = str(row.get("unit_link_status") or ContactUnitStatus.ACTIVE.value)
-            member_status = HouseholdInvitationService.derive_member_status(
-                portal_access=portal_access,
-                unit_link_status=unit_link_status,
+        return [self._format_household_member(row) for row in rows]
+
+    async def _load_household_member(
+        self,
+        *,
+        primary_contact_id: str,
+        contact_unit_id: str,
+    ) -> dict[str, Any]:
+        """Load one household member or raise not found."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        row = await self.contact_units_repo.get_household_member(
+            organization_id=org_id,
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.household_member_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
-            item: dict[str, Any] = {
-                "contact_id": str(row["contact_id"]),
-                "contact_unit_id": str(row["contact_unit_id"]),
-                "unit_id": str(row["unit_id"]),
-                "first_name": row.get("first_name"),
-                "last_name": row.get("last_name"),
-                "relationship": row.get("relationship"),
-                "portal_access": portal_access,
-                "member_status": member_status,
-                "phones": parse_json_any(row.get("phones"), default=[]),
-            }
-            if (
-                member_status == HouseholdMemberStatus.INVITED.value
-                and row.get("invitation_status") == "pending"
-                and row.get("invitation_token")
-            ):
-                item["invite_url"] = HouseholdInvitationService._generate_invite_url(
-                    str(row["invitation_token"])
+        return row
+
+    @staticmethod
+    def _primary_phone_from_contact(contact: dict[str, Any]) -> dict[str, Any] | None:
+        """Return the primary phone dict from a contact row."""
+        phones = parse_json_any(contact.get("phones"), default=[])
+        primary = next((phone for phone in phones if phone.get("is_primary")), None)
+        return primary or (phones[0] if phones else None)
+
+    async def _apply_household_portal_access_change(
+        self,
+        *,
+        primary_contact_id: str,
+        contact_unit_id: str,
+        family_contact_id: str,
+        member_row: dict[str, Any],
+        portal_access: bool,
+    ) -> None:
+        """Enable or disable portal access for an existing household member."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        current_portal_access = bool(member_row.get("portal_access", False))
+        if portal_access == current_portal_access:
+            return
+
+        if portal_access:
+            if member_row.get("user_id"):
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.household_portal_access_already_enabled",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
-                item["invitation_expires_at"] = format_iso_datetime(
-                    row.get("invitation_expires_at")
+            invitations_repo = self.household_invitation_service.invitations_repo
+            pending_invitation = await invitations_repo.get_pending_by_contact_unit(
+                organization_id=org_id,
+                contact_unit_id=contact_unit_id,
+            )
+            if pending_invitation:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.household_portal_access_invite_pending",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
-            out.append(item)
-        return out
+
+            contact = await self.contacts_repo.get_contact_details(
+                contact_id=family_contact_id,
+                organization_id=org_id,
+            )
+            if not contact:
+                raise NotFoundException(
+                    message_key="contacts.errors.contact_not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+            primary_phone = self._primary_phone_from_contact(contact)
+            if not primary_phone:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.household_portal_access_requires_phone",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+
+            await self.contacts_repo.update_contact(
+                contact_id=family_contact_id,
+                organization_id=org_id,
+                update_data={"portal_access": True},
+            )
+            await self.contact_units_repo.update_household_link_status(
+                organization_id=org_id,
+                contact_unit_id=contact_unit_id,
+                status=ContactUnitStatus.PENDING.value,
+            )
+            primary_contact = await ContactsService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+                supabase_client=self.supabase_client,
+            ).get_contact_details(contact_id=primary_contact_id)
+            await self.household_invitation_service.create_and_send(
+                primary_contact_id=primary_contact_id,
+                family_contact_id=family_contact_id,
+                contact_unit_id=contact_unit_id,
+                phone_isd_code=str(primary_phone["phone_isd_code"]),
+                phone_number=str(primary_phone["phone_number"]),
+                invitee_first_name=contact.get("first_name"),
+                invitee_last_name=contact.get("last_name"),
+                inviter_first_name=primary_contact.get("first_name"),
+                inviter_last_name=primary_contact.get("last_name"),
+            )
+            return
+
+        await self.household_invitation_service.cancel_for_contact_unit(
+            organization_id=org_id,
+            contact_unit_id=contact_unit_id,
+        )
+        await self.contacts_repo.update_contact(
+            contact_id=family_contact_id,
+            organization_id=org_id,
+            update_data={"portal_access": False},
+        )
+        if str(member_row.get("unit_link_status")) == ContactUnitStatus.PENDING.value:
+            await self.contact_units_repo.update_household_link_status(
+                organization_id=org_id,
+                contact_unit_id=contact_unit_id,
+                status=ContactUnitStatus.ACTIVE.value,
+            )
+
+    async def update_household_member(
+        self,
+        *,
+        primary_contact_id: str,
+        contact_unit_id: str,
+        body: UpdateHouseholdMemberRequest,
+    ) -> dict[str, Any]:
+        """Patch a household member's contact details, relationship, or portal access."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        link = await self.contact_units_repo.get_household_link(
+            organization_id=org_id,
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        if not link:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.household_member_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        member_row = await self._load_household_member(
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        family_contact_id = str(link["contact_id"])
+        contact_update: dict[str, Any] = {}
+        if body.first_name is not None:
+            contact_update["first_name"] = body.first_name
+        if body.last_name is not None:
+            contact_update["last_name"] = body.last_name
+
+        if contact_update:
+            updated = await self.contacts_repo.update_contact(
+                contact_id=family_contact_id,
+                organization_id=org_id,
+                update_data=contact_update,
+            )
+            if not updated:
+                raise NotFoundException(
+                    message_key="contacts.errors.contact_not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+
+        if body.relationship is not None:
+            await self.contact_units_repo.update_household_relationship(
+                organization_id=org_id,
+                contact_unit_id=contact_unit_id,
+                relationship=body.relationship.value,
+            )
+
+        if body.portal_access is not None:
+            await self._apply_household_portal_access_change(
+                primary_contact_id=primary_contact_id,
+                contact_unit_id=contact_unit_id,
+                family_contact_id=family_contact_id,
+                member_row=member_row,
+                portal_access=body.portal_access,
+            )
+
+        row = await self._load_household_member(
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        return self._format_household_member(row)
 
     async def add_household_member(
         self,
