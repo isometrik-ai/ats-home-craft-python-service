@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import (
@@ -190,6 +190,27 @@ class CreateHouseholdMemberRequest(BaseModel):
     def validate_primary_phone(cls, phones: list[Phone]) -> list[Phone]:
         """Validate exactly one primary phone."""
         return _validate_exactly_one_primary_phone(phones)
+
+
+class UpdateHouseholdMemberRequest(BaseModel):
+    """Patch a household member."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    first_name: str | None = Field(None, max_length=100)
+    last_name: str | None = Field(None, max_length=100)
+    relationship: ContactUnitRelationship | None = None
+    portal_access: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty_patch(self) -> UpdateHouseholdMemberRequest:
+        """Require at least one field in the patch body."""
+        if not self.model_dump(exclude_unset=True):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_member_update_empty",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
 
 class SetDefaultUnitRequest(BaseModel):

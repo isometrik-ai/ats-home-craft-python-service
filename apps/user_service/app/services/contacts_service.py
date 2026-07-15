@@ -45,7 +45,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
-from apps.user_service.app.schemas.common import NoteItem, PhoneInput
+from apps.user_service.app.schemas.common import NoteItem, Phone
 from apps.user_service.app.schemas.contacts import (
     ContactCompanyUpdate,
     ContactSummaryResponse,
@@ -94,7 +94,11 @@ from apps.user_service.app.utils.common_utils import (
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
-from libs.shared_db.supabase_db.auth_repository import create_user
+from libs.shared_db.supabase_db.auth_repository import (
+    create_user,
+    get_user_by_id,
+    update_phone,
+)
 from libs.shared_utils.custom_field_filtering import normalize_dropdown_filters_payload
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -111,6 +115,58 @@ from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.typesense_service import TypesenseService
 
 logger = get_logger("contacts_service")
+
+
+def _serialize_jsonb_list(items: list[Any] | None) -> list[dict[str, Any]]:
+    """Serialize pydantic models or dicts for JSONB list columns."""
+    out: list[dict[str, Any]] = []
+    for item in items or []:
+        if hasattr(item, "model_dump"):
+            out.append(item.model_dump(exclude_none=True))
+        elif isinstance(item, dict):
+            out.append(item)
+    return out
+
+
+def _normalize_phone_item(phone: Any) -> dict[str, Any]:
+    """Normalize phone item."""
+    if isinstance(phone, Phone):
+        return phone.model_dump()
+    if isinstance(phone, dict):
+        return phone
+    return {}
+
+
+def _get_primary_phone_identity(phones: list[Any] | None) -> tuple[str, str] | None:
+    """Return (phone_isd_code, phone_number) for the primary phone, if any."""
+    for phone in phones or []:
+        item = _normalize_phone_item(phone)
+        if item.get("is_primary"):
+            return (
+                str(item.get("phone_isd_code") or ""),
+                str(item.get("phone_number") or ""),
+            )
+    return None
+
+
+def _primary_phone_changed(old_phones: Any, new_phones: list[Any]) -> bool:
+    """True when the primary phone assignment or number changed."""
+    old_primary = _get_primary_phone_identity(parse_json_any(old_phones, default=[]))
+    new_primary = _get_primary_phone_identity(new_phones)
+    return old_primary != new_primary
+
+
+def _contact_phone_sync_info(
+    *,
+    current: dict[str, Any],
+    phones: list[Phone],
+) -> tuple[bool, Phone | None]:
+    """Return whether auth phone should sync and the new primary phone."""
+    sync_auth_phone = bool(current.get("user_id")) and _primary_phone_changed(
+        current.get("phones"), phones
+    )
+    primary_phone = next(phone for phone in phones if phone.is_primary) if sync_auth_phone else None
+    return sync_auth_phone, primary_phone
 
 
 class ContactsService:
@@ -489,6 +545,43 @@ class ContactsService:
             )
         return user_id, str(isometrik_response["userId"]), created_password
 
+    async def _sync_contact_auth_phone(self, *, user_id: str, phone: Phone) -> None:
+        """Update linked Supabase auth user when the contact primary phone changes."""
+        if not self.supabase_client:
+            raise ServiceUnavailableException(
+                message_key="contacts.errors.auth_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+
+        full_phone = self._normalize_full_phone(phone.phone_isd_code, phone.phone_number)
+        user_repo = UserRepository(db_connection=self.db_connection)
+        existing_user = await user_repo.get_auth_user_by_phone(full_phone)
+        if existing_user and str(existing_user["id"]) != user_id:
+            raise ConflictException(
+                message_key="clients.errors.phone_number_already_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        auth_user = await get_user_by_id(self.supabase_client, user_id)
+        if not auth_user:
+            raise ServiceUnavailableException(
+                message_key="contacts.errors.auth_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+
+        updated = await update_phone(
+            self.supabase_client,
+            user_id,
+            auth_user.get("user_metadata") or {},
+            phone.phone_number,
+            phone.phone_isd_code,
+        )
+        if not updated:
+            raise ServiceUnavailableException(
+                message_key="contacts.errors.auth_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+
     async def _prepare_optional_contact_company_association(
         self,
         *,
@@ -626,7 +719,7 @@ class ContactsService:
         self,
         *,
         contact_id: str,
-        phones: list[PhoneInput],
+        phones: list[Phone],
     ) -> bool:
         """Append phones to an existing contact when they are not already present."""
         if not phones:
@@ -1380,6 +1473,17 @@ class ContactsService:
                 ContactsService._normalize_contact_sales_intelligence(normalized)
                 continue
 
+            if field_name == "communication_preferences":
+                raw_value = normalized.get(field_name)
+                if isinstance(raw_value, dict):
+                    continue
+                if isinstance(raw_value, str):
+                    parsed = parse_json_field(raw_value)
+                    normalized[field_name] = parsed if isinstance(parsed, dict) else {}
+                elif raw_value is None:
+                    normalized[field_name] = {}
+                continue
+
             normalized[field_name] = coerce_json_list(normalized.get(field_name))
 
     @staticmethod
@@ -1417,6 +1521,7 @@ class ContactsService:
     @staticmethod
     def _build_contact_scalar_update_data(*, body: UpdateContactRequest) -> dict[str, Any]:
         """Build the scalar update data for the contact."""
+        # pylint: disable=too-complex
         update_data: dict[str, Any] = {}
         scalar_fields = (
             ("status", "status"),
@@ -1433,13 +1538,28 @@ class ContactsService:
         for body_attr, column_name in scalar_fields:
             value = getattr(body, body_attr, None)
             if value is not None:
-                update_data[column_name] = value
+                update_data[column_name] = value.value if hasattr(value, "value") else value
+
+        if body.contact_type is not None:
+            update_data["contact_type"] = body.contact_type.value
+
+        if "portal_access" in body.model_fields_set:
+            update_data["portal_access"] = body.portal_access
 
         if body.additional_data is not None:
             update_data["additional_data"] = body.additional_data
 
         if body.sales_intelligence is not None:
             update_data["sales_intelligence"] = body.sales_intelligence
+
+        if body.gender is not None:
+            update_data["gender"] = body.gender.value
+
+        if body.blood_group is not None:
+            update_data["blood_group"] = body.blood_group.value
+
+        if body.communication_preferences is not None:
+            update_data["communication_preferences"] = body.communication_preferences.model_dump()
 
         if body.skills is not None:
             update_data["skills"] = body.skills
@@ -1492,6 +1612,7 @@ class ContactsService:
         This consolidates field updates + ADR section 3 association changes into one call
         so the API can expose a single PATCH endpoint.
         """
+        # pylint: disable=too-complex
         org_id = self.user_context.organization_id
 
         current = await self.contacts_repo.get_contact_for_update(
@@ -1505,8 +1626,28 @@ class ContactsService:
             )
 
         update_data = self._build_contact_scalar_update_data(body=body)
+
+        sync_auth_phone = False
+        primary_phone: Phone | None = None
+        if body.phones is not None:
+            update_data["phones"] = _serialize_jsonb_list(body.phones)
+            primary_phone_count = sum(
+                1 for phone_item in update_data["phones"] if phone_item.get("is_primary") is True
+            )
+            if primary_phone_count > 1:
+                raise ValidationException(
+                    message_key="contacts.errors.only_one_primary_phone",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            sync_auth_phone, primary_phone = _contact_phone_sync_info(
+                current=current,
+                phones=body.phones,
+            )
+
+        if body.emails is not None:
+            update_data["emails"] = _serialize_jsonb_list(body.emails)
+
         jsonb_list_fields = (
-            ("phones", "contacts.errors.phone_not_found"),
             ("social_pages", "contacts.errors.social_page_not_found"),
             ("work_history", "contacts.errors.work_history_item_not_found"),
             ("educational_history", "contacts.errors.educational_history_item_not_found"),
@@ -1521,18 +1662,6 @@ class ContactsService:
                     field_name=field_name,
                     not_found_message_key=not_found_message_key,
                 )
-                if field_name == "phones":
-                    phones_items = update_data.get("phones") or []
-                    primary_phone_count = sum(
-                        1
-                        for phone_item in phones_items
-                        if isinstance(phone_item, dict) and phone_item.get("is_primary") is True
-                    )
-                    if primary_phone_count > 1:
-                        raise ValidationException(
-                            message_key="contacts.errors.only_one_primary_phone",
-                            custom_code=CustomStatusCode.VALIDATION_ERROR,
-                        )
         await self._merge_contact_custom_fields(
             body=body,
             current=current,
@@ -1546,11 +1675,22 @@ class ContactsService:
                 organization_id=org_id,
                 update_data=update_data,
             )
+            if not updated_row:
+                raise NotFoundException(
+                    message_key="contacts.errors.contact_not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
 
         # Derive the post-update snapshot in-memory (no extra DB read).
         new_snapshot: dict[str, Any] = dict(current)
         if isinstance(updated_row, dict):
             new_snapshot.update(updated_row)
+
+        if sync_auth_phone and primary_phone is not None and updated_row is not None:
+            await self._sync_contact_auth_phone(
+                user_id=str(current["user_id"]),
+                phone=primary_phone,
+            )
 
         updated_addresses = await self._apply_contact_addresses_delta(
             contact_id=contact_id,
@@ -1909,6 +2049,9 @@ class ContactsService:
         """Coerce JSON-backed list fields on contact details to Python lists."""
         json_list_fields = (
             "phones",
+            "emails",
+            "documents",
+            "websites",
             "notes",
             "custom_fields",
             "social_pages",
@@ -1922,10 +2065,24 @@ class ContactsService:
                 details[field_name] = ContactsService._normalize_notes_for_detail(raw_field_value)
             elif field_name in ("work_history", "educational_history"):
                 details[field_name] = coerce_json_list(raw_field_value)
+            elif isinstance(raw_field_value, list):
+                continue
             elif isinstance(raw_field_value, str):
-                details[field_name] = parse_json_field(raw_field_value) or []
+                details[field_name] = coerce_json_list(raw_field_value)
             elif raw_field_value is None:
                 details[field_name] = []
+
+    @staticmethod
+    def _normalize_contact_detail_communication_preferences(details: dict[str, Any]) -> None:
+        """Ensure ``communication_preferences`` is a dict after optional string JSON parsing."""
+        raw_value = details.get("communication_preferences")
+        if isinstance(raw_value, dict):
+            return
+        if isinstance(raw_value, str):
+            parsed = parse_json_field(raw_value)
+            details["communication_preferences"] = parsed if isinstance(parsed, dict) else {}
+        elif raw_value is None:
+            details["communication_preferences"] = {}
 
     @staticmethod
     def _normalize_contact_detail_scalar_arrays(details: dict[str, Any]) -> None:
@@ -1957,6 +2114,7 @@ class ContactsService:
         self._coerce_contact_detail_json_lists(details)
         self._normalize_contact_detail_scalar_arrays(details)
         self._normalize_contact_detail_additional_data(details)
+        self._normalize_contact_detail_communication_preferences(details)
         self._normalize_contact_sales_intelligence(details)
         self._normalize_contact_detail_timestamps(details)
         return details

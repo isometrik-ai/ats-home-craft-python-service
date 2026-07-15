@@ -20,6 +20,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 CONTACT_JSONB_COLUMNS: frozenset[str] = frozenset(
     {
         "phones",
+        "emails",
         "notes",
         "custom_fields",
         "additional_data",
@@ -34,6 +35,21 @@ CONTACT_JSONB_COLUMNS: frozenset[str] = frozenset(
 )
 
 CONTACT_ADDRESS_JSONB_COLUMNS: frozenset[str] = frozenset({"address_data"})
+
+CONTACT_DETAIL_JSONB_LIST_FIELDS: tuple[str, ...] = (
+    "phones",
+    "emails",
+    "notes",
+    "custom_fields",
+    "social_pages",
+    "documents",
+    "websites",
+    "companies",
+    "leads",
+    "addresses",
+    "work_history",
+    "educational_history",
+)
 
 
 class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-methods
@@ -615,9 +631,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         if not fetched_row:
             return None
         result = dict(fetched_row)
-        return self._coerce_jsonb_array_fields(
-            result, ("companies", "leads", "addresses", "work_history", "educational_history")
-        )
+        return self._coerce_jsonb_array_fields(result, CONTACT_DETAIL_JSONB_LIST_FIELDS)
 
     async def get_contact_for_update_by_enrichment_request_id(
         self,
@@ -862,9 +876,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         if not fetched_row:
             return None
         result = dict(fetched_row)
-        return self._coerce_jsonb_array_fields(
-            result, ("companies", "leads", "addresses", "work_history", "educational_history")
-        )
+        return self._coerce_jsonb_array_fields(result, CONTACT_DETAIL_JSONB_LIST_FIELDS)
 
     async def get_contact_details_by_phone(
         self,
@@ -970,9 +982,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         if not fetched_row:
             return None
         result = dict(fetched_row)
-        return self._coerce_jsonb_array_fields(
-            result, ("companies", "leads", "addresses", "work_history", "educational_history")
-        )
+        return self._coerce_jsonb_array_fields(result, CONTACT_DETAIL_JSONB_LIST_FIELDS)
 
     async def list_contacts(
         self,
