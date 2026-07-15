@@ -396,10 +396,19 @@ class ClientType(str, Enum):
 
 
 class ContactStatus(str, Enum):
-    """Client status enumeration."""
+    """Contact status enumeration (property management)."""
 
     ACTIVE = "active"
     INACTIVE = "inactive"
+    DELETED = "deleted"
+
+
+class ClientStatus(str, Enum):
+    """Client status enumeration (CRM legacy alias)."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    PROSPECT = "prospect"
     DELETED = "deleted"
 
 

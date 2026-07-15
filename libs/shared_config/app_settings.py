@@ -128,6 +128,39 @@ class AgentMailSettings(BaseSettings):
     request_timeout_seconds: float = config("AGENTMAIL_REQUEST_TIMEOUT_SECONDS", default=30.0)
 
 
+class GraphitiSettings(BaseSettings):
+    """Graphiti + FalkorDB configuration for CRM entity memory sync."""
+
+    enabled: bool = config("GRAPHITI_ENABLED", default=False)
+    falkor_host: str = config("FALKOR_HOST", default="localhost")
+    falkor_port: int = config("FALKOR_PORT", default=6379)
+    falkor_database: str = config("FALKOR_DATABASE", default="default_db")
+    llm_model: str = config("GRAPHITI_LLM_MODEL", default="gpt-5-nano")
+    llm_small_model: str = config("GRAPHITI_LLM_SMALL_MODEL", default="gpt-5-nano")
+    llm_temperature: float = config("GRAPHITI_LLM_TEMPERATURE", default=1.0)
+    embedding_model: str = config("GRAPHITI_EMBEDDING_MODEL", default="text-embedding-3-small")
+    consumer_group_id: str = config(
+        "GRAPHITI_CONSUMER_GROUP_ID",
+        default="crm-graphiti-sync",
+    )
+    dlq_topic: str = config("GRAPHITI_DLQ_TOPIC", default="crm.graphiti.dlq.dev")
+    sync_max_retries: int = config("GRAPHITI_SYNC_MAX_RETRIES", default=3)
+    sync_retry_base_delay_seconds: float = config(
+        "GRAPHITI_SYNC_RETRY_BASE_DELAY_SECONDS",
+        default=0.5,
+    )
+    consumer_max_concurrency: int = config("GRAPHITI_CONSUMER_MAX_CONCURRENCY", default=4)
+    strict_index_verify: bool = config("GRAPHITI_STRICT_INDEX_VERIFY", default=False)
+    sync_timeout_seconds: float = config("GRAPHITI_SYNC_TIMEOUT_SECONDS", default=60.0)
+    crm_events_topic: str = config("GRAPHITI_CRM_EVENTS_TOPIC", default="crm.events.dev")
+    startup_backfill_enabled: bool = config("GRAPHITI_STARTUP_BACKFILL_ENABLED", default=False)
+    startup_backfill_limit: int = config("GRAPHITI_STARTUP_BACKFILL_LIMIT", default=500)
+    startup_backfill_mode: str = config(
+        "GRAPHITI_STARTUP_BACKFILL_MODE",
+        default="pending",
+    )
+
+
 class TelemetrySettings(BaseSettings):
     """OpenTelemetry / SigNoz telemetry settings."""
 
@@ -154,6 +187,38 @@ class RedisSettings(BaseSettings):
     user_deleted_cache_ttl_seconds: int = config("USER_DELETED_CACHE_TTL_SECONDS", default=86400)
 
 
+class TypesenseSettings(BaseSettings):
+    """Typesense cluster and API key configuration."""
+
+    host: str = config("TYPESENSE_HOST")
+    port: int = config("TYPESENSE_PORT", default=8108)
+    protocol: str = config("TYPESENSE_PROTOCOL", default="https")
+    admin_api_key: str = config("TYPESENSE_ADMIN_API_KEY")
+    search_only_api_key: str = config("TYPESENSE_SEARCH_ONLY_KEY")
+    vector_distance_threshold: float = config(
+        "TYPESENSE_VECTOR_DISTANCE_THRESHOLD",
+        default=0.30,
+    )
+    connection_timeout_seconds: float = config(
+        "TYPESENSE_CONNECTION_TIMEOUT_SECONDS",
+        default=5.0,
+    )
+    num_retries: int = config("TYPESENSE_NUM_RETRIES", default=3)
+    retry_interval_seconds: float = config(
+        "TYPESENSE_RETRY_INTERVAL_SECONDS",
+        default=0.1,
+    )
+    clients_collection_name: str = config("TYPESENSE_CLIENTS_COLLECTION_NAME")
+    contacts_collection_name: str = config(
+        "TYPESENSE_CONTACTS_COLLECTION_NAME",
+        default="contacts",
+    )
+    companies_collection_name: str = config(
+        "TYPESENSE_COMPANIES_COLLECTION_NAME",
+        default="companies",
+    )
+
+
 class SharedAppSettings(BaseSettings):
     """Application settings."""
 
@@ -162,7 +227,9 @@ class SharedAppSettings(BaseSettings):
     supabase: SupabaseSettings = SupabaseSettings()
     isometrik: IsometrikSettings = IsometrikSettings()
     cloudflare_r2: CloudflareR2Settings = CloudflareR2Settings()
+    typesense: TypesenseSettings = TypesenseSettings()
     agentmail: AgentMailSettings = AgentMailSettings()
+    graphiti: GraphitiSettings = GraphitiSettings()
     telemetry: TelemetrySettings = TelemetrySettings()
     environment: EnvironmentOption = config("ENVIRONMENT", default=EnvironmentOption.LOCAL)
     log_level: LogLevelOption = config("LOG_LEVEL", default=LogLevelOption.INFO.value)
@@ -172,17 +239,20 @@ class SharedAppSettings(BaseSettings):
     app_description: str = config("APP_DESCRIPTION", default="API for House Of Apps AI")
     app_author: str = config("APP_AUTHOR", default="Rahul Sharma")
     app_author_email: str = config("APP_AUTHOR_EMAIL", default="rahul@3embed.com")
-    app_author_url: str = config("APP_AUTHOR_URL", default="https://appscrip.co")
+    app_author_url: str = config("APP_AUTHOR_URL", default="https://houseofapps.ai")
     app_license: str = config("APP_LICENSE", default="MIT")
     app_license_url: str = config("APP_LICENSE_URL", default="https://opensource.org/licenses/MIT")
     company_name: str = config("COMPANY_NAME", default="House of App AI")
     company_address: str = config("COMPANY_ADDRESS", default="123 Main Street, City, State 12345")
-    company_support_email: str = config("COMPANY_SUPPORT_EMAIL", default="support@appscrip.co")
-    company_website: str = config("COMPANY_WEBSITE", default="https://appscrip.co")
+    company_support_email: str = config("COMPANY_SUPPORT_EMAIL", default="support@houseofapps.ai")
+    company_website: str = config("COMPANY_WEBSITE", default="https://houseofapps.ai")
     company_privacy_policy_url: str = config(
-        "COMPANY_PRIVACY_POLICY_URL", default="https://appscrip.co/privacy"
+        "COMPANY_PRIVACY_POLICY_URL", default="https://houseofapps.ai/privacy"
     )
-    company_terms_url: str = config("COMPANY_TERMS_URL", default="https://appscrip.co/terms")
+    company_terms_url: str = config("COMPANY_TERMS_URL", default="https://houseofapps.ai/terms")
+    openai_api_key: str = config("OPENAI_API_KEY")
+    org_memory_llm_model: str = config("ORG_MEMORY_LLM_MODEL", default="gpt-4.1-mini")
+    rossai_api_key: str = config("ROSSAI_API_KEY", default="")
 
 
 shared_settings = SharedAppSettings()

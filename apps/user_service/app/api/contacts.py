@@ -1,7 +1,14 @@
-"""Contacts API."""
+"""Contacts API.
+
+Resource-specific endpoints targeting the split tables (`contacts`, `companies`,
+`contact_companies`, `contact_addresses`) with the operations defined in
+`ADRs/clients_operations.md`.
+"""
+
+from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 from supabase import AsyncClient
 
@@ -17,9 +24,22 @@ from apps.user_service.app.schemas.contacts import (
     ListContactsRequest,
     UpdateContactRequest,
 )
+from apps.user_service.app.schemas.enums import (
+    ClientStatus,
+    CompanyEventType,
+    ContactEventType,
+    KafkaTopics,
+)
 from apps.user_service.app.services.activity_service import ActivityService
+from apps.user_service.app.services.client_enrichment_service import (
+    require_client_enrichment_enabled,
+)
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.services.contacts_service import ContactsService
+from apps.user_service.app.services.event_service import EventService
+from apps.user_service.app.services.typesense_index_service import (
+    delete_contact_background,
+)
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
@@ -35,6 +55,8 @@ from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/contacts", tags=["Contacts"])
+
+CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
 COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     401: {"description": "Unauthorized (missing/invalid JWT)."},
@@ -52,8 +74,13 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     status_code=http_status.HTTP_201_CREATED,
     summary="Create a contact",
     description=(
-        "Creates a contact in public.contacts. Requires contact_type and email. "
-        "Email is stored in the emails jsonb column."
+        "Creates a contact in the split-table model. Depending on the payload, this can also "
+        "link the contact to an existing company or create a new company by name and associate it."
+        "Side effects:"
+        "- Emits lifecycle events (Kafka topic: CRM events)"
+        "- Schedules Typesense indexing for the contact "
+        "(and for a company if one was created inline)"
+        "- Schedules enrichment for the created/affected entities"
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -61,42 +88,121 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 @audit_api_call(
     action_type="CREATE",
     data_classification="pii",
-    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    compliance_tags=[
+        "gdpr",
+        "pii",
+        "soc2_audit",
+        "audit_required",
+    ],
     table_name="contacts",
     category="CONTACT",
 )
 async def create_contact(
     request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    background_tasks: BackgroundTasks,
+    db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
-    body: CreateContactRequest = Body(...),
+    body: CreateContactRequest = Body(
+        ...,
+        description=(
+            "Supports creating a standalone contact, linking to an existing company, "
+            "or creating a new company by name and associating it."
+        ),
+    ),
 ):
-    """Create a contact."""
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_CREATE,
+    """Create a contact.
+
+    This endpoint is the primary “create” entry-point for contacts in the split-table model.
+    It can optionally create/link a company association in the same request.
+
+    Args:
+        request: FastAPI request (used for audit log context).
+        background_tasks: Schedules non-blocking side effects (events/indexing/enrichment).
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims extracted from JWT.
+        sb_client: Supabase client (used by the service for auth-related operations, if needed).
+        body: Contact create payload.
+
+    Returns:
+        Standard success response envelope (201 Created). The created entity identifiers are not
+        returned directly in the response body; they are available in audit logs/events.
+
+    Side effects:
+        - Creates lifecycle events for created entities (best-effort publish via BackgroundTasks).
+        - Indexes the created contact in Typesense (BackgroundTasks), and a new company in Typesense
+          when one was created in the same request (BackgroundTasks).
+        - Triggers enrichment for the created contact and any created company (BackgroundTasks).
+    """
+    created_events: list[tuple[dict, str]] = []
+    contact_id: str | None = None
+    user_context = None
+    result: dict[str, Any] = {}
+    lead_created_event: dict | None = None
+    lead_event_key: str | None = None
+    async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CONTACTS_MANAGEMENT_CREATE,
+        )
+        request.state.audit_table = "contacts"
+        request.state.audit_description = "Created contact"
+        request.state.audit_risk_level = "high"
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        service = ContactsService(
+            db_connection=db_connection,
+            user_context=user_context,
+            supabase_client=sb_client,
+        )
+        event_service = EventService(db_connection=db_connection)
+        result = await service.create_contact(body)
+        contact_id = result["contact_id"]
+        request.state.audit_requested_id = str(contact_id)
+        request.state.audit_description = f"Created contact: {contact_id}"
+        request.state.raw_audit_old_data = result.get("old_data")
+        request.state.raw_audit_new_data = result.get("new_data")
+        created_events = await ContactsService.create_lifecycle_events_for_created_entities(
+            event_service=event_service,
+            created_entities=result.get("created_entities"),
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+        )
+        created_lead_id = result.get("created_lead_id")
+        if created_lead_id:
+            lead_created_event = await event_service.create_lead_created_lifecycle_event(
+                lead_id=str(created_lead_id),
+                organization_id=user_context.organization_id,
+                actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            lead_event_key = str(created_lead_id)
+
+    ContactsService.schedule_lifecycle_event_publishes(
+        background_tasks=background_tasks,
+        created_events=created_events,
     )
-    request.state.audit_table = "contacts"
-    request.state.audit_description = "Created contact"
-    request.state.audit_risk_level = "high"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-    service = ContactsService(
-        db_connection=db_connection,
-        user_context=user_context,
-        supabase_client=sb_client,
-    )
-    result = await service.create_contact(body)
-    contact_id = result["contact_id"]
-    request.state.audit_requested_id = str(contact_id)
-    request.state.audit_description = f"Created contact: {contact_id}"
-    request.state.raw_audit_old_data = result.get("old_data")
-    request.state.raw_audit_new_data = result.get("new_data")
+    if lead_created_event is not None and lead_event_key is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=lead_created_event,
+            key=lead_event_key,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+    if contact_id is not None and user_context is not None:
+        ContactsService.schedule_typesense_indexing_for_created_entities(
+            background_tasks=background_tasks,
+            created_entities=result.get("created_entities"),
+            organization_id=user_context.organization_id,
+        )
+        ContactsService.schedule_enrichment(
+            background_tasks=background_tasks,
+            enrichment_targets=result.get("enrichment_targets"),
+        )
 
     return success_response(
         request=request,
@@ -111,7 +217,12 @@ async def create_contact(
     "/list",
     status_code=http_status.HTTP_200_OK,
     summary="List contacts (database)",
-    description="Returns paginated contacts from PostgreSQL.",
+    description=(
+        "Returns paginated contacts from PostgreSQL.\n\n"
+        "Notes:\n"
+        "- Use `search` for a lightweight name/email search.\n"
+        "- Use `/contacts/search` for Typesense-backed full-text search."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
@@ -121,7 +232,17 @@ async def list_contacts(
     current_user: dict = Depends(get_user_from_auth),
     body: ListContactsRequest = Body(...),
 ):
-    """List contacts from PostgreSQL with pagination."""
+    """List contacts from PostgreSQL with pagination.
+
+    Args:
+        request: FastAPI request.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims extracted from JWT.
+        body: JSON body with filters and pagination.
+
+    Returns:
+        Paginated list response envelope containing contact summary items and total count.
+    """
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -133,7 +254,6 @@ async def list_contacts(
     result = await service.list_contacts(
         search=body.search,
         status=body.status.value if body.status else None,
-        contact_type=body.contact_type.value if body.contact_type else None,
         dropdown_filters=dropdown_filters,
         page=body.page,
         page_size=body.page_size,
@@ -194,6 +314,7 @@ async def get_contact_activity(
         permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
 
+    # Ensure contact exists (and org-scoped) before returning activity.
     service = ContactsService(db_connection=db_connection, user_context=user_context)
     await service.get_contact_details(contact_id=contact_id)
 
@@ -239,6 +360,97 @@ async def get_contact_activity(
     )
 
 
+@handle_api_exceptions("search contacts")
+@router.get(
+    "/search",
+    status_code=http_status.HTTP_200_OK,
+    summary="Search contacts (Typesense)",
+    description=(
+        "Performs full-text search over contacts using Typesense."
+        "This endpoint currently returns raw Typesense hits."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def search_contacts(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    query: str = Query(
+        ...,
+        min_length=2,
+        description="Search query (min 2 chars).",
+    ),
+    status: ClientStatus | None = Query(
+        None,
+        description="Optional contact status filter applied to the search.",
+    ),
+    page: int = Query(
+        1,
+        ge=1,
+        description="1-based page number.",
+    ),
+    page_size: int = Query(
+        20,
+        ge=1,
+        le=100,
+        description="Number of hits per page (max 100).",
+    ),
+):
+    """Search contacts using Typesense.
+
+    Args:
+        request: FastAPI request.
+        db_connection: PostgreSQL connection (request-scoped) used for permission checks.
+        current_user: Authenticated user claims extracted from JWT.
+        query: Full-text query (min 2 chars).
+        status: Optional status filter applied to the search.
+        page: 1-based page number.
+        page_size: Hits per page (max 100).
+
+    Returns:
+        Paginated list response envelope containing raw Typesense hits and total count.
+
+    Notes:
+        This endpoint intentionally returns raw Typesense hits.
+    """
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+    )
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
+    result = await service.search_contacts(
+        query=query,
+        page=page,
+        page_size=page_size,
+        status=status.value if status else None,
+    )
+    items = result["items"]
+    total = result["total"]
+    if not items:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+        )
+    return list_response(
+        request=request,
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        message_key="contacts.success.contacts_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
 @handle_api_exceptions("get contact details")
 @router.get(
     "/{contact_id}",
@@ -249,11 +461,24 @@ async def get_contact_activity(
 @limiter.limit("100/minute")
 async def get_contact_details(
     request: Request,
-    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
+    contact_id: str = Path(
+        ...,
+        description="Contact identifier (UUID string).",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Get a single contact including addresses and linked companies."""
+    """Get a single contact including addresses and linked companies.
+
+    Args:
+        request: FastAPI request.
+        contact_id: Contact identifier.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims extracted from JWT.
+
+    Returns:
+        Success response envelope containing a contact details payload.
+    """
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -279,6 +504,9 @@ async def get_contact_details(
     description=(
         "Updates contact fields and related nested data (e.g., addresses). "
         "May also apply company association changes when `company_association` is provided."
+        "Side effects:"
+        "- Emits lifecycle events for the contact and each company touched by `company_association`"
+        "- Schedules Typesense re-indexing for the contact and those companies"
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -286,45 +514,218 @@ async def get_contact_details(
 @audit_api_call(
     action_type="UPDATE",
     data_classification="pii",
-    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    compliance_tags=[
+        "gdpr",
+        "pii",
+        "soc2_audit",
+        "audit_required",
+    ],
     table_name="contacts",
     category="CONTACT",
 )
 async def update_contact(
     request: Request,
-    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    background_tasks: BackgroundTasks,
+    contact_id: str = Path(
+        ...,
+        description="Contact identifier (UUID string).",
+    ),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
-    sb_client: AsyncClient = Depends(supabase_service),
-    body: UpdateContactRequest = Body(...),
+    body: UpdateContactRequest = Body(
+        ...,
+        description="Partial update payload. Only provided fields are updated.",
+    ),
 ):
-    """Update a contact."""
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_EDIT,
-    )
-    service = ContactsService(
-        db_connection=db_connection, user_context=user_context, supabase_client=sb_client
-    )
-    request.state.audit_table = "contacts"
-    request.state.audit_requested_id = contact_id
-    request.state.audit_description = f"Updated contact: {contact_id}"
-    request.state.audit_risk_level = "medium"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-    result = await service.update_contact(contact_id=contact_id, body=body)
-    request.state.raw_audit_old_data = result.get("old_data")
-    request.state.raw_audit_new_data = result.get("new_data")
+    """Update a contact (fields + addresses + optional company association change).
 
+    Args:
+        request: FastAPI request (used for audit log context).
+        background_tasks: Schedules non-blocking side effects (events/indexing).
+        contact_id: Contact identifier.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims extracted from JWT.
+        body: Partial update payload. Only provided fields are updated.
+
+    Returns:
+        Success response envelope containing the service result payload.
+
+    Side effects:
+        - Emits lifecycle events for the contact and any companies touched by `company_association`
+          (best-effort publish via BackgroundTasks).
+        - Schedules Typesense re-indexing for the contact and those companies (BackgroundTasks).
+    """
+    update_event: dict | None = None
+    related_lifecycle_events: list[tuple[dict[str, Any], str]] = []
+    async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        )
+        service = ContactsService(db_connection=db_connection, user_context=user_context)
+        event_service = EventService(db_connection=db_connection)
+        request.state.audit_table = "contacts"
+        request.state.audit_requested_id = contact_id
+        request.state.audit_description = f"Updated contact: {contact_id}"
+        request.state.audit_risk_level = "medium"
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        result = await service.update_contact(contact_id=contact_id, body=body)
+        changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
+        request.state.raw_audit_old_data = result.get("old_data")
+        request.state.raw_audit_new_data = result.get("new_data")
+        companies_delta = (result.get("companies_delta") or {}) if isinstance(result, dict) else {}
+        raw_affected = companies_delta.get("affected_company_ids") or []
+        affected_company_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
+
+        contact_payload: dict[str, Any] = {
+            "module": "contacts",
+            "action": "update",
+            "changed_fields": changed_fields,
+        }
+        if affected_company_ids:
+            contact_payload["affected_company_ids"] = affected_company_ids
+
+        update_event = await event_service.create_lifecycle_event(
+            event_type=ContactEventType.UPDATED.value,
+            aggregate_id=contact_id,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload=contact_payload,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+        created_cid = companies_delta.get("created_company_id")
+        created_cid_s = str(created_cid) if created_cid else None
+        if affected_company_ids:
+            actor = str(user_context.user_id) if user_context.user_id else None
+            org_id = user_context.organization_id
+            company_event_items = [
+                {
+                    "event_type": (
+                        CompanyEventType.CREATED.value
+                        if created_cid_s is not None and cid_s == created_cid_s
+                        else CompanyEventType.UPDATED.value
+                    ),
+                    "aggregate_id": cid_s,
+                    "organization_id": org_id,
+                    "actor_user_id": actor,
+                    "payload": {
+                        "module": "companies",
+                        "action": (
+                            "company_created_with_contact"
+                            if created_cid_s is not None and cid_s == created_cid_s
+                            else "company_association_changed"
+                        ),
+                        "contact_id": contact_id,
+                    },
+                }
+                for cid_s in affected_company_ids
+            ]
+            company_events = await event_service.create_lifecycle_events(
+                items=company_event_items,
+                topics=CLIENT_KAFKA_TOPICS,
+            )
+            related_lifecycle_events.extend(
+                (event_payload, event_payload["aggregate_id"]) for event_payload in company_events
+            )
+
+    ContactsService.schedule_contact_update_background_tasks(
+        background_tasks=background_tasks,
+        contact_id=contact_id,
+        organization_id=user_context.organization_id,
+        body=body,
+        update_result=result if isinstance(result, dict) else None,
+        update_event=update_event,
+        event_key=contact_id,
+        event_topics=CLIENT_KAFKA_TOPICS,
+        related_lifecycle_events=related_lifecycle_events,
+    )
     return success_response(
         request=request,
         message_key="contacts.success.contact_updated",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("enrich contact")
+@router.post(
+    "/{contact_id}/enrich",
+    status_code=http_status.HTTP_202_ACCEPTED,
+    summary="Trigger contact enrichment",
+    description=(
+        "Triggers enrichment for a contact using the latest persisted data. "
+        "Emits `contacts.enrichment_requested` on the CRM events topic."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="contacts",
+    category="CONTACT",
+)
+async def enrich_contact(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Trigger enrichment for a contact (best-effort async)."""
+    require_client_enrichment_enabled()
+    enrich_event: dict | None = None
+    organization_id: str | None = None
+    async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        )
+        request.state.audit_table = "contacts"
+        request.state.audit_requested_id = contact_id
+        request.state.audit_description = f"Triggered enrichment for contact: {contact_id}"
+        request.state.audit_risk_level = "medium"
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        organization_id = user_context.organization_id
+        event_service = EventService(db_connection=db_connection)
+        enrich_event = await event_service.create_lifecycle_event(
+            event_type=ContactEventType.ENRICHMENT_REQUESTED.value,
+            aggregate_id=contact_id,
+            organization_id=organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={"module": "contacts", "action": "enrich"},
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+
+    if organization_id is not None:
+        background_tasks.add_task(
+            ContactsService.trigger_enrichment_background,
+            contact_id,
+            organization_id,
+        )
+    if enrich_event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=enrich_event,
+            key=contact_id,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+    return success_response(
+        request=request,
+        message_key="contacts.success.contact_enrichment_requested",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_202_ACCEPTED,
     )
 
 
@@ -384,43 +785,91 @@ async def assign_unit_to_contact(
     "/{contact_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Delete a contact (soft delete)",
-    description="Soft-deletes a contact.",
+    description=(
+        "Soft-deletes a contact.\n\n"
+        "Side effects:\n"
+        "- Emits a DELETED lifecycle event\n"
+        "- Schedules Typesense de-indexing for the contact"
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
 @audit_api_call(
     action_type="DELETE",
     data_classification="pii",
-    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    compliance_tags=[
+        "gdpr",
+        "pii",
+        "soc2_audit",
+        "audit_required",
+    ],
     table_name="contacts",
     category="CONTACT",
 )
 async def delete_contact(
     request: Request,
-    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
-    db_connection: asyncpg.Connection = Depends(db_uow),
+    background_tasks: BackgroundTasks,
+    contact_id: str = Path(
+        ...,
+        description="Contact identifier (UUID string).",
+    ),
+    db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Soft-delete a contact."""
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_DELETE,
-    )
-    service = ContactsService(db_connection=db_connection, user_context=user_context)
-    request.state.audit_table = "contacts"
-    request.state.audit_requested_id = contact_id
-    request.state.audit_description = f"Deleted contact: {contact_id}"
-    request.state.audit_risk_level = "high"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-    deleted = await service.soft_delete_contact(contact_id=contact_id)
-    request.state.raw_audit_old_data = deleted.get("old_data")
-    request.state.raw_audit_new_data = deleted.get("new_data")
+    """Soft-delete a contact.
 
+    Args:
+        request: FastAPI request (used for audit log context).
+        background_tasks: Schedules non-blocking side effects (events/de-indexing).
+        contact_id: Contact identifier.
+        db_connection: PostgreSQL connection (request-scoped).
+        current_user: Authenticated user claims extracted from JWT.
+
+    Returns:
+        Standard success response envelope (200 OK).
+
+    Side effects:
+        - Emits a DELETED lifecycle event (best-effort publish via BackgroundTasks).
+        - Schedules Typesense de-indexing for the contact (BackgroundTasks).
+    """
+    event: dict | None = None
+    async with db_connection.transaction():
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=CONTACTS_MANAGEMENT_DELETE,
+        )
+        service = ContactsService(db_connection=db_connection, user_context=user_context)
+        event_service = EventService(db_connection=db_connection)
+        request.state.audit_table = "contacts"
+        request.state.audit_requested_id = contact_id
+        request.state.audit_description = f"Deleted contact: {contact_id}"
+        request.state.audit_risk_level = "high"
+        request.state.audit_user_context = {
+            "user_id": user_context.user_id,
+            "user_email": user_context.email,
+            "organization_id": user_context.organization_id,
+        }
+        deleted = await service.soft_delete_contact(contact_id=contact_id)
+        request.state.raw_audit_old_data = deleted.get("old_data")
+        request.state.raw_audit_new_data = deleted.get("new_data")
+        event = await event_service.create_lifecycle_event(
+            event_type=ContactEventType.DELETED.value,
+            aggregate_id=contact_id,
+            organization_id=user_context.organization_id,
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            payload={"module": "contacts", "action": "delete"},
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+
+    if event is not None:
+        background_tasks.add_task(
+            EventService.publish_event_background,
+            event=event,
+            key=contact_id,
+            topics=CLIENT_KAFKA_TOPICS,
+        )
+    background_tasks.add_task(delete_contact_background, contact_id)
     return success_response(
         request=request,
         message_key="contacts.success.contact_deleted",
