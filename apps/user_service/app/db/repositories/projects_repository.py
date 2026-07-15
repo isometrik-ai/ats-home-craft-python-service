@@ -59,6 +59,22 @@ class ProjectsRepository(BaseRepository):
         )
         return dict(row)
 
+    async def project_code_exists(self, *, organization_id: str, code: str) -> bool:
+        """Return True when an org already has a project with this code."""
+        exists = await self.db_connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM projects
+                WHERE organization_id = $1::uuid
+                  AND code = $2
+            )
+            """,
+            organization_id,
+            code,
+        )
+        return bool(exists)
+
     async def get_project(self, *, organization_id: str, project_id: str) -> dict[str, Any] | None:
         """Fetch a single project scoped to the organization."""
         row = await self.db_connection.fetchrow(

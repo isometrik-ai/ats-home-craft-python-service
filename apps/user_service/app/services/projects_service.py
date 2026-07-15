@@ -23,10 +23,15 @@ from apps.user_service.app.services.project_setup_service import ProjectSetupSer
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     ConflictException,
+    InternalServerErrorException,
     NotFoundException,
     ValidationException,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
+
+_PROJECT_CODE_MAX_LEN = 64
+_PROJECT_CODE_SUFFIX_RESERVE = 6
+_PROJECT_CODE_MAX_ATTEMPTS = 1000
 
 
 def _to_float(value: Any) -> float | None:
@@ -118,6 +123,48 @@ class ProjectsService:
         summary["role"] = str(row.get("role") or "")
         return summary
 
+    @staticmethod
+    def _slugify_project_name(name: str) -> str:
+        """Build a URL-friendly project code base from the display name."""
+        clean_name = name.lower().strip()
+        normalized = "".join(char if char.isalnum() else "-" for char in clean_name)
+        compact = "-".join(part for part in normalized.split("-") if part)
+        return compact[:_PROJECT_CODE_MAX_LEN]
+
+    async def _resolve_project_code(
+        self,
+        *,
+        organization_id: str,
+        name: str,
+        code: str | None,
+    ) -> str:
+        """Use the provided code or generate a unique slug from the project name."""
+        explicit_code = (code or "").strip()
+        if explicit_code:
+            return explicit_code
+
+        base = self._slugify_project_name(name) or "project"
+        max_base_len = _PROJECT_CODE_MAX_LEN - _PROJECT_CODE_SUFFIX_RESERVE
+        candidate_base = base[:max_base_len].rstrip("-") or "project"
+        candidate = candidate_base
+        suffix = 2
+
+        for _ in range(_PROJECT_CODE_MAX_ATTEMPTS):
+            if not await self.projects_repo.project_code_exists(
+                organization_id=organization_id,
+                code=candidate,
+            ):
+                return candidate
+            suffix_text = f"-{suffix}"
+            trimmed_base = candidate_base[: _PROJECT_CODE_MAX_LEN - len(suffix_text)].rstrip("-")
+            candidate = f"{trimmed_base or 'project'}{suffix_text}"
+            suffix += 1
+
+        raise InternalServerErrorException(
+            message_key="project_setup.errors.duplicate_code",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        )
+
     async def _ensure_community_admin_is_org_member(self, *, user_id: str) -> None:
         """Require the selected community admin to be an active org member."""
         org_id = self.user_context.organization_id
@@ -142,10 +189,15 @@ class ProjectsService:
         await self._ensure_community_admin_is_org_member(user_id=community_admin_user_id)
         project_id = str(uuid.uuid4())
         property_types = [pt.value for pt in body.property_types]
+        resolved_code = await self._resolve_project_code(
+            organization_id=org_id,
+            name=body.name,
+            code=body.code,
+        )
         row_data = {
             "id": project_id,
             "organization_id": org_id,
-            "code": body.code,
+            "code": resolved_code,
             "name": body.name,
             "developer_name": body.developer_name,
             "community_admin_user_id": community_admin_user_id,

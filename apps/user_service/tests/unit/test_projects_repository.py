@@ -33,6 +33,20 @@ class _FakeConn:
 
 
 @pytest.mark.asyncio
+async def test_project_code_exists_lookup():
+    """Code lookup checks organization_id and code."""
+    conn = _FakeConn(val=True)
+    repo = ProjectsRepository(db_connection=conn)
+
+    exists = await repo.project_code_exists(organization_id="org-1", code="alpha")
+
+    assert exists is True
+    query, args = conn.fetchval_calls[0]
+    assert "FROM projects" in query
+    assert args == ("org-1", "alpha")
+
+
+@pytest.mark.asyncio
 async def test_insert_project_only_includes_present_columns():
     """Insert builds column list from provided keys and casts enum columns."""
     conn = _FakeConn(row={"id": "p1"})
