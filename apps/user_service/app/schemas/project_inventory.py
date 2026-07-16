@@ -259,3 +259,108 @@ class UpdateProjectLocationRequest(BaseModel):
 
     latitude: float
     longitude: float
+
+
+# ---------------------------------------------------------------------------
+# Inventory summary (post-setup inventory menu)
+# ---------------------------------------------------------------------------
+
+
+class InventorySummaryHeader(BaseModel):
+    """Aggregated counts for the inventory page header."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    buildings: int = Field(..., ge=0)
+    apartments: int = Field(..., ge=0)
+    commercial: int = Field(..., ge=0)
+    plots: int = Field(..., ge=0)
+    sold_count: int = Field(..., ge=0)
+    unsold_count: int = Field(..., ge=0)
+    sold_percent: int = Field(..., ge=0, le=100)
+
+
+class InventorySummaryBuilding(BaseModel):
+    """Tower row for the buildings sidebar."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    code: str
+    tower_type: str
+    upper_floor_count: int = Field(..., ge=0)
+    basement_count: int = Field(..., ge=0)
+    units_per_floor_default: int | None = Field(default=None, ge=0)
+    unit_count: int = Field(..., ge=0)
+    sold_count: int = Field(..., ge=0)
+    unsold_count: int = Field(..., ge=0)
+    active: bool = True
+
+
+class InventorySummaryUnit(BaseModel):
+    """Slim unit row for occupancy grid rendering."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    code: str
+    tower_id: str | None = None
+    floor_id: str | None = None
+    config_id: str | None = None
+    config_kind: str | None = None
+    status: str
+    sort_order: int = Field(..., ge=0)
+    is_parking: bool = False
+    plot_item_id: str | None = None
+
+
+class InventorySummaryFloor(BaseModel):
+    """Floor row grouped under a tower."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    level_number: int
+    display_name: str
+    sort_order: int = Field(..., ge=0)
+    is_parking: bool = False
+
+
+class InventorySummaryPlotItem(BaseModel):
+    """Plot item with optional linked unit status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    plot_no: str
+    size_sqft: float = Field(..., ge=0)
+    status: str
+    is_corner: bool = False
+    sort_order: int = Field(..., ge=0)
+    unit_id: str | None = None
+    unit_status: str | None = None
+
+
+class InventorySummaryPlotConfig(BaseModel):
+    """Plot configuration with nested plot items."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    code: str
+    items: list[InventorySummaryPlotItem] = Field(default_factory=list)
+
+
+class InventorySummaryResponse(BaseModel):
+    """Full inventory menu payload for a project."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str
+    header: InventorySummaryHeader
+    buildings: list[InventorySummaryBuilding] = Field(default_factory=list)
+    units: list[InventorySummaryUnit] = Field(default_factory=list)
+    floors: dict[str, list[InventorySummaryFloor]] = Field(default_factory=dict)
+    plot_configs: list[InventorySummaryPlotConfig] = Field(default_factory=list)

@@ -404,6 +404,7 @@
       "config_media_deleted": "Configuration media deleted successfully.",
       "inventory_updated": "Inventory updated successfully.",
       "inventory_retrieved": "Inventory retrieved successfully.",
+      "inventory_summary_retrieved": "Inventory summary retrieved successfully.",
       "facility_created": "Facility created successfully.",
       "facility_updated": "Facility updated successfully.",
       "facility_deleted": "Facility deleted successfully.",

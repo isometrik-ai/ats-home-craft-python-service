@@ -8,7 +8,11 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.schemas.enums import PropertyProjectStatus, PropertyType
+from apps.user_service.app.schemas.enums import (
+    PropertyProjectStatus,
+    PropertyType,
+    UnitStatus,
+)
 from apps.user_service.app.schemas.project_inventory import (
     ConfigMediaRequest,
     CreateFacilityRequest,
@@ -17,6 +21,7 @@ from apps.user_service.app.schemas.project_inventory import (
     CreateSiteMapOverlayRequest,
     CreateUnitConfigRequest,
     CreateUnitRequest,
+    InventorySummaryResponse,
     UpdateFacilityRequest,
     UpdateProjectLocationRequest,
     UpdateUnitConfigRequest,
@@ -1659,6 +1664,59 @@ async def upsert_floor_inventory(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data={"items": items},
+    )
+
+
+@handle_api_exceptions("list floor inventory")
+@router.get(
+    "/{project_id}/inventory/summary",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get inventory menu summary",
+    description=(
+        "Returns aggregated inventory data for the post-setup inventory screen: "
+        "header stats, buildings, units, floors, and plot configs."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_inventory_summary(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    tower_id: str | None = Query(
+        default=None,
+        description="Optional tower filter for units and floors.",
+    ),
+    status: UnitStatus | None = Query(
+        default=None,
+        description="Optional unit status filter.",
+    ),
+    include_plot_items: bool = Query(
+        default=True,
+        description="Include plot configs and plot items in the response.",
+    ),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Get the inventory menu summary for a project."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+    )
+    service = InventoryService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_inventory_summary(
+        project_id=project_id,
+        tower_id=tower_id,
+        status=status,
+        include_plot_items=include_plot_items,
+    )
+    payload = InventorySummaryResponse.model_validate(data).model_dump(exclude_none=True)
+    return success_response(
+        request=request,
+        message_key="project_setup.success.inventory_summary_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=payload,
     )
 
 
