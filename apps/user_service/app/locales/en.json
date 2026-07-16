@@ -631,7 +631,8 @@
       "invitation_invalid_or_expired": "This household invitation is invalid or has expired.",
       "invitation_already_accepted": "This household invitation has already been accepted.",
       "invitation_already_declined": "This household invitation has already been declined.",
-      "invitation_not_found": "No pending household invitation was found."
+      "invitation_not_found": "No pending household invitation was found.",
+      "invitation_not_pending": "No pending household invitation to revoke."
     },
     "success": {
       "status_retrieved": "Onboarding status retrieved successfully.",
@@ -653,6 +654,7 @@
       "invitation_validated": "Household invitation validated successfully.",
       "invitation_accepted": "Household invitation accepted successfully.",
       "invitation_declined": "Household invitation declined successfully.",
+      "invitation_revoked": "Household invitation revoked successfully.",
       "invitation_resent": "Household invitation resent successfully.",
       "default_unit_set": "Default unit set successfully.",
       "review_retrieved": "Onboarding review retrieved successfully.",

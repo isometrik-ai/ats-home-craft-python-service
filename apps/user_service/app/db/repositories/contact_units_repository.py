@@ -371,7 +371,8 @@ class ContactUnitsRepository(BaseRepository):
               c.user_id::text AS user_id,
               hi.status::text AS invitation_status,
               hi.token AS invitation_token,
-              hi.expires_at AS invitation_expires_at
+              hi.expires_at AS invitation_expires_at,
+              hi.updated_at AS invitation_sent_at
             FROM contact_units primary_cu
             JOIN contact_units cu
               ON cu.unit_id = primary_cu.unit_id
@@ -457,7 +458,8 @@ class ContactUnitsRepository(BaseRepository):
               c.user_id::text AS user_id,
               hi.status::text AS invitation_status,
               hi.token AS invitation_token,
-              hi.expires_at AS invitation_expires_at
+              hi.expires_at AS invitation_expires_at,
+              hi.updated_at AS invitation_sent_at
             FROM contact_units primary_cu
             JOIN contact_units cu
               ON cu.unit_id = primary_cu.unit_id
