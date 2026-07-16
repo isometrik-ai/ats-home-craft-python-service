@@ -492,14 +492,10 @@ class VehicleType(str, Enum):
 
 
 class VehicleFuelType(str, Enum):
-    """Vehicle fuel type."""
+    """Vehicle fuel / request type (Non EV vs EV)."""
 
-    PETROL = "petrol"
-    DIESEL = "diesel"
-    ELECTRIC = "electric"
-    CNG = "cng"
-    LPG = "lpg"
-    OTHER = "other"
+    NON_EV = "non_ev"
+    EV = "ev"
 
 
 class VehicleStatus(str, Enum):
