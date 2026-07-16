@@ -196,6 +196,7 @@ class ContactOnboardingService:
             "portal_access": portal_access,
             "member_status": member_status,
             "phones": parse_json_any(row.get("phones"), default=[]),
+            "emails": parse_json_any(row.get("emails"), default=[]),
         }
         if (
             member_status == HouseholdMemberStatus.INVITED.value
