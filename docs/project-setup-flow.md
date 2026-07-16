@@ -64,25 +64,25 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 
 ### File map
 
-| Concern                                  | File                                                                                          |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------- |
-| API endpoints (all 60+)                  | `app/api/projects.py`                                                                         |
-| Route registration                       | `app/api/routes.py`                                                                           |
-| Wizard orchestration / step‑gating       | `app/services/project_setup_service.py`                                                       |
-| Project CRUD + media + members           | `app/services/projects_service.py`                                                            |
-| Towers/wings/gates/lifts/floors          | `app/services/towers_service.py`                                                              |
-| Unit configs + plot items + config media | `app/services/unit_configs_service.py`                                                        |
-| Floor inventory matrix                   | `app/services/inventory_service.py`                                                           |
-| Facilities                               | `app/services/facilities_service.py`                                                          |
-| Units + parking zones                    | `app/services/units_service.py`                                                               |
-| Site map location + overlays             | `app/services/site_map_service.py`                                                            |
-| Step persistence                         | `app/db/repositories/project_setup_repository.py`                                             |
-| Project persistence                      | `app/db/repositories/projects_repository.py`                                                  |
-| Other repositories                       | `app/db/repositories/{towers,unit_configs,inventory,facilities,units,site_map}_repository.py` |
-| Request/response models                  | `app/schemas/project_setup.py`, `app/schemas/project_inventory.py`                            |
-| Enums (mirror Postgres)                  | `app/schemas/enums.py`                                                                        |
-| Row → JSON serialization                 | `app/utils/project_serialization.py`                                                          |
-| i18n messages                            | `app/locales/en.json` (`project_setup.*`)                                                     |
+| Concern                                   | File                                                                                          |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------- |
+| API endpoints (all 60+)                   | `app/api/projects.py`                                                                         |
+| Route registration                        | `app/api/routes.py`                                                                           |
+| Wizard orchestration / step‑gating        | `app/services/project_setup_service.py`                                                       |
+| Project CRUD + media + members            | `app/services/projects_service.py`                                                            |
+| Towers/wings/gates/lifts/floors           | `app/services/towers_service.py`                                                              |
+| Unit configs + plot items + config media  | `app/services/unit_configs_service.py`                                                        |
+| Inventory / Facilities / Units / Site map | `app/services/inventory_service.py`                                                           |
+| Facilities                                | `app/services/facilities_service.py`                                                          |
+| Units + parking zones                     | `app/services/units_service.py`                                                               |
+| Site map location + overlays              | `app/services/site_map_service.py`                                                            |
+| Step persistence                          | `app/db/repositories/project_setup_repository.py`                                             |
+| Project persistence                       | `app/db/repositories/projects_repository.py`                                                  |
+| Other repositories                        | `app/db/repositories/{towers,unit_configs,inventory,facilities,units,site_map}_repository.py` |
+| Request/response models                   | `app/schemas/project_setup.py`, `app/schemas/project_inventory.py`                            |
+| Enums (mirror Postgres)                   | `app/schemas/enums.py`                                                                        |
+| Row → JSON serialization                  | `app/utils/project_serialization.py`                                                          |
+| i18n messages                             | `app/locales/en.json` (`project_setup.*`)                                                     |
 
 ______________________________________________________________________
 
@@ -167,6 +167,7 @@ All routes are under `/v1/projects` and require authentication + an org context.
 | Method     | Path                                                                      | Notes                             |
 | ---------- | ------------------------------------------------------------------------- | --------------------------------- |
 | PUT / GET  | `/v1/projects/{project_id}/inventory`                                     | Upsert / read floor×config matrix |
+| GET        | `/v1/projects/{project_id}/inventory/summary`                             | Post-setup inventory menu payload |
 | POST / GET | `/v1/projects/{project_id}/facilities` · PATCH/DELETE `.../{facility_id}` |                                   |
 | POST / GET | `/v1/projects/{project_id}/units` · PATCH/DELETE `.../{unit_id}`          | Recomputes `projects.units_count` |
 | POST / GET | `/v1/projects/{project_id}/parking-zones` · DELETE `.../{zone_id}`        |                                   |

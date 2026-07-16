@@ -94,7 +94,7 @@ All carry `organization_id`.
 
 Key enums: `ContactOnboardingStep`, `ContactUnitStatus` (`pending`/`active`/`moved_out`),
 `ContactUnitRelationship`, `VehicleType` (`two_wheeler`/`four_wheeler`),
-`VehicleFuelType` (`petrol`/`diesel`/`electric`/`cng`/`lpg`/`other`),
+`VehicleFuelType` (`non_ev`/`ev` — UI label: Non EV / EV Vehicle),
 `VehicleStatus` (`pending`/`approved`/`rejected`), `SetupStepStatus`,
 `HouseholdInvitationStatus`, `HouseholdMemberStatus`.
 
@@ -107,7 +107,7 @@ Key enums: `ContactOnboardingStep`, `ContactUnitStatus` (`pending`/`active`/`mov
 | `registration_number`    | text    | Unique per `(organization_id, project_id)`                                |
 | `make`, `model`, `color` | text    | Optional                                                                  |
 | `photo_paths`            | text[]  | Storage paths only (max 10 per vehicle); not raw blobs                    |
-| `fuel_type`              | enum    | Optional on create; `petrol`, `diesel`, `electric`, `cng`, `lpg`, `other` |
+| `fuel_type`              | enum    | Optional on create; `non_ev`, `ev` (UI: Non EV / EV Vehicle)              |
 | `status`                 | enum    | Defaults to `pending` on create; admin sets `approved` / `rejected` later |
 | `rejection_reason`       | text    | Set by admin when `status = rejected` (not contact-editable yet)          |
 
