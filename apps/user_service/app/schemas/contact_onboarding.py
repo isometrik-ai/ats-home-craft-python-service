@@ -205,6 +205,7 @@ class VehicleCatalogResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    vehicle_type: str
     brands: list[VehicleBrandOption] = Field(default_factory=list)
     colors: list[VehicleColorOption] = Field(default_factory=list)
 

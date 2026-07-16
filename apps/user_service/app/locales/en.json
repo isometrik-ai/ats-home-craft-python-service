@@ -600,6 +600,7 @@
       "vehicle_not_found": "The vehicle you are trying to access does not exist.",
       "vehicle_brand_not_found": "The selected vehicle brand was not found.",
       "invalid_vehicle_photo_path": "Each vehicle photo path must be between 1 and 500 characters.",
+      "invalid_vehicle_type": "Vehicle type must be two_wheeler or four_wheeler.",
       "no_default_unit": "Please choose a default unit before completing onboarding.",
       "no_active_units": "At least one confirmed property is required to complete onboarding.",
       "invalid_step": "The onboarding step is not valid.",
