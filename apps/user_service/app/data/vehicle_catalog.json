@@ -1,0 +1,53 @@
+{
+  "brands": [
+    {
+      "id": "tata",
+      "name": "Tata",
+      "models": [
+        { "id": "safari", "name": "Safari" },
+        { "id": "harrier", "name": "Harrier" },
+        { "id": "punch", "name": "Punch" },
+        { "id": "nexon", "name": "Nexon" }
+      ]
+    },
+    {
+      "id": "toyota",
+      "name": "Toyota",
+      "models": [
+        { "id": "innova", "name": "Innova" },
+        { "id": "fortuner", "name": "Fortuner" },
+        { "id": "glanza", "name": "Glanza" },
+        { "id": "urban_cruiser", "name": "Urban Cruiser" }
+      ]
+    },
+    {
+      "id": "honda",
+      "name": "Honda",
+      "models": [
+        { "id": "city", "name": "City" },
+        { "id": "amaze", "name": "Amaze" },
+        { "id": "elevate", "name": "Elevate" },
+        { "id": "wr_v", "name": "WR-V" }
+      ]
+    },
+    {
+      "id": "ford",
+      "name": "Ford",
+      "models": [
+        { "id": "ecosport", "name": "EcoSport" },
+        { "id": "endeavour", "name": "Endeavour" },
+        { "id": "figo", "name": "Figo" },
+        { "id": "aspire", "name": "Aspire" }
+      ]
+    }
+  ],
+  "colors": [
+    { "id": "black", "name": "Black" },
+    { "id": "white", "name": "White" },
+    { "id": "grey", "name": "Grey" },
+    { "id": "yellow", "name": "Yellow" },
+    { "id": "red", "name": "Red" },
+    { "id": "blue", "name": "Blue" },
+    { "id": "silver", "name": "Silver" }
+  ]
+}

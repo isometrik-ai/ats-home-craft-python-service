@@ -172,6 +172,43 @@ class VehicleResponse(BaseModel):
     updated_at: str
 
 
+class VehicleModelOption(BaseModel):
+    """Vehicle model picker option."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+
+
+class VehicleBrandOption(BaseModel):
+    """Vehicle brand with nested models."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    models: list[VehicleModelOption] = Field(default_factory=list)
+
+
+class VehicleColorOption(BaseModel):
+    """Vehicle color picker option."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+
+
+class VehicleCatalogResponse(BaseModel):
+    """Static vehicle catalog for brand/model/color pickers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    brands: list[VehicleBrandOption] = Field(default_factory=list)
+    colors: list[VehicleColorOption] = Field(default_factory=list)
+
+
 class CreateHouseholdMemberRequest(BaseModel):
     """Add a family member to a unit."""
 
