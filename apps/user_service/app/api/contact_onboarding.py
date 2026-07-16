@@ -371,11 +371,51 @@ async def update_vehicle(
     )
 
 
+@handle_api_exceptions("withdraw contact vehicle request")
+@router.post(
+    "/vehicles/{vehicle_id}/withdraw",
+    status_code=http_status.HTTP_200_OK,
+    summary="Withdraw a pending vehicle request",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="vehicles",
+    category="CONTACT_ONBOARDING",
+)
+async def withdraw_vehicle(
+    request: Request,
+    vehicle_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Withdraw a pending vehicle request (hard-delete before admin approval)."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    vehicles_service = VehiclesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    await vehicles_service.withdraw_vehicle(
+        contact_id=str(contact["id"]),
+        vehicle_id=vehicle_id,
+    )
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.vehicle_withdrawn",
+        custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
 @handle_api_exceptions("remove contact vehicle")
 @router.delete(
     "/vehicles/{vehicle_id}",
     status_code=http_status.HTTP_200_OK,
-    summary="Remove a vehicle",
+    summary="Remove an approved vehicle",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("30/minute")
@@ -392,7 +432,7 @@ async def remove_vehicle(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Delete a vehicle owned by the authenticated contact."""
+    """Soft-remove an approved vehicle (status removed; parking slot released)."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -400,7 +440,7 @@ async def remove_vehicle(
         db_connection=db_connection,
         user_context=user_context,
     )
-    await vehicles_service.remove_vehicle(
+    data = await vehicles_service.remove_vehicle(
         contact_id=str(contact["id"]),
         vehicle_id=vehicle_id,
     )
@@ -408,6 +448,7 @@ async def remove_vehicle(
         request=request,
         message_key="contact_onboarding.success.vehicle_removed",
         custom_code=CustomStatusCode.SUCCESS,
+        data=data,
     )
 
 

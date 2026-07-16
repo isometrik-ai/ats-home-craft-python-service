@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
@@ -9,6 +10,7 @@ from apps.user_service.app.db.repositories.base_repository import BaseRepository
 _FACILITY_COLUMN_CASTS: dict[str, str] = {
     "status": "::facility_status",
     "location_type": "::facility_location_type",
+    "parking_user_type": "::parking_user_type",
 }
 
 _FACILITY_INSERT_COLUMNS: tuple[str, ...] = (
@@ -21,7 +23,12 @@ _FACILITY_INSERT_COLUMNS: tuple[str, ...] = (
     "location_type",
     "tower_id",
     "floor_level",
+    "wing",
     "area_sqft",
+    "capacity_persons",
+    "parking_slots",
+    "parking_user_type",
+    "extra_attributes",
     "location_notes",
     "latitude",
     "longitude",
@@ -33,16 +40,27 @@ _FACILITY_INSERT_COLUMNS: tuple[str, ...] = (
 class FacilitiesRepository(BaseRepository):
     """Database operations for public.facilities."""
 
+    def _prepare_value(self, col: str, val: Any) -> Any:
+        """Serialize values that need DB casts."""
+        if col == "extra_attributes":
+            return json.dumps(val if val is not None else {})
+        return val
+
     async def insert_facility(self, data: dict[str, Any]) -> dict[str, Any]:
         """Insert a facility row."""
         present = [col for col in _FACILITY_INSERT_COLUMNS if col in data]
         col_sql = ", ".join(present)
-        placeholders = ", ".join(
-            f"${idx + 1}{_FACILITY_COLUMN_CASTS.get(col, '')}" for idx, col in enumerate(present)
-        )
+        placeholders: list[str] = []
+        values: list[Any] = []
+        for idx, col in enumerate(present, start=1):
+            if col == "extra_attributes":
+                placeholders.append(f"${idx}::jsonb")
+            else:
+                placeholders.append(f"${idx}{_FACILITY_COLUMN_CASTS.get(col, '')}")
+            values.append(self._prepare_value(col, data.get(col)))
         row = await self.db_connection.fetchrow(
-            f"INSERT INTO facilities ({col_sql}) VALUES ({placeholders}) RETURNING *",
-            *[data.get(col) for col in present],
+            f"INSERT INTO facilities ({col_sql}) VALUES ({', '.join(placeholders)}) RETURNING *",
+            *values,
         )
         return dict(row)
 
@@ -95,8 +113,12 @@ class FacilitiesRepository(BaseRepository):
         values: list[Any] = []
         idx = 1
         for col, val in update_data.items():
-            set_parts.append(f"{col} = ${idx}{_FACILITY_COLUMN_CASTS.get(col, '')}")
-            values.append(val)
+            if col == "extra_attributes":
+                set_parts.append(f"{col} = ${idx}::jsonb")
+                values.append(json.dumps(val if val is not None else {}))
+            else:
+                set_parts.append(f"{col} = ${idx}{_FACILITY_COLUMN_CASTS.get(col, '')}")
+                values.append(val)
             idx += 1
         set_parts.append("updated_at = now()")
         values.extend([facility_id, project_id, organization_id])

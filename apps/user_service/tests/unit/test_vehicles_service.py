@@ -1,0 +1,115 @@
+"""Unit tests for vehicle withdraw and soft-remove rules."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from apps.user_service.app.schemas.enums import VehicleStatus
+from apps.user_service.app.services.vehicles_service import VehiclesService
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+
+
+def _service() -> VehiclesService:
+    """Build VehiclesService with mocked dependencies."""
+    svc = VehiclesService(db_connection=MagicMock(), user_context=MagicMock())
+    svc.user_context.organization_id = "org-1"
+    svc.repo = AsyncMock()
+    svc.parking_slots_repo = AsyncMock()
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_withdraw_pending_hard_deletes():
+    """Pending vehicles can be withdrawn (hard-deleted)."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.PENDING.value,
+        "project_id": "p1",
+    }
+    svc.repo.delete.return_value = {"id": "v1"}
+
+    await svc.withdraw_vehicle(contact_id="c1", vehicle_id="v1")
+
+    svc.repo.delete.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_withdraw_approved_rejected():
+    """Approved vehicles cannot be withdrawn."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.APPROVED.value,
+    }
+
+    with pytest.raises(ValidationException):
+        await svc.withdraw_vehicle(contact_id="c1", vehicle_id="v1")
+
+    svc.repo.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_remove_pending_use_withdraw():
+    """Pending vehicles must use withdraw, not DELETE remove."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.PENDING.value,
+    }
+
+    with pytest.raises(ValidationException):
+        await svc.remove_vehicle(contact_id="c1", vehicle_id="v1")
+
+
+@pytest.mark.asyncio
+async def test_remove_approved_soft_deletes_and_releases_slot():
+    """Approved vehicles are soft-removed and parking slot is released."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.APPROVED.value,
+        "project_id": "p1",
+        "parking_slot_id": "slot-1",
+        "organization_id": "org-1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+        "vehicle_type": "four_wheeler",
+        "registration_number": "ABC123",
+        "photo_paths": [],
+        "status_updated_at": "2026-07-16T10:00:00Z",
+        "created_at": "2026-07-16T09:00:00Z",
+        "updated_at": "2026-07-16T10:00:00Z",
+        "sort_order": 0,
+    }
+    svc.repo.soft_remove.return_value = {
+        **svc.repo.get_by_id.return_value,
+        "status": VehicleStatus.REMOVED.value,
+        "parking_slot_id": None,
+    }
+
+    result = await svc.remove_vehicle(contact_id="c1", vehicle_id="v1")
+
+    svc.parking_slots_repo.release_slot.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+        slot_id="slot-1",
+    )
+    svc.repo.soft_remove.assert_awaited_once()
+    assert result["status"] == VehicleStatus.REMOVED.value
+
+
+@pytest.mark.asyncio
+async def test_remove_not_found():
+    """Missing vehicle raises not found."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = None
+
+    with pytest.raises(NotFoundException):
+        await svc.remove_vehicle(contact_id="c1", vehicle_id="v1")

@@ -162,16 +162,17 @@ class UnitConfigsRepository(BaseRepository):
         row = await self.db_connection.fetchrow(
             """
             INSERT INTO plot_config_items (
-                organization_id, config_id, plot_no, size_sqft, status,
+                organization_id, config_id, plot_no, size_sqft, description, status,
                 is_corner, sort_order
             )
-            VALUES ($1::uuid, $2::uuid, $3, $4, $5::plot_item_status, $6, $7)
+            VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::plot_item_status, $7, $8)
             RETURNING *
             """,
             data["organization_id"],
             data["config_id"],
             data["plot_no"],
             data["size_sqft"],
+            data.get("description"),
             data.get("status", "empty"),
             data.get("is_corner", False),
             data.get("sort_order", 0),

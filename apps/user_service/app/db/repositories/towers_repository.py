@@ -23,6 +23,7 @@ _TOWER_INSERT_COLUMNS: tuple[str, ...] = (
     "units_per_floor_default",
     "numbering_pattern",
     "starting_unit_number",
+    "custom_prefix",
     "has_wings",
     "latitude",
     "longitude",

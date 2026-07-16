@@ -223,6 +223,7 @@ class InventoryRepository(BaseRepository):
                 pci.config_id,
                 pci.plot_no,
                 pci.size_sqft,
+                pci.description,
                 pci.status,
                 pci.is_corner,
                 pci.sort_order,

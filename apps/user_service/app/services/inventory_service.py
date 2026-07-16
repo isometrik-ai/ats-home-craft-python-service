@@ -167,6 +167,7 @@ def build_inventory_summary(
                 id=str(item["id"]),
                 plot_no=str(item["plot_no"]),
                 size_sqft=float(item["size_sqft"]),
+                description=item.get("description"),
                 status=str(item["status"]),
                 is_corner=bool(item.get("is_corner")),
                 sort_order=int(item.get("sort_order") or 0),

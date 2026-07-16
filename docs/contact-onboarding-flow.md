@@ -95,21 +95,24 @@ All carry `organization_id`.
 Key enums: `ContactOnboardingStep`, `ContactUnitStatus` (`pending`/`active`/`moved_out`),
 `ContactUnitRelationship`, `VehicleType` (`two_wheeler`/`four_wheeler`),
 `VehicleFuelType` (`non_ev`/`ev` — UI label: Non EV / EV Vehicle),
-`VehicleStatus` (`pending`/`approved`/`rejected`), `SetupStepStatus`,
+`VehicleStatus` (`pending`/`approved`/`rejected`/`removed`), `SetupStepStatus`,
 `HouseholdInvitationStatus`, `HouseholdMemberStatus`.
 
 ### `vehicles` columns (contact-facing)
 
-| Column                   | Type    | Notes                                                                     |
-| ------------------------ | ------- | ------------------------------------------------------------------------- |
-| `unit_id`                | uuid FK | Must be a unit actively assigned to the contact                           |
-| `vehicle_type`           | enum    | `two_wheeler`, `four_wheeler`                                             |
-| `registration_number`    | text    | Unique per `(organization_id, project_id)`                                |
-| `make`, `model`, `color` | text    | Optional                                                                  |
-| `photo_paths`            | text[]  | Storage paths only (max 10 per vehicle); not raw blobs                    |
-| `fuel_type`              | enum    | Optional on create; `non_ev`, `ev` (UI: Non EV / EV Vehicle)              |
-| `status`                 | enum    | Defaults to `pending` on create; admin sets `approved` / `rejected` later |
-| `rejection_reason`       | text    | Set by admin when `status = rejected` (not contact-editable yet)          |
+| Column                   | Type        | Notes                                                           |
+| ------------------------ | ----------- | --------------------------------------------------------------- |
+| `unit_id`                | uuid FK     | Must be a unit actively assigned to the contact                 |
+| `vehicle_type`           | enum        | `two_wheeler`, `four_wheeler`                                   |
+| `registration_number`    | text        | Unique per project among active vehicles (`deleted_at IS NULL`) |
+| `make`, `model`, `color` | text        | Optional                                                        |
+| `photo_paths`            | text[]      | Storage paths only (max 10 per vehicle); not raw blobs          |
+| `fuel_type`              | enum        | Optional on create; `non_ev`, `ev` (UI: Non EV / EV Vehicle)    |
+| `status`                 | enum        | `pending`, `approved`, `rejected`, `removed`                    |
+| `status_updated_at`      | timestamptz | Set whenever `status` changes                                   |
+| `deleted_at`             | timestamptz | Set on soft-remove; row retained for audit                      |
+| `rejection_reason`       | text        | Set by admin when `status = rejected`                           |
+| `parking_slot_id`        | uuid FK     | Set by admin on approve; links to `facility_parking_slots`      |
 
 Media/files (profile photo, vehicle images) store **paths only** — no raw blobs in Postgres.
 
@@ -130,7 +133,8 @@ most endpoints take **no** contact id in the path.
 | GET    | `/v1/contact-onboarding/vehicles`                                      | List vehicles                                                     |
 | POST   | `/v1/contact-onboarding/vehicles`                                      | Add a vehicle                                                     |
 | PATCH  | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Update a vehicle                                                  |
-| DELETE | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Hard-delete a vehicle (row removed from `vehicles`)               |
+| POST   | `/v1/contact-onboarding/vehicles/{vehicle_id}/withdraw`                | Withdraw a pending request (hard-delete before approval)          |
+| DELETE | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Soft-remove an approved vehicle (`status = removed`)              |
 | POST   | `/v1/contact-onboarding/steps/vehicles/complete`                       | Complete the `vehicles` step                                      |
 | POST   | `/v1/contact-onboarding/steps/skip`                                    | Skip an optional step (`vehicles` or `household`)                 |
 | GET    | `/v1/contact-onboarding/household`                                     | List household/family members                                     |
@@ -145,6 +149,16 @@ most endpoints take **no** contact id in the path.
 | POST   | `/v1/contact-onboarding/default-unit`                                  | Choose default login unit (step 5)                                |
 | GET    | `/v1/contact-onboarding/review`                                        | Aggregate review (contact + units + vehicles + household + steps) |
 | POST   | `/v1/contact-onboarding/complete`                                      | Finalize onboarding → activate unit links                         |
+
+### Admin vehicle review (project APIs)
+
+These live under `/v1/projects` (community admin RBAC), not contact-onboarding:
+
+| Method | Path                                                               | Purpose                                    |
+| ------ | ------------------------------------------------------------------ | ------------------------------------------ |
+| GET    | `/v1/projects/{project_id}/vehicle-requests`                       | List vehicle requests (`?status=pending`)  |
+| PATCH  | `/v1/projects/{project_id}/vehicle-requests/{vehicle_id}`          | Approve (with `parking_slot_id`) or reject |
+| GET    | `/v1/projects/{project_id}/facilities/{facility_id}/parking-slots` | List slots (`?status=available`)           |
 
 ______________________________________________________________________
 
@@ -164,10 +178,23 @@ Enforced in `contact_onboarding_service.py`:
   - Each vehicle is tied to a unit the contact actively owns (`unit_not_assigned` / `unit_not_found`).
   - Create payload: `unit_id`, `vehicle_type`, `registration_number`, optional `make`/`model`/`color`,
     `fuel_type`, and `photo_paths` (list of storage paths, up to 10).
-  - New vehicles default to `status = pending`. Contacts cannot set `status` or `rejection_reason`;
-    admin approval/rejection APIs are planned separately.
-  - `DELETE /vehicles/{id}` hard-deletes the row (no soft-delete / `removed` status).
-  - Registration numbers are unique per project (`vehicle_registration_duplicate` on conflict).
+  - New vehicles default to `status = pending`. Contacts cannot set `status`, `rejection_reason`,
+    or `parking_slot_id`.
+  - **Admin review** (community admin, project APIs):
+    1. Resident submits vehicle → `pending`
+    1. Admin lists `GET /v1/projects/{id}/vehicle-requests?status=pending`
+    1. Admin lists available slots `GET .../facilities/{facility_id}/parking-slots?status=available`
+    1. Admin approves `PATCH .../vehicle-requests/{vehicle_id}` with `{ "status": "approved", "parking_slot_id": "..." }`
+       or rejects with `{ "status": "rejected", "rejection_reason": "..." }`
+    1. On approve: slot → `assigned`, vehicle gets `parking_slot_id`. On remove: slot released.
+  - Parking slots are provisioned when a **parking** facility is created in project setup
+    (`facilities.parking_slots` → `facility_parking_slots` rows). See `docs/project-setup-flow.md`.
+  - **Withdraw (pending only):** `POST /vehicles/{id}/withdraw` permanently deletes the row.
+    Allowed only while `status = pending` (before admin approval).
+  - **Remove (approved only):** `DELETE /vehicles/{id}` sets `status = removed`, `deleted_at = now()`,
+    releases parking slot; row is kept for audit (soft delete).
+  - `status_updated_at` is set on create and on every status change (approve, reject, remove).
+  - Registration numbers are unique per project among active vehicles (`vehicle_registration_duplicate` on conflict).
 - **Household requires an assigned unit:** adding a member checks the primary contact has an
   active link to that unit (`contact_onboarding.errors.unit_not_assigned`) and the unit exists
   (`contact_onboarding.errors.unit_not_found`).
@@ -204,19 +231,19 @@ ______________________________________________________________________
 
 ## 6. How to make common changes
 
-| I want to…                          | Change here                                                                    |
-| ----------------------------------- | ------------------------------------------------------------------------------ |
-| Add/remove a wizard step            | `ContactOnboardingStep` enum + Postgres enum + `ONBOARDING_STEP_KEYS` ordering |
-| Make a step skippable / required    | `allowed_skip` set in `skip_step` (`contact_onboarding_service.py`)            |
-| Change finalize prerequisites       | `complete_onboarding` in `contact_onboarding_service.py`                       |
-| Add a field to a request/response   | matching model in `schemas/contact_onboarding.py`                              |
-| Add/rename a DB column              | new migration in `ats-home-craft-supabase` + repository SQL + schema model     |
-| Change how "current step" is chosen | `_derive_current_step`                                                         |
-| Add an endpoint                     | route in `api/contact_onboarding.py` → service method → repository method      |
-| Change a user‑facing message        | `app/locales/en.json` under `contact_onboarding.*`                             |
-| Change vehicle approval workflow    | `VehicleStatus` enum + `vehicles.status` column + future admin API             |
-| Wire household SMS delivery         | `app/utils/household_invitation_sms.py`                                        |
-| Change who can act                  | `extract_onboarding_contact_context` (context resolution)                      |
+| I want to…                          | Change here                                                                        |
+| ----------------------------------- | ---------------------------------------------------------------------------------- |
+| Add/remove a wizard step            | `ContactOnboardingStep` enum + Postgres enum + `ONBOARDING_STEP_KEYS` ordering     |
+| Make a step skippable / required    | `allowed_skip` set in `skip_step` (`contact_onboarding_service.py`)                |
+| Change finalize prerequisites       | `complete_onboarding` in `contact_onboarding_service.py`                           |
+| Add a field to a request/response   | matching model in `schemas/contact_onboarding.py`                                  |
+| Add/rename a DB column              | new migration in `ats-home-craft-supabase` + repository SQL + schema model         |
+| Change how "current step" is chosen | `_derive_current_step`                                                             |
+| Add an endpoint                     | route in `api/contact_onboarding.py` → service method → repository method          |
+| Change a user‑facing message        | `app/locales/en.json` under `contact_onboarding.*`                                 |
+| Change vehicle approval workflow    | `vehicles_service.review_vehicle` + `PATCH /v1/projects/.../vehicle-requests/{id}` |
+| Wire household SMS delivery         | `app/utils/household_invitation_sms.py`                                            |
+| Change who can act                  | `extract_onboarding_contact_context` (context resolution)                          |
 
 ______________________________________________________________________
 
@@ -231,4 +258,5 @@ ______________________________________________________________________
 ## Related
 
 - Project setup wizard (admin side): `docs/project-setup-flow.md`. The two flows meet at
-  **units** — a project's `units` become the `contact_units` a contact confirms here.
+  **units** (project setup) and **vehicles** (onboarding submit → project admin review + parking slot).
+  Schema reference: `ats-home-craft-supabase/docs/project-setup-schema.md`.
