@@ -379,3 +379,115 @@ class InventorySummaryResponse(BaseModel):
     units: list[InventorySummaryUnit] = Field(default_factory=list)
     floors: dict[str, list[InventorySummaryFloor]] = Field(default_factory=dict)
     plot_configs: list[InventorySummaryPlotConfig] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Unit detail (inventory slide-out / unit registry)
+# ---------------------------------------------------------------------------
+
+
+class UnitDetailTower(BaseModel):
+    """Tower context for a unit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    code: str
+    tower_type: str
+
+
+class UnitDetailFloor(BaseModel):
+    """Floor context for a unit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    display_name: str
+    level_number: int
+
+
+class UnitDetailConfig(BaseModel):
+    """Unit configuration snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    config_kind: str
+    name: str
+    code: str
+    display_label: str | None = None
+    bedrooms: float | None = None
+    bathrooms: float | None = None
+    area_sqft: float | None = None
+    carpet_area_sqft: float | None = None
+    parking_entitlement: int = Field(default=0, ge=0)
+    default_facing: str | None = None
+    facing: str | None = None
+    commercial_unit_type: str | None = None
+
+
+class UnitDetailPlotItem(BaseModel):
+    """Linked plot item when the unit represents a plot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    plot_no: str
+    size_sqft: float = Field(..., ge=0)
+    status: str
+    description: str | None = None
+
+
+class UnitDetailPerson(BaseModel):
+    """Active contact linked to a unit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: str
+    contact_unit_id: str
+    display_name: str
+    contact_type: str
+    relationship: str
+    is_primary: bool = False
+
+
+class UnitDetailFinancials(BaseModel):
+    """Fee and balance placeholders until billing is implemented."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_fee_monthly: float | None = None
+    outstanding_amount: float | None = None
+    currency: str = "INR"
+
+
+class UnitDetailResponse(BaseModel):
+    """Full unit detail for inventory slide-out and unit registry screens."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    project_id: str
+    code: str
+    unit_label: str | None = None
+    status: str
+    occupancy_label: str
+    is_sold: bool
+    is_parking: bool = False
+    sort_order: int = Field(default=0, ge=0)
+    location_label: str | None = None
+    carpet_area_sqft: float | None = None
+    facing: str | None = None
+    parking_entitlement: int = Field(default=0, ge=0)
+    parking_slots_assigned: int = Field(default=0, ge=0)
+    tower: UnitDetailTower | None = None
+    floor: UnitDetailFloor | None = None
+    config: UnitDetailConfig | None = None
+    plot_item: UnitDetailPlotItem | None = None
+    owner: UnitDetailPerson | None = None
+    residents: list[UnitDetailPerson] = Field(default_factory=list)
+    vehicles_count: int = Field(default=0, ge=0)
+    financials: UnitDetailFinancials = Field(default_factory=UnitDetailFinancials)
+    created_at: str
+    updated_at: str

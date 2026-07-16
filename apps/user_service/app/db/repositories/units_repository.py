@@ -118,6 +118,136 @@ class UnitsRepository(BaseRepository):
         )
         return result.upper().endswith("1")
 
+    async def get_unit_detail_base(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch a unit with tower, floor, config, and plot joins."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+                u.id,
+                u.organization_id,
+                u.project_id,
+                u.tower_id,
+                u.wing_id,
+                u.floor_id,
+                u.config_id,
+                u.code,
+                u.unit_label,
+                u.status,
+                u.sort_order,
+                u.is_parking,
+                u.plot_item_id,
+                u.created_at,
+                u.updated_at,
+                t.name AS tower_name,
+                t.code AS tower_code,
+                t.tower_type,
+                f.display_name AS floor_display_name,
+                f.level_number AS floor_level_number,
+                uc.config_kind,
+                uc.name AS config_name,
+                uc.code AS config_code,
+                uc.display_label AS config_display_label,
+                uc.bedrooms,
+                uc.bathrooms,
+                uc.area_sqft,
+                uc.carpet_area_sqft,
+                uc.parking_entitlement,
+                uc.default_facing,
+                uc.facing AS config_facing,
+                uc.commercial_unit_type,
+                pci.plot_no,
+                pci.size_sqft AS plot_size_sqft,
+                pci.status AS plot_item_status,
+                pci.description AS plot_description
+            FROM units u
+            LEFT JOIN towers t
+                ON t.id = u.tower_id
+               AND t.organization_id = u.organization_id
+            LEFT JOIN floors f
+                ON f.id = u.floor_id
+               AND f.organization_id = u.organization_id
+            LEFT JOIN unit_configs uc
+                ON uc.id = u.config_id
+               AND uc.organization_id = u.organization_id
+            LEFT JOIN plot_config_items pci
+                ON pci.id = u.plot_item_id
+               AND pci.organization_id = u.organization_id
+            WHERE u.organization_id = $1::uuid
+              AND u.project_id = $2::uuid
+              AND u.id = $3::uuid
+            LIMIT 1
+            """,
+            organization_id,
+            project_id,
+            unit_id,
+        )
+        return dict(row) if row else None
+
+    async def list_unit_residents(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """List active contacts linked to a unit."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+                cu.id AS contact_unit_id,
+                cu.contact_id,
+                cu.is_primary,
+                cu.relationship::text AS relationship,
+                cu.status::text AS status,
+                c.contact_type,
+                c.prefix,
+                c.first_name,
+                c.last_name
+            FROM contact_units cu
+            JOIN contacts c
+                ON c.id = cu.contact_id
+               AND c.organization_id = cu.organization_id
+            WHERE cu.organization_id = $1::uuid
+              AND cu.unit_id = $2::uuid
+              AND cu.status = 'active'::contact_unit_status
+              AND c.status = 'active'
+            ORDER BY cu.is_primary DESC, cu.sort_order, cu.created_at
+            """,
+            organization_id,
+            unit_id,
+        )
+        return [dict(row) for row in rows]
+
+    async def count_unit_vehicles(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> tuple[int, int]:
+        """Return (approved_vehicle_count, assigned_parking_slot_count) for a unit."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+                COUNT(*)::int AS vehicles_count,
+                COUNT(*) FILTER (WHERE parking_slot_id IS NOT NULL)::int AS parking_slots_assigned
+            FROM vehicles v
+            WHERE v.organization_id = $1::uuid
+              AND v.unit_id = $2::uuid
+              AND v.deleted_at IS NULL
+              AND v.status = 'approved'::vehicle_status
+            """,
+            organization_id,
+            unit_id,
+        )
+        if not row:
+            return 0, 0
+        return int(row["vehicles_count"] or 0), int(row["parking_slots_assigned"] or 0)
+
     # -- parking zones ------------------------------------------------------
 
     async def insert_parking_zone(self, data: dict[str, Any]) -> dict[str, Any]:

@@ -25,6 +25,7 @@ from apps.user_service.app.schemas.project_inventory import (
     CreateUnitConfigRequest,
     CreateUnitRequest,
     InventorySummaryResponse,
+    UnitDetailResponse,
     UpdateFacilityRequest,
     UpdateProjectLocationRequest,
     UpdateUnitConfigRequest,
@@ -2064,6 +2065,42 @@ async def list_units(
         message_key="project_setup.success.units_retrieved",
         custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("get unit detail")
+@router.get(
+    "/{project_id}/units/{unit_id}/detail",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get unit detail",
+    description=(
+        "Returns full unit detail for the inventory slide-out and unit registry: "
+        "tower/floor, config, owner, residents, vehicles, and financial placeholders."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_unit_detail(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    unit_id: str = Path(..., description="Unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Get full detail for one unit in a project."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+    )
+    service = UnitsService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_unit_detail(project_id=project_id, unit_id=unit_id)
+    payload = UnitDetailResponse.model_validate(data).model_dump(exclude_none=True)
+    return success_response(
+        request=request,
+        message_key="project_setup.success.unit_detail_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=payload,
     )
 
 

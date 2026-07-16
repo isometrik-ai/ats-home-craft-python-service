@@ -173,11 +173,19 @@ All routes are under `/v1/projects` and require authentication + an org context.
 | POST / GET | `/v1/projects/{project_id}/facilities` · PATCH/DELETE `.../{facility_id}` |                                       |
 | GET        | `/v1/projects/{project_id}/facilities/{facility_id}/parking-slots`        | Slots for parking facilities          |
 | POST / GET | `/v1/projects/{project_id}/units` · PATCH/DELETE `.../{unit_id}`          | Recomputes `projects.units_count`     |
+| GET        | `/v1/projects/{project_id}/units/{unit_id}/detail`                        | Inventory slide-out / unit registry   |
 | POST / GET | `/v1/projects/{project_id}/parking-zones` · DELETE `.../{zone_id}`        | Tower basement zone ranges            |
 | GET        | `/v1/projects/{project_id}/vehicle-requests`                              | Admin: list resident vehicle requests |
 | PATCH      | `/v1/projects/{project_id}/vehicle-requests/{vehicle_id}`                 | Admin: approve/reject + assign slot   |
 | PATCH      | `/v1/projects/{project_id}/site-map/location`                             | Set project lat/lng                   |
 | POST / GET | `/v1/projects/{project_id}/site-map/overlays` · DELETE `.../{overlay_id}` |                                       |
+
+**Inventory menu (post-setup):**
+
+- **Grid / sidebar:** `GET /inventory/summary?tower_id=...` — towers, floors, slim unit rows.
+- **Unit click (slide-out / registry):** `GET /units/{unit_id}/detail` — tower/floor, config,
+  owner, residents, vehicles; `financials.base_fee_monthly` and `financials.outstanding_amount`
+  are `null` until billing is implemented.
 
 ### Conditional fields (UI-driven validation)
 
