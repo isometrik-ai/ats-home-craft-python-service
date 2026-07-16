@@ -7,10 +7,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from libs.shared_utils.http_exceptions import NotFoundException
+from apps.user_service.app.schemas.enums import VehicleType
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 _CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "vehicle_catalog.json"
+_VALID_VEHICLE_TYPES = {vehicle_type.value for vehicle_type in VehicleType}
 
 
 @lru_cache(maxsize=1)
@@ -38,13 +40,27 @@ class VehicleCatalogService:
     @staticmethod
     def get_catalog(
         *,
+        vehicle_type: str,
         brand_id: str | None = None,
         search: str | None = None,
     ) -> dict[str, Any]:
-        """Return brands (with models) and colors, with optional filters."""
+        """Return brands (with models) and colors for a vehicle type."""
+        if vehicle_type not in _VALID_VEHICLE_TYPES:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.invalid_vehicle_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
         raw = _load_catalog_raw()
-        brands = list(raw.get("brands") or [])
-        colors = list(raw.get("colors") or [])
+        catalog = raw.get(vehicle_type)
+        if not catalog:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.invalid_vehicle_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        brands = list(catalog.get("brands") or [])
+        colors = list(catalog.get("colors") or [])
 
         if brand_id:
             brands = [brand for brand in brands if brand.get("id") == brand_id]
@@ -67,7 +83,11 @@ class VehicleCatalogService:
         else:
             brands = [{**brand, "models": list(brand.get("models") or [])} for brand in brands]
 
-        return {"brands": brands, "colors": colors}
+        return {
+            "vehicle_type": vehicle_type,
+            "brands": brands,
+            "colors": colors,
+        }
 
     @staticmethod
     def clear_cache() -> None:

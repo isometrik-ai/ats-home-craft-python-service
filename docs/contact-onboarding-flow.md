@@ -158,7 +158,8 @@ Enforced in `contact_onboarding_service.py`:
   (`contact_onboarding.errors.invalid_step`).
 - **Vehicles:**
   - Picker options (brand → models, colors) come from `app/data/vehicle_catalog.json` via
-    `GET /vehicles/options` — not stored in Postgres. Edit the JSON to add brands/models/colors.
+    `GET /vehicles/options?vehicle_type=two_wheeler|four_wheeler` — not stored in Postgres.
+    JSON is split by vehicle type; edit the file to add brands/models/colors per type.
     Optional query params: `brand_id` (narrow models), `search` (filter names).
   - Each vehicle is tied to a unit the contact actively owns (`unit_not_assigned` / `unit_not_found`).
   - Create payload: `unit_id`, `vehicle_type`, `registration_number`, optional `make`/`model`/`color`,

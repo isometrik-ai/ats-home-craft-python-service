@@ -23,6 +23,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     ValidateHouseholdInvitationRequest,
     VehicleCatalogResponse,
 )
+from apps.user_service.app.schemas.enums import VehicleType
 from apps.user_service.app.services.contact_onboarding_service import (
     ContactOnboardingService,
 )
@@ -219,7 +220,7 @@ async def complete_profile(
     status_code=http_status.HTTP_200_OK,
     summary="Get vehicle brand, model, and color options",
     description=(
-        "Returns static picker options from vehicle_catalog.json. "
+        "Returns static picker options from vehicle_catalog.json for the given vehicle_type. "
         "Optional brand_id narrows models to one brand; search filters names."
     ),
     responses=COMMON_ERROR_RESPONSES,
@@ -227,6 +228,10 @@ async def complete_profile(
 @limiter.limit("100/minute")
 async def get_vehicle_catalog(
     request: Request,
+    vehicle_type: VehicleType = Query(
+        ...,
+        description="Vehicle type: two_wheeler or four_wheeler.",
+    ),
     brand_id: str | None = Query(
         default=None,
         description="Filter to a single brand (e.g. tata).",
@@ -239,7 +244,11 @@ async def get_vehicle_catalog(
 ):
     """Return vehicle catalog options for the Add Vehicle screen."""
     _ = current_user
-    data = VehicleCatalogService.get_catalog(brand_id=brand_id, search=search)
+    data = VehicleCatalogService.get_catalog(
+        vehicle_type=vehicle_type.value,
+        brand_id=brand_id,
+        search=search,
+    )
     payload = VehicleCatalogResponse.model_validate(data).model_dump(exclude_none=True)
     return success_response(
         request=request,
