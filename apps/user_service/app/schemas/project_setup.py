@@ -240,6 +240,7 @@ class CreateTowerRequest(BaseModel):
     units_per_floor_default: int | None = Field(default=None, ge=0)
     numbering_pattern: UnitNumberingPattern = UnitNumberingPattern.FLOOR_UNIT
     starting_unit_number: int = Field(default=1, ge=0)
+    custom_prefix: str | None = Field(default=None, max_length=32)
     has_wings: bool = False
     latitude: float | None = None
     longitude: float | None = None
@@ -260,6 +261,7 @@ class UpdateTowerRequest(BaseModel):
     units_per_floor_default: int | None = Field(default=None, ge=0)
     numbering_pattern: UnitNumberingPattern | None = None
     starting_unit_number: int | None = Field(default=None, ge=0)
+    custom_prefix: str | None = Field(default=None, max_length=32)
     has_wings: bool | None = None
     latitude: float | None = None
     longitude: float | None = None

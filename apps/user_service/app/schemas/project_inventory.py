@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.user_service.app.schemas.enums import (
@@ -10,6 +12,7 @@ from apps.user_service.app.schemas.enums import (
     FacilityLocationType,
     FacilityStatus,
     Facing,
+    ParkingUserType,
     PlotItemStatus,
     PlotType,
     UnitConfigKind,
@@ -95,6 +98,7 @@ class CreatePlotConfigItemRequest(BaseModel):
 
     plot_no: str = Field(..., min_length=1)
     size_sqft: float = Field(..., ge=0)
+    description: str | None = Field(default=None, max_length=500)
     status: PlotItemStatus = PlotItemStatus.EMPTY
     is_corner: bool = False
     sort_order: int = Field(default=0, ge=0)
@@ -154,7 +158,12 @@ class CreateFacilityRequest(BaseModel):
     location_type: FacilityLocationType
     tower_id: str | None = None
     floor_level: str | None = None
+    wing: str | None = Field(default=None, max_length=100)
     area_sqft: float | None = Field(default=None, ge=0)
+    capacity_persons: int | None = Field(default=None, ge=0)
+    parking_slots: int | None = Field(default=None, ge=0)
+    parking_user_type: ParkingUserType | None = None
+    extra_attributes: dict[str, Any] = Field(default_factory=dict)
     location_notes: str | None = None
     latitude: float | None = None
     longitude: float | None = None
@@ -174,7 +183,12 @@ class UpdateFacilityRequest(BaseModel):
     location_type: FacilityLocationType | None = None
     tower_id: str | None = None
     floor_level: str | None = None
+    wing: str | None = Field(default=None, max_length=100)
     area_sqft: float | None = Field(default=None, ge=0)
+    capacity_persons: int | None = Field(default=None, ge=0)
+    parking_slots: int | None = Field(default=None, ge=0)
+    parking_user_type: ParkingUserType | None = None
+    extra_attributes: dict[str, Any] | None = None
     location_notes: str | None = None
     latitude: float | None = None
     longitude: float | None = None
@@ -335,6 +349,7 @@ class InventorySummaryPlotItem(BaseModel):
     id: str
     plot_no: str
     size_sqft: float = Field(..., ge=0)
+    description: str | None = None
     status: str
     is_corner: bool = False
     sort_order: int = Field(..., ge=0)

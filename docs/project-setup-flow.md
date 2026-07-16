@@ -64,31 +64,33 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 
 ### File map
 
-| Concern                                   | File                                                                                          |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------- |
-| API endpoints (all 60+)                   | `app/api/projects.py`                                                                         |
-| Route registration                        | `app/api/routes.py`                                                                           |
-| Wizard orchestration / step‑gating        | `app/services/project_setup_service.py`                                                       |
-| Project CRUD + media + members            | `app/services/projects_service.py`                                                            |
-| Towers/wings/gates/lifts/floors           | `app/services/towers_service.py`                                                              |
-| Unit configs + plot items + config media  | `app/services/unit_configs_service.py`                                                        |
-| Inventory / Facilities / Units / Site map | `app/services/inventory_service.py`                                                           |
-| Facilities                                | `app/services/facilities_service.py`                                                          |
-| Units + parking zones                     | `app/services/units_service.py`                                                               |
-| Site map location + overlays              | `app/services/site_map_service.py`                                                            |
-| Step persistence                          | `app/db/repositories/project_setup_repository.py`                                             |
-| Project persistence                       | `app/db/repositories/projects_repository.py`                                                  |
-| Other repositories                        | `app/db/repositories/{towers,unit_configs,inventory,facilities,units,site_map}_repository.py` |
-| Request/response models                   | `app/schemas/project_setup.py`, `app/schemas/project_inventory.py`                            |
-| Enums (mirror Postgres)                   | `app/schemas/enums.py`                                                                        |
-| Row → JSON serialization                  | `app/utils/project_serialization.py`                                                          |
-| i18n messages                             | `app/locales/en.json` (`project_setup.*`)                                                     |
+| Concern                                   | File                                                                                                        |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| API endpoints (all 60+)                   | `app/api/projects.py`                                                                                       |
+| Route registration                        | `app/api/routes.py`                                                                                         |
+| Wizard orchestration / step‑gating        | `app/services/project_setup_service.py`                                                                     |
+| Project CRUD + media + members            | `app/services/projects_service.py`                                                                          |
+| Towers/wings/gates/lifts/floors           | `app/services/towers_service.py`                                                                            |
+| Unit configs + plot items + config media  | `app/services/unit_configs_service.py`                                                                      |
+| Inventory / Facilities / Units / Site map | `app/services/inventory_service.py`                                                                         |
+| Facilities + parking slot provisioning    | `app/services/facilities_service.py`                                                                        |
+| Conditional field validation              | `app/services/project_setup_validation.py`                                                                  |
+| Units + parking zones                     | `app/services/units_service.py`                                                                             |
+| Vehicle admin review (parking assignment) | `app/services/vehicles_service.py`                                                                          |
+| Site map location + overlays              | `app/services/site_map_service.py`                                                                          |
+| Step persistence                          | `app/db/repositories/project_setup_repository.py`                                                           |
+| Project persistence                       | `app/db/repositories/projects_repository.py`                                                                |
+| Other repositories                        | `app/db/repositories/{towers,unit_configs,inventory,facilities,parking_slots,units,site_map}_repository.py` |
+| Request/response models                   | `app/schemas/project_setup.py`, `app/schemas/project_inventory.py`                                          |
+| Enums (mirror Postgres)                   | `app/schemas/enums.py`                                                                                      |
+| Row → JSON serialization                  | `app/utils/project_serialization.py`                                                                        |
+| i18n messages                             | `app/locales/en.json` (`project_setup.*`)                                                                   |
 
 ______________________________________________________________________
 
-## 3. Data model (17 tables)
+## 3. Data model (18 tables)
 
-Defined in `20260629101000_property_setup_tables.sql`. Every table carries
+Defined in `20260629101000_property_setup_tables.sql` (+ `20260716120000_project_setup_field_extensions.sql` for existing DBs). Every table carries
 `organization_id` for tenant scoping.
 
 | Group         | Tables                                                                |
@@ -97,7 +99,7 @@ Defined in `20260629101000_property_setup_tables.sql`. Every table carries
 | Tower builder | `towers`, `tower_wings`, `tower_gates`, `tower_lifts`, `floors`       |
 | Configs       | `unit_configs`, `plot_config_items`, `config_media`                   |
 | Inventory     | `floor_inventory`                                                     |
-| Facilities    | `facilities`                                                          |
+| Facilities    | `facilities`, `facility_parking_slots`                                |
 | Floor plans   | `units`, `parking_zones`                                              |
 | Site map      | `site_map_overlays`                                                   |
 
@@ -164,15 +166,47 @@ All routes are under `/v1/projects` and require authentication + an org context.
 
 ### Inventory / Facilities / Units / Site map
 
-| Method     | Path                                                                      | Notes                             |
-| ---------- | ------------------------------------------------------------------------- | --------------------------------- |
-| PUT / GET  | `/v1/projects/{project_id}/inventory`                                     | Upsert / read floor×config matrix |
-| GET        | `/v1/projects/{project_id}/inventory/summary`                             | Post-setup inventory menu payload |
-| POST / GET | `/v1/projects/{project_id}/facilities` · PATCH/DELETE `.../{facility_id}` |                                   |
-| POST / GET | `/v1/projects/{project_id}/units` · PATCH/DELETE `.../{unit_id}`          | Recomputes `projects.units_count` |
-| POST / GET | `/v1/projects/{project_id}/parking-zones` · DELETE `.../{zone_id}`        |                                   |
-| PATCH      | `/v1/projects/{project_id}/site-map/location`                             | Set project lat/lng               |
-| POST / GET | `/v1/projects/{project_id}/site-map/overlays` · DELETE `.../{overlay_id}` |                                   |
+| Method     | Path                                                                      | Notes                                 |
+| ---------- | ------------------------------------------------------------------------- | ------------------------------------- |
+| PUT / GET  | `/v1/projects/{project_id}/inventory`                                     | Upsert / read floor×config matrix     |
+| GET        | `/v1/projects/{project_id}/inventory/summary`                             | Post-setup inventory menu payload     |
+| POST / GET | `/v1/projects/{project_id}/facilities` · PATCH/DELETE `.../{facility_id}` |                                       |
+| GET        | `/v1/projects/{project_id}/facilities/{facility_id}/parking-slots`        | Slots for parking facilities          |
+| POST / GET | `/v1/projects/{project_id}/units` · PATCH/DELETE `.../{unit_id}`          | Recomputes `projects.units_count`     |
+| POST / GET | `/v1/projects/{project_id}/parking-zones` · DELETE `.../{zone_id}`        | Tower basement zone ranges            |
+| GET        | `/v1/projects/{project_id}/vehicle-requests`                              | Admin: list resident vehicle requests |
+| PATCH      | `/v1/projects/{project_id}/vehicle-requests/{vehicle_id}`                 | Admin: approve/reject + assign slot   |
+| PATCH      | `/v1/projects/{project_id}/site-map/location`                             | Set project lat/lng                   |
+| POST / GET | `/v1/projects/{project_id}/site-map/overlays` · DELETE `.../{overlay_id}` |                                       |
+
+### Conditional fields (UI-driven validation)
+
+Validated in `app/services/project_setup_validation.py` (towers + facilities).
+
+| Step / entity | API field           | Required when                                         |
+| ------------- | ------------------- | ----------------------------------------------------- |
+| Tower         | `custom_prefix`     | `numbering_pattern = "custom"`                        |
+| Plot item     | `description`       | Optional (e.g. "Near park, road-facing")              |
+| Facility      | `wing`              | `location_type = "in_tower"`                          |
+| Facility      | `capacity_persons`  | `facility_type = "events"` (integer > 0)              |
+| Facility      | `parking_slots`     | `facility_type = "parking"` (integer > 0)             |
+| Facility      | `parking_user_type` | `facility_type = "parking"` (`resident` / `visitors`) |
+| Facility      | `extra_attributes`  | Optional JSON object; defaults to `{}` on create      |
+
+When a **parking** facility is created, the API auto-provisions `facility_parking_slots` rows
+(`slot_number` 1…N). These are separate from Step 8 `parking_zones` (tower basement ranges).
+
+### Vehicle registration review (admin)
+
+Residents submit vehicles during contact onboarding (`status = pending`). Community admins
+review via project APIs:
+
+1. `GET /vehicle-requests?status=pending` — queue
+1. `GET /facilities/{facility_id}/parking-slots?status=available` — pick a slot
+1. `PATCH /vehicle-requests/{vehicle_id}` — approve with `parking_slot_id`, or reject with `rejection_reason`
+
+On approval the slot becomes `assigned` and `vehicles.parking_slot_id` is set. Deleting a
+vehicle releases the slot back to `available`.
 
 ______________________________________________________________________
 
@@ -210,7 +244,7 @@ ______________________________________________________________________
 | Change which property type shows which step                    | `compute_visible_steps()` in `project_setup_service.py`                                  |
 | Add a field to a request/response                              | matching model in `schemas/project_setup.py` or `schemas/project_inventory.py`           |
 | Add/rename a DB column                                         | new migration in `ats-home-craft-supabase` + repository SQL + schema model               |
-| Change validation rules (e.g. required fields per config kind) | relevant `*_service.py`                                                                  |
+| Change validation rules (e.g. required fields per config kind) | `project_setup_validation.py` or relevant `*_service.py`                                 |
 | Add an endpoint                                                | add route in `api/projects.py` → service method → repository method                      |
 | Change a user‑facing message                                   | `app/locales/en.json` under `project_setup.*`                                            |
 | Change RBAC required for an action                             | the `check_permissions(...)` call on that endpoint                                       |
@@ -233,5 +267,7 @@ Unit tests (fake repos, no DB):
 - `tests/unit/test_project_setup_service.py` — step visibility, seeding/skipping, gating, finalize.
 - `tests/unit/test_projects_repository.py` — SQL generation (insert/list/recompute).
 - `tests/unit/test_unit_configs_service.py` — kind‑specific validation + config→step mapping.
+- `tests/unit/test_project_setup_validation.py` — tower custom prefix + facility conditional fields.
+- `tests/unit/test_inventory_service.py` — inventory summary aggregation.
 
 Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`

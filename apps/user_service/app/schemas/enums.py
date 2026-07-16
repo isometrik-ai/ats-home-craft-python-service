@@ -504,6 +504,7 @@ class VehicleStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    REMOVED = "removed"
 
 
 class ClientUserStatus(str, Enum):
@@ -1307,6 +1308,21 @@ class FacilityLocationType(str, Enum):
     INDOOR_CLUBHOUSE = "indoor_clubhouse"
     IN_TOWER = "in_tower"
     OTHER = "other"
+
+
+class ParkingUserType(str, Enum):
+    """Parking facility audience (Postgres parking_user_type enum)."""
+
+    RESIDENT = "resident"
+    VISITORS = "visitors"
+
+
+class ParkingSlotStatus(str, Enum):
+    """Individual parking slot status (Postgres parking_slot_status enum)."""
+
+    AVAILABLE = "available"
+    ASSIGNED = "assigned"
+    BLOCKED = "blocked"
 
 
 # ============================================================================

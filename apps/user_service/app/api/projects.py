@@ -8,10 +8,13 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
+from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
 from apps.user_service.app.schemas.enums import (
+    ParkingSlotStatus,
     PropertyProjectStatus,
     PropertyType,
     UnitStatus,
+    VehicleStatus,
 )
 from apps.user_service.app.schemas.project_inventory import (
     ConfigMediaRequest,
@@ -53,6 +56,7 @@ from apps.user_service.app.services.site_map_service import SiteMapService
 from apps.user_service.app.services.towers_service import TowersService
 from apps.user_service.app.services.unit_configs_service import UnitConfigsService
 from apps.user_service.app.services.units_service import UnitsService
+from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     check_permissions,
@@ -1840,6 +1844,49 @@ async def list_facilities(
     )
 
 
+@handle_api_exceptions("list facility parking slots")
+@router.get(
+    "/{project_id}/facilities/{facility_id}/parking-slots",
+    status_code=http_status.HTTP_200_OK,
+    summary="List parking slots for a facility",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_facility_parking_slots(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    facility_id: str = Path(..., description="Facility identifier (UUID string)."),
+    status: ParkingSlotStatus | None = Query(
+        default=None,
+        description="Filter by slot status (available, assigned, blocked).",
+    ),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """List parking slots provisioned for a parking facility."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+    )
+    service = FacilitiesService(db_connection=db_connection, user_context=user_context)
+    items = await service.list_parking_slots(
+        project_id=project_id,
+        facility_id=facility_id,
+        status=status.value if status else None,
+    )
+    return list_response(
+        request=request,
+        items=items,
+        total=len(items),
+        page=1,
+        page_size=max(len(items), 1),
+        message_key="project_setup.success.parking_slots_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
 @handle_api_exceptions("update facility")
 @router.patch(
     "/{project_id}/facilities/{facility_id}",
@@ -2342,4 +2389,103 @@ async def delete_site_map_overlay(
         message_key="project_setup.success.overlay_deleted",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Vehicle registration requests (admin review + parking slot assignment)
+# ---------------------------------------------------------------------------
+
+
+@handle_api_exceptions("list project vehicle requests")
+@router.get(
+    "/{project_id}/vehicle-requests",
+    status_code=http_status.HTTP_200_OK,
+    summary="List resident vehicle registration requests",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_project_vehicle_requests(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    status: VehicleStatus | None = Query(
+        default=None,
+        description="Filter by vehicle status (pending, approved, rejected).",
+    ),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """List vehicle requests for admin review."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+    )
+    service = VehiclesService(db_connection=db_connection, user_context=user_context)
+    items = await service.list_project_vehicles(project_id=project_id, status=status)
+    return list_response(
+        request=request,
+        items=items,
+        total=len(items),
+        page=1,
+        page_size=max(len(items), 1),
+        message_key="project_setup.success.vehicle_requests_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("review project vehicle request")
+@router.patch(
+    "/{project_id}/vehicle-requests/{vehicle_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Approve or reject a vehicle request",
+    description=(
+        "On approval, assigns an available parking slot from a parking facility. "
+        "On rejection, stores rejection_reason."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="vehicles",
+    category="PROJECT_SETUP",
+)
+async def review_project_vehicle_request(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    vehicle_id: str = Path(..., description="Vehicle identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: ReviewVehicleRequest = Body(...),
+):
+    """Approve or reject a resident vehicle registration request."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+    )
+    service = VehiclesService(db_connection=db_connection, user_context=user_context)
+    _set_audit(
+        request,
+        user_context,
+        table="vehicles",
+        requested_id=vehicle_id,
+        description=f"Reviewed vehicle request: {vehicle_id}",
+    )
+    data = await service.review_vehicle(
+        project_id=project_id,
+        vehicle_id=vehicle_id,
+        body=body,
+    )
+    request.state.raw_audit_new_data = data
+    return success_response(
+        request=request,
+        message_key="project_setup.success.vehicle_request_reviewed",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=data,
     )

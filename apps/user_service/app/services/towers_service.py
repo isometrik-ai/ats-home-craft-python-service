@@ -18,6 +18,9 @@ from apps.user_service.app.schemas.project_setup import (
     UpdateTowerRequest,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
+from apps.user_service.app.services.project_setup_validation import (
+    validate_tower_numbering,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.project_serialization import serialize_row
 from libs.shared_utils.http_exceptions import (
@@ -80,6 +83,10 @@ class TowersService:
     async def create_tower(self, *, project_id: str, body: CreateTowerRequest) -> dict[str, Any]:
         """Create a tower."""
         await self.setup_service.ensure_project(project_id=project_id)
+        validate_tower_numbering(
+            numbering_pattern=body.numbering_pattern.value,
+            custom_prefix=body.custom_prefix,
+        )
         data = body.model_dump()
         data["tower_type"] = body.tower_type.value
         data["numbering_pattern"] = body.numbering_pattern.value
@@ -108,6 +115,21 @@ class TowersService:
         """Patch a tower."""
         await self._ensure_tower(project_id=project_id, tower_id=tower_id)
         patch = body.model_dump(exclude_unset=True, exclude_none=True)
+        current = await self.towers_repo.get_tower(
+            organization_id=self._org_id, project_id=project_id, tower_id=tower_id
+        )
+        numbering_pattern = (
+            body.numbering_pattern.value
+            if body.numbering_pattern
+            else str(current.get("numbering_pattern"))
+        )
+        custom_prefix = (
+            body.custom_prefix if "custom_prefix" in patch else current.get("custom_prefix")
+        )
+        validate_tower_numbering(
+            numbering_pattern=numbering_pattern,
+            custom_prefix=custom_prefix,
+        )
         if "tower_type" in patch and body.tower_type:
             patch["tower_type"] = body.tower_type.value
         if "numbering_pattern" in patch and body.numbering_pattern:

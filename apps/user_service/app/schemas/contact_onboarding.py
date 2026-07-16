@@ -19,6 +19,7 @@ from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
     ContactUnitRelationship,
     VehicleFuelType,
+    VehicleStatus,
     VehicleType,
 )
 from libs.shared_utils.http_exceptions import ValidationException
@@ -167,9 +168,46 @@ class VehicleResponse(BaseModel):
     fuel_type: str | None = None
     status: str
     rejection_reason: str | None = None
+    parking_slot_id: str | None = None
+    status_updated_at: str
     sort_order: int = 0
     created_at: str
     updated_at: str
+
+
+class ReviewVehicleRequest(BaseModel):
+    """Admin review of a resident vehicle registration request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: VehicleStatus
+    parking_slot_id: str | None = None
+    rejection_reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_review(self) -> ReviewVehicleRequest:
+        """Enforce slot on approve and reason on reject."""
+        if self.status == VehicleStatus.APPROVED and not self.parking_slot_id:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.parking_slot_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if self.status == VehicleStatus.REJECTED and not self.rejection_reason:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.rejection_reason_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if self.status == VehicleStatus.PENDING:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.invalid_vehicle_review_status",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if self.status == VehicleStatus.REMOVED:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.invalid_vehicle_review_status",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
 
 class VehicleModelOption(BaseModel):
