@@ -343,6 +343,7 @@ class HouseholdMemberResponse(BaseModel):
     portal_access: bool = False
     member_status: str
     phones: list[Any] = Field(default_factory=list)
+    emails: list[Any] = Field(default_factory=list)
     invite_url: str | None = None
     invitation_expires_at: str | None = None
 
