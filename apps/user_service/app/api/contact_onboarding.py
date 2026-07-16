@@ -750,6 +750,48 @@ async def decline_household_invitation(
     )
 
 
+@handle_api_exceptions("revoke household invitation")
+@router.post(
+    "/household/{contact_unit_id}/revoke-invitation",
+    status_code=http_status.HTTP_200_OK,
+    summary="Revoke a pending household invitation",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="household_invitations",
+    category="CONTACT_ONBOARDING",
+)
+async def revoke_household_invitation(
+    request: Request,
+    contact_unit_id: str = Path(..., description="Household member's contact_unit id"),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Cancel a pending portal invitation; the household member remains on the unit."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = _service(
+        db_connection=db_connection,
+        user_context=user_context,
+        sb_client=None,
+    )
+    data = await service.revoke_household_invitation(
+        primary_contact_id=str(contact["id"]),
+        contact_unit_id=contact_unit_id,
+    )
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.invitation_revoked",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
 @handle_api_exceptions("resend household invitation")
 @router.post(
     "/household/{contact_unit_id}/resend-invitation",

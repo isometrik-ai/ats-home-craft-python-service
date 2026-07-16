@@ -345,7 +345,9 @@ class HouseholdMemberResponse(BaseModel):
     phones: list[Any] = Field(default_factory=list)
     emails: list[Any] = Field(default_factory=list)
     invite_url: str | None = None
+    invitation_sent_at: str | None = None
     invitation_expires_at: str | None = None
+    invitation_status: str | None = None
 
 
 class AcceptHouseholdInvitationRequest(BaseModel):

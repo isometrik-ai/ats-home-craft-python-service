@@ -29,6 +29,7 @@ from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
     ContactType,
     ContactUnitStatus,
+    HouseholdInvitationStatus,
     HouseholdMemberStatus,
     SetupStepStatus,
 )
@@ -207,6 +208,7 @@ class ContactOnboardingService:
                 str(row["invitation_token"])
             )
             item["invitation_expires_at"] = format_iso_datetime(row.get("invitation_expires_at"))
+            item["invitation_sent_at"] = format_iso_datetime(row.get("invitation_sent_at"))
         return item
 
     async def list_household(self, *, contact_id: str) -> list[dict[str, Any]]:
@@ -518,6 +520,69 @@ class ContactOnboardingService:
             inviter_first_name=primary_contact.get("first_name"),
             inviter_last_name=primary_contact.get("last_name"),
         )
+
+    async def revoke_household_invitation(
+        self,
+        *,
+        primary_contact_id: str,
+        contact_unit_id: str,
+    ) -> dict[str, Any]:
+        """Cancel a pending portal invitation without removing the household member."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        link = await self.contact_units_repo.get_household_link(
+            organization_id=org_id,
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        if not link:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.household_member_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        member_row = await self._load_household_member(
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        pending_invitation = (
+            await self.household_invitation_service.invitations_repo.get_pending_by_contact_unit(
+                organization_id=org_id,
+                contact_unit_id=contact_unit_id,
+            )
+        )
+        portal_access = bool(member_row.get("portal_access"))
+        unit_link_status = str(member_row.get("unit_link_status") or ContactUnitStatus.ACTIVE.value)
+
+        if not pending_invitation and not (
+            portal_access and unit_link_status == ContactUnitStatus.PENDING.value
+        ):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.invitation_not_pending",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        if portal_access:
+            await self._apply_household_portal_access_change(
+                primary_contact_id=primary_contact_id,
+                contact_unit_id=contact_unit_id,
+                family_contact_id=str(link["contact_id"]),
+                member_row=member_row,
+                portal_access=False,
+            )
+        elif pending_invitation:
+            await self.household_invitation_service.cancel_for_contact_unit(
+                organization_id=org_id,
+                contact_unit_id=contact_unit_id,
+            )
+
+        row = await self._load_household_member(
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        item = self._format_household_member(row)
+        item["invitation_status"] = HouseholdInvitationStatus.CANCELLED.value
+        return item
 
     async def remove_household_member(
         self,
