@@ -126,6 +126,7 @@ most endpoints take **no** contact id in the path.
 | GET    | `/v1/contact-onboarding/properties`                                    | List pre‑allotted units to confirm (step 1)                       |
 | POST   | `/v1/contact-onboarding/properties/confirm`                            | Confirm selected units (step 1)                                   |
 | PATCH  | `/v1/contact-onboarding/profile`                                       | Update profile + complete `complete_profile` (step 2)             |
+| GET    | `/v1/contact-onboarding/vehicles/options`                              | Brand/model/color picker options (static JSON)                    |
 | GET    | `/v1/contact-onboarding/vehicles`                                      | List vehicles                                                     |
 | POST   | `/v1/contact-onboarding/vehicles`                                      | Add a vehicle                                                     |
 | PATCH  | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Update a vehicle                                                  |
@@ -156,6 +157,9 @@ Enforced in `contact_onboarding_service.py`:
   (`contact_onboarding.errors.step_not_skippable`) and unknown keys
   (`contact_onboarding.errors.invalid_step`).
 - **Vehicles:**
+  - Picker options (brand → models, colors) come from `app/data/vehicle_catalog.json` via
+    `GET /vehicles/options` — not stored in Postgres. Edit the JSON to add brands/models/colors.
+    Optional query params: `brand_id` (narrow models), `search` (filter names).
   - Each vehicle is tied to a unit the contact actively owns (`unit_not_assigned` / `unit_not_found`).
   - Create payload: `unit_id`, `vehicle_type`, `registration_number`, optional `make`/`model`/`color`,
     `fuel_type`, and `photo_paths` (list of storage paths, up to 10).

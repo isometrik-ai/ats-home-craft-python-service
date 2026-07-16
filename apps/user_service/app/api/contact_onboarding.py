@@ -1,7 +1,7 @@
 """Contact onboarding API."""
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Request
+from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 from supabase import AsyncClient
 
@@ -21,6 +21,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     UpdateHouseholdMemberRequest,
     UpdateVehicleRequest,
     ValidateHouseholdInvitationRequest,
+    VehicleCatalogResponse,
 )
 from apps.user_service.app.services.contact_onboarding_service import (
     ContactOnboardingService,
@@ -29,6 +30,7 @@ from apps.user_service.app.services.contact_units_service import ContactUnitsSer
 from apps.user_service.app.services.household_invitation_service import (
     HouseholdInvitationService,
 )
+from apps.user_service.app.services.vehicle_catalog_service import VehicleCatalogService
 from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import (
     extract_onboarding_contact_context,
@@ -208,6 +210,42 @@ async def complete_profile(
         message_key="contact_onboarding.success.profile_updated",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
+    )
+
+
+@handle_api_exceptions("get vehicle catalog")
+@router.get(
+    "/vehicles/options",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get vehicle brand, model, and color options",
+    description=(
+        "Returns static picker options from vehicle_catalog.json. "
+        "Optional brand_id narrows models to one brand; search filters names."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_vehicle_catalog(
+    request: Request,
+    brand_id: str | None = Query(
+        default=None,
+        description="Filter to a single brand (e.g. tata).",
+    ),
+    search: str | None = Query(
+        default=None,
+        description="Case-insensitive filter on brand, model, and color names.",
+    ),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return vehicle catalog options for the Add Vehicle screen."""
+    _ = current_user
+    data = VehicleCatalogService.get_catalog(brand_id=brand_id, search=search)
+    payload = VehicleCatalogResponse.model_validate(data).model_dump(exclude_none=True)
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.vehicle_catalog_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=payload,
     )
 
 
