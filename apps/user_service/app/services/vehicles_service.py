@@ -93,13 +93,21 @@ class VehiclesService:
             )
         return unit["project_id"]
 
-    async def list_vehicles(self, *, contact_id: str) -> list[dict[str, Any]]:
-        """List active vehicles for the contact."""
+    async def list_vehicles(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List active vehicles for the contact, optionally filtered by unit."""
         org_id = self.user_context.organization_id
         assert org_id
+        if unit_id:
+            await self._validate_unit_for_contact(contact_id=contact_id, unit_id=unit_id)
         rows = await self.repo.list_by_contact(
             organization_id=org_id,
             contact_id=contact_id,
+            unit_id=unit_id,
         )
         return [self._normalize_vehicle(row) for row in rows]
 

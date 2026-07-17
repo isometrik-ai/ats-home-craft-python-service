@@ -632,12 +632,14 @@
       "invitation_already_accepted": "This household invitation has already been accepted.",
       "invitation_already_declined": "This household invitation has already been declined.",
       "invitation_not_found": "No pending household invitation was found.",
-      "invitation_not_pending": "No pending household invitation to revoke."
+      "invitation_not_pending": "No pending household invitation to revoke.",
+      "onboarding_not_completed_use_confirm": "Use property confirm during onboarding; claim is for after onboarding is complete."
     },
     "success": {
       "status_retrieved": "Onboarding status retrieved successfully.",
       "properties_retrieved": "Your properties retrieved successfully.",
       "properties_confirmed": "Properties confirmed successfully.",
+      "properties_claimed": "Properties claimed successfully.",
       "profile_updated": "Profile updated successfully.",
       "vehicles_retrieved": "Vehicles retrieved successfully.",
       "vehicle_catalog_retrieved": "Vehicle options retrieved successfully.",

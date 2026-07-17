@@ -60,6 +60,31 @@ class ContactUnitsService:
         )
         return [self._normalize_unit_row(row) for row in rows]
 
+    async def _confirm_pending_units(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        contact_unit_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Activate selected pending units or raise when any id is invalid."""
+        updated = await self.repo.confirm_selection(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            contact_unit_ids=contact_unit_ids,
+        )
+        if len(updated) != len(contact_unit_ids):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.contact_unit_not_found",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return updated
+
+    @staticmethod
+    def _confirmed_items(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+        """Map confirmed contact_unit rows to API items."""
+        return [{"id": row["id"], "status": row["status"]} for row in rows]
+
     async def confirm_properties(
         self,
         *,
@@ -69,22 +94,68 @@ class ContactUnitsService:
         """Confirm selected pending units and complete step 1."""
         org_id = self.user_context.organization_id
         assert org_id
-        updated = await self.repo.confirm_selection(
+        updated = await self._confirm_pending_units(
             organization_id=org_id,
             contact_id=contact_id,
             contact_unit_ids=contact_unit_ids,
         )
-        if len(updated) != len(contact_unit_ids):
-            raise ValidationException(
-                message_key="contact_onboarding.errors.contact_unit_not_found",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
         await self.onboarding_repo.complete_step(
             organization_id=org_id,
             contact_id=contact_id,
             step_key=ContactOnboardingStep.SELECT_PROPERTIES.value,
         )
-        return [{"id": row["id"], "status": row["status"]} for row in updated]
+        if await self.onboarding_repo.is_wizard_completed(
+            organization_id=org_id,
+            contact_id=contact_id,
+        ):
+            await self.repo.activate_units_by_ids(
+                organization_id=org_id,
+                contact_id=contact_id,
+                contact_unit_ids=[row["id"] for row in updated],
+            )
+        return self._confirmed_items(updated)
+
+    async def claim_properties(
+        self,
+        *,
+        contact_id: str,
+        contact_unit_ids: list[str],
+    ) -> dict[str, Any]:
+        """Accept pending units after onboarding is already complete."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        if not await self.onboarding_repo.is_wizard_completed(
+            organization_id=org_id,
+            contact_id=contact_id,
+        ):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.onboarding_not_completed_use_confirm",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        updated = await self._confirm_pending_units(
+            organization_id=org_id,
+            contact_id=contact_id,
+            contact_unit_ids=contact_unit_ids,
+        )
+        await self.repo.activate_units_by_ids(
+            organization_id=org_id,
+            contact_id=contact_id,
+            contact_unit_ids=[row["id"] for row in updated],
+        )
+
+        active_count = await self.repo.count_active_units(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        has_default = await self.repo.has_default_login(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        return {
+            "items": self._confirmed_items(updated),
+            "requires_default_unit": active_count > 1 and not has_default,
+        }
 
     async def set_default_unit(self, *, contact_id: str, contact_unit_id: str) -> dict[str, Any]:
         """Set the default login unit and complete the choose-unit step."""

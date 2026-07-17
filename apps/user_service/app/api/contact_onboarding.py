@@ -11,6 +11,8 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_anon, supabase_service
 from apps.user_service.app.schemas.contact_onboarding import (
     AcceptHouseholdInvitationRequest,
+    ClaimPropertiesRequest,
+    ClaimPropertiesResponse,
     CompleteProfileRequest,
     CompleteStepRequest,
     ConfirmPropertiesRequest,
@@ -174,6 +176,52 @@ async def confirm_properties(
     )
 
 
+@handle_api_exceptions("claim post-onboarding properties")
+@router.post(
+    "/properties/claim",
+    status_code=http_status.HTTP_200_OK,
+    summary="Claim properties after onboarding is complete",
+    description=(
+        "Accept pending unit allotments when onboarding is already finished. "
+        "Sets activated_at on claimed units and returns whether a default login unit is needed."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contact_units",
+    category="CONTACT_ONBOARDING",
+)
+async def claim_properties(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: ClaimPropertiesRequest = Body(...),
+):
+    """Claim pending properties assigned after onboarding completion."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    units_service = ContactUnitsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await units_service.claim_properties(
+        contact_id=str(contact["id"]),
+        contact_unit_ids=body.contact_unit_ids,
+    )
+    payload = ClaimPropertiesResponse.model_validate(data).model_dump(exclude_none=True)
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.properties_claimed",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=payload,
+    )
+
+
 @handle_api_exceptions("complete contact profile")
 @router.patch(
     "/profile",
@@ -268,6 +316,10 @@ async def get_vehicle_catalog(
 @limiter.limit("100/minute")
 async def list_vehicles(
     request: Request,
+    unit_id: str | None = Query(
+        default=None,
+        description="Optional unit filter; returns vehicles for that unit only.",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -279,7 +331,10 @@ async def list_vehicles(
         db_connection=db_connection,
         user_context=user_context,
     )
-    items = await vehicles_service.list_vehicles(contact_id=str(contact["id"]))
+    items = await vehicles_service.list_vehicles(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+    )
     return list_response(
         request=request,
         items=items,

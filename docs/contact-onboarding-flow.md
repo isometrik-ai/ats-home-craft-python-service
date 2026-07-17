@@ -44,6 +44,11 @@ Only `vehicles` and `household` may be skipped (`skip_step` enforces this via `a
 The "current step" is derived on the fly: the first step whose status is not
 `completed`/`skipped` (`_derive_current_step` in `contact_onboarding_service.py`).
 
+> **Multiple properties:** see [§6 Multi-property onboarding](#6-multi-property-onboarding) for
+> how steps 1, 3–5 behave when a contact has more than one pre‑allotted unit.
+>
+> **Admin assigns a unit later:** see [§7 Post-onboarding property assignment](#7-post-onboarding-property-assignment).
+
 ______________________________________________________________________
 
 ## 2. Architecture (layers)
@@ -127,10 +132,11 @@ most endpoints take **no** contact id in the path.
 | ------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | GET    | `/v1/contact-onboarding/status`                                        | Wizard progress + derived current step                            |
 | GET    | `/v1/contact-onboarding/properties`                                    | List pre‑allotted units to confirm (step 1)                       |
-| POST   | `/v1/contact-onboarding/properties/confirm`                            | Confirm selected units (step 1)                                   |
+| POST   | `/v1/contact-onboarding/properties/confirm`                            | Confirm selected units (step 1, during onboarding)                |
+| POST   | `/v1/contact-onboarding/properties/claim`                              | Claim pending units after onboarding is complete                  |
 | PATCH  | `/v1/contact-onboarding/profile`                                       | Update profile + complete `complete_profile` (step 2)             |
 | GET    | `/v1/contact-onboarding/vehicles/options`                              | Brand/model/color picker options (static JSON)                    |
-| GET    | `/v1/contact-onboarding/vehicles`                                      | List vehicles                                                     |
+| GET    | `/v1/contact-onboarding/vehicles`                                      | List vehicles (`?unit_id=` optional filter)                       |
 | POST   | `/v1/contact-onboarding/vehicles`                                      | Add a vehicle                                                     |
 | PATCH  | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Update a vehicle                                                  |
 | POST   | `/v1/contact-onboarding/vehicles/{vehicle_id}/withdraw`                | Withdraw a pending request (hard-delete before approval)          |
@@ -232,7 +238,239 @@ Enforced in `contact_onboarding_service.py`:
 
 ______________________________________________________________________
 
-## 6. How to make common changes
+## 6. Multi-property onboarding
+
+Onboarding is **one wizard per contact**, not one wizard per unit. A contact pre‑allotted
+three apartments still has a single `contact_onboarding_steps` row set and one profile — but
+vehicles, household members, and the default login unit are scoped per property where noted.
+
+### How it differs from a single property
+
+| Area                         | 1 unit                                               | Multiple units                                                |
+| ---------------------------- | ---------------------------------------------------- | ------------------------------------------------------------- |
+| Step 1 (`select_properties`) | Confirm the one pending allotment                    | Multi-select which pending allotments to accept               |
+| Profile (step 2)             | Once per contact                                     | Once per contact (shared)                                     |
+| Vehicles (step 3)            | `unit_id` = that unit                                | Each vehicle requires a `unit_id` (picker in UI)              |
+| Household (step 4)           | `unit_id` on add                                     | Each family member linked to a specific unit                  |
+| Choose unit (step 5)         | UI may skip; backend does not auto-complete the step | **Required** — must call `POST /default-unit` before finalize |
+| Review (step 6)              | One unit in payload                                  | All active units + all vehicles + all household               |
+| Finalize                     | `is_default_login` not enforced                      | `is_default_login` required on exactly one active unit        |
+
+### Admin setup (before the contact logs in)
+
+Community admin pre‑allotment creates one `contact_units` row per unit, each with
+`status = pending`:
+
+```
+Contact2
+  ├── contact_units → Unit A-1801 (pending)
+  ├── contact_units → Unit B-1204 (pending)
+  └── contact_units → Unit C-0502 (pending)
+```
+
+The contact sees all of these in step 1 via `GET /v1/contact-onboarding/properties`.
+
+### Step-by-step flow (multiple units)
+
+```
+Admin pre-allots N units (contact_units.status = pending)
+        ↓
+Step 1  GET  /properties              → list all pending + active units
+        POST /properties/confirm        → { "contact_unit_ids": ["...", "..."] }
+                                        selected rows → active; others stay pending
+        ↓
+Step 2  PATCH /profile                → one profile for the contact
+        ↓
+Step 3  POST /vehicles { unit_id, … } → optional; repeat per unit as needed
+        POST /steps/skip { step_key: "vehicles" }  → or skip entirely
+        ↓
+Step 4  POST /household { unit_id, … }→ optional; family members are per unit
+        POST /steps/skip { step_key: "household" }
+        ↓
+Step 5  POST /default-unit            → { "contact_unit_id": "..." }
+                                        sets is_default_login on one active unit
+                                        (only when active_count > 1)
+        ↓
+Step 6  GET  /review                  → aggregate: contact + units + vehicles + household
+        POST /complete                → sets activated_at on all active units
+```
+
+### Step 1 — confirming properties
+
+- **`GET /properties`** returns every `contact_units` row for the contact with
+  `status` in `pending` or `active`, including display fields (`code`, `tower_name`,
+  `floor_name`, `config_label`, `is_default_login`, etc.).
+- **`POST /properties/confirm`** accepts one or more `contact_unit_ids`. Only rows that
+  belong to the contact and are currently `pending` are updated to `active`.
+- Unselected pending units **remain pending** and are excluded from vehicle/household
+  validation (`unit_not_assigned`) until confirmed.
+
+### Steps 3–4 — unit-scoped data
+
+- **Vehicles:** `POST /vehicles` requires `unit_id`. The contact must have an **active**
+  link to that unit. `GET /vehicles` returns all vehicles for the contact across units.
+- **Household:** `POST /household` requires `unit_id`. `GET /household` returns family
+  members on **any unit the primary contact actively owns** (not just the default login unit).
+
+### Step 5 — default login unit
+
+When the contact has **more than one active unit** after step 1:
+
+- Call **`POST /default-unit`** with `{ "contact_unit_id": "<uuid>" }`.
+- Sets `is_default_login = true` on the chosen row and clears it on all other active rows
+  for that contact.
+- Completes the `choose_unit` wizard step.
+- **`POST /complete` fails** with `no_default_unit` if this was not done.
+
+When the contact has **exactly one active unit**, default-login validation is skipped at
+finalize — but the `choose_unit` step row must still be `completed` or `skipped` like any
+other step. The mobile app typically auto-calls `POST /default-unit` or hides the screen.
+
+> **`is_primary`** (set at admin allotment) and **`is_default_login`** (set in step 5) are
+> independent. Primary marks ownership; default login controls which property opens first
+> after sign-in.
+
+### Step 6 — review and finalize
+
+**`GET /review`** returns:
+
+| Key         | Contents                               |
+| ----------- | -------------------------------------- |
+| `contact`   | Profile of the onboarding contact      |
+| `units`     | All pending + active property links    |
+| `vehicles`  | All vehicles registered by the contact |
+| `household` | All family members across owned units  |
+| `steps`     | Wizard step statuses                   |
+
+**`POST /complete`** prerequisites (enforced in `complete_onboarding`):
+
+1. Wizard not already completed.
+1. At least one active unit.
+1. If `active_count > 1`, a default login unit must be set.
+1. Every step except `review` must be `completed` or `skipped`.
+1. On success: `activated_at` is set on all active units; `review` step is completed.
+
+### Mobile UI recommendations
+
+1. **Step 1:** Multi-select checklist of pre‑allotted properties; send all accepted
+   `contact_unit_ids` in one confirm call.
+1. **Vehicles / household:** Show a unit picker populated from active units returned by
+   `GET /properties`.
+1. **Step 5:** Show only when `GET /status` → `setup_current_step === "choose_unit"` and
+   more than one active unit exists.
+1. **Review:** Group vehicles and household members by unit (use `unit_id` / tower + code).
+
+### Quick API reference (multi-unit)
+
+| Action            | Endpoint                   | Notes                                  |
+| ----------------- | -------------------------- | -------------------------------------- |
+| List allotments   | `GET /properties`          | Pending + active                       |
+| Accept units      | `POST /properties/confirm` | Partial selection allowed              |
+| Add vehicle       | `POST /vehicles`           | Requires `unit_id`                     |
+| Add family        | `POST /household`          | Requires `unit_id`                     |
+| Set login default | `POST /default-unit`       | Required when 2+ active units          |
+| Check progress    | `GET /status`              | `setup_current_step` drives navigation |
+| Preview all       | `GET /review`              | Full aggregate before submit           |
+| Finish            | `POST /complete`           | Activates all confirmed units          |
+
+______________________________________________________________________
+
+## 7. Post-onboarding property assignment
+
+When a contact **already finished onboarding** (`GET /status` → `is_completed: true`) and an
+admin assigns another unit later, the **full wizard does not reopen**. The new allotment is a
+**property claim** flow instead.
+
+### What the admin does
+
+```
+POST /v1/contacts/{contact_id}/units
+{ "unit_id": "...", "relationship": "self", "is_primary": false }
+```
+
+Creates a new `contact_units` row with `status = pending`. Existing wizard step rows stay
+`completed` / `skipped`.
+
+### What the contact sees
+
+| API               | Result                                             |
+| ----------------- | -------------------------------------------------- |
+| `GET /status`     | `is_completed: true`, `setup_current_step: null`   |
+| `GET /properties` | Existing active units **plus** new pending unit(s) |
+
+The mobile app should show a **“New property to accept”** banner — not the 6-step wizard.
+
+### Claim flow (recommended)
+
+```
+GET  /properties                         → detect pending rows while is_completed
+POST /properties/claim                   → { "contact_unit_ids": ["..."] }
+POST /default-unit (if requires_default_unit === true)
+POST /vehicles, POST /household (optional) → scoped to new unit_id
+```
+
+**`POST /properties/claim`** (post-onboarding only):
+
+- Requires onboarding to be **already complete**; otherwise returns
+  `onboarding_not_completed_use_confirm` (use `POST /properties/confirm` during the wizard).
+- Activates selected pending rows (`status → active`, `claimed_at` set).
+- Sets **`activated_at`** on the claimed rows (same as finalize does for first onboarding).
+- Returns:
+
+```json
+{
+  "items": [{ "id": "...", "status": "active" }],
+  "requires_default_unit": true
+}
+```
+
+`requires_default_unit` is `true` when the contact now has **2+ active units** and no
+`is_default_login` unit is set — prompt for `POST /default-unit`.
+
+### During vs after onboarding
+
+| Endpoint                   | When to use                                         |
+| -------------------------- | --------------------------------------------------- |
+| `POST /properties/confirm` | Step 1 of the wizard (`is_completed: false`)        |
+| `POST /properties/claim`   | After onboarding is complete (`is_completed: true`) |
+
+Both accept one or more `contact_unit_ids`. `confirm` also marks the `select_properties`
+step complete. `claim` does **not** change wizard steps or call `POST /complete` again
+(that endpoint returns `already_completed`).
+
+### Example timeline
+
+```text
+Day 1 — Contact1 + Unit A
+  Full onboarding → POST /complete → Unit A active, activated_at set
+
+Day 30 — Admin assigns Unit B (pending)
+  Contact logs in:
+    GET /status      → is_completed: true
+    GET /properties  → Unit A (active), Unit B (pending)
+    POST /properties/claim { Unit B }
+    POST /default-unit (if requires_default_unit)
+    POST /vehicles / POST /household for Unit B as needed
+```
+
+### Mobile UI recommendation
+
+```text
+On app open:
+  GET /status + GET /properties
+
+If is_completed && any property.status === "pending":
+  → Show claim modal
+  → POST /properties/claim
+  → If requires_default_unit, prompt POST /default-unit
+
+Else if !is_completed:
+  → Normal onboarding wizard (POST /properties/confirm at step 1)
+```
+
+______________________________________________________________________
+
+## 8. How to make common changes
 
 | I want to…                          | Change here                                                                        |
 | ----------------------------------- | ---------------------------------------------------------------------------------- |
@@ -250,9 +488,10 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 7. Tests
+## 9. Tests
 
 - `tests/unit/test_contact_onboarding_service.py` — step derivation, skip rules, finalize gating.
+- `tests/unit/test_contact_units_service.py` — property confirm/claim after onboarding.
 
 Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`
 

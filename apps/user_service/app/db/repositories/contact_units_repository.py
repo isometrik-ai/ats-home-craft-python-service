@@ -38,6 +38,8 @@ WHERE cu.organization_id = $1::uuid
 class ContactUnitsRepository(BaseRepository):
     """Database operations for public.contact_units."""
 
+    # pylint: disable=too-many-public-methods
+
     async def list_by_contact(
         self,
         *,
@@ -197,6 +199,32 @@ class ContactUnitsRepository(BaseRepository):
             ContactUnitStatus.PENDING.value,
         )
         return [dict(row) for row in rows]
+
+    async def activate_units_by_ids(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        contact_unit_ids: list[str],
+    ) -> None:
+        """Set activated_at on specific active contact_unit rows."""
+        if not contact_unit_ids:
+            return
+        await self.db_connection.execute(
+            """
+            UPDATE contact_units
+            SET activated_at = COALESCE(activated_at, now()),
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND contact_id = $2::uuid
+              AND id = ANY($3::uuid[])
+              AND status = $4::contact_unit_status
+            """,
+            organization_id,
+            contact_id,
+            contact_unit_ids,
+            ContactUnitStatus.ACTIVE.value,
+        )
 
     async def set_default_login(
         self,

@@ -68,6 +68,32 @@ class ConfirmPropertiesRequest(BaseModel):
     contact_unit_ids: list[str] = Field(..., min_length=1)
 
 
+class ConfirmedPropertyItem(BaseModel):
+    """One contact_unit row confirmed or claimed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    status: str
+
+
+class ClaimPropertiesRequest(BaseModel):
+    """Claim pending properties after onboarding is complete."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_unit_ids: list[str] = Field(..., min_length=1)
+
+
+class ClaimPropertiesResponse(BaseModel):
+    """Result of claiming one or more post-onboarding properties."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ConfirmedPropertyItem]
+    requires_default_unit: bool = False
+
+
 class CompleteProfileRequest(BaseModel):
     """Complete profile step payload."""
 
