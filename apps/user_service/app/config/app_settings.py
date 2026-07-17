@@ -79,6 +79,11 @@ class ApplicationSettings(BaseSettings):
     two_fa_settings: TwoFASettings = TwoFASettings()
     enrichment_service: EnrichmentServiceSettings = EnrichmentServiceSettings()
     invite_expiry_days: int = config("INVITE_EXPIRY_DAYS", default=7)
+    # Re-enable Supabase auth by setting HOUSEHOLD_INVITATION_BYPASS_SUPABASE_AUTH=false.
+    household_invitation_bypass_supabase_auth: bool = config(
+        "HOUSEHOLD_INVITATION_BYPASS_SUPABASE_AUTH",
+        default=True,
+    )
     datadog_tracing_enabled: bool = config("DATADOG_TRACING_ENABLED", default=False)
     external_service: ExternalServiceSettings = ExternalServiceSettings()
     kafka: KafkaSettings = KafkaSettings()

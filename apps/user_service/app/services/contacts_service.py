@@ -109,6 +109,7 @@ from libs.shared_utils.http_exceptions import (
 from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
     get_isometrik_data_from_settings,
+    login_to_isometrik,
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -441,6 +442,55 @@ class ContactsService:
         digits = re.sub(r"\D", "", combined)
         return digits if digits else ""
 
+    @staticmethod
+    def _isometrik_user_id_from_response(response: dict[str, Any] | None) -> str | None:
+        """Extract Isometrik user id from create/login API payloads."""
+        if not response:
+            return None
+        for key in ("userId", "user_id", "id"):
+            value = response.get(key)
+            if value:
+                return str(value)
+        return None
+
+    async def _create_or_reuse_isometrik_user(
+        self,
+        *,
+        contact_id: str,
+        isometrik_payload: dict[str, Any],
+        isometrik_credentials: dict[str, Any],
+        existing_isometrik_user_id: str | None = None,
+    ) -> str:
+        """Create an Isometrik chat user or reuse one that already exists."""
+        if existing_isometrik_user_id:
+            return existing_isometrik_user_id
+
+        try:
+            isometrik_response = await create_isometrik_user(
+                user=isometrik_payload,
+                isometrik_credentials=isometrik_credentials,
+            )
+        except ConflictException:
+            login_response = await login_to_isometrik(
+                user_id=contact_id,
+                isometrik_credentials=isometrik_credentials,
+            )
+            isometrik_user_id = self._isometrik_user_id_from_response(login_response)
+            if not isometrik_user_id:
+                raise ServiceUnavailableException(
+                    message_key="contacts.errors.isometrik_user_creation_failed",
+                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+                ) from None
+            return isometrik_user_id
+
+        isometrik_user_id = self._isometrik_user_id_from_response(isometrik_response)
+        if not isometrik_user_id:
+            raise ServiceUnavailableException(
+                message_key="contacts.errors.isometrik_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+        return isometrik_user_id
+
     async def _provision_contact_auth_identity(
         self,
         *,
@@ -451,6 +501,7 @@ class ContactsService:
         phone: str | None = None,
         email: str | None = None,
         password: str | None = None,
+        existing_isometrik_user_id: str | None = None,
     ) -> tuple[str, str, str | None]:
         """Create/reuse Supabase auth user and create Isometrik user for a contact.
 
@@ -534,16 +585,13 @@ class ContactsService:
         }
         if email_norm:
             isometrik_payload["email"] = email_norm
-        isometrik_response = await create_isometrik_user(
-            user=isometrik_payload,
+        isometrik_user_id = await self._create_or_reuse_isometrik_user(
+            contact_id=contact_id,
+            isometrik_payload=isometrik_payload,
             isometrik_credentials=isometrik_credentials,
+            existing_isometrik_user_id=existing_isometrik_user_id,
         )
-        if not isometrik_response or not isometrik_response.get("userId"):
-            raise ServiceUnavailableException(
-                message_key="contacts.errors.isometrik_user_creation_failed",
-                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
-            )
-        return user_id, str(isometrik_response["userId"]), created_password
+        return user_id, isometrik_user_id, created_password
 
     async def _sync_contact_auth_phone(self, *, user_id: str, phone: Phone) -> None:
         """Update linked Supabase auth user when the contact primary phone changes."""
@@ -2519,6 +2567,9 @@ class ContactsService:
             (e.get("email") for e in emails if e.get("is_primary")),
             emails[0].get("email") if emails else None,
         )
+        existing_isometrik_user_id = (
+            str(current["isometrik_user_id"]) if current.get("isometrik_user_id") else None
+        )
         user_id, isometrik_user_id, _ = await self._provision_contact_auth_identity(
             contact_id=contact_id,
             phone=self._normalize_full_phone(
@@ -2530,13 +2581,19 @@ class ContactsService:
             last_name=current.get("last_name"),
             prefix=current.get("prefix"),
             password=password,
+            existing_isometrik_user_id=existing_isometrik_user_id,
         )
+        update_data: dict[str, Any] = {}
+        if user_id and str(current.get("user_id") or "") != user_id:
+            update_data["user_id"] = user_id
+        if isometrik_user_id and str(current.get("isometrik_user_id") or "") != isometrik_user_id:
+            update_data["isometrik_user_id"] = isometrik_user_id
+        if not update_data:
+            return current
+
         updated = await self.contacts_repo.update_contact(
             contact_id=contact_id,
             organization_id=org_id,
-            update_data={
-                "user_id": user_id,
-                "isometrik_user_id": isometrik_user_id,
-            },
+            update_data=update_data,
         )
         return updated or current

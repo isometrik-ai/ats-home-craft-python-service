@@ -761,10 +761,11 @@ async def accept_household_invitation(
     data = await service.accept(token=body.token, password=body.password)
 
     session_id = extract_session_id_from_access_token(data.get("access_token"))
-    await warm_session_context_after_auth(
-        session_id=session_id,
-        organization_id=data.get("organization_id"),
-    )
+    if session_id:
+        await warm_session_context_after_auth(
+            session_id=session_id,
+            organization_id=data.get("organization_id"),
+        )
 
     return success_response(
         request=request,
