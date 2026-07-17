@@ -61,11 +61,15 @@ class ContactUnitSummaryResponse(BaseModel):
 
 
 class ConfirmPropertiesRequest(BaseModel):
-    """Confirm selected properties during onboarding step 1."""
+    """Confirm selected properties after the profile step."""
 
     model_config = ConfigDict(extra="forbid")
 
     contact_unit_ids: list[str] = Field(..., min_length=1)
+    default_contact_unit_id: str | None = Field(
+        None,
+        description="Optional default login unit when confirming multiple properties.",
+    )
 
 
 class ConfirmedPropertyItem(BaseModel):
@@ -282,6 +286,7 @@ class CreateHouseholdMemberRequest(BaseModel):
     unit_id: str
     first_name: str = Field(..., max_length=100)
     last_name: str | None = Field(None, max_length=100)
+    gender: ContactGender | None = None
     phones: list[Phone] = Field(..., min_length=1, max_length=20)
     emails: list[Email] | None = Field(None, max_length=20)
     relationship: ContactUnitRelationship
@@ -323,12 +328,38 @@ class SetDefaultUnitRequest(BaseModel):
     contact_unit_id: str
 
 
+class CompleteUnitStepRequest(BaseModel):
+    """Complete a unit-scoped onboarding step (vehicles or household)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_unit_id: str
+
+
 class CompleteStepRequest(BaseModel):
-    """Mark an optional step complete (e.g. vehicles with zero items)."""
+    """Mark an optional step complete (unit-scoped for vehicles/household)."""
 
     model_config = ConfigDict(extra="forbid")
 
     step_key: ContactOnboardingStep
+    contact_unit_id: str | None = Field(
+        None,
+        description="Required when step_key is vehicles or household.",
+    )
+
+    @model_validator(mode="after")
+    def validate_unit_step(self) -> CompleteStepRequest:
+        """Unit-scoped steps require contact_unit_id."""
+        unit_steps = {
+            ContactOnboardingStep.VEHICLES.value,
+            ContactOnboardingStep.HOUSEHOLD.value,
+        }
+        if self.step_key.value in unit_steps and not self.contact_unit_id:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_step_requires_contact_unit",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
 
 class AdminAssignUnitRequest(BaseModel):
@@ -349,12 +380,31 @@ class OnboardingStepResponse(BaseModel):
     completed_at: str | None = None
 
 
+class UnitOnboardingStepResponse(BaseModel):
+    """Single unit-scoped wizard step."""
+
+    step_key: str
+    status: str
+    completed_at: str | None = None
+
+
+class UnitOnboardingProgressResponse(BaseModel):
+    """Per-unit vehicles/household progress."""
+
+    contact_unit_id: str
+    unit_id: str
+    unit_code: str | None = None
+    steps: list[UnitOnboardingStepResponse] = Field(default_factory=list)
+
+
 class OnboardingStatusResponse(BaseModel):
     """Wizard progress."""
 
     setup_current_step: str | None
+    current_contact_unit_id: str | None = None
     is_completed: bool
     steps: list[OnboardingStepResponse]
+    unit_onboarding: list[UnitOnboardingProgressResponse] = Field(default_factory=list)
 
 
 class HouseholdMemberResponse(BaseModel):

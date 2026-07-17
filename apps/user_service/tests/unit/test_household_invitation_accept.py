@@ -55,7 +55,7 @@ async def test_accept_reaccept_skips_side_effects() -> None:
     service.contact_units_repo = MagicMock()
     service.contact_units_repo.activate_contact_unit = AsyncMock()
     service.onboarding_repo = MagicMock()
-    service.onboarding_repo.ensure_steps = AsyncMock()
+    service.onboarding_repo.ensure_profile_step = AsyncMock()
     service.invitations_repo.mark_accepted = AsyncMock()
 
     session = MagicMock(access_token="access-token", refresh_token="refresh-token")
@@ -86,7 +86,7 @@ async def test_accept_reaccept_skips_side_effects() -> None:
     assert result["already_accepted"] is True
     assert result["access_token"] == "access-token"
     service.contact_units_repo.activate_contact_unit.assert_not_awaited()
-    service.onboarding_repo.ensure_steps.assert_not_awaited()
+    service.onboarding_repo.ensure_profile_step.assert_not_awaited()
     service.invitations_repo.mark_accepted.assert_not_awaited()
     mock_sign_in.assert_awaited_once()
 
@@ -111,7 +111,7 @@ async def test_accept_bypass_skips_login() -> None:
     service.contact_units_repo = MagicMock()
     service.contact_units_repo.activate_contact_unit = AsyncMock()
     service.onboarding_repo = MagicMock()
-    service.onboarding_repo.ensure_steps = AsyncMock()
+    service.onboarding_repo.ensure_profile_step = AsyncMock()
     service.invitations_repo.mark_accepted = AsyncMock()
 
     with (

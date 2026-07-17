@@ -15,6 +15,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     ClaimPropertiesResponse,
     CompleteProfileRequest,
     CompleteStepRequest,
+    CompleteUnitStepRequest,
     ConfirmPropertiesRequest,
     CreateHouseholdMemberRequest,
     CreateVehicleRequest,
@@ -95,7 +96,10 @@ async def get_onboarding_status(
         user_context=user_context,
         sb_client=None,
     )
-    data = await service.get_status(contact_id=str(contact["id"]))
+    data = await service.get_status(
+        contact_id=str(contact["id"]),
+        contact_type=str(contact.get("contact_type") or ""),
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.status_retrieved",
@@ -167,6 +171,7 @@ async def confirm_properties(
     data = await units_service.confirm_properties(
         contact_id=str(contact["id"]),
         contact_unit_ids=body.contact_unit_ids,
+        default_contact_unit_id=body.default_contact_unit_id,
     )
     return success_response(
         request=request,
@@ -219,6 +224,37 @@ async def claim_properties(
         message_key="contact_onboarding.success.properties_claimed",
         custom_code=CustomStatusCode.SUCCESS,
         data=payload,
+    )
+
+
+@handle_api_exceptions("get contact profile")
+@router.get(
+    "/profile",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get contact profile for onboarding",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_profile(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return the authenticated contact's profile for the onboarding wizard."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = _service(
+        db_connection=db_connection,
+        user_context=user_context,
+        sb_client=None,
+    )
+    data = await service.get_profile(contact_id=str(contact["id"]))
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.profile_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
     )
 
 
@@ -519,8 +555,9 @@ async def complete_vehicles_step(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
+    body: CompleteUnitStepRequest = Body(...),
 ):
-    """Mark the vehicles onboarding step complete."""
+    """Mark the vehicles onboarding step complete for one unit."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -528,7 +565,10 @@ async def complete_vehicles_step(
         db_connection=db_connection,
         user_context=user_context,
     )
-    await vehicles_service.complete_vehicles_step(contact_id=str(contact["id"]))
+    await vehicles_service.complete_vehicles_step(
+        contact_id=str(contact["id"]),
+        contact_unit_id=body.contact_unit_id,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.step_completed",
@@ -562,6 +602,7 @@ async def skip_onboarding_step(
     await service.skip_step(
         contact_id=str(contact["id"]),
         step_key=body.step_key.value,
+        contact_unit_id=body.contact_unit_id,
     )
     return success_response(
         request=request,
@@ -580,6 +621,10 @@ async def skip_onboarding_step(
 @limiter.limit("100/minute")
 async def list_household(
     request: Request,
+    unit_id: str | None = Query(
+        default=None,
+        description="Filter household members to one unit.",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -592,7 +637,10 @@ async def list_household(
         user_context=user_context,
         sb_client=None,
     )
-    items = await service.list_household(contact_id=str(contact["id"]))
+    items = await service.list_household(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+    )
     return list_response(
         request=request,
         items=items,
@@ -937,8 +985,9 @@ async def complete_household_step(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
+    body: CompleteUnitStepRequest = Body(...),
 ):
-    """Mark the household onboarding step complete."""
+    """Mark the household onboarding step complete for one unit."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -947,7 +996,10 @@ async def complete_household_step(
         user_context=user_context,
         sb_client=None,
     )
-    await service.complete_household_step(contact_id=str(contact["id"]))
+    await service.complete_household_step(
+        contact_id=str(contact["id"]),
+        contact_unit_id=body.contact_unit_id,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.step_completed",

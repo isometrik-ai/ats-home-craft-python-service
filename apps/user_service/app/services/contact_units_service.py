@@ -9,6 +9,9 @@ import asyncpg
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
     ContactOnboardingRepository,
 )
+from apps.user_service.app.db.repositories.contact_unit_onboarding_repository import (
+    ContactUnitOnboardingRepository,
+)
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
@@ -27,6 +30,7 @@ class ContactUnitsService:
         self.user_context = user_context
         self.repo = ContactUnitsRepository(db_connection)
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
+        self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
 
     def _normalize_unit_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a contact_units row to API response shape."""
@@ -90,15 +94,69 @@ class ContactUnitsService:
         *,
         contact_id: str,
         contact_unit_ids: list[str],
+        default_contact_unit_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Confirm selected pending units and complete step 1."""
+        """Confirm selected pending units and complete the properties step."""
         org_id = self.user_context.organization_id
         assert org_id
+        profile_step = await self.onboarding_repo.list_steps(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        profile_status = next(
+            (
+                row.get("status")
+                for row in profile_step
+                if row.get("step_key") == ContactOnboardingStep.COMPLETE_PROFILE.value
+            ),
+            None,
+        )
+        if profile_status not in {"completed", "skipped"}:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.profile_step_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
         updated = await self._confirm_pending_units(
             organization_id=org_id,
             contact_id=contact_id,
             contact_unit_ids=contact_unit_ids,
         )
+        confirmed_ids = [str(row["id"]) for row in updated]
+        await self.unit_onboarding_repo.ensure_steps_for_units(
+            organization_id=org_id,
+            contact_id=contact_id,
+            contact_unit_ids=confirmed_ids,
+        )
+
+        if len(updated) == 1:
+            await self.repo.set_default_login(
+                organization_id=org_id,
+                contact_id=contact_id,
+                contact_unit_id=str(updated[0]["id"]),
+            )
+            await self.onboarding_repo.complete_step(
+                organization_id=org_id,
+                contact_id=contact_id,
+                step_key=ContactOnboardingStep.CHOOSE_UNIT.value,
+            )
+        elif default_contact_unit_id:
+            if default_contact_unit_id not in confirmed_ids:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.contact_unit_not_found",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            await self.repo.set_default_login(
+                organization_id=org_id,
+                contact_id=contact_id,
+                contact_unit_id=default_contact_unit_id,
+            )
+            await self.onboarding_repo.complete_step(
+                organization_id=org_id,
+                contact_id=contact_id,
+                step_key=ContactOnboardingStep.CHOOSE_UNIT.value,
+            )
+
         await self.onboarding_repo.complete_step(
             organization_id=org_id,
             contact_id=contact_id,
@@ -111,7 +169,7 @@ class ContactUnitsService:
             await self.repo.activate_units_by_ids(
                 organization_id=org_id,
                 contact_id=contact_id,
-                contact_unit_ids=[row["id"] for row in updated],
+                contact_unit_ids=confirmed_ids,
             )
         return self._confirmed_items(updated)
 
@@ -138,10 +196,16 @@ class ContactUnitsService:
             contact_id=contact_id,
             contact_unit_ids=contact_unit_ids,
         )
+        confirmed_ids = [str(row["id"]) for row in updated]
+        await self.unit_onboarding_repo.ensure_steps_for_units(
+            organization_id=org_id,
+            contact_id=contact_id,
+            contact_unit_ids=confirmed_ids,
+        )
         await self.repo.activate_units_by_ids(
             organization_id=org_id,
             contact_id=contact_id,
-            contact_unit_ids=[row["id"] for row in updated],
+            contact_unit_ids=confirmed_ids,
         )
 
         active_count = await self.repo.count_active_units(
