@@ -67,6 +67,7 @@ class VehiclesRepository(BaseRepository):
         *,
         organization_id: str,
         contact_id: str,
+        unit_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """List active (non-soft-deleted) vehicles for a contact."""
         rows = await self.db_connection.fetch(
@@ -76,11 +77,13 @@ class VehiclesRepository(BaseRepository):
             FROM vehicles v
             WHERE v.organization_id = $1::uuid
               AND v.contact_id = $2::uuid
+              AND ($3::uuid IS NULL OR v.unit_id = $3::uuid)
               AND {_ACTIVE_VEHICLE_FILTER}
             ORDER BY v.sort_order, v.created_at
             """,
             organization_id,
             contact_id,
+            unit_id,
         )
         return [dict(row) for row in rows]
 
