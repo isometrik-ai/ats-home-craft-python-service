@@ -8,8 +8,12 @@ import asyncpg
 from supabase import AsyncClient
 
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
-    ONBOARDING_STEP_KEYS,
+    CONTACT_LEVEL_STEP_KEYS,
     ContactOnboardingRepository,
+)
+from apps.user_service.app.db.repositories.contact_unit_onboarding_repository import (
+    UNIT_ONBOARDING_STEP_KEYS,
+    ContactUnitOnboardingRepository,
 )
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
@@ -71,6 +75,7 @@ class ContactOnboardingService:
         self.user_context = user_context
         self.supabase_client = supabase_client
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
+        self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
         self.contact_units_repo = ContactUnitsRepository(db_connection)
         self.vehicles_repo = VehiclesRepository(db_connection)
         self.contacts_repo = ContactsRepository(db_connection)
@@ -88,14 +93,36 @@ class ContactOnboardingService:
             supabase_client=supabase_client,
         )
 
-    async def _ensure_onboarding(self, contact_id: str) -> None:
-        """Ensure all wizard steps exist for the contact."""
+    async def _ensure_onboarding(
+        self,
+        contact_id: str,
+        *,
+        contact_type: str | None = None,
+    ) -> None:
+        """Ensure wizard steps exist for the contact (profile-only for Family)."""
         org_id = self.user_context.organization_id
         assert org_id
+        if contact_type is None:
+            contact = await self.contacts_repo.get_contact_details(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
+            contact_type = str(contact.get("contact_type") or "") if contact else ""
+        if contact_type == ContactType.FAMILY.value:
+            await self.onboarding_repo.ensure_profile_step(
+                organization_id=org_id,
+                contact_id=contact_id,
+            )
+            return
         await self.onboarding_repo.ensure_steps(
             organization_id=org_id,
             contact_id=contact_id,
         )
+
+    @staticmethod
+    def _is_family_contact(contact_type: str | None) -> bool:
+        """True when the contact is a household family member."""
+        return contact_type == ContactType.FAMILY.value
 
     def _normalize_step(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a contact_onboarding_steps row to API response shape."""
@@ -105,33 +132,174 @@ class ContactOnboardingService:
             "completed_at": format_iso_datetime(row.get("completed_at")),
         }
 
-    def _derive_current_step(self, steps: list[dict[str, Any]]) -> str | None:
-        """Return the first step that is not completed or skipped."""
-        for step_key in ONBOARDING_STEP_KEYS:
-            match = next((s for s in steps if s.get("step_key") == step_key), None)
-            if match and match.get("status") not in TERMINAL_STEP_STATUSES:
-                return step_key
-        return None
+    @staticmethod
+    def _step_status(steps: list[dict[str, Any]], step_key: str) -> str:
+        """Return the status string for a step key, defaulting to not_started."""
+        match = next((row for row in steps if row.get("step_key") == step_key), None)
+        return str((match or {}).get("status") or SetupStepStatus.NOT_STARTED.value)
 
-    async def get_status(self, *, contact_id: str) -> dict[str, Any]:
+    def _build_unit_onboarding_progress(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Group flat unit step rows into per-unit progress payloads."""
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            contact_unit_id = str(row["contact_unit_id"])
+            bucket = grouped.setdefault(
+                contact_unit_id,
+                {
+                    "contact_unit_id": contact_unit_id,
+                    "unit_id": str(row.get("unit_id") or ""),
+                    "unit_code": row.get("unit_code"),
+                    "steps": [],
+                },
+            )
+            bucket["steps"].append(
+                {
+                    "step_key": row.get("step_key"),
+                    "status": row.get("status"),
+                    "completed_at": format_iso_datetime(row.get("completed_at")),
+                }
+            )
+        return list(grouped.values())
+
+    def _derive_navigation(
+        self,
+        *,
+        contact_steps: list[dict[str, Any]],
+        unit_step_rows: list[dict[str, Any]],
+        active_count: int,
+        has_default: bool,
+    ) -> tuple[str | None, str | None]:
+        """Return (current_step, current_contact_unit_id) for the wizard."""
+        profile_status = self._step_status(
+            contact_steps,
+            ContactOnboardingStep.COMPLETE_PROFILE.value,
+        )
+        if profile_status not in TERMINAL_STEP_STATUSES:
+            return ContactOnboardingStep.COMPLETE_PROFILE.value, None
+
+        select_status = self._step_status(
+            contact_steps,
+            ContactOnboardingStep.SELECT_PROPERTIES.value,
+        )
+        if select_status not in TERMINAL_STEP_STATUSES:
+            return ContactOnboardingStep.SELECT_PROPERTIES.value, None
+
+        grouped = self._build_unit_onboarding_progress(unit_step_rows)
+        for unit in grouped:
+            contact_unit_id = unit["contact_unit_id"]
+            for step_key in UNIT_ONBOARDING_STEP_KEYS:
+                status = self._step_status(unit["steps"], step_key)
+                if status not in TERMINAL_STEP_STATUSES:
+                    return step_key, contact_unit_id
+
+        choose_status = self._step_status(
+            contact_steps,
+            ContactOnboardingStep.CHOOSE_UNIT.value,
+        )
+        if active_count > 1 and not has_default and choose_status not in TERMINAL_STEP_STATUSES:
+            return ContactOnboardingStep.CHOOSE_UNIT.value, None
+
+        review_status = self._step_status(contact_steps, ContactOnboardingStep.REVIEW.value)
+        if review_status not in TERMINAL_STEP_STATUSES:
+            return ContactOnboardingStep.REVIEW.value, None
+        return None, None
+
+    async def get_status(
+        self,
+        *,
+        contact_id: str,
+        contact_type: str | None = None,
+    ) -> dict[str, Any]:
         """Return wizard progress and derived current step."""
-        await self._ensure_onboarding(contact_id)
         org_id = self.user_context.organization_id
         assert org_id
+        if contact_type is None:
+            contact = await self.contacts_repo.get_contact_details(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
+            contact_type = str(contact.get("contact_type") or "") if contact else ""
+
+        await self._ensure_onboarding(contact_id, contact_type=contact_type)
+
+        if self._is_family_contact(contact_type):
+            steps = await self.onboarding_repo.list_profile_step(
+                organization_id=org_id,
+                contact_id=contact_id,
+            )
+            normalized = [self._normalize_step(row) for row in steps]
+            profile_status = self._step_status(
+                steps,
+                ContactOnboardingStep.COMPLETE_PROFILE.value,
+            )
+            is_completed = profile_status in TERMINAL_STEP_STATUSES
+            current_step = None if is_completed else ContactOnboardingStep.COMPLETE_PROFILE.value
+            return {
+                "setup_current_step": current_step,
+                "current_contact_unit_id": None,
+                "is_completed": is_completed,
+                "steps": normalized,
+                "unit_onboarding": [],
+            }
+
         steps = await self.onboarding_repo.list_steps(
             organization_id=org_id,
             contact_id=contact_id,
         )
         normalized = [self._normalize_step(row) for row in steps]
-        is_completed = await self.onboarding_repo.is_wizard_completed(
+        unit_step_rows = await self.unit_onboarding_repo.list_steps_for_contact(
             organization_id=org_id,
             contact_id=contact_id,
         )
+        unit_onboarding = self._build_unit_onboarding_progress(unit_step_rows)
+        active_count = await self.contact_units_repo.count_active_units(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        has_default = await self.contact_units_repo.has_default_login(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        contact_completed = await self.onboarding_repo.is_wizard_completed(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        units_completed = await self.unit_onboarding_repo.all_unit_steps_terminal(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        is_completed = contact_completed and units_completed and active_count > 0
+        current_step, current_contact_unit_id = (
+            (None, None)
+            if is_completed
+            else self._derive_navigation(
+                contact_steps=steps,
+                unit_step_rows=unit_step_rows,
+                active_count=active_count,
+                has_default=has_default,
+            )
+        )
         return {
-            "setup_current_step": None if is_completed else self._derive_current_step(steps),
+            "setup_current_step": current_step,
+            "current_contact_unit_id": current_contact_unit_id,
             "is_completed": is_completed,
             "steps": normalized,
+            "unit_onboarding": unit_onboarding,
         }
+
+    async def get_profile(self, *, contact_id: str) -> dict[str, Any]:
+        """Return the contact profile for the onboarding wizard."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        contacts_service = ContactsService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+            supabase_client=self.supabase_client,
+        )
+        return await contacts_service.get_contact_details(contact_id=contact_id)
 
     @staticmethod
     def _to_update_contact_request(body: CompleteProfileRequest) -> UpdateContactRequest:
@@ -211,13 +379,19 @@ class ContactOnboardingService:
             item["invitation_sent_at"] = format_iso_datetime(row.get("invitation_sent_at"))
         return item
 
-    async def list_household(self, *, contact_id: str) -> list[dict[str, Any]]:
+    async def list_household(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """List family contacts linked to the primary contact's units."""
         org_id = self.user_context.organization_id
         assert org_id
         rows = await self.contact_units_repo.list_household_by_primary(
             organization_id=org_id,
             primary_contact_id=contact_id,
+            unit_id=unit_id,
         )
         return [self._format_household_member(row) for row in rows]
 
@@ -452,6 +626,7 @@ class ContactOnboardingService:
                 portal_access=body.portal_access,
                 first_name=body.first_name,
                 last_name=body.last_name,
+                gender=body.gender,
                 phones=body.phones,
                 emails=body.emails or [],
             ),
@@ -629,25 +804,56 @@ class ContactOnboardingService:
             "contact_deleted": remaining == 0,
         }
 
-    async def complete_household_step(self, *, contact_id: str) -> None:
-        """Mark the household onboarding step complete."""
+    async def complete_household_step(
+        self,
+        *,
+        contact_id: str,
+        contact_unit_id: str,
+    ) -> None:
+        """Mark the household onboarding step complete for one unit."""
         org_id = self.user_context.organization_id
         assert org_id
-        await self.onboarding_repo.complete_step(
+        await self._assert_owned_contact_unit(
+            contact_id=contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        await self.unit_onboarding_repo.complete_step(
             organization_id=org_id,
             contact_id=contact_id,
+            contact_unit_id=contact_unit_id,
             step_key=ContactOnboardingStep.HOUSEHOLD.value,
         )
 
-    async def skip_step(self, *, contact_id: str, step_key: str) -> None:
-        """Skip an optional onboarding step (vehicles or household)."""
+    async def _assert_owned_contact_unit(
+        self,
+        *,
+        contact_id: str,
+        contact_unit_id: str,
+    ) -> None:
+        """Ensure the contact_unit belongs to the onboarding contact."""
         org_id = self.user_context.organization_id
         assert org_id
-        if step_key not in ONBOARDING_STEP_KEYS:
-            raise ValidationException(
-                message_key="contact_onboarding.errors.invalid_step",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
+        row = await self.contact_units_repo.get_owned_by_contact(
+            organization_id=org_id,
+            contact_id=contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.contact_unit_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
+
+    async def skip_step(
+        self,
+        *,
+        contact_id: str,
+        step_key: str,
+        contact_unit_id: str | None = None,
+    ) -> None:
+        """Skip an optional unit-level onboarding step (vehicles or household)."""
+        org_id = self.user_context.organization_id
+        assert org_id
         allowed_skip = {
             ContactOnboardingStep.VEHICLES.value,
             ContactOnboardingStep.HOUSEHOLD.value,
@@ -657,9 +863,19 @@ class ContactOnboardingService:
                 message_key="contact_onboarding.errors.step_not_skippable",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        await self.onboarding_repo.skip_step(
+        if not contact_unit_id:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_step_requires_contact_unit",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        await self._assert_owned_contact_unit(
+            contact_id=contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        await self.unit_onboarding_repo.skip_step(
             organization_id=org_id,
             contact_id=contact_id,
+            contact_unit_id=contact_unit_id,
             step_key=step_key,
         )
 
@@ -683,6 +899,7 @@ class ContactOnboardingService:
             "vehicles": vehicles,
             "household": household,
             "steps": status["steps"],
+            "unit_onboarding": status["unit_onboarding"],
         }
 
     async def complete_onboarding(self, *, contact_id: str) -> dict[str, Any]:
@@ -717,7 +934,7 @@ class ContactOnboardingService:
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
 
-        for step_key in ONBOARDING_STEP_KEYS:
+        for step_key in CONTACT_LEVEL_STEP_KEYS:
             if step_key == ContactOnboardingStep.REVIEW.value:
                 continue
             step = next((s for s in status["steps"] if s["step_key"] == step_key), None)
@@ -727,6 +944,15 @@ class ContactOnboardingService:
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"step_key": step_key},
                 )
+
+        if not await self.unit_onboarding_repo.all_unit_steps_terminal(
+            organization_id=org_id,
+            contact_id=contact_id,
+        ):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_steps_incomplete",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
 
         await self.contact_units_repo.activate_for_contact(
             organization_id=org_id,

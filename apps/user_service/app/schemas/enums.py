@@ -456,8 +456,8 @@ class SetupStepStatus(str, Enum):
 class ContactOnboardingStep(str, Enum):
     """Contact onboarding wizard step keys."""
 
-    SELECT_PROPERTIES = "select_properties"
     COMPLETE_PROFILE = "complete_profile"
+    SELECT_PROPERTIES = "select_properties"
     VEHICLES = "vehicles"
     HOUSEHOLD = "household"
     CHOOSE_UNIT = "choose_unit"

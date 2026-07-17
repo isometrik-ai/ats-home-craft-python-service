@@ -386,7 +386,7 @@ class HouseholdInvitationService:
             organization_id=org_id,
             contact_unit_id=str(invitation["contact_unit_id"]),
         )
-        await self.onboarding_repo.ensure_steps(
+        await self.onboarding_repo.ensure_profile_step(
             organization_id=org_id,
             contact_id=contact_id,
         )

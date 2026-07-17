@@ -381,10 +381,21 @@ class ContactUnitsRepository(BaseRepository):
         *,
         organization_id: str,
         primary_contact_id: str,
+        unit_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Family contacts linked to units the primary contact owns."""
+        args: list[Any] = [
+            organization_id,
+            primary_contact_id,
+            ContactUnitStatus.ACTIVE.value,
+            [ContactUnitStatus.ACTIVE.value, ContactUnitStatus.PENDING.value],
+        ]
+        unit_filter = ""
+        if unit_id:
+            unit_filter = f" AND primary_cu.unit_id = ${len(args) + 1}::uuid"
+            args.append(unit_id)
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT
               cu.id::text AS contact_unit_id,
               cu.unit_id::text AS unit_id,
@@ -415,12 +426,10 @@ class ContactUnitsRepository(BaseRepository):
               AND cu.contact_id != $2::uuid
               AND c.contact_type = 'Family'
               AND cu.status = ANY($4::contact_unit_status[])
+              {unit_filter}
             ORDER BY cu.created_at
             """,
-            organization_id,
-            primary_contact_id,
-            ContactUnitStatus.ACTIVE.value,
-            [ContactUnitStatus.ACTIVE.value, ContactUnitStatus.PENDING.value],
+            *args,
         )
         return [dict(row) for row in rows]
 
