@@ -198,9 +198,23 @@ def _service(
     svc.onboarding_repo = onboarding_repo or _FakeOnboardingRepo()
     svc.unit_onboarding_repo = unit_onboarding_repo or _FakeUnitOnboardingRepo()
     svc.contact_units_repo = contact_units_repo or _FakeContactUnitsRepo()
+    svc.contacts_repo = MagicMock()
+    svc.contacts_repo.get_contact_details = AsyncMock(
+        return_value={"contact_type": ContactType.OWNER.value},
+    )
     svc.contact_units_service = MagicMock()
     svc.vehicles_service = MagicMock()
     return svc
+
+
+def _completed_profile_steps() -> list[dict[str, str]]:
+    """Onboarding step rows with profile completed (for confirm_properties tests)."""
+    return [
+        {
+            "step_key": ContactOnboardingStep.COMPLETE_PROFILE.value,
+            "status": SetupStepStatus.COMPLETED.value,
+        }
+    ]
 
 
 def _terminal_contact_steps() -> list[dict[str, Any]]:
@@ -467,6 +481,7 @@ async def test_confirm_properties_validates_selection_count():
     svc.repo = MagicMock()
     svc.repo.confirm_selection = AsyncMock(return_value=[{"id": "cu-1", "status": "active"}])
     svc.onboarding_repo = MagicMock()
+    svc.onboarding_repo.list_steps = AsyncMock(return_value=_completed_profile_steps())
     svc.unit_onboarding_repo = MagicMock()
 
     with pytest.raises(ValidationException):
