@@ -211,8 +211,14 @@ class HouseholdInvitationService:
 
     async def validate_token(self, *, token: str) -> dict[str, Any]:
         """Return invite details for the acceptance screen."""
+        invitation_row = await self.invitations_repo.get_by_token_hash(hash_token(token))
+        already_accepted = (
+            invitation_row is not None
+            and invitation_row.get("status") == HouseholdInvitationStatus.ACCEPTED.value
+        )
         invitation = self._validate_invitation(
-            await self.invitations_repo.get_by_token_hash(hash_token(token))
+            invitation_row,
+            allow_accepted=True,
         )
         org_id = str(invitation["organization_id"])
         organization = await self.organization_repo.get_organization_by_id(org_id)
@@ -233,6 +239,8 @@ class HouseholdInvitationService:
                 phone_number=str(invitation["phone_number"]),
             ),
             "expires_at": format_iso_datetime(invitation.get("expires_at")),
+            "invitation_status": invitation.get("status"),
+            "already_accepted": already_accepted,
         }
 
     @staticmethod
@@ -240,6 +248,19 @@ class HouseholdInvitationService:
         """Normalize phone for Supabase sign-in (digits only, matches contact provisioning)."""
         combined = f"{phone_isd_code or ''}{phone_number or ''}".strip()
         return "".join(ch for ch in combined if ch.isdigit())
+
+    async def _update_member_password(self, *, user_id: str, password: str) -> None:
+        """Set the Supabase auth password for a provisioned household member."""
+        if not self.supabase_client:
+            raise InternalServerErrorException(
+                message_key="auth.errors.authentication_failed",
+                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+            )
+        await update_password_by_user_id(
+            user_id=user_id,
+            new_password=password,
+            sb_client=self.supabase_client,
+        )
 
     async def _sign_in_provisioned_member(
         self,
@@ -249,17 +270,13 @@ class HouseholdInvitationService:
         password: str,
     ) -> Any:
         """Sign in the household member with phone + password after auth provisioning."""
-        if not self.supabase_client or not self.supabase_anon_client:
+        if not self.supabase_anon_client:
             raise InternalServerErrorException(
                 message_key="auth.errors.authentication_failed",
                 custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
             )
 
-        await update_password_by_user_id(
-            user_id=user_id,
-            new_password=password,
-            sb_client=self.supabase_client,
-        )
+        await self._update_member_password(user_id=user_id, password=password)
 
         try:
             return await login_user_with_phone(
@@ -283,13 +300,113 @@ class HouseholdInvitationService:
                 custom_code=CustomStatusCode.BAD_REQUEST,
             ) from login_error
 
+    @staticmethod
+    def _build_accept_response(
+        *,
+        invitation: dict[str, Any],
+        contact_id: str,
+        org_id: str,
+        phone_isd_code: str,
+        phone_number: str,
+        user_id: str,
+        auth_result: Any | None = None,
+        contact: dict[str, Any] | None = None,
+        already_accepted: bool = False,
+        auth_bypassed: bool = False,
+    ) -> dict[str, Any]:
+        """Build the accept/re-accept API payload."""
+        if auth_bypassed:
+            return {
+                "contact_id": contact_id,
+                "organization_id": org_id,
+                "contact_unit_id": str(invitation["contact_unit_id"]),
+                "member_status": HouseholdMemberStatus.JOINED.value,
+                "invitation_status": HouseholdInvitationStatus.ACCEPTED.value,
+                "already_accepted": already_accepted,
+                "auth_bypassed": True,
+                "phone_masked": mask_phone(
+                    phone_isd_code=phone_isd_code,
+                    phone_number=phone_number,
+                ),
+                "access_token": None,
+                "refresh_token": None,
+                "expires_in": None,
+                "expires_at": None,
+                "user": {
+                    "id": user_id or contact_id,
+                    "email": (contact or {}).get("email"),
+                    "first_name": (contact or {}).get("first_name"),
+                    "last_name": (contact or {}).get("last_name"),
+                    "phone_number": phone_number,
+                    "phone_isd_code": phone_isd_code,
+                },
+            }
+
+        session = auth_result.session
+        user = auth_result.user
+        user_metadata = getattr(user, "user_metadata", {}) or {}
+        return {
+            "contact_id": contact_id,
+            "organization_id": org_id,
+            "contact_unit_id": str(invitation["contact_unit_id"]),
+            "member_status": HouseholdMemberStatus.JOINED.value,
+            "invitation_status": HouseholdInvitationStatus.ACCEPTED.value,
+            "already_accepted": already_accepted,
+            "auth_bypassed": False,
+            "phone_masked": mask_phone(
+                phone_isd_code=phone_isd_code,
+                phone_number=phone_number,
+            ),
+            "access_token": session.access_token,
+            "refresh_token": getattr(session, "refresh_token", None),
+            "expires_in": getattr(session, "expires_in", None),
+            "expires_at": getattr(session, "expires_at", None),
+            "user": {
+                "id": getattr(user, "id", user_id),
+                "email": getattr(user, "email", None),
+                "first_name": user_metadata.get("first_name"),
+                "last_name": user_metadata.get("last_name"),
+                "phone_number": user_metadata.get("phone_number") or phone_number,
+                "phone_isd_code": user_metadata.get("phone_isd_code") or phone_isd_code,
+            },
+        }
+
+    async def _complete_invitation_acceptance(
+        self,
+        *,
+        org_id: str,
+        contact_id: str,
+        invitation: dict[str, Any],
+        already_accepted: bool,
+    ) -> None:
+        """Activate the unit link, seed onboarding, and mark the invitation accepted."""
+        if already_accepted:
+            return
+        await self.contact_units_repo.activate_contact_unit(
+            organization_id=org_id,
+            contact_unit_id=str(invitation["contact_unit_id"]),
+        )
+        await self.onboarding_repo.ensure_steps(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        await self.invitations_repo.mark_accepted(invitation_id=str(invitation["id"]))
+
     async def accept(self, *, token: str, password: str) -> dict[str, Any]:
         """Accept a phone invitation: provision auth, activate unit, seed onboarding, sign in."""
-        invitation = self._validate_invitation(
-            await self.invitations_repo.get_by_token_hash(
-                hash_token(token),
-                for_update=True,
+        invitation_row = await self.invitations_repo.get_by_token_hash(
+            hash_token(token),
+            for_update=True,
+        )
+        if not invitation_row:
+            raise GoneException(
+                message_key="contact_onboarding.errors.invitation_invalid_or_expired",
+                custom_code=CustomStatusCode.GONE,
             )
+
+        already_accepted = invitation_row.get("status") == HouseholdInvitationStatus.ACCEPTED.value
+        invitation = (
+            invitation_row if already_accepted else self._validate_invitation(invitation_row)
         )
         org_id = str(invitation["organization_id"])
         contact_id = str(invitation["contact_id"])
@@ -322,58 +439,49 @@ class HouseholdInvitationService:
             password=password,
         )
         user_id = str(provisioned.get("user_id") or "")
-        if not user_id:
-            raise InternalServerErrorException(
-                message_key="contacts.errors.auth_user_creation_failed",
-                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
-            )
 
-        auth_result = await self._sign_in_provisioned_member(
-            user_id=user_id,
-            phone=login_phone,
-            password=password,
-        )
-        session = auth_result.session
-        user = auth_result.user
-        if not session or not getattr(session, "access_token", None):
-            raise InternalServerErrorException(
-                message_key="auth.errors.authentication_failed",
-                custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        auth_bypassed = app_settings.household_invitation_bypass_supabase_auth
+        auth_result = None
+        if auth_bypassed:
+            if user_id:
+                await self._update_member_password(user_id=user_id, password=password)
+        else:
+            if not user_id:
+                raise InternalServerErrorException(
+                    message_key="contacts.errors.auth_user_creation_failed",
+                    custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+                )
+            auth_result = await self._sign_in_provisioned_member(
+                user_id=user_id,
+                phone=login_phone,
+                password=password,
             )
+            session = auth_result.session
+            if not session or not getattr(session, "access_token", None):
+                raise InternalServerErrorException(
+                    message_key="auth.errors.authentication_failed",
+                    custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+                )
 
-        await self.contact_units_repo.activate_contact_unit(
-            organization_id=org_id,
-            contact_unit_id=str(invitation["contact_unit_id"]),
-        )
-        await self.onboarding_repo.ensure_steps(
-            organization_id=org_id,
+        await self._complete_invitation_acceptance(
+            org_id=org_id,
             contact_id=contact_id,
+            invitation=invitation,
+            already_accepted=already_accepted,
         )
-        await self.invitations_repo.mark_accepted(invitation_id=str(invitation["id"]))
 
-        user_metadata = getattr(user, "user_metadata", {}) or {}
-        return {
-            "contact_id": contact_id,
-            "organization_id": org_id,
-            "contact_unit_id": str(invitation["contact_unit_id"]),
-            "member_status": HouseholdMemberStatus.JOINED.value,
-            "phone_masked": mask_phone(
-                phone_isd_code=phone_isd_code,
-                phone_number=phone_number,
-            ),
-            "access_token": session.access_token,
-            "refresh_token": getattr(session, "refresh_token", None),
-            "expires_in": getattr(session, "expires_in", None),
-            "expires_at": getattr(session, "expires_at", None),
-            "user": {
-                "id": getattr(user, "id", user_id),
-                "email": getattr(user, "email", None),
-                "first_name": user_metadata.get("first_name"),
-                "last_name": user_metadata.get("last_name"),
-                "phone_number": user_metadata.get("phone_number") or phone_number,
-                "phone_isd_code": user_metadata.get("phone_isd_code") or phone_isd_code,
-            },
-        }
+        return self._build_accept_response(
+            invitation=invitation,
+            contact_id=contact_id,
+            org_id=org_id,
+            phone_isd_code=phone_isd_code,
+            phone_number=phone_number,
+            user_id=user_id,
+            auth_result=auth_result,
+            contact=provisioned if isinstance(provisioned, dict) else contact,
+            already_accepted=already_accepted,
+            auth_bypassed=auth_bypassed,
+        )
 
     async def decline(self, *, token: str) -> dict[str, Any]:
         """Decline a phone invitation: mark declined, remove link, delete orphan contact."""
