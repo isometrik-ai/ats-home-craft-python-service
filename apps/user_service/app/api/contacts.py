@@ -35,12 +35,16 @@ from apps.user_service.app.services.activity_service import ActivityService
 from apps.user_service.app.services.client_enrichment_service import (
     require_client_enrichment_enabled,
 )
+from apps.user_service.app.services.contact_onboarding_service import (
+    ContactOnboardingService,
+)
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service import (
     delete_contact_background,
 )
+from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
@@ -778,6 +782,108 @@ async def list_contact_units(
         items=items,
         total=len(items),
         message_key="contacts.success.contact_units_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("list contact vehicles")
+@router.get(
+    "/{contact_id}/vehicles",
+    status_code=http_status.HTTP_200_OK,
+    summary="List vehicles registered by a contact",
+    description=(
+        "Returns vehicles owned by the contact across their assigned units. "
+        "Optional unit_id filter."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_contact_vehicles(
+    request: Request,
+    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
+    unit_id: str | None = Query(
+        default=None,
+        description="Optional unit filter; returns vehicles for that unit only.",
+    ),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """List vehicles registered by a contact (admin)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+    )
+    contacts_service = ContactsService(
+        db_connection=db_connection,
+        user_context=user_context,
+        supabase_client=None,
+    )
+    await contacts_service.get_contact_details(contact_id=contact_id)
+    vehicles_service = VehiclesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    items = await vehicles_service.list_vehicles(
+        contact_id=contact_id,
+        unit_id=unit_id,
+    )
+    return list_response(
+        request=request,
+        items=items,
+        total=len(items),
+        message_key="contacts.success.contact_vehicles_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("list contact household members")
+@router.get(
+    "/{contact_id}/household",
+    status_code=http_status.HTTP_200_OK,
+    summary="List household members for a contact",
+    description=(
+        "Returns family members linked to units the primary contact owns. Optional unit_id filter."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_contact_household(
+    request: Request,
+    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
+    unit_id: str | None = Query(
+        default=None,
+        description="Filter household members to one unit.",
+    ),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """List household members for a primary contact (admin)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+    )
+    contacts_service = ContactsService(
+        db_connection=db_connection,
+        user_context=user_context,
+        supabase_client=None,
+    )
+    await contacts_service.get_contact_details(contact_id=contact_id)
+    onboarding_service = ContactOnboardingService(
+        db_connection=db_connection,
+        user_context=user_context,
+        supabase_client=None,
+    )
+    items = await onboarding_service.list_household(
+        contact_id=contact_id,
+        unit_id=unit_id,
+    )
+    return list_response(
+        request=request,
+        items=items,
+        total=len(items),
+        message_key="contacts.success.contact_household_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
     )
 

@@ -268,7 +268,9 @@
       "contact_updated": "Contact updated successfully.",
       "contact_deleted": "Contact deleted successfully.",
       "contact_enrichment_requested": "Contact enrichment requested successfully.",
-      "contact_units_retrieved": "Contact unit assignments retrieved successfully."
+      "contact_units_retrieved": "Contact unit assignments retrieved successfully.",
+      "contact_vehicles_retrieved": "Contact vehicles retrieved successfully.",
+      "contact_household_retrieved": "Contact household members retrieved successfully."
     }
   },
   "audit_logs": {
