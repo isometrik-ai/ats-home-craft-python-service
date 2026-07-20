@@ -19,6 +19,7 @@ from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
 from apps.user_service.app.schemas.contacts import (
     ContactDetailsResponse,
+    ContactOverviewResponse,
     ContactSummaryResponse,
     CreateContactRequest,
     ListContactsRequest,
@@ -453,6 +454,44 @@ async def search_contacts(
         message_key="contacts.success.contacts_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("get contact overview")
+@router.get(
+    "/overview",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get contact overview",
+    description=(
+        "Returns overview card counts (total, owners, tenants, vendors) for the Contacts registry. "
+        "Optional `status` aligns with the All / Active / Deleted tabs."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_contact_overview(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    status: ClientStatus | None = Query(
+        None,
+        description="Optional contact status filter (active, inactive, prospect, deleted).",
+    ),
+):
+    """Return overview card counts for the Contacts registry dashboard."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+    )
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_contact_overview(status=status.value if status else None)
+    payload = ContactOverviewResponse.model_validate(data).model_dump(exclude_none=True)
+    return success_response(
+        request=request,
+        message_key="contacts.success.overview_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=payload,
     )
 
 

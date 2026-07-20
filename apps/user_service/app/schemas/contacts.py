@@ -520,6 +520,17 @@ class ContactSummaryResponse(BaseModel):
     updated_at: str
 
 
+class ContactOverviewResponse(BaseModel):
+    """Overview card counts for the Contacts registry dashboard."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    total: int = 0
+    owners: int = 0
+    tenants: int = 0
+    vendors: int = 0
+
+
 class ContactDetailsResponse(BaseModel):
     """Contact detail response."""
 
