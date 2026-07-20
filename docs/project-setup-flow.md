@@ -177,8 +177,32 @@ All routes are under `/v1/projects` and require authentication + an org context.
 | POST / GET | `/v1/projects/{project_id}/parking-zones` · DELETE `.../{zone_id}`        | Tower basement zone ranges            |
 | GET        | `/v1/projects/{project_id}/vehicle-requests`                              | Admin: list resident vehicle requests |
 | PATCH      | `/v1/projects/{project_id}/vehicle-requests/{vehicle_id}`                 | Admin: approve/reject + assign slot   |
-| PATCH      | `/v1/projects/{project_id}/site-map/location`                             | Set project lat/lng                   |
-| POST / GET | `/v1/projects/{project_id}/site-map/overlays` · DELETE `.../{overlay_id}` |                                       |
+| PATCH      | `/v1/projects/{project_id}/site-map/location`                             | Set project center lat/lng            |
+| POST / GET | `/v1/projects/{project_id}/site-map/overlays` · DELETE `.../{overlay_id}` | Geo pins for towers, facilities, etc. |
+| POST       | `/v1/projects/{project_id}/steps/site_map/complete`                       | Mark site_map wizard step complete    |
+
+**Site map overlays (Step 9):**
+
+Overlays are **geo pins on a map**, not positions on an uploaded layout image. Migration
+`20260720110000_site_map_overlay_geo_coords.sql` replaced `site_map_media_id` + `x_percent` /
+`y_percent` with `latitude` / `longitude`.
+
+```json
+POST /v1/projects/{project_id}/site-map/overlays
+{
+  "entity_type": "facility",
+  "entity_id": "<uuid>",
+  "latitude": 19.0760,
+  "longitude": 72.8777,
+  "label": "Clubhouse"
+}
+```
+
+- **`PATCH /site-map/location`** — project center (`projects.latitude` / `longitude`).
+- **`POST /site-map/overlays`** — pin a tower, facility, plot config, or the project itself.
+- **`GET /site-map/overlays`** — list pins for the project.
+- **`project_media` with `kind = site_map`** — optional layout file uploads (Step 1); overlays
+  are **not** linked to those files anymore.
 
 **Inventory menu (post-setup):**
 

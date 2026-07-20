@@ -372,6 +372,30 @@ class AdminAssignUnitRequest(BaseModel):
     relationship: ContactUnitRelationship = ContactUnitRelationship.SELF
 
 
+class ContactUnitAssignmentResponse(BaseModel):
+    """One contact_units row with unit display fields (admin or resident list)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    unit_id: str
+    project_id: str
+    contact_id: str
+    code: str = ""
+    unit_label: str | None = None
+    tower_name: str | None = None
+    floor_name: str | None = None
+    config_label: str | None = None
+    status: str
+    is_primary: bool = False
+    is_default_login: bool = False
+    relationship: str = "self"
+    contact_type: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    created_at: str | None = None
+
+
 class OnboardingStepResponse(BaseModel):
     """Single wizard step."""
 

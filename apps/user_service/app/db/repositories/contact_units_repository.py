@@ -24,7 +24,8 @@ SELECT
   uc.display_label AS config_label,
   c.contact_type,
   c.first_name,
-  c.last_name
+  c.last_name,
+  cu.created_at
 FROM contact_units cu
 JOIN units u ON u.id = cu.unit_id
 JOIN contacts c ON c.id = cu.contact_id

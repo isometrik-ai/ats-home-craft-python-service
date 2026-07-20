@@ -17,7 +17,7 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 )
 from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
 from apps.user_service.app.schemas.enums import ContactOnboardingStep, ContactUnitStatus
-from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -51,18 +51,31 @@ class ContactUnitsService:
             "contact_type": row.get("contact_type"),
             "first_name": row.get("first_name"),
             "last_name": row.get("last_name"),
+            "created_at": format_iso_datetime(row.get("created_at")),
         }
 
-    async def list_my_properties(self, *, contact_id: str) -> list[dict[str, Any]]:
-        """List pending and active units assigned to the contact."""
+    async def list_contact_units(
+        self,
+        *,
+        contact_id: str,
+        statuses: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """List unit assignments for a contact (admin: all statuses by default)."""
         org_id = self.user_context.organization_id
         assert org_id
         rows = await self.repo.list_by_contact(
             organization_id=org_id,
             contact_id=contact_id,
-            statuses=[ContactUnitStatus.PENDING.value, ContactUnitStatus.ACTIVE.value],
+            statuses=statuses,
         )
         return [self._normalize_unit_row(row) for row in rows]
+
+    async def list_my_properties(self, *, contact_id: str) -> list[dict[str, Any]]:
+        """List pending and active units assigned to the contact."""
+        return await self.list_contact_units(
+            contact_id=contact_id,
+            statuses=[ContactUnitStatus.PENDING.value, ContactUnitStatus.ACTIVE.value],
+        )
 
     async def _confirm_pending_units(
         self,
