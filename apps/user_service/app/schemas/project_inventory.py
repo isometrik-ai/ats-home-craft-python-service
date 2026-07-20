@@ -254,15 +254,14 @@ class CreateParkingZoneRequest(BaseModel):
 
 
 class CreateSiteMapOverlayRequest(BaseModel):
-    """Create a site map overlay marker."""
+    """Create a site map overlay marker at a geo coordinate."""
 
     model_config = ConfigDict(extra="forbid")
 
-    site_map_media_id: str
     entity_type: str = Field(..., min_length=1)
     entity_id: str
-    x_percent: float = Field(..., ge=0, le=100)
-    y_percent: float = Field(..., ge=0, le=100)
+    latitude: float
+    longitude: float
     label: str | None = None
 
 

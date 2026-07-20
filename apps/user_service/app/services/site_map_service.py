@@ -16,7 +16,7 @@ from apps.user_service.app.schemas.project_inventory import (
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.project_serialization import serialize_row
-from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -59,16 +59,6 @@ class SiteMapService:
     ) -> dict[str, Any]:
         """Create a site map overlay marker."""
         await self.setup_service.ensure_project(project_id=project_id)
-        media_ok = await self.site_map_repo.media_belongs_to_project(
-            organization_id=self._org_id,
-            project_id=project_id,
-            media_id=body.site_map_media_id,
-        )
-        if not media_ok:
-            raise ValidationException(
-                message_key="project_setup.errors.media_not_found",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
         data = body.model_dump()
         data["organization_id"] = self._org_id
         data["project_id"] = project_id
