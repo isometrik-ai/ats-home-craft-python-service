@@ -230,6 +230,20 @@ class TowersRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def get_gate_by_id(self, *, organization_id: str, gate_id: str) -> dict[str, Any] | None:
+        """Fetch a tower gate scoped to the organization."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT *
+            FROM tower_gates
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+            """,
+            organization_id,
+            gate_id,
+        )
+        return dict(row) if row else None
+
     async def delete_gate(self, *, organization_id: str, tower_id: str, gate_id: str) -> bool:
         """Delete a gate."""
         result = await self.db_connection.execute(

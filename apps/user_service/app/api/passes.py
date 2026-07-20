@@ -1,4 +1,4 @@
-"""Visitor passes API."""
+"""Visitor passes API (resident-facing)."""
 
 from __future__ import annotations
 

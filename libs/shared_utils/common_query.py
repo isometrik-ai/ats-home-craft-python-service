@@ -58,6 +58,9 @@ USERS_MANAGEMENT_DELETE = "users_management.delete"
 # "view_system" is intended to mean org-wide (system-level) audit logs visibility.
 AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM = "audit_logs_management.view_system"
 
+VISITOR_MANAGEMENT_VIEW = "visitor_management.view"
+VISITOR_MANAGEMENT_VERIFY = "visitor_management.verify"
+
 DEFAULT_PERMISSIONS = [
     # User Management
     (
@@ -346,6 +349,19 @@ DEFAULT_PERMISSIONS = [
         "Delete Email Templates",
         "Remove email templates",
         "email_templates",
+    ),
+    # visitor logs / gate management
+    (
+        VISITOR_MANAGEMENT_VIEW,
+        "View Visitor Logs",
+        "View visitor logs, overview, and pass details",
+        "visitor_logs",
+    ),
+    (
+        VISITOR_MANAGEMENT_VERIFY,
+        "Verify Visitor Passes",
+        "Verify passes and record check-in/check-out at the gate",
+        "visitor_logs",
     ),
 ]
 
