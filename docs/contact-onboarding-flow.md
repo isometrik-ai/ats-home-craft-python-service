@@ -319,6 +319,22 @@ Step 5  GET  /review                    → aggregate + unit_onboarding progress
 - Unselected pending units **remain pending** and are excluded from vehicle/household
   validation (`unit_not_assigned`) until confirmed.
 
+**Partial property selection:** `contact_unit_ids` is the set the user accepts **in this call**,
+not all assigned units. To finish onboarding for one unit only, confirm just that unit's
+`contact_unit_id` and leave others pending. Pending units do **not** block `POST /complete`.
+
+**Multiple units confirmed in one call:** `POST /complete` requires vehicles + household
+`completed` or `skipped` for **every active (confirmed) unit** (`unit_steps_incomplete` otherwise).
+To finish onboarding before finishing Unit 2 setup, either skip Unit 2's steps:
+
+```json
+POST /steps/skip { "step_key": "vehicles", "contact_unit_id": "<unit2_contact_unit_id>" }
+POST /steps/skip { "step_key": "household", "contact_unit_id": "<unit2_contact_unit_id>" }
+```
+
+or confirm units one at a time across separate `/properties/confirm` calls before calling
+`POST /complete`. After onboarding, claim remaining pending units via `POST /properties/claim`.
+
 ### Unit-scoped vehicles and household
 
 - **Navigation:** `GET /status` returns `unit_onboarding[]` (per-unit step progress) and
@@ -406,6 +422,7 @@ admin assigns another unit later, the **full wizard does not reopen**. The new a
 ### What the admin does
 
 ```
+GET  /v1/contacts/{contact_id}/units              → list all unit assignments (optional ?status=)
 POST /v1/contacts/{contact_id}/units
 { "unit_id": "...", "relationship": "self", "is_primary": false }
 ```

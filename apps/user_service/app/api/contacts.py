@@ -28,6 +28,7 @@ from apps.user_service.app.schemas.enums import (
     ClientStatus,
     CompanyEventType,
     ContactEventType,
+    ContactUnitStatus,
     KafkaTopics,
 )
 from apps.user_service.app.services.activity_service import ActivityService
@@ -726,6 +727,58 @@ async def enrich_contact(
         message_key="contacts.success.contact_enrichment_requested",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_202_ACCEPTED,
+    )
+
+
+@handle_api_exceptions("list contact unit assignments")
+@router.get(
+    "/{contact_id}/units",
+    status_code=http_status.HTTP_200_OK,
+    summary="List units assigned to a contact",
+    description=(
+        "Returns contact_units rows for the contact with unit display fields. "
+        "Optional status filter; omit to return pending, active, and moved_out."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_contact_units(
+    request: Request,
+    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
+    status: ContactUnitStatus | None = Query(
+        default=None,
+        description="Filter by contact_unit status (pending, active, moved_out).",
+    ),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """List all unit assignments for a contact (admin)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+    )
+    contacts_service = ContactsService(
+        db_connection=db_connection,
+        user_context=user_context,
+        supabase_client=None,
+    )
+    await contacts_service.get_contact_details(contact_id=contact_id)
+    units_service = ContactUnitsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    statuses = [status.value] if status else None
+    items = await units_service.list_contact_units(
+        contact_id=contact_id,
+        statuses=statuses,
+    )
+    return list_response(
+        request=request,
+        items=items,
+        total=len(items),
+        message_key="contacts.success.contact_units_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
     )
 
 

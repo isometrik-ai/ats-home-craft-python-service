@@ -44,6 +44,72 @@ def _service(*, onboarding_repo: AsyncMock | None = None) -> ContactUnitsService
 
 
 @pytest.mark.asyncio
+async def test_list_contact_units_returns_all_by_default():
+    """Admin list returns all statuses when no filter is passed."""
+    svc = _service()
+    svc.repo.list_by_contact = AsyncMock(
+        return_value=[
+            {
+                "id": "cu-1",
+                "unit_id": "unit-1",
+                "project_id": "proj-1",
+                "contact_id": "contact-1",
+                "code": "A-101",
+                "status": "active",
+                "is_primary": True,
+                "is_default_login": True,
+                "relationship": "self",
+                "created_at": None,
+            }
+        ]
+    )
+
+    items = await svc.list_contact_units(contact_id="contact-1")
+
+    svc.repo.list_by_contact.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="contact-1",
+        statuses=None,
+    )
+    assert items[0]["id"] == "cu-1"
+    assert items[0]["code"] == "A-101"
+    assert "created_at" in items[0]
+
+
+@pytest.mark.asyncio
+async def test_list_contact_units_filters_by_status():
+    """Admin list can filter to one contact_unit status."""
+    svc = _service()
+    svc.repo.list_by_contact = AsyncMock(return_value=[])
+
+    await svc.list_contact_units(
+        contact_id="contact-1",
+        statuses=["pending"],
+    )
+
+    svc.repo.list_by_contact.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="contact-1",
+        statuses=["pending"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_my_properties_pending_active_only():
+    """Resident property list excludes moved_out units."""
+    svc = _service()
+    svc.repo.list_by_contact = AsyncMock(return_value=[])
+
+    await svc.list_my_properties(contact_id="contact-1")
+
+    svc.repo.list_by_contact.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="contact-1",
+        statuses=["pending", "active"],
+    )
+
+
+@pytest.mark.asyncio
 async def test_claim_properties_requires_completed_onboarding():
     """Claim is rejected when onboarding is not yet complete."""
     svc = _service()
