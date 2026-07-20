@@ -1391,3 +1391,20 @@ class PassListBucket(str, Enum):
     UPCOMING = "upcoming"
     ACTIVE = "active"
     EXPIRED = "expired"
+
+
+class PassEntryMethod(str, Enum):
+    """How a guest was admitted at the gate (Postgres pass_entry_method enum)."""
+
+    QR = "qr"
+    CODE = "code"
+    MANUAL = "manual"
+
+
+class PassAccessStatus(str, Enum):
+    """Gate decision at entry (Postgres pass_access_status enum)."""
+
+    APPROVED = "approved"
+    GRANTED = "granted"
+    EXPIRED = "expired"
+    DENIED = "denied"

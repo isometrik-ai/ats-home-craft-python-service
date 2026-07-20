@@ -676,7 +676,9 @@
       "pass_not_editable": "This pass can no longer be edited or cancelled.",
       "pass_invalid_or_expired": "This pass is invalid or has expired.",
       "max_entries_reached": "This pass has reached the maximum number of entries.",
-      "code_generation_failed": "Unable to generate a unique pass code. Please try again."
+      "code_generation_failed": "Unable to generate a unique pass code. Please try again.",
+      "not_checked_in": "The visitor must be checked in before checking out.",
+      "gate_not_found": "Tower gate not found."
     },
     "success": {
       "pass_created": "Visitor pass created successfully.",
@@ -684,7 +686,22 @@
       "pass_cancelled": "Visitor pass cancelled successfully.",
       "pass_retrieved": "Visitor pass retrieved successfully.",
       "list_retrieved": "Visitor passes retrieved successfully.",
-      "events_retrieved": "Pass timeline retrieved successfully."
+      "events_retrieved": "Pass timeline retrieved successfully.",
+      "verified": "Visitor pass verified successfully.",
+      "checked_in": "Visitor checked in successfully.",
+      "checked_out": "Visitor checked out successfully."
+    }
+  },
+    "visitor_logs": {
+    "errors": {
+      "invalid_month": "The month filter must be in YYYY-MM format.",
+      "invalid_date_range": "Provide start_at and end_at together, with end_at after start_at.",
+      "pass_not_found": "The visitor pass could not be found."
+    },
+    "success": {
+      "list_retrieved": "Visitor logs retrieved successfully.",
+      "overview_retrieved": "Visitor log overview retrieved successfully.",
+      "detail_retrieved": "Visitor log detail retrieved successfully."
     }
   }
 }

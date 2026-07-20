@@ -325,6 +325,7 @@ ______________________________________________________________________
 ## Related
 
 - Design decision & new tables: [ADR 0003 — Visitor passes](./adr/0003-visitor-passes.md)
+- Downstream flow (gate check-in/out + Visitor Logs): [ADR 0004](./adr/0004-pass-validation-gate.md) / [passes-validation-flow.md](./passes-validation-flow.md)
 - Upstream flow (produces active `contact_units`): [contact-onboarding-flow.md](./contact-onboarding-flow.md)
 - Inventory (`units`, `tower_gates`): [project-setup-flow.md](./project-setup-flow.md)
 - Unit-ownership check reused: `ContactUnitsRepository.contact_has_active_unit`

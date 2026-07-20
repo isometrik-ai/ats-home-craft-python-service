@@ -146,3 +146,39 @@ async def test_code_exists_active_lookup():
     query, args = conn.fetchval_calls[0]
     assert "status = $3::pass_status" in query
     assert args == ("org-1", "4821", PassStatus.ACTIVE.value)
+
+
+@pytest.mark.asyncio
+async def test_get_by_code_active_lookup():
+    """Active code lookup filters by organization and active status."""
+    conn = _FakeConn(row={"id": "pass-1", "code": "4821"})
+    repo = PassesRepository(db_connection=conn)
+    row = await repo.get_by_code(organization_id="org-1", code="4821")
+    assert row is not None
+    query, args = conn.fetchrow_calls[0]
+    assert "p.code = $2" in query
+    assert "p.status = $3::pass_status" in query
+    assert args == ("org-1", "4821", PassStatus.ACTIVE.value)
+
+
+@pytest.mark.asyncio
+async def test_increment_entry_count():
+    """Increment entry_count updates the pass row."""
+    conn = _FakeConn(row={"id": "pass-1", "entry_count": 2})
+    repo = PassesRepository(db_connection=conn)
+    row = await repo.increment_entry_count(organization_id="org-1", pass_id="pass-1")
+    assert row["entry_count"] == 2
+    query, _ = conn.fetchrow_calls[0]
+    assert "entry_count = entry_count + 1" in query
+
+
+@pytest.mark.asyncio
+async def test_complete_pass():
+    """Complete sets pass status to completed."""
+    conn = _FakeConn(row={"id": "pass-1", "status": PassStatus.COMPLETED.value})
+    repo = PassesRepository(db_connection=conn)
+    row = await repo.complete(organization_id="org-1", pass_id="pass-1")
+    assert row["status"] == PassStatus.COMPLETED.value
+    query, args = conn.fetchrow_calls[0]
+    assert "status = $3::pass_status" in query
+    assert args[-1] == PassStatus.COMPLETED.value

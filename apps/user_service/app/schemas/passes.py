@@ -80,6 +80,8 @@ class PassEventResponse(BaseModel):
     occurred_at: str | None = None
     notes: str | None = None
     metadata: dict | None = None
+    entry_method: str | None = None
+    access_status: str | None = None
 
 
 class PassResponse(BaseModel):
