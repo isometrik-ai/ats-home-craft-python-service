@@ -285,6 +285,41 @@ Returns raw Typesense hits in the list envelope:
 
 ______________________________________________________________________
 
+## `GET /v1/contacts/counts` — Contact overview counts
+
+Returns overview card counts for the Contacts registry dashboard (Total Contacts, Owners, Tenants, Vendors).
+
+### Query params
+
+- `status` (optional): `active|inactive|prospect|deleted`
+  - omitted — **All** tab: counts all non-deleted contacts
+  - `active` — **Active** tab
+  - `deleted` — **Deleted** tab
+
+### Response payload (`data`)
+
+```json
+{
+  "status": "success",
+  "message": "Contact counts retrieved successfully.",
+  "statusCode": 200,
+  "code": "2000",
+  "data": {
+    "total": 26,
+    "owners": 16,
+    "tenants": 2,
+    "vendors": 8
+  }
+}
+```
+
+Notes:
+
+- Counts are org-scoped aggregates (same RBAC as list/search: `contacts_management.view`).
+- Typed sub-counts (`owners`, `tenants`, `vendors`) are subsets of `total`; contacts with other or null `contact_type` contribute to `total` only.
+
+______________________________________________________________________
+
 ## `GET /v1/contacts/{contact_id}` — Contact details
 
 ### Path params

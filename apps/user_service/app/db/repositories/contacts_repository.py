@@ -11,7 +11,7 @@ from apps.user_service.app.db.repositories.base_repository import (
     BaseRepository,
     rows_with_default_address_data,
 )
-from apps.user_service.app.schemas.enums import ClientStatus
+from apps.user_service.app.schemas.enums import ClientStatus, ContactType
 from apps.user_service.app.utils.common_utils import parse_json_any
 from libs.shared_utils.custom_field_filtering import build_dropdown_jsonb_where
 from libs.shared_utils.http_exceptions import NotFoundException
@@ -1075,6 +1075,47 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         )
         contact_rows = [dict(contact_row) for contact_row in rows]
         return contact_rows, int(total or 0)
+
+    async def get_contact_counts(
+        self,
+        *,
+        organization_id: str,
+        status: str | None,
+    ) -> dict[str, int]:
+        """Return overview card counts grouped by contact_type for an organization."""
+        args: list[Any] = [organization_id]
+        where = ["organization_id = $1::uuid"]
+        if status:
+            where.append("status = $2")
+            args.append(status)
+        else:
+            where.append("status <> $2")
+            args.append(ClientStatus.DELETED.value)
+
+        where_sql = " AND ".join(where)
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT
+              COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE contact_type = ${len(args) + 1}) AS owners,
+              COUNT(*) FILTER (WHERE contact_type = ${len(args) + 2}) AS tenants,
+              COUNT(*) FILTER (WHERE contact_type = ${len(args) + 3}) AS vendors
+            FROM contacts
+            WHERE {where_sql}
+            """,
+            *args,
+            ContactType.OWNER.value,
+            ContactType.TENANT.value,
+            ContactType.VENDOR.value,
+        )
+        if not row:
+            return {"total": 0, "owners": 0, "tenants": 0, "vendors": 0}
+        return {
+            "total": int(row["total"] or 0),
+            "owners": int(row["owners"] or 0),
+            "tenants": int(row["tenants"] or 0),
+            "vendors": int(row["vendors"] or 0),
+        }
 
     async def get_contacts_by_ids(
         self,
