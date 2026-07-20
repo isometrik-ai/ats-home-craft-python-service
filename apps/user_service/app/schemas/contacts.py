@@ -520,7 +520,7 @@ class ContactSummaryResponse(BaseModel):
     updated_at: str
 
 
-class ContactCountsResponse(BaseModel):
+class ContactOverviewResponse(BaseModel):
     """Overview card counts for the Contacts registry dashboard."""
 
     model_config = ConfigDict(extra="ignore")

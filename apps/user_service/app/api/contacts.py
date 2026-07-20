@@ -18,8 +18,8 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
 from apps.user_service.app.schemas.contacts import (
-    ContactCountsResponse,
     ContactDetailsResponse,
+    ContactOverviewResponse,
     ContactSummaryResponse,
     CreateContactRequest,
     ListContactsRequest,
@@ -452,11 +452,11 @@ async def search_contacts(
     )
 
 
-@handle_api_exceptions("get contact counts")
+@handle_api_exceptions("get contact overview")
 @router.get(
-    "/counts",
+    "/overview",
     status_code=http_status.HTTP_200_OK,
-    summary="Get contact overview counts",
+    summary="Get contact overview",
     description=(
         "Returns overview card counts (total, owners, tenants, vendors) for the Contacts registry. "
         "Optional `status` aligns with the All / Active / Deleted tabs."
@@ -464,7 +464,7 @@ async def search_contacts(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
-async def get_contact_counts(
+async def get_contact_overview(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
@@ -480,11 +480,11 @@ async def get_contact_counts(
         permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
-    data = await service.get_contact_counts(status=status.value if status else None)
-    payload = ContactCountsResponse.model_validate(data).model_dump(exclude_none=True)
+    data = await service.get_contact_overview(status=status.value if status else None)
+    payload = ContactOverviewResponse.model_validate(data).model_dump(exclude_none=True)
     return success_response(
         request=request,
-        message_key="contacts.success.counts_retrieved",
+        message_key="contacts.success.overview_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=payload,
     )

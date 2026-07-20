@@ -1,4 +1,4 @@
-"""Unit tests for ContactsService contact counts."""
+"""Unit tests for ContactsService contact overview."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class _FakeContactsRepo:
     """In-memory fake for ContactsRepository."""
 
     def __init__(self):
-        self.counts_result = {
+        self.overview_result = {
             "total": 26,
             "owners": 16,
             "tenants": 2,
@@ -33,10 +33,10 @@ class _FakeContactsRepo:
         }
         self.last_kwargs: dict[str, Any] | None = None
 
-    async def get_contact_counts(self, **kwargs):
-        """Return configured counts and record call kwargs."""
+    async def get_contact_overview(self, **kwargs):
+        """Return configured overview and record call kwargs."""
         self.last_kwargs = kwargs
-        return self.counts_result
+        return self.overview_result
 
 
 def _service(*, contacts_repo: _FakeContactsRepo | None = None) -> ContactsService:
@@ -50,14 +50,14 @@ def _service(*, contacts_repo: _FakeContactsRepo | None = None) -> ContactsServi
 
 
 @pytest.mark.asyncio
-async def test_get_contact_counts_forwards_org_and_status():
+async def test_get_contact_overview_forwards_org_and_status():
     """Service passes organization_id from user context and forwards status."""
     contacts_repo = _FakeContactsRepo()
     svc = _service(contacts_repo=contacts_repo)
 
-    result = await svc.get_contact_counts(status=ClientStatus.ACTIVE.value)
+    result = await svc.get_contact_overview(status=ClientStatus.ACTIVE.value)
 
-    assert result == contacts_repo.counts_result
+    assert result == contacts_repo.overview_result
     assert contacts_repo.last_kwargs == {
         "organization_id": "org-1",
         "status": ClientStatus.ACTIVE.value,
@@ -65,12 +65,12 @@ async def test_get_contact_counts_forwards_org_and_status():
 
 
 @pytest.mark.asyncio
-async def test_get_contact_counts_default_status():
+async def test_get_contact_overview_default_status():
     """Service forwards None status for the All tab."""
     contacts_repo = _FakeContactsRepo()
     svc = _service(contacts_repo=contacts_repo)
 
-    result = await svc.get_contact_counts(status=None)
+    result = await svc.get_contact_overview(status=None)
 
     assert result["total"] == 26
     assert contacts_repo.last_kwargs == {

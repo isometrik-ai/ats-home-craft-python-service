@@ -285,7 +285,7 @@ Returns raw Typesense hits in the list envelope:
 
 ______________________________________________________________________
 
-## `GET /v1/contacts/counts` — Contact overview counts
+## `GET /v1/contacts/overview` — Contact overview
 
 Returns overview card counts for the Contacts registry dashboard (Total Contacts, Owners, Tenants, Vendors).
 
@@ -301,7 +301,7 @@ Returns overview card counts for the Contacts registry dashboard (Total Contacts
 ```json
 {
   "status": "success",
-  "message": "Contact counts retrieved successfully.",
+  "message": "Contact overview retrieved successfully.",
   "statusCode": 200,
   "code": "2000",
   "data": {

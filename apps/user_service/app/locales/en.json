@@ -268,7 +268,7 @@
       "contact_updated": "Contact updated successfully.",
       "contact_deleted": "Contact deleted successfully.",
       "contact_enrichment_requested": "Contact enrichment requested successfully.",
-      "counts_retrieved": "Contact counts retrieved successfully."
+      "overview_retrieved": "Contact overview retrieved successfully."
     }
   },
   "audit_logs": {

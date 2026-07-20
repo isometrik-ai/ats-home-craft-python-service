@@ -1076,7 +1076,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         contact_rows = [dict(contact_row) for contact_row in rows]
         return contact_rows, int(total or 0)
 
-    async def get_contact_counts(
+    async def get_contact_overview(
         self,
         *,
         organization_id: str,

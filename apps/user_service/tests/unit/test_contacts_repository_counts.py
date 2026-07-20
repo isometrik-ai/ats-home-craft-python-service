@@ -1,4 +1,4 @@
-"""Unit tests for ContactsRepository contact counts query."""
+"""Unit tests for ContactsRepository contact overview query."""
 
 from __future__ import annotations
 
@@ -22,13 +22,13 @@ class _FakeConn:
 
 
 @pytest.mark.asyncio
-async def test_get_contact_counts_default_excludes_deleted():
-    """Default counts exclude soft-deleted contacts."""
+async def test_get_contact_overview_default_excludes_deleted():
+    """Default overview excludes soft-deleted contacts."""
     conn = _FakeConn(
         row={"total": 26, "owners": 16, "tenants": 2, "vendors": 8},
     )
     repo = ContactsRepository(db_connection=conn)
-    result = await repo.get_contact_counts(organization_id="org-1", status=None)
+    result = await repo.get_contact_overview(organization_id="org-1", status=None)
 
     assert result == {"total": 26, "owners": 16, "tenants": 2, "vendors": 8}
     query, args = conn.fetchrow_calls[0]
@@ -41,13 +41,13 @@ async def test_get_contact_counts_default_excludes_deleted():
 
 
 @pytest.mark.asyncio
-async def test_get_contact_counts_status_active():
-    """Active tab counts only active contacts."""
+async def test_get_contact_overview_status_active():
+    """Active tab overview counts only active contacts."""
     conn = _FakeConn(
         row={"total": 20, "owners": 14, "tenants": 2, "vendors": 4},
     )
     repo = ContactsRepository(db_connection=conn)
-    result = await repo.get_contact_counts(
+    result = await repo.get_contact_overview(
         organization_id="org-1",
         status=ClientStatus.ACTIVE.value,
     )
@@ -59,13 +59,13 @@ async def test_get_contact_counts_status_active():
 
 
 @pytest.mark.asyncio
-async def test_get_contact_counts_status_deleted():
-    """Deleted tab counts only soft-deleted contacts."""
+async def test_get_contact_overview_status_deleted():
+    """Deleted tab overview counts only soft-deleted contacts."""
     conn = _FakeConn(
         row={"total": 3, "owners": 1, "tenants": 0, "vendors": 2},
     )
     repo = ContactsRepository(db_connection=conn)
-    result = await repo.get_contact_counts(
+    result = await repo.get_contact_overview(
         organization_id="org-1",
         status=ClientStatus.DELETED.value,
     )
@@ -77,9 +77,9 @@ async def test_get_contact_counts_status_deleted():
 
 
 @pytest.mark.asyncio
-async def test_get_contact_counts_empty_row():
+async def test_get_contact_overview_empty_row():
     """Missing row returns zero counts."""
     conn = _FakeConn(row=None)
     repo = ContactsRepository(db_connection=conn)
-    result = await repo.get_contact_counts(organization_id="org-1", status=None)
+    result = await repo.get_contact_overview(organization_id="org-1", status=None)
     assert result == {"total": 0, "owners": 0, "tenants": 0, "vendors": 0}
