@@ -117,6 +117,8 @@ class PassesService:
             "occurred_at": format_iso_datetime(row.get("occurred_at")),
             "notes": row.get("notes"),
             "metadata": metadata or {},
+            "entry_method": row.get("entry_method"),
+            "access_status": row.get("access_status"),
         }
 
     def _normalize_pass(

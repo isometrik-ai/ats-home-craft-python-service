@@ -53,6 +53,54 @@ LEFT JOIN unit_configs uc ON uc.id = u.config_id
 WHERE p.organization_id = $1::uuid
 """
 
+_PASS_GATE_SELECT_SQL = """
+SELECT
+  p.id::text AS id,
+  p.organization_id::text AS organization_id,
+  p.project_id::text AS project_id,
+  p.unit_id::text AS unit_id,
+  u.tower_id::text AS tower_id,
+  p.host_contact_id::text AS host_contact_id,
+  p.pass_type::text AS pass_type,
+  p.guest_name,
+  p.guest_phone_isd_code,
+  p.guest_phone_number,
+  p.visitor_count,
+  p.vehicle_number,
+  p.purpose,
+  p.valid_from,
+  p.valid_until,
+  p.validity_type::text AS validity_type,
+  p.allow_multiple_entries,
+  p.is_private,
+  p.max_entries,
+  p.entry_count,
+  p.status::text AS status,
+  p.code,
+  p.pass_image_path,
+  p.notes,
+  p.created_by_contact_id::text AS created_by_contact_id,
+  p.created_at,
+  p.updated_at,
+  u.code AS unit_code,
+  u.unit_label,
+  t.name AS tower_name,
+  f.display_name AS floor_name,
+  uc.display_label AS config_label,
+  host.first_name AS host_first_name,
+  host.last_name AS host_last_name,
+  creator.first_name AS creator_first_name,
+  creator.last_name AS creator_last_name
+FROM passes p
+JOIN units u ON u.id = p.unit_id
+LEFT JOIN towers t ON t.id = u.tower_id
+LEFT JOIN floors f ON f.id = u.floor_id
+LEFT JOIN unit_configs uc ON uc.id = u.config_id
+JOIN contacts host ON host.id = p.host_contact_id
+JOIN contacts creator ON creator.id = p.created_by_contact_id
+WHERE p.organization_id = $1::uuid
+"""
+
 
 class PassesRepository(BaseRepository):
     """Database operations for public.passes."""
@@ -225,6 +273,87 @@ class PassesRepository(BaseRepository):
             organization_id,
             host_contact_id,
             pass_id,
+        )
+        return dict(row) if row else None
+
+    async def get_by_code(
+        self,
+        *,
+        organization_id: str,
+        code: str,
+    ) -> dict[str, Any] | None:
+        """Fetch an active pass by org-scoped 4-digit code."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            {_PASS_GATE_SELECT_SQL}
+              AND p.code = $2
+              AND p.status = $3::pass_status
+            LIMIT 1
+            """,
+            organization_id,
+            code,
+            PassStatus.ACTIVE.value,
+        )
+        return dict(row) if row else None
+
+    async def get_by_id(
+        self,
+        *,
+        organization_id: str,
+        pass_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch a pass by id within the organization."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            {_PASS_GATE_SELECT_SQL}
+              AND p.id = $2::uuid
+            LIMIT 1
+            """,
+            organization_id,
+            pass_id,
+        )
+        return dict(row) if row else None
+
+    async def increment_entry_count(
+        self,
+        *,
+        organization_id: str,
+        pass_id: str,
+    ) -> dict[str, Any] | None:
+        """Increment entry_count for a pass."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE passes
+            SET entry_count = entry_count + 1,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+            RETURNING id::text AS id, entry_count
+            """,
+            organization_id,
+            pass_id,
+        )
+        return dict(row) if row else None
+
+    async def complete(
+        self,
+        *,
+        organization_id: str,
+        pass_id: str,
+    ) -> dict[str, Any] | None:
+        """Mark a pass as completed."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE passes
+            SET status = $3::pass_status,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+            RETURNING id::text AS id, status::text AS status
+            """,
+            organization_id,
+            pass_id,
+            PassStatus.COMPLETED.value,
         )
         return dict(row) if row else None
 

@@ -22,6 +22,7 @@ from apps.user_service.app.api.external_entity_lists import (
     router as external_entity_lists_router,
 )
 from apps.user_service.app.api.external_leads import router as external_leads_router
+from apps.user_service.app.api.gate_passes import router as gate_passes_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.lead_stages import router as lead_stages_router
 from apps.user_service.app.api.leads import router as leads_router
@@ -43,6 +44,7 @@ from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
 )
+from apps.user_service.app.api.visitor_logs import router as visitor_logs_router
 from apps.user_service.app.api.webhooks import router as webhooks_router
 
 router = APIRouter(prefix="/v1")
@@ -62,7 +64,9 @@ router.include_router(verification_codes_router)
 router.include_router(teams_router)
 router.include_router(contacts_router)
 router.include_router(contact_onboarding_router)
+router.include_router(gate_passes_router)
 router.include_router(passes_router)
+router.include_router(visitor_logs_router)
 router.include_router(custom_fields_router)
 router.include_router(projects_router)
 router.include_router(external_clients_router)
@@ -98,6 +102,7 @@ async def api_status():
             "/contacts",
             "/contact-onboarding",
             "/passes",
+            "/visitor-logs",
             "/custom-fields",
             "/projects",
             "/companies",
