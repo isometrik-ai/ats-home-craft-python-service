@@ -16,7 +16,11 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_service
-from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
+from apps.user_service.app.schemas.contact_onboarding import (
+    AdminAssignUnitRequest,
+    CreateHouseholdMemberRequest,
+    CreateVehicleRequest,
+)
 from apps.user_service.app.schemas.contacts import (
     ContactDetailsResponse,
     ContactOverviewResponse,
@@ -876,6 +880,64 @@ async def list_contact_vehicles(
     )
 
 
+@handle_api_exceptions("create contact vehicle")
+@router.post(
+    "/{contact_id}/vehicles",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Register a vehicle for a contact",
+    description="Admin creates a vehicle linked to one of the contact's assigned units.",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="vehicles",
+    category="CONTACT",
+)
+async def create_contact_vehicle(
+    request: Request,
+    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: CreateVehicleRequest = Body(...),
+):
+    """Register a vehicle for a contact (admin)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+    )
+    request.state.audit_table = "vehicles"
+    request.state.audit_requested_id = contact_id
+    request.state.audit_description = f"Added vehicle for contact: {contact_id}"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+    contacts_service = ContactsService(
+        db_connection=db_connection,
+        user_context=user_context,
+        supabase_client=None,
+    )
+    await contacts_service.get_contact_details(contact_id=contact_id)
+    vehicles_service = VehiclesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await vehicles_service.create_vehicle(contact_id=contact_id, body=body)
+    request.state.raw_audit_new_data = data
+    return success_response(
+        request=request,
+        message_key="contacts.success.contact_vehicle_created",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=data,
+    )
+
+
 @handle_api_exceptions("list contact household members")
 @router.get(
     "/{contact_id}/household",
@@ -924,6 +986,72 @@ async def list_contact_household(
         total=len(items),
         message_key="contacts.success.contact_household_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("add contact household member")
+@router.post(
+    "/{contact_id}/household",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Add a household member for a contact",
+    description=(
+        "Admin adds a family member to a unit owned by the contact. "
+        "Same payload as contact onboarding household create."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contacts",
+    category="CONTACT",
+)
+async def add_contact_household_member(
+    request: Request,
+    contact_id: str = Path(..., description="Contact identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
+    body: CreateHouseholdMemberRequest = Body(...),
+):
+    """Add a household member for a primary contact (admin)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+    )
+    request.state.audit_table = "contacts"
+    request.state.audit_requested_id = contact_id
+    request.state.audit_description = f"Added household member for contact: {contact_id}"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+    contacts_service = ContactsService(
+        db_connection=db_connection,
+        user_context=user_context,
+        supabase_client=sb_client,
+    )
+    await contacts_service.get_contact_details(contact_id=contact_id)
+    onboarding_service = ContactOnboardingService(
+        db_connection=db_connection,
+        user_context=user_context,
+        supabase_client=sb_client,
+    )
+    data = await onboarding_service.add_household_member(
+        primary_contact_id=contact_id,
+        body=body,
+    )
+    request.state.raw_audit_new_data = data
+    return success_response(
+        request=request,
+        message_key="contacts.success.contact_household_member_added",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=data,
     )
 
 
