@@ -48,6 +48,7 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_any,
 )
+from apps.user_service.app.utils.household_invitation_sms import mask_phone
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -347,13 +348,37 @@ class ContactOnboardingService:
         return profile
 
     @staticmethod
+    def _can_resend_household_invitation(
+        *,
+        portal_access: bool,
+        invitation_status: str | None,
+        has_user: bool,
+    ) -> bool:
+        """True when the primary can resend SMS or re-invite after revoke/decline."""
+        if has_user:
+            return False
+        if invitation_status == HouseholdInvitationStatus.PENDING.value:
+            return True
+        if not portal_access and invitation_status in {
+            HouseholdInvitationStatus.CANCELLED.value,
+            HouseholdInvitationStatus.EXPIRED.value,
+            HouseholdInvitationStatus.DECLINED.value,
+        }:
+            return True
+        return False
+
+    @staticmethod
     def _format_household_member(row: dict[str, Any]) -> dict[str, Any]:
         """Map a household member query row to API response shape."""
         portal_access = bool(row.get("portal_access", False))
         unit_link_status = str(row.get("unit_link_status") or ContactUnitStatus.ACTIVE.value)
+        invitation_status = row.get("invitation_status")
+        has_user = bool(row.get("user_id"))
         member_status = HouseholdInvitationService.derive_member_status(
             portal_access=portal_access,
             unit_link_status=unit_link_status,
+            invitation_status=invitation_status,
+            has_user=has_user,
         )
         item: dict[str, Any] = {
             "contact_id": str(row["contact_id"]),
@@ -364,6 +389,12 @@ class ContactOnboardingService:
             "relationship": row.get("relationship"),
             "portal_access": portal_access,
             "member_status": member_status,
+            "invitation_status": invitation_status,
+            "can_resend_invitation": ContactOnboardingService._can_resend_household_invitation(
+                portal_access=portal_access,
+                invitation_status=invitation_status,
+                has_user=has_user,
+            ),
             "phones": parse_json_any(row.get("phones"), default=[]),
             "emails": parse_json_any(row.get("emails"), default=[]),
         }
@@ -683,18 +714,84 @@ class ContactOnboardingService:
         primary_contact_id: str,
         contact_unit_id: str,
     ) -> dict[str, Any]:
-        """Resend a pending portal invitation for a household member."""
+        """Resend a pending invite, or create a fresh one after revoke."""
+        org_id = self.user_context.organization_id
+        assert org_id
+
+        link = await self.contact_units_repo.get_household_link(
+            organization_id=org_id,
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+        )
+        if not link:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.household_member_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
         primary_contact = await ContactsService(
             db_connection=self.db_connection,
             user_context=self.user_context,
             supabase_client=self.supabase_client,
         ).get_contact_details(contact_id=primary_contact_id)
-        return await self.household_invitation_service.resend(
+
+        invitations_repo = self.household_invitation_service.invitations_repo
+        pending_invitation = await invitations_repo.get_pending_by_contact_unit(
+            organization_id=org_id,
+            contact_unit_id=contact_unit_id,
+        )
+        if pending_invitation:
+            return await self.household_invitation_service.resend(
+                primary_contact_id=primary_contact_id,
+                contact_unit_id=contact_unit_id,
+                inviter_first_name=primary_contact.get("first_name"),
+                inviter_last_name=primary_contact.get("last_name"),
+            )
+
+        member_row = await self._load_household_member(
             primary_contact_id=primary_contact_id,
             contact_unit_id=contact_unit_id,
-            inviter_first_name=primary_contact.get("first_name"),
-            inviter_last_name=primary_contact.get("last_name"),
         )
+        if member_row.get("user_id"):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_portal_access_already_enabled",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if bool(member_row.get("portal_access")):
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.invitation_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        await self._apply_household_portal_access_change(
+            primary_contact_id=primary_contact_id,
+            contact_unit_id=contact_unit_id,
+            family_contact_id=str(link["contact_id"]),
+            member_row=member_row,
+            portal_access=True,
+        )
+
+        pending_invitation = await invitations_repo.get_pending_by_contact_unit(
+            organization_id=org_id,
+            contact_unit_id=contact_unit_id,
+        )
+        if not pending_invitation:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.invitation_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return {
+            "invitation_id": str(pending_invitation["id"]),
+            "contact_unit_id": contact_unit_id,
+            "member_status": HouseholdMemberStatus.INVITED.value,
+            "phone_masked": mask_phone(
+                phone_isd_code=str(pending_invitation["phone_isd_code"]),
+                phone_number=str(pending_invitation["phone_number"]),
+            ),
+            "invite_url": HouseholdInvitationService._generate_invite_url(
+                str(pending_invitation["token"])
+            ),
+        }
 
     async def revoke_household_invitation(
         self,

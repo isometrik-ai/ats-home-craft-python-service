@@ -13,6 +13,8 @@ from apps.user_service.app.db.repositories.contact_onboarding_repository import 
 from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
     ContactType,
+    HouseholdInvitationStatus,
+    HouseholdMemberStatus,
     SetupStepStatus,
 )
 from apps.user_service.app.services.contact_onboarding_service import (
@@ -515,3 +517,62 @@ async def test_confirm_properties_requires_profile_step():
             contact_id="contact-1",
             contact_unit_ids=["cu-1"],
         )
+
+
+def _household_row(**overrides: Any) -> dict[str, Any]:
+    """Build a minimal household member DB row for formatter tests."""
+    row = {
+        "contact_id": "family-1",
+        "contact_unit_id": "cu-1",
+        "unit_id": "unit-1",
+        "first_name": "Minaxi",
+        "last_name": "Chaudhari",
+        "relationship": "parent",
+        "portal_access": False,
+        "unit_link_status": "active",
+        "phones": [],
+        "emails": [],
+        "user_id": None,
+        "invitation_status": None,
+        "invitation_token": None,
+        "invitation_expires_at": None,
+        "invitation_sent_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_format_household_member_revoked_invitation():
+    """Revoked invites expose cancelled status and can_resend_invitation."""
+    item = ContactOnboardingService._format_household_member(
+        _household_row(invitation_status=HouseholdInvitationStatus.CANCELLED.value)
+    )
+
+    assert item["member_status"] == HouseholdMemberStatus.REVOKED.value
+    assert item["portal_access"] is False
+    assert item["invitation_status"] == HouseholdInvitationStatus.CANCELLED.value
+    assert item["can_resend_invitation"] is True
+
+
+def test_format_household_member_never_invited():
+    """Members added without portal access have no invitation_status."""
+    item = ContactOnboardingService._format_household_member(_household_row())
+
+    assert item["invitation_status"] is None
+    assert item["can_resend_invitation"] is False
+
+
+def test_format_household_member_pending_invitation():
+    """Pending invites remain invited and allow resend."""
+    item = ContactOnboardingService._format_household_member(
+        _household_row(
+            portal_access=True,
+            unit_link_status="pending",
+            invitation_status=HouseholdInvitationStatus.PENDING.value,
+            invitation_token="secret-token",
+        )
+    )
+
+    assert item["member_status"] == HouseholdMemberStatus.INVITED.value
+    assert item["can_resend_invitation"] is True
+    assert item["invite_url"]

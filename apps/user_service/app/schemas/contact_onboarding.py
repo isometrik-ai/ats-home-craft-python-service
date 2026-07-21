@@ -448,6 +448,7 @@ class HouseholdMemberResponse(BaseModel):
     invitation_sent_at: str | None = None
     invitation_expires_at: str | None = None
     invitation_status: str | None = None
+    can_resend_invitation: bool = False
 
 
 class AcceptHouseholdInvitationRequest(BaseModel):

@@ -81,6 +81,74 @@ class HouseholdInvitationsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def get_by_contact_unit(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the invitation row for a contact_unit link (one row per link)."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT *
+            FROM household_invitations
+            WHERE organization_id = $1::uuid
+              AND contact_unit_id = $2::uuid
+            LIMIT 1
+            """,
+            organization_id,
+            contact_unit_id,
+        )
+        return dict(row) if row else None
+
+    async def reactivate_invitation(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_id: str,
+        invited_by_contact_id: str,
+        phone_isd_code: str,
+        phone_number: str,
+        token: str,
+        token_hash: str,
+        expires_at: Any,
+    ) -> dict[str, Any] | None:
+        """Re-open a cancelled/expired/declined invitation as pending."""
+        reactivatable = [
+            HouseholdInvitationStatus.CANCELLED.value,
+            HouseholdInvitationStatus.EXPIRED.value,
+            HouseholdInvitationStatus.DECLINED.value,
+        ]
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE household_invitations
+            SET status = $6::household_invitation_status,
+                invited_by_contact_id = $3::uuid,
+                phone_isd_code = $4,
+                phone_number = $5,
+                token = $7,
+                token_hash = $8,
+                expires_at = $9,
+                accepted_at = NULL,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND contact_unit_id = $2::uuid
+              AND status = ANY($10::household_invitation_status[])
+            RETURNING *
+            """,
+            organization_id,
+            contact_unit_id,
+            invited_by_contact_id,
+            phone_isd_code,
+            phone_number,
+            HouseholdInvitationStatus.PENDING.value,
+            token,
+            token_hash,
+            expires_at,
+            reactivatable,
+        )
+        return dict(row) if row else None
+
     async def cancel_by_contact_unit(
         self,
         *,
