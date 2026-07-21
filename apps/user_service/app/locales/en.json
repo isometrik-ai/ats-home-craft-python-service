@@ -430,6 +430,7 @@
       "parking_zones_retrieved": "Parking zones retrieved successfully.",
       "parking_zone_deleted": "Parking zone deleted successfully.",
       "overlay_created": "Site map overlay created successfully.",
+      "overlays_created": "Site map overlays created successfully.",
       "overlays_retrieved": "Site map overlays retrieved successfully.",
       "overlay_deleted": "Site map overlay deleted successfully."
     }

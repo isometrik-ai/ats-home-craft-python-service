@@ -91,8 +91,20 @@ class HouseholdInvitationService:
         *,
         portal_access: bool,
         unit_link_status: str,
+        invitation_status: str | None = None,
+        has_user: bool = False,
     ) -> str:
         """Map stored rows to API member_status."""
+        if has_user:
+            return HouseholdMemberStatus.JOINED.value
+        if (
+            portal_access
+            and unit_link_status == "pending"
+            and invitation_status == HouseholdInvitationStatus.PENDING.value
+        ):
+            return HouseholdMemberStatus.INVITED.value
+        if invitation_status == HouseholdInvitationStatus.CANCELLED.value:
+            return HouseholdMemberStatus.REVOKED.value
         if not portal_access:
             return HouseholdMemberStatus.JOINED.value
         if unit_link_status == "pending":
@@ -174,19 +186,51 @@ class HouseholdInvitationService:
 
         token, token_hash = self._generate_token()
         expires_at = datetime.now(timezone.utc) + timedelta(days=app_settings.invite_expiry_days)
-        invitation = await self.invitations_repo.insert_invitation(
-            {
-                "organization_id": org_id,
-                "contact_id": family_contact_id,
-                "contact_unit_id": contact_unit_id,
-                "invited_by_contact_id": primary_contact_id,
-                "phone_isd_code": phone_isd_code,
-                "phone_number": phone_number,
-                "token": token,
-                "token_hash": token_hash,
-                "expires_at": expires_at,
-            }
+        existing = await self.invitations_repo.get_by_contact_unit(
+            organization_id=org_id,
+            contact_unit_id=contact_unit_id,
         )
+        if existing:
+            status = str(existing.get("status") or "")
+            if status == HouseholdInvitationStatus.PENDING.value:
+                raise ConflictException(
+                    message_key="contact_onboarding.errors.household_portal_access_invite_pending",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+            if status == HouseholdInvitationStatus.ACCEPTED.value:
+                raise ConflictException(
+                    message_key="contact_onboarding.errors.invitation_already_accepted",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+            invitation = await self.invitations_repo.reactivate_invitation(
+                organization_id=org_id,
+                contact_unit_id=contact_unit_id,
+                invited_by_contact_id=primary_contact_id,
+                phone_isd_code=phone_isd_code,
+                phone_number=phone_number,
+                token=token,
+                token_hash=token_hash,
+                expires_at=expires_at,
+            )
+            if not invitation:
+                raise NotFoundException(
+                    message_key="contact_onboarding.errors.invitation_not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+        else:
+            invitation = await self.invitations_repo.insert_invitation(
+                {
+                    "organization_id": org_id,
+                    "contact_id": family_contact_id,
+                    "contact_unit_id": contact_unit_id,
+                    "invited_by_contact_id": primary_contact_id,
+                    "phone_isd_code": phone_isd_code,
+                    "phone_number": phone_number,
+                    "token": token,
+                    "token_hash": token_hash,
+                    "expires_at": expires_at,
+                }
+            )
 
         invite_url = self._generate_invite_url(token)
         inviter_name = build_full_name(None, inviter_first_name, inviter_last_name)

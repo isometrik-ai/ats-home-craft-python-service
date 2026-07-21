@@ -165,6 +165,7 @@ class HouseholdMemberStatus(str, Enum):
 
     INVITED = "invited"
     JOINED = "joined"
+    REVOKED = "revoked"
 
 
 class InviteAcceptAuthKind(str, Enum):

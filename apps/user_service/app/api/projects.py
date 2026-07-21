@@ -21,7 +21,7 @@ from apps.user_service.app.schemas.project_inventory import (
     CreateFacilityRequest,
     CreateParkingZoneRequest,
     CreatePlotConfigItemRequest,
-    CreateSiteMapOverlayRequest,
+    CreateSiteMapOverlaysRequest,
     CreateUnitConfigRequest,
     CreateUnitRequest,
     InventorySummaryResponse,
@@ -2332,35 +2332,36 @@ async def update_project_location(
     )
 
 
-@handle_api_exceptions("create site map overlay")
+@handle_api_exceptions("create site map overlays")
 @router.post(
     "/{project_id}/site-map/overlays",
     status_code=http_status.HTTP_201_CREATED,
-    summary="Create a site map overlay",
+    summary="Create site map overlays",
+    description="Create one or more geo overlay markers in a single request.",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
-async def create_site_map_overlay(
+async def create_site_map_overlays(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
-    body: CreateSiteMapOverlayRequest = Body(...),
+    body: CreateSiteMapOverlaysRequest = Body(...),
 ):
-    """Create a site map overlay marker."""
+    """Create site map overlay markers in bulk."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
-    data = await service.create_overlay(project_id=project_id, body=body)
+    items = await service.create_overlays(project_id=project_id, body=body)
     return success_response(
         request=request,
         message_key="project_setup.success.overlay_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
-        data=data,
+        data=items,
     )
 
 

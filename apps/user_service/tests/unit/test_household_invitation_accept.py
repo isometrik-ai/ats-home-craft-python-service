@@ -11,6 +11,7 @@ from apps.user_service.app.schemas.enums import HouseholdInvitationStatus
 from apps.user_service.app.services.household_invitation_service import (
     HouseholdInvitationService,
 )
+from apps.user_service.app.utils.common_utils import UserContext
 
 TOKEN = "test-token"
 CONTACT_ID = "22222222-2222-2222-2222-222222222222"
@@ -153,3 +154,54 @@ async def test_accept_bypass_skips_login() -> None:
     )
     service.contact_units_repo.activate_contact_unit.assert_awaited_once()
     service.invitations_repo.mark_accepted.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reactivate_cancelled_invitation_on_resend() -> None:
+    """Re-invite after revoke updates the existing row instead of inserting."""
+    service = HouseholdInvitationService(
+        db_connection=object(),
+        user_context=UserContext(
+            user_id="user-1",
+            email="owner@example.com",
+            organization_id=ORG_ID,
+        ),
+    )
+    service.invitations_repo = MagicMock()
+    service.invitations_repo.get_by_contact_unit = AsyncMock(
+        return_value={
+            "id": INVITATION_ID,
+            "status": HouseholdInvitationStatus.CANCELLED.value,
+        }
+    )
+    service.invitations_repo.reactivate_invitation = AsyncMock(
+        return_value={
+            "id": INVITATION_ID,
+            "phone_isd_code": "+91",
+            "phone_number": "9112233000",
+            "token": "new-token",
+        }
+    )
+    service.invitations_repo.insert_invitation = AsyncMock()
+
+    with patch.object(
+        HouseholdInvitationService,
+        "_dispatch_sms",
+        new_callable=AsyncMock,
+    ):
+        result = await service.create_and_send(
+            primary_contact_id="primary-1",
+            family_contact_id=CONTACT_ID,
+            contact_unit_id=CONTACT_UNIT_ID,
+            phone_isd_code="+91",
+            phone_number="9112233000",
+            invitee_first_name="Ashya",
+            invitee_last_name="S",
+            inviter_first_name="Owner",
+            inviter_last_name="One",
+        )
+
+    service.invitations_repo.insert_invitation.assert_not_awaited()
+    service.invitations_repo.reactivate_invitation.assert_awaited_once()
+    assert result["invitation_id"] == INVITATION_ID
+    assert "invite_url" in result

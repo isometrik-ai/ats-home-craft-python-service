@@ -7,6 +7,21 @@ from typing import Any
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.enums import ContactUnitStatus
 
+_HOUSEHOLD_INVITATION_LATERAL_JOIN = """
+LEFT JOIN LATERAL (
+  SELECT
+    hi.status,
+    hi.token,
+    hi.expires_at,
+    hi.updated_at
+  FROM household_invitations hi
+  WHERE hi.contact_unit_id = cu.id
+    AND hi.organization_id = cu.organization_id
+  ORDER BY hi.updated_at DESC
+  LIMIT 1
+) hi ON true
+"""
+
 _CONTACT_UNIT_LIST_SQL = """
 SELECT
   cu.id::text AS id,
@@ -418,9 +433,7 @@ class ContactUnitsRepository(BaseRepository):
               ON cu.unit_id = primary_cu.unit_id
              AND cu.organization_id = primary_cu.organization_id
             JOIN contacts c ON c.id = cu.contact_id
-            LEFT JOIN household_invitations hi
-              ON hi.contact_unit_id = cu.id
-             AND hi.organization_id = cu.organization_id
+            {_HOUSEHOLD_INVITATION_LATERAL_JOIN}
             WHERE primary_cu.organization_id = $1::uuid
               AND primary_cu.contact_id = $2::uuid
               AND primary_cu.status = $3::contact_unit_status
@@ -481,7 +494,7 @@ class ContactUnitsRepository(BaseRepository):
     ) -> dict[str, Any] | None:
         """Fetch one household member row visible to the primary contact."""
         row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT
               cu.id::text AS contact_unit_id,
               cu.unit_id::text AS unit_id,
@@ -503,9 +516,7 @@ class ContactUnitsRepository(BaseRepository):
               ON cu.unit_id = primary_cu.unit_id
              AND cu.organization_id = primary_cu.organization_id
             JOIN contacts c ON c.id = cu.contact_id
-            LEFT JOIN household_invitations hi
-              ON hi.contact_unit_id = cu.id
-             AND hi.organization_id = cu.organization_id
+            {_HOUSEHOLD_INVITATION_LATERAL_JOIN}
             WHERE primary_cu.organization_id = $1::uuid
               AND primary_cu.contact_id = $2::uuid
               AND primary_cu.status = $3::contact_unit_status

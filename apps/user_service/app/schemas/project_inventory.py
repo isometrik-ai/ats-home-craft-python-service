@@ -265,6 +265,14 @@ class CreateSiteMapOverlayRequest(BaseModel):
     label: str | None = None
 
 
+class CreateSiteMapOverlaysRequest(BaseModel):
+    """Create one or more site map overlay markers in a single request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[CreateSiteMapOverlayRequest] = Field(..., min_length=1, max_length=200)
+
+
 class UpdateProjectLocationRequest(BaseModel):
     """Patch project lat/lng (site map step)."""
 
