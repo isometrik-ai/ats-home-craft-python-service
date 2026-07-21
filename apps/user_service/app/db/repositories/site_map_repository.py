@@ -10,28 +10,21 @@ from apps.user_service.app.db.repositories.base_repository import BaseRepository
 class SiteMapRepository(BaseRepository):
     """Database operations for public.site_map_overlays."""
 
-    async def insert_overlay(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Insert a site map overlay marker."""
-        row = await self.db_connection.fetchrow(
-            """
-            INSERT INTO site_map_overlays (
-                organization_id, project_id, entity_type,
-                entity_id, latitude, longitude, label
-            )
-            VALUES (
-                $1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7
-            )
-            RETURNING *
-            """,
-            data["organization_id"],
-            data["project_id"],
-            data["entity_type"],
-            data["entity_id"],
-            data["latitude"],
-            data["longitude"],
-            data.get("label"),
+    async def insert_overlays(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Insert multiple site map overlay markers in one statement."""
+        return await self.bulk_insert_returning(
+            table="site_map_overlays",
+            required_columns=[
+                "organization_id",
+                "project_id",
+                "entity_type",
+                "entity_id",
+                "latitude",
+                "longitude",
+            ],
+            optional_columns=["label"],
+            rows=rows,
         )
-        return dict(row)
 
     async def list_overlays(self, *, organization_id: str, project_id: str) -> list[dict[str, Any]]:
         """List overlays for a project."""

@@ -10,7 +10,7 @@ from apps.user_service.app.db.repositories.projects_repository import ProjectsRe
 from apps.user_service.app.db.repositories.site_map_repository import SiteMapRepository
 from apps.user_service.app.schemas.enums import ProjectSetupStep
 from apps.user_service.app.schemas.project_inventory import (
-    CreateSiteMapOverlayRequest,
+    CreateSiteMapOverlaysRequest,
     UpdateProjectLocationRequest,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
@@ -54,16 +54,21 @@ class SiteMapService:
         )
         return serialize_row(updated or {})
 
-    async def create_overlay(
-        self, *, project_id: str, body: CreateSiteMapOverlayRequest
-    ) -> dict[str, Any]:
-        """Create a site map overlay marker."""
+    async def create_overlays(
+        self, *, project_id: str, body: CreateSiteMapOverlaysRequest
+    ) -> list[dict[str, Any]]:
+        """Create site map overlay markers in bulk."""
         await self.setup_service.ensure_project(project_id=project_id)
-        data = body.model_dump()
-        data["organization_id"] = self._org_id
-        data["project_id"] = project_id
-        inserted = await self.site_map_repo.insert_overlay(data)
-        return serialize_row(inserted)
+        rows = [
+            {
+                **item.model_dump(),
+                "organization_id": self._org_id,
+                "project_id": project_id,
+            }
+            for item in body.items
+        ]
+        inserted = await self.site_map_repo.insert_overlays(rows)
+        return [serialize_row(row) for row in inserted]
 
     async def list_overlays(self, *, project_id: str) -> list[dict[str, Any]]:
         """List overlays for a project."""
