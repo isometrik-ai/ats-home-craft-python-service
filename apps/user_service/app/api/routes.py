@@ -26,6 +26,7 @@ from apps.user_service.app.api.gate_passes import router as gate_passes_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.lead_stages import router as lead_stages_router
 from apps.user_service.app.api.leads import router as leads_router
+from apps.user_service.app.api.move_events import router as move_events_router
 from apps.user_service.app.api.organization import router as organization_router
 from apps.user_service.app.api.organization_memory import (
     router as organization_memory_router,
@@ -67,6 +68,7 @@ router.include_router(contact_onboarding_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
 router.include_router(visitor_logs_router)
+router.include_router(move_events_router)
 router.include_router(custom_fields_router)
 router.include_router(projects_router)
 router.include_router(external_clients_router)
@@ -103,6 +105,7 @@ async def api_status():
             "/contact-onboarding",
             "/passes",
             "/visitor-logs",
+            "/move-events",
             "/custom-fields",
             "/projects",
             "/companies",

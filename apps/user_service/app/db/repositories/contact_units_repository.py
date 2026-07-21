@@ -144,6 +144,78 @@ class ContactUnitsRepository(BaseRepository):
         )
         return row is not None
 
+    async def get_by_unit_and_contact(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        contact_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch contact_unit link for a unit+contact regardless of status."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            {_CONTACT_UNIT_LIST_SQL}
+              AND cu.unit_id = $2::uuid
+              AND cu.contact_id = $3::uuid
+            LIMIT 1
+            """,
+            organization_id,
+            unit_id,
+            contact_id,
+        )
+        return dict(row) if row else None
+
+    async def sync_move_in(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_id: str,
+        event_date: Any,
+    ) -> dict[str, Any] | None:
+        """Activate a contact_unit link after a move-in event."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE contact_units
+            SET status = $3::contact_unit_status,
+                activated_at = COALESCE(activated_at, $4::timestamptz),
+                moved_out_at = NULL,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+            RETURNING id::text AS id, status::text AS status
+            """,
+            organization_id,
+            contact_unit_id,
+            ContactUnitStatus.ACTIVE.value,
+            event_date,
+        )
+        return dict(row) if row else None
+
+    async def sync_move_out(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_id: str,
+        event_date: Any,
+    ) -> dict[str, Any] | None:
+        """Mark a contact_unit link moved out after a move-out event."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE contact_units
+            SET status = $3::contact_unit_status,
+                moved_out_at = $4::timestamptz,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+            RETURNING id::text AS id, status::text AS status
+            """,
+            organization_id,
+            contact_unit_id,
+            ContactUnitStatus.MOVED_OUT.value,
+            event_date,
+        )
+        return dict(row) if row else None
+
     async def count_active_units(
         self,
         *,
