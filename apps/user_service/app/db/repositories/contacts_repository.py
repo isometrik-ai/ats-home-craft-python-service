@@ -990,6 +990,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         organization_id: str,
         search: str | None,
         status: str | None,
+        contact_type: str | None = None,
         dropdown_filters: dict[str, list[str]] | None = None,
         page: int,
         page_size: int,
@@ -1002,6 +1003,10 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         if status:
             where.append(f"status = ${next_param_index}")
             args.append(status)
+            next_param_index += 1
+        if contact_type:
+            where.append(f"contact_type = ${next_param_index}")
+            args.append(contact_type)
             next_param_index += 1
         if search:
             name_email_match = (
