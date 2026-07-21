@@ -1052,6 +1052,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               ct.id::text AS id,
               ct.organization_id::text AS organization_id,
               ct.status,
+              ct.contact_type,
               ct.first_name,
               ct.last_name,
               ct.title,
