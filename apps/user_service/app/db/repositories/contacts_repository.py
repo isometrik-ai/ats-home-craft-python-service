@@ -686,7 +686,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         fetched_row = await self.db_connection.fetchrow(
             """
             UPDATE contacts
-            SET status = $3, updated_at = NOW()
+            SET status = $3, user_id = NULL, updated_at = NOW()
             WHERE id = $1::uuid AND organization_id = $2::uuid AND status != $3
             RETURNING *
             """,
