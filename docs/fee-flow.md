@@ -1,19 +1,13 @@
 # Project Fee Configuration Flow — Context & Change Guide
 
-> **Status: Planned / target design.** This flow is **not built yet**. This document is the
-> build guide for **Fee Configuration** (Finance → Settings) in `user_service`, written in the
-> same style as `[project-setup-flow.md](./project-setup-flow.md)` and
-> `[passes-flow.md](./passes-flow.md)`. Schema and architecture rationale live in
-> [ADR 0006](./adr/0006-project-fee-configuration.md).
+> **Status: Built (Phases 1–3).** Admin fee configuration, invoice generation/scheduling, and resident payment APIs are implemented in `user_service`. See implementation files under `app/api/fee_configuration.py`, `fee_invoices.py`, `maintenance_fees.py`.
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **API prefix:** `/v1/projects/{project_id}/fee-configuration`
-- **DB schema:** `ats-home-craft-supabase` (new migrations `2026XXXXXXXXXX_project_fee_`*)
-- **Design decision:** `[docs/adr/0006-project-fee-configuration.md](./adr/0006-project-fee-configuration.md)`
+- **DB schema:** `ats-home-craft-supabase` (new migrations `2026XXXXXXXXXX_project_fee_`\*)
+- **Design decision:** [`docs/adr/0006-project-fee-configuration.md`](./adr/0006-project-fee-configuration.md)
 
----
-
-
+______________________________________________________________________
 
 ## 1. What this flow does
 
@@ -26,16 +20,13 @@ sections:
 Tabs: **Apartments**, **Plots**, **Commercial** — only tabs whose category matches
 `projects.property_types`:
 
-
 | Tab (UI)   | `property_types` | `project_fee_rates.unit_config_kind` |
 | ---------- | ---------------- | ------------------------------------ |
 | Apartments | `residential`    | `apartment`                          |
 | Commercial | `commercial`     | `commercial`                         |
 | Plots      | `plots`          | `plot`                               |
 
-
 Per tab (independent rate rows; other sections are global):
-
 
 | Field                    | Control                        | Notes                                                       |
 | ------------------------ | ------------------------------ | ----------------------------------------------------------- |
@@ -45,11 +36,9 @@ Per tab (independent rate rows; other sections are global):
 | After X days             | Number input (when applicable) | `start_offset_days` when trigger = `after_days`             |
 | Minimum fee (floor)      | Currency input                 | `minimum_fee_minor`; `0` = no minimum                       |
 
-
 Helper preview: *"e.g. 1,500 sq ft unit = ₹3,000 / month"* — computed on read from rate + sample area.
 
 ### 1.2 Retry & reminder settings (global)
-
 
 | Field                   | UI values (examples) |
 | ----------------------- | -------------------- |
@@ -57,7 +46,6 @@ Helper preview: *"e.g. 1,500 sq ft unit = ₹3,000 / month"* — computed on rea
 | Days between each retry | 1, 2, 3, 7 days      |
 | Number of reminders     | 0–3 reminders        |
 | Days between reminders  | 1, 2, 3, 7 days      |
-
 
 **Reminder logic (derived, not stored):**
 
@@ -70,16 +58,13 @@ by `reminder_interval_days`. Delivery channel: **email + in-app notification** (
 
 ### 1.3 When all retries are done (global)
 
-
 | Option                   | Enum value                 |
 | ------------------------ | -------------------------- |
 | Escalate to billing team | `escalate_to_billing_team` |
 
-
 Billing team receives a notification to follow up manually with the owner.
 
 ### 1.4 Billing cycle (global)
-
 
 | Option         | Enum value       | Description                            |
 | -------------- | ---------------- | -------------------------------------- |
@@ -87,12 +72,9 @@ Billing team receives a notification to follow up manually with the owner.
 | Financial year | `financial_year` | April – March (India standard)         |
 | Pro-rata       | `pro_rata`       | Billed from each unit's fee start date |
 
-
 Reflected on the future **Fee Management** page (invoice list — Phase 2).
 
----
-
-
+______________________________________________________________________
 
 ## 2. Relationship to existing flows
 
@@ -115,7 +97,6 @@ Unit detail / Fee Management UI
   financials.base_fee_monthly, outstanding_amount (Phase 3)
 ```
 
-
 | Existing artifact                             | Role in fee flow                                   |
 | --------------------------------------------- | -------------------------------------------------- |
 | `projects.property_types`                     | Determines required rate tabs                      |
@@ -126,10 +107,7 @@ Unit detail / Fee Management UI
 | `contact_units.activated_at`                  | Anchor for `onboarding_date` start trigger         |
 | `units_service` → `financials.*`              | Placeholders until Phase 3 populates from invoices |
 
-
----
-
-
+______________________________________________________________________
 
 ## 3. Architecture (layers)
 
@@ -139,10 +117,7 @@ Same 3-layer FastAPI pattern:
 HTTP → API router → Service (business rules) → Repository (SQL) → Postgres
 ```
 
-
-
 ### File map (to create)
-
 
 | Concern                           | File                                                         |
 | --------------------------------- | ------------------------------------------------------------ |
@@ -156,38 +131,28 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 | Enums (mirror Postgres)           | `app/schemas/enums.py`                                       |
 | i18n messages                     | `app/locales/en.json` (`fee_configuration.*`)                |
 
-
 Phase 2 additions: `maintenance_fee_invoices_repository.py`, `fee_invoice_service.py`,
 `fee_scheduler_service.py` (or external worker).
 
----
-
-
+______________________________________________________________________
 
 ## 4. Data model
 
 Phase 1 tables (full column reference in [ADR 0006](./adr/0006-project-fee-configuration.md)):
-
 
 | Table                  | Purpose                                             |
 | ---------------------- | --------------------------------------------------- |
 | `project_fee_settings` | One row per project — global policy + billing cycle |
 | `project_fee_rates`    | Per `unit_config_kind` rate, frequency, trigger     |
 
-
 Phase 2 tables (invoice lifecycle):
-
 
 | Table                            | Purpose                                  |
 | -------------------------------- | ---------------------------------------- |
 | `maintenance_fee_invoices`       | Generated charge per unit per period     |
 | `maintenance_fee_invoice_events` | Reminders, payment attempts, escalations |
 
-
-
-
 ### Fee start triggers
-
 
 | Trigger value         | Anchor used                    | Backend source                           |
 | --------------------- | ------------------------------ | ---------------------------------------- |
@@ -196,9 +161,6 @@ Phase 2 tables (invoice lifecycle):
 | `first_of_next_month` | 1st day of month after anchor  | Computed from anchor                     |
 | `after_one_year`      | Anchor + 365/366 days          | Computed from anchor                     |
 | `after_days`          | Anchor + `start_offset_days`   | Requires `start_offset_days` on rate row |
-
-
-
 
 ### Fee calculation (preview + invoice generation)
 
@@ -211,24 +173,18 @@ period_minor = apply_billing_frequency(raw_minor, rate.billing_frequency)
 charge_minor = max(period_minor, rate.minimum_fee_minor)
 ```
 
----
-
-
+______________________________________________________________________
 
 ## 5. API catalog (Phase 1)
 
 All routes require authentication + org context. RBAC:
 `FINANCE_MANAGEMENT_VIEW` (reads), `FINANCE_MANAGEMENT_EDIT` (writes).
 
-
 | Method | Path                                                  | Purpose                                      |
 | ------ | ----------------------------------------------------- | -------------------------------------------- |
 | GET    | `/v1/projects/{project_id}/fee-configuration`         | Full config: settings + all rate rows + tabs |
 | PUT    | `/v1/projects/{project_id}/fee-configuration`         | Upsert settings + rates (atomic transaction) |
 | GET    | `/v1/projects/{project_id}/fee-configuration/preview` | Sample calculation for a unit or area        |
-
-
-
 
 ### Example: `GET /v1/projects/{project_id}/fee-configuration`
 
@@ -274,8 +230,6 @@ All routes require authentication + org context. RBAC:
 
 > API responses expose **major currency units** (₹) for UI; DB stores **minor units** (paise).
 
-
-
 ### Example: `PUT /v1/projects/{project_id}/fee-configuration`
 
 **Request:** settings object + `rates[]` array (one entry per applicable tab the admin filled in).
@@ -283,13 +237,11 @@ All routes require authentication + org context. RBAC:
 **Behavior:**
 
 1. Ensure project exists and belongs to org.
-2. Validate each rate row's `unit_config_kind` is applicable for `projects.property_types`.
-3. Validate `start_offset_days` when `fee_start_trigger = after_days`.
-4. Upsert `project_fee_settings` + `project_fee_rates` in one transaction.
-5. Set `is_configured = true` when all **required** tabs have rate rows.
-6. Audit log under category `FINANCE` / table `project_fee_settings`.
-
-
+1. Validate each rate row's `unit_config_kind` is applicable for `projects.property_types`.
+1. Validate `start_offset_days` when `fee_start_trigger = after_days`.
+1. Upsert `project_fee_settings` + `project_fee_rates` in one transaction.
+1. Set `is_configured = true` when all **required** tabs have rate rows.
+1. Audit log under category `FINANCE` / table `project_fee_settings`.
 
 ### Example: `GET .../fee-configuration/preview`
 
@@ -297,9 +249,7 @@ Query params: `unit_config_kind`, optional `unit_id` OR `area` + `measurement_un
 
 Returns computed fee for the sample without persisting.
 
----
-
-
+______________________________________________________________________
 
 ## 6. Business rules & gating
 
@@ -307,19 +257,17 @@ Enforced in `fee_configuration_service.py`:
 
 - **Project must exist:** 404 `fee_configuration.errors.project_not_found`.
 - **Tab applicability:** reject rate rows for kinds not in project's `property_types`
-(`fee_configuration.errors.rate_tab_not_applicable`).
+  (`fee_configuration.errors.rate_tab_not_applicable`).
 - **Complete configuration:** `is_configured` is false until every required tab has a rate row.
 - **Offset days:** required and `> 0` when trigger is `after_days`
-(`fee_configuration.errors.start_offset_required`).
+  (`fee_configuration.errors.start_offset_required`).
 - **Possession warning:** allow save with `possession_date` trigger even if
-`projects.possession_date` is NULL — return a `warnings.possession_date_missing` flag on GET;
-invoice generator skips those units in Phase 2.
+  `projects.possession_date` is NULL — return a `warnings.possession_date_missing` flag on GET;
+  invoice generator skips those units in Phase 2.
 - **Onboarding trigger:** units without a primary owner `activated_at` are not billable until
-onboarding completes (Phase 2 scheduler behavior).
+  onboarding completes (Phase 2 scheduler behavior).
 - **Minimum fee:** `minimum_fee_minor >= 0`; `0` means no floor.
 - **Retry/reminder bounds:** match UI dropdowns (retry 0–4, intervals ∈ {1,2,3,7}).
-
-
 
 ### Reminder schedule (Phase 2 worker)
 
@@ -344,12 +292,9 @@ for attempt in 1..retry_count:
 When `retry_attempts >= retry_count` and still unpaid → `status = escalated`,
 `exhausted_retry_action` applied, `maintenance_fee_invoice_events` row `escalated`.
 
----
-
-
+______________________________________________________________________
 
 ## 7. Screen → API mapping (from Figma)
-
 
 | UI section / control                | API field / endpoint                       |
 | ----------------------------------- | ------------------------------------------ |
@@ -368,30 +313,24 @@ When `retry_attempts >= retry_count` and still unpaid → `status = escalated`,
 | Save changes                        | `PUT /fee-configuration`                   |
 | Cancel                              | Client discards draft — no API call        |
 
-
 Property type selection (project setup Step 1) determines `applicable_tabs` in GET response — not
 re-edited on this screen.
 
----
-
-
+______________________________________________________________________
 
 ## 8. Cross-cutting conventions
 
 - **Auth & org scope:** every query filters by `organization_id`.
 - **RBAC:** `FINANCE_MANAGEMENT_VIEW` / `FINANCE_MANAGEMENT_EDIT` (new codes — see ADR 0006).
-- **Responses:** `success_response` / i18n keys under `fee_configuration.`*.
+- **Responses:** `success_response` / i18n keys under `fee_configuration.`\*.
 - **Writes:** `db_uow` transaction for PUT (settings + rates together).
 - **Auditing:** `@audit_api_call` on PUT (`table_name` = `project_fee_settings`, category `FINANCE`).
 - **Money:** convert major ↔ minor at API boundary; never store floats in Postgres.
 - **Enums:** Python enums mirror Postgres; repositories cast explicitly.
 
----
-
-
+______________________________________________________________________
 
 ## 9. Error keys (add under `fee_configuration.errors.*`)
-
 
 | Key                                                 | When                                           |
 | --------------------------------------------------- | ---------------------------------------------- |
@@ -402,60 +341,46 @@ re-edited on this screen.
 | `fee_configuration.errors.invalid_retry_count`      | Outside (2,3,4,5)                              |
 | `fee_configuration.errors.invalid_interval`         | Interval not in {1,2,3,7}                      |
 
-
----
-
-
+______________________________________________________________________
 
 ## 10. Implementation phases
 
-
-
 ### Phase 1 — Fee configuration (this UI)
 
-- [ ] Supabase migrations: enums + `project_fee_settings` + `project_fee_rates`
-- [ ] Enums in `schemas/enums.py`
-- [ ] `FeeConfigurationService` + repositories
-- [ ] `GET` / `PUT` / `preview` endpoints
-- [ ] Seed `FINANCE_MANAGEMENT_*` RBAC codes
-- [ ] Unit tests: tab applicability, offset validation, preview math, configured flag
-
-
+- [x] Supabase migrations: enums + `project_fee_settings` + `project_fee_rates`
+- [x] Enums in `schemas/enums.py`
+- [x] `FeeConfigurationService` + repositories
+- [x] `GET` / `PUT` / `preview` endpoints
+- [x] Seed `FINANCE_MANAGEMENT_*` RBAC codes
+- [x] Unit tests: tab applicability, offset validation, preview math, configured flag
 
 ### Phase 2 — Invoice generation & automation
 
-- [ ] Migrations: `maintenance_fee_invoices` + `maintenance_fee_invoice_events`
-- [ ] Scheduler: generate invoices from config + unit area + start triggers
-- [ ] Reminder worker (email + in-app)
-- [ ] Retry worker + escalation queue for billing team
-- [ ] Fee Management list API (admin)
-
-
+- [x] Migrations: `maintenance_fee_invoices` + `maintenance_fee_invoice_events`
+- [x] Scheduler: generate invoices from config + unit area + start triggers
+- [x] Reminder worker (events recorded; notification delivery follow-up)
+- [x] Retry worker + escalation queue for billing team
+- [x] Fee Management list API (admin)
 
 ### Phase 3 — Resident payments & unit financials
 
-- [ ] Payment PSP integration + webhooks
-- [ ] Populate `units/{id}/detail` → `financials.base_fee_monthly`, `outstanding_amount`
-- [ ] Resident invoice list + pay flow (contact-scoped routes)
+- [x] Payment recording API (PSP webhooks — follow-up)
+- [x] Populate `units/{id}/detail` → `financials.base_fee_monthly`, `outstanding_amount`
+- [x] Resident invoice list + pay flow (contact-scoped routes)
 
----
-
-
+______________________________________________________________________
 
 ## 11. Tests
 
 - `tests/unit/test_fee_configuration_service.py` — tab gating, validation, `is_configured` logic.
 - `tests/unit/test_fee_calculation_service.py` — area resolution, frequency, minimum floor, preview.
-- `tests/unit/test_fee_configuration_repository.py` — upsert SQL.
+- `tests/unit/test_fee_invoice_service.py` — payment recording guards
 
 Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`
 
----
-
-
+______________________________________________________________________
 
 ## 12. How to make common changes
-
 
 | I want to…                     | Change here                                                  |
 | ------------------------------ | ------------------------------------------------------------ |
@@ -468,10 +393,7 @@ Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`
 | Wire unit detail financials    | `units_service.py` + invoice aggregation query (Phase 3)     |
 | Add an endpoint                | `api/fee_configuration.py` → service → repository            |
 
-
----
-
-
+______________________________________________________________________
 
 ## Related
 
@@ -479,4 +401,3 @@ Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`
 - Upstream inventory: [project-setup-flow.md](./project-setup-flow.md)
 - Onboarding date anchor: [contact-onboarding-flow.md](./contact-onboarding-flow.md)
 - Schema conventions: `ats-home-craft-supabase/docs/project-setup-schema.md`
-

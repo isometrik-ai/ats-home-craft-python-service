@@ -11,7 +11,7 @@ ADRs capture significant design choices, the context behind them, and their cons
 | [0003](./0003-visitor-passes.md)                     | Visitor passes — schema and backend model             | Accepted (Phase 1) |
 | [0004](./0004-pass-validation-gate.md)               | Pass validation — gate check-in/out and visitor logs  | Proposed           |
 | [0005](./0005-move-events.md)                        | Move events — move-in / move-out records              | Accepted           |
-| [0006](./0006-project-fee-configuration.md)          | Project fee configuration — schema and backend model  | Proposed           |
+| [0006](./0006-project-fee-configuration.md)          | Project fee configuration — schema and backend model  | Accepted           |
 
 ## Format
 

@@ -1428,3 +1428,67 @@ class MoveEventListBucket(str, Enum):
 
     MOVE_IN = "move_in"
     MOVE_OUT = "move_out"
+
+
+# ============================================================================
+# FEE CONFIGURATION ENUMS — mirror Postgres project_fee enums
+# ============================================================================
+
+
+class BillingFrequency(str, Enum):
+    """Maintenance fee billing frequency (Postgres billing_frequency enum)."""
+
+    MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+    HALF_YEARLY = "half_yearly"
+    ANNUALLY = "annually"
+
+
+class FeeStartTrigger(str, Enum):
+    """When unit maintenance billing starts (Postgres fee_start_trigger enum)."""
+
+    ONBOARDING_DATE = "onboarding_date"
+    POSSESSION_DATE = "possession_date"
+    FIRST_OF_NEXT_MONTH = "first_of_next_month"
+    AFTER_ONE_YEAR = "after_one_year"
+    AFTER_DAYS = "after_days"
+
+
+class BillingCycleType(str, Enum):
+    """Project billing cycle alignment (Postgres billing_cycle_type enum)."""
+
+    CALENDAR_YEAR = "calendar_year"
+    FINANCIAL_YEAR = "financial_year"
+    PRO_RATA = "pro_rata"
+
+
+class ExhaustedRetryAction(str, Enum):
+    """Action after payment retries are exhausted."""
+
+    ESCALATE_TO_BILLING_TEAM = "escalate_to_billing_team"
+
+
+class MaintenanceFeeInvoiceStatus(str, Enum):
+    """Maintenance fee invoice status (Postgres maintenance_fee_invoice_status enum)."""
+
+    DRAFT = "draft"
+    ISSUED = "issued"
+    PAID = "paid"
+    PARTIALLY_PAID = "partially_paid"
+    OVERDUE = "overdue"
+    FAILED = "failed"
+    ESCALATED = "escalated"
+    CANCELLED = "cancelled"
+
+
+class MaintenanceFeeInvoiceEventType(str, Enum):
+    """Maintenance fee invoice timeline events."""
+
+    ISSUED = "issued"
+    REMINDER_SENT = "reminder_sent"
+    PAYMENT_ATTEMPTED = "payment_attempted"
+    PAYMENT_SUCCEEDED = "payment_succeeded"
+    PAYMENT_FAILED = "payment_failed"
+    RETRY_SCHEDULED = "retry_scheduled"
+    ESCALATED = "escalated"
+    CANCELLED = "cancelled"

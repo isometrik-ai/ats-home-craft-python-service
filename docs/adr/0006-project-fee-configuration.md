@@ -1,19 +1,15 @@
 # ADR 0006: Project fee configuration — schema and backend model
 
-
 |                  |                                                                                                                                                 |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                                        |
+| **Status**       | Accepted (Phase 1–3 implemented)                                                                                                                |
 | **Date**         | 2026-07-20                                                                                                                                      |
 | **Authors**      | Home Craft platform team                                                                                                                        |
 | **Depends on**   | Project setup (`[project-setup-flow.md](../project-setup-flow.md)`), contact onboarding ([ADR 0001](./0001-resident-onboarding.md))             |
 | **Related docs** | [fee-flow.md](../fee-flow.md) (flow & change guide), `[project-setup-schema.md](../../../ats-home-craft-supabase/docs/project-setup-schema.md)` |
 | **Migrations**   | `2026XXXXXXXXXX_project_fee_enums.sql`, `2026XXXXXXXXXX_project_fee_tables.sql` (to be created in `ats-home-craft-supabase`)                    |
 
-
----
-
-
+______________________________________________________________________
 
 ## Context
 
@@ -21,22 +17,22 @@ Community admins need to configure **maintenance fees** for a project before bil
 **Fee Configuration** screen (Finance → Settings) lets an admin set:
 
 1. **Per property-category rates** — Apartments / Plots / Commercial tabs (only tabs matching
-  `projects.property_types`: residential → Apartments, plots → Plots, commercial → Commercial).
+   `projects.property_types`: residential → Apartments, plots → Plots, commercial → Commercial).
    Each tab defines a **rate per unit area**, **billing frequency**, **fee start trigger**, and
    optional **minimum fee floor**.
-2. **Global retry & reminder policy** — failed payment retries, pre-due reminders (email + in-app).
-3. **Escalation policy** — what happens when retries are exhausted (currently: escalate to billing
-  team).
-4. **Billing cycle alignment** — calendar year, financial year (Apr–Mar), or pro-rata per unit.
+1. **Global retry & reminder policy** — failed payment retries, pre-due reminders (email + in-app).
+1. **Escalation policy** — what happens when retries are exhausted (currently: escalate to billing
+   team).
+1. **Billing cycle alignment** — calendar year, financial year (Apr–Mar), or pro-rata per unit.
 
 This mirrors the platform's existing flows:
 
 - **Project Setup (admin)** creates inventory (`projects`, `units`, `unit_configs`) and selects
-`property_types`.
+  `property_types`.
 - **Contact Onboarding (resident)** links owners to units via `contact_units` and sets
-`activated_at` on finalize.
+  `activated_at` on finalize.
 - **Fee Configuration (admin)** — this ADR — defines how maintenance fees are calculated and
-collected for that project.
+  collected for that project.
 
 Today, `GET /v1/projects/{project_id}/units/{unit_id}/detail` returns
 `financials.base_fee_monthly` and `financials.outstanding_amount` as `null` placeholders until
@@ -48,33 +44,27 @@ Constraints (same as prior ADRs):
 
 - Multi-tenancy via `organization_id` on every new table.
 - Project scope via `project_id` on all fee tables (denormalized where a row also references
-`units`).
+  `units`).
 - Admin routes use org-member RBAC (`FINANCE_MANAGEMENT_*` — new codes, see below); resident
-payment routes are a follow-up.
+  payment routes are a follow-up.
 - Money stored in **minor units** (`bigint`) with `currency text DEFAULT 'INR'` (see
-`project-setup-schema.md` conventions).
+  `project-setup-schema.md` conventions).
 - Area rates reference `measurement_unit`; stored amounts are always computed from the unit's
-area in the configured unit (backend normalizes using `projects.primary_measurement_unit` and
-config overrides).
+  area in the configured unit (backend normalizes using `projects.primary_measurement_unit` and
+  config overrides).
 - RLS enabled on new tables; **policies deferred** (backend uses `service_role`), matching earlier
-phases.
+  phases.
 
----
-
-
+______________________________________________________________________
 
 ## Decision
 
-
-
 ### 1. Split configuration into two tables: global settings + per-category rates
-
 
 | Table                  | Cardinality              | Purpose                                                                     |
 | ---------------------- | ------------------------ | --------------------------------------------------------------------------- |
 | `project_fee_settings` | **1 row per project**    | Retry/reminder policy, escalation, billing cycle, currency, configured flag |
 | `project_fee_rates`    | **0–3 rows per project** | Rate, frequency, start trigger, minimum floor **per** `unit_config_kind`    |
-
 
 > **Why two tables:** the UI explicitly states "Set a separate rate for apartments. Other settings
 > below apply to all property types." Global policy belongs on the project row; category-specific
@@ -84,15 +74,11 @@ phases.
 Only rate tabs whose `unit_config_kind` maps to a selected `property_types` value are **required**
 before fee configuration is considered complete:
 
-
 | `property_types` contains | Required `project_fee_rates.unit_config_kind` |
 | ------------------------- | --------------------------------------------- |
 | `residential`             | `apartment`                                   |
 | `commercial`              | `commercial`                                  |
 | `plots`                   | `plot`                                        |
-
-
-
 
 ### 2. Fee amount formula (stored rate → computed charge)
 
@@ -108,10 +94,10 @@ charge = max(period_amount, minimum_fee_minor)
 ```
 
 - `rate_amount_minor_per_unit` is the admin-entered "₹ X / sq ft" value converted to minor units
-(paise).
+  (paise).
 - `minimum_fee_minor` is the floor (`0` = no minimum).
 - `resolve_unit_area_sqft` reuses the same logic as `units_service.resolve_carpet_area_sqft`
-(apartment `area_sqft`, commercial `carpet_area_sqft`, plot `size_sqft` on `plot_config_items`).
+  (apartment `area_sqft`, commercial `carpet_area_sqft`, plot `size_sqft` on `plot_config_items`).
 
 Preview helper text in the UI ("e.g. 1,500 sq ft unit = ₹3,000 / month") is computed server-side
 on read — not persisted.
@@ -119,7 +105,6 @@ on read — not persisted.
 ### 3. Fee start trigger (when a unit begins billing)
 
 Enum `fee_start_trigger` on each `project_fee_rates` row:
-
 
 | Value                 | Anchor date source                                              |
 | --------------------- | --------------------------------------------------------------- |
@@ -129,7 +114,6 @@ Enum `fee_start_trigger` on each `project_fee_rates` row:
 | `after_one_year`      | Anchor + 1 calendar year                                        |
 | `after_days`          | Anchor + `start_offset_days` (requires `start_offset_days > 0`) |
 
-
 For `onboarding_date`, if no primary owner has `activated_at` yet, the unit is **not billable**
 (scheduler skips until onboarding completes). For `possession_date`, if `projects.possession_date`
 is NULL, configuration save is allowed but invoice generation must skip with a logged reason.
@@ -137,19 +121,15 @@ is NULL, configuration save is allowed but invoice generation must skip with a l
 > **Unit-level possession** is not in the schema today. If product later needs per-unit possession,
 > add `units.possession_date` in a follow-up migration — do not block Phase 1 on it.
 
-
-
 ### 4. Billing cycle (period alignment)
 
 Enum `billing_cycle_type` on `project_fee_settings`:
-
 
 | Value            | Behavior                                                       |
 | ---------------- | -------------------------------------------------------------- |
 | `calendar_year`  | Periods align Jan–Dec across all units                         |
 | `financial_year` | Periods align Apr–Mar (India standard)                         |
 | `pro_rata`       | Each unit's periods start from its computed **fee start date** |
-
 
 `billing_frequency` on each rate row (`monthly`, `quarterly`, `half_yearly`, `annually`) defines
 the **length of each charge** within the chosen cycle. Pro-rata may produce a partial first period
@@ -158,7 +138,6 @@ when a unit's start date falls mid-cycle.
 ### 5. Retry, reminder, and escalation policy
 
 Stored on `project_fee_settings` (global):
-
 
 | Field                      | UI control                | Notes                                                          |
 | -------------------------- | ------------------------- | -------------------------------------------------------------- |
@@ -169,19 +148,16 @@ Stored on `project_fee_settings` (global):
 | `first_reminder_lead_days` | *(derived, not stored)*   | `reminder_count * reminder_interval_days` days before due date |
 | `exhausted_retry_action`   | When all retries are done | Currently only `escalate_to_billing_team`                      |
 
-
 Reminder delivery (email + in-app) and payment retry execution are **Phase 2 workers** — Phase 1
 only persists the policy. The UI note ("First reminder goes out N days before due date") matches
 the derived formula above.
 
 ### 6. Invoice + operational tables (Phase 2)
 
-
 | Table                            | Purpose                                                                |
 | -------------------------------- | ---------------------------------------------------------------------- |
 | `maintenance_fee_invoices`       | One row per unit per billing period: amount, due date, status          |
 | `maintenance_fee_invoice_events` | Append-only: reminder_sent, payment_attempted, paid, failed, escalated |
-
 
 Invoice `status` (`maintenance_fee_invoice_status`): `draft`, `issued`, `paid`, `partially_paid`,
 `overdue`, `failed`, `escalated`, `cancelled`.
@@ -245,27 +221,21 @@ introduce a parallel property-type enum.
 
 New permission codes (seed in `common_query.py` with other `*_MANAGEMENT_*` codes):
 
-
 | Code                       | Purpose                                      |
 | -------------------------- | -------------------------------------------- |
 | `FINANCE_MANAGEMENT_VIEW`  | Read fee configuration + invoices            |
 | `FINANCE_MANAGEMENT_EDIT`  | Create/update fee configuration              |
 | `FINANCE_MANAGEMENT_ADMIN` | Escalation queue, manual overrides (Phase 2) |
 
-
 Community admins with `PROJECTS_MANAGEMENT_EDIT` alone do **not** automatically get finance edit;
 Finance is a separate module in the UI breadcrumb.
 
----
-
-
+______________________________________________________________________
 
 ## New tables (what's needed)
 
 > DDL below is the **intended shape** for Supabase migrations. Follow conventions from
 > `project-setup-schema.md` (org FK, `set_updated_at` trigger, RLS enabled).
-
-
 
 ### Enums
 
@@ -294,10 +264,7 @@ CREATE TYPE public.maintenance_fee_invoice_event_type AS ENUM (
 -- Optional: ALTER TYPE public.measurement_unit ADD VALUE 'sq_yard';
 ```
 
-
-
 ### `project_fee_settings`
-
 
 | Column                   | Type                            | Notes                                                |
 | ------------------------ | ------------------------------- | ---------------------------------------------------- |
@@ -317,11 +284,9 @@ CREATE TYPE public.maintenance_fee_invoice_event_type AS ENUM (
 | `created_at`             | timestamptz NOT NULL            | `now()`                                              |
 | `updated_at`             | timestamptz NOT NULL            | `now()`                                              |
 
-
 Suggested index: `(organization_id, project_id)`.
 
 ### `project_fee_rates`
-
 
 | Column                       | Type                       | Notes                                           |
 | ---------------------------- | -------------------------- | ----------------------------------------------- |
@@ -338,13 +303,11 @@ Suggested index: `(organization_id, project_id)`.
 | `created_at`                 | timestamptz NOT NULL       | `now()`                                         |
 | `updated_at`                 | timestamptz NOT NULL       | `now()`                                         |
 
-
 Unique: `(project_id, unit_config_kind)`.
 
 CHECK constraint: `(fee_start_trigger <> 'after_days') OR (start_offset_days IS NOT NULL AND start_offset_days > 0)`.
 
 ### `maintenance_fee_invoices` (Phase 2)
-
 
 | Column              | Type                           | Notes                                           |
 | ------------------- | ------------------------------ | ----------------------------------------------- |
@@ -372,7 +335,6 @@ CHECK constraint: `(fee_start_trigger <> 'after_days') OR (start_offset_days IS 
 | `created_at`        | timestamptz NOT NULL           | `now()`                                         |
 | `updated_at`        | timestamptz NOT NULL           | `now()`                                         |
 
-
 Unique: `(unit_id, period_start, period_end)` among non-cancelled rows (partial index
 `WHERE status <> 'cancelled'`).
 
@@ -380,7 +342,6 @@ Suggested indexes: `(organization_id, project_id, status, due_date)`,
 `(organization_id, unit_id, period_start DESC)`.
 
 ### `maintenance_fee_invoice_events` (Phase 2)
-
 
 | Column            | Type                               | Notes                                           |
 | ----------------- | ---------------------------------- | ----------------------------------------------- |
@@ -394,11 +355,9 @@ Suggested indexes: `(organization_id, project_id, status, due_date)`,
 | `metadata`        | jsonb NOT NULL                     | default `'{}'`                                  |
 | `created_at`      | timestamptz NOT NULL               | `now()`                                         |
 
-
 Suggested index: `(organization_id, invoice_id, occurred_at)`.
 
 ### Tables reused (not created)
-
 
 | Table               | Used for                                                        |
 | ------------------- | --------------------------------------------------------------- |
@@ -409,14 +368,9 @@ Suggested index: `(organization_id, invoice_id, occurred_at)`.
 | `contact_units`     | `activated_at` for onboarding-date trigger; invoice owner link  |
 | `contacts`          | owner display on invoices / escalation queue                    |
 
-
----
-
-
+______________________________________________________________________
 
 ## Consequences
-
-
 
 ### Positive
 
@@ -425,38 +379,31 @@ Suggested index: `(organization_id, invoice_id, occurred_at)`.
 - **Reuses inventory** — area and property category come from existing project-setup tables.
 - **Extensible** — `maintenance_fee_invoice_events` supports reminders, retries, and escalation audit trail.
 - **Unit detail ready** — Phase 2 can populate `financials.base_fee_monthly` and
-`financials.outstanding_amount` from `maintenance_fee_invoices`.
-
-
+  `financials.outstanding_amount` from `maintenance_fee_invoices`.
 
 ### Negative / trade-offs
 
 - **Project-level possession** — `possession_date` trigger uses `projects.possession_date`, not
-per-unit dates. Document limitation until `units.possession_date` exists.
+  per-unit dates. Document limitation until `units.possession_date` exists.
 - **Measurement unit gap** — DB enum lacks `sq_yard`; needs migration or UI restriction.
 - **No payment PSP in scope** — retry logic models attempts/events; actual charge API is follow-up.
 - **Scheduler required** — invoice generation, reminders, and retries need background jobs (cron/worker).
 - **Denormalization** — `organization_id` / `project_id` on child rows must match parent FKs
-(backend-enforced, same as `contact_units` / `vehicles`).
-
-
+  (backend-enforced, same as `contact_units` / `vehicles`).
 
 ### Follow-ups
 
 1. **Phase 1 implementation** — see [fee-flow.md](../fee-flow.md) (config API, validation, preview).
-2. **Phase 2** — invoice generator, reminder/retry workers, escalation queue for billing team.
-3. **Phase 3** — resident payment UI, PSP webhooks, populate unit `financials` on detail API.
-4. Add RLS policies keyed on `organization_id` + finance role.
-5. Optional Kafka events (`fees.invoice_issued`, `fees.escalated`) for notifications.
-6. Extend `measurement_unit` with `sq_yard` if confirmed by product.
-7. Per-unit `possession_date` if communities need it.
+1. **Phase 2** — invoice generator, reminder/retry workers, escalation queue for billing team.
+1. **Phase 3** — resident payment UI, PSP webhooks, populate unit `financials` on detail API.
+1. Add RLS policies keyed on `organization_id` + finance role.
+1. Optional Kafka events (`fees.invoice_issued`, `fees.escalated`) for notifications.
+1. Extend `measurement_unit` with `sq_yard` if confirmed by product.
+1. Per-unit `possession_date` if communities need it.
 
----
-
-
+______________________________________________________________________
 
 ## Alternatives considered
-
 
 | Alternative                                      | Why rejected                                                                  |
 | ------------------------------------------------ | ----------------------------------------------------------------------------- |
@@ -466,10 +413,7 @@ per-unit dates. Document limitation until `units.possession_date` exists.
 | Reuse CRM `billing_preferences` on contacts      | Wrong domain — maintenance fees are project-scoped, not contact CRM prefs     |
 | Skip invoice tables in ADR                       | Retry/reminder UI implies operational tables; defining them now avoids rework |
 
-
----
-
-
+______________________________________________________________________
 
 ## References
 
@@ -478,4 +422,3 @@ per-unit dates. Document limitation until `units.possession_date` exists.
 - Onboarding date anchor: `[contact-onboarding-flow.md](../contact-onboarding-flow.md)`
 - Unit detail financial placeholders: `apps/user_service/app/services/units_service.py`
 - Money conventions: `[project-setup-schema.md](../../../ats-home-craft-supabase/docs/project-setup-schema.md)`
-
