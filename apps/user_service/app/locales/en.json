@@ -708,5 +708,21 @@
       "overview_retrieved": "Visitor log overview retrieved successfully.",
       "detail_retrieved": "Visitor log detail retrieved successfully."
     }
+  },
+  "move_events": {
+    "errors": {
+      "move_event_not_found": "The move event could not be found.",
+      "unit_not_found": "The unit could not be found.",
+      "contact_not_found": "The contact could not be found.",
+      "not_currently_occupying": "The contact is not currently occupying this unit.",
+      "invalid_fee": "The move fee must be zero or greater."
+    },
+    "success": {
+      "created": "Move event recorded successfully.",
+      "updated": "Move event updated successfully.",
+      "deleted": "Move event voided successfully.",
+      "list_retrieved": "Move events retrieved successfully.",
+      "detail_retrieved": "Move event details retrieved successfully."
+    }
   }
 }

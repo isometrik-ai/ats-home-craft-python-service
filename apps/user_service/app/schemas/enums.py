@@ -1409,3 +1409,22 @@ class PassAccessStatus(str, Enum):
     GRANTED = "granted"
     EXPIRED = "expired"
     DENIED = "denied"
+
+
+# ============================================================================
+# MOVE EVENTS ENUMS — mirror Postgres move_events enums
+# ============================================================================
+
+
+class MoveEventType(str, Enum):
+    """Move event type (Postgres move_event_type enum)."""
+
+    MOVE_IN = "move_in"
+    MOVE_OUT = "move_out"
+
+
+class MoveEventListBucket(str, Enum):
+    """List filter buckets for GET /move-events (omit = All)."""
+
+    MOVE_IN = "move_in"
+    MOVE_OUT = "move_out"
