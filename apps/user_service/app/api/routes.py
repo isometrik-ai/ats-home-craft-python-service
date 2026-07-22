@@ -22,10 +22,15 @@ from apps.user_service.app.api.external_entity_lists import (
     router as external_entity_lists_router,
 )
 from apps.user_service.app.api.external_leads import router as external_leads_router
+from apps.user_service.app.api.fee_configuration import (
+    router as fee_configuration_router,
+)
+from apps.user_service.app.api.fee_invoices import router as fee_invoices_router
 from apps.user_service.app.api.gate_passes import router as gate_passes_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.lead_stages import router as lead_stages_router
 from apps.user_service.app.api.leads import router as leads_router
+from apps.user_service.app.api.maintenance_fees import router as maintenance_fees_router
 from apps.user_service.app.api.move_events import router as move_events_router
 from apps.user_service.app.api.organization import router as organization_router
 from apps.user_service.app.api.organization_memory import (
@@ -71,6 +76,9 @@ router.include_router(visitor_logs_router)
 router.include_router(move_events_router)
 router.include_router(custom_fields_router)
 router.include_router(projects_router)
+router.include_router(fee_configuration_router)
+router.include_router(fee_invoices_router)
+router.include_router(maintenance_fees_router)
 router.include_router(external_clients_router)
 router.include_router(external_email_templates_router)
 router.include_router(external_leads_router)
@@ -108,6 +116,7 @@ async def api_status():
             "/move-events",
             "/custom-fields",
             "/projects",
+            "/maintenance-fees",
             "/companies",
             "/leads",
             "/lead-stages",

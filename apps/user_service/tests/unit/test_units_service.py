@@ -144,6 +144,9 @@ async def test_get_unit_detail_builds_payload():
         }
     ]
     service.units_repo.count_unit_vehicles.return_value = (1, 1)
+    service.invoices_repo = AsyncMock()
+    service.invoices_repo.sum_outstanding_by_unit.return_value = 0
+    service.invoices_repo.latest_monthly_fee_by_unit.return_value = 300000
 
     data = await service.get_unit_detail(project_id="proj-1", unit_id="unit-1")
 
@@ -154,3 +157,5 @@ async def test_get_unit_detail_builds_payload():
     assert data["carpet_area_sqft"] == 1080.0
     assert data["parking_entitlement"] == 2
     assert data["vehicles_count"] == 1
+    assert data["financials"]["base_fee_monthly"] == 3000.0
+    assert data["financials"]["outstanding_amount"] == 0.0
