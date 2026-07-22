@@ -2443,52 +2443,13 @@ class ContactsService:
         )
 
         if provision_auth:
-            if not self.supabase_client:
-                raise ServiceUnavailableException(
-                    message_key="contacts.errors.auth_user_creation_failed",
-                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
-                )
-            organization = await self.org_repo.get_organization_by_id(org_id)
-            if not organization:
-                raise NotFoundException(
-                    message_key="organizations.errors.not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                )
-            auth_password = generate_random_password()
-            auth_user = await create_user(
-                sb_client=self.supabase_client,
-                email=primary_email,
+            user_id, isometrik_user_id, _ = await self._provision_contact_auth_identity(
+                contact_id=contact_id,
+                first_name=body.first_name,
+                last_name=body.last_name,
+                prefix=body.prefix,
                 phone=full_phone or None,
-                password=auth_password,
-                user_metadata={
-                    "timezone": "UTC",
-                    "first_name": body.first_name,
-                    "last_name": body.last_name,
-                },
-                email_confirm=True,
-            )
-            if not auth_user or not auth_user.get("id"):
-                raise ServiceUnavailableException(
-                    message_key="contacts.errors.auth_user_creation_failed",
-                    custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
-                )
-            user_id = str(auth_user["id"])
-            org_settings = parse_json_field(organization.get("settings"))
-            isometrik_credentials = get_isometrik_data_from_settings(org_settings)
-            isometrik_response = await create_isometrik_user(
-                user={
-                    "user_id": contact_id,
-                    "organization_id": org_id,
-                    "role": IsometrikRole.CLIENT.value,
-                    "first_name": body.first_name,
-                    "last_name": body.last_name,
-                },
-                isometrik_credentials=isometrik_credentials,
-            )
-            isometrik_user_id = (
-                str(isometrik_response["userId"])
-                if isometrik_response and isometrik_response.get("userId")
-                else None
+                email=primary_email,
             )
 
         phones_payload = [
