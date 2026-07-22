@@ -18,6 +18,26 @@ EXAMPLE_TEAM_NAME = "Legal Team"
 EXAMPLE_TEAM_DESCRIPTION = "Core legal practitioners handling cases"
 EXAMPLE_TEAM_DESC_SHORT = "Team description"
 EXAMPLE_DEFAULT_TIMESTAMP = "2024-01-15T10:30:00Z"
+EXAMPLE_USER_ID = "550e8400-e29b-41d4-a716-446655440000"
+
+
+class TeamMemberInput(BaseModel):
+    """Team member input with optional per-member role."""
+
+    user_id: str = Field(..., description="Organization member user UUID")
+    role: TeamRoles = Field(
+        default=TeamRoles.MEMBER,
+        description="Team member role (defaults to MEMBER)",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "user_id": EXAMPLE_USER_ID,
+                "role": TeamRoles.LEAD.value,
+            }
+        }
+    )
 
 
 class CreateTeamRequest(BaseModel):
@@ -30,9 +50,23 @@ class CreateTeamRequest(BaseModel):
         description="Team name (must be unique within organization)",
     )
     description: str | None = Field(None, max_length=1000, description=EXAMPLE_TEAM_DESC_SHORT)
-    member_ids: list[str] | None = Field(
-        None, description="List of user IDs to add as team members"
+    members: list[TeamMemberInput] | None = Field(
+        None,
+        description="Team members with optional per-member role (defaults to MEMBER)",
     )
+
+    @field_validator("members")
+    @classmethod
+    def validate_unique_members(
+        cls, members: list[TeamMemberInput] | None
+    ) -> list[TeamMemberInput] | None:
+        """Reject duplicate user_id entries in members."""
+        if not members:
+            return members
+        user_ids = [member.user_id for member in members]
+        if len(user_ids) != len(set(user_ids)):
+            raise ValueError("Duplicate user_id values are not allowed in members")
+        return members
 
     @field_validator("name")
     @classmethod
@@ -50,9 +84,14 @@ class CreateTeamRequest(BaseModel):
             "example": {
                 "name": EXAMPLE_TEAM_NAME,
                 "description": EXAMPLE_TEAM_DESCRIPTION,
-                "member_ids": [
-                    "550e8400-e29b-41d4-a716-446655440000",
-                    "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                "members": [
+                    {
+                        "user_id": EXAMPLE_USER_ID,
+                        "role": TeamRoles.LEAD.value,
+                    },
+                    {
+                        "user_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                    },
                 ],
             }
         }
@@ -64,13 +103,27 @@ class UpdateTeamRequest(BaseModel):
 
     name: str | None = Field(None, min_length=1, max_length=255, description="Updated team name")
     description: str | None = Field(None, max_length=1000, description="Updated team description")
-    member_ids: list[str] | None = Field(
+    members: list[TeamMemberInput] | None = Field(
         None,
         description=(
-            "Updated list of user IDs. If provided, replaces all existing members. "
+            "Full member list with per-member roles. If provided, syncs membership "
+            "(add/remove) and updates roles for all listed members. "
             "Empty array removes all members."
         ),
     )
+
+    @field_validator("members")
+    @classmethod
+    def validate_unique_members(
+        cls, members: list[TeamMemberInput] | None
+    ) -> list[TeamMemberInput] | None:
+        """Reject duplicate user_id entries in members."""
+        if not members:
+            return members
+        user_ids = [member.user_id for member in members]
+        if len(user_ids) != len(set(user_ids)):
+            raise ValueError("Duplicate user_id values are not allowed in members")
+        return members
 
     @field_validator("name")
     @classmethod
@@ -87,10 +140,15 @@ class UpdateTeamRequest(BaseModel):
             "example": {
                 "name": "Updated Legal Team",
                 "description": "Updated description",
-                "member_ids": [
-                    "550e8400-e29b-41d4-a716-446655440000",
-                    "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-                    "7ca8c920-0ebe-22e2-91c5-557766551111",
+                "members": [
+                    {
+                        "user_id": EXAMPLE_USER_ID,
+                        "role": TeamRoles.PROJECT_LEAD.value,
+                    },
+                    {
+                        "user_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                        "role": TeamRoles.MEMBER.value,
+                    },
                 ],
             }
         }
@@ -213,22 +271,26 @@ class TeamDetailResponse(BaseModel):
 # DATABASE INPUT MODELS
 # ============================================================================
 class MemberData(BaseModel):
-    """Model for team member data with additional_data"""
+    """Model for team member data passed to the repository."""
 
     member_id: str = Field(..., description="Member user ID")
+    role: TeamRoles = Field(
+        default=TeamRoles.MEMBER,
+        description="Team member role",
+    )
     additional_data: dict[str, Any] | None = Field(
-        None, description="Additional member data (e.g., role, allocation_percentage, hourly_rate)"
+        None,
+        description="Optional extra member metadata (allocation, hourly_rate, etc.)",
     )
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "member_id": "550e8400-e29b-41d4-a716-446655440002",
+                "role": TeamRoles.MEMBER.value,
                 "additional_data": {
-                    "role": "Project Lead",
                     "allocation_percentage": 60,
                     "hourly_rate": 150.00,
-                    "role_description": "Manages project delivery",
                 },
             }
         }
@@ -271,8 +333,13 @@ class TeamDbUpdate(BaseModel):
     added_by: str = Field(..., description="User ID making the changes")
     name: str | None = Field(None, min_length=1, max_length=255, description="Updated team name")
     description: str | None = Field(None, max_length=1000, description="Updated team description")
-    members_to_add: list[str] | None = Field(None, description="Member IDs to add to team")
+    members_to_add: list[MemberData] | None = Field(
+        None, description="Members to add with per-member roles"
+    )
     members_to_remove: list[str] | None = Field(None, description="Member IDs to remove from team")
+    members_to_update: list[MemberData] | None = Field(
+        None, description="Existing members whose roles should be updated"
+    )
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
