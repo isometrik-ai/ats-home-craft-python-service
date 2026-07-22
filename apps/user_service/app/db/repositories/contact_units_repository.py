@@ -260,6 +260,70 @@ class ContactUnitsRepository(BaseRepository):
         )
         return row is not None
 
+    async def find_active_primary_conflicts(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        contact_unit_ids: list[str],
+    ) -> list[str]:
+        """Return unit_ids where activating pending primary rows would conflict."""
+        if not contact_unit_ids:
+            return []
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT cu_pending.unit_id::text AS unit_id
+            FROM contact_units cu_pending
+            INNER JOIN contact_units cu_existing
+              ON cu_existing.unit_id = cu_pending.unit_id
+             AND cu_existing.organization_id = cu_pending.organization_id
+             AND cu_existing.is_primary = true
+             AND cu_existing.status = 'active'::contact_unit_status
+             AND cu_existing.id <> cu_pending.id
+            WHERE cu_pending.organization_id = $1::uuid
+              AND cu_pending.contact_id = $2::uuid
+              AND cu_pending.id = ANY($3::uuid[])
+              AND cu_pending.is_primary = true
+              AND cu_pending.status = 'pending'::contact_unit_status
+            """,
+            organization_id,
+            contact_id,
+            contact_unit_ids,
+        )
+        return [str(row["unit_id"]) for row in rows]
+
+    async def unit_has_primary_occupant(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        exclude_contact_id: str | None = None,
+    ) -> bool:
+        """Return True when the unit has a pending or active primary occupant."""
+        args: list[Any] = [
+            organization_id,
+            unit_id,
+            [ContactUnitStatus.PENDING.value, ContactUnitStatus.ACTIVE.value],
+        ]
+        exclude_filter = ""
+        if exclude_contact_id:
+            exclude_filter = " AND contact_id <> $4::uuid"
+            args.append(exclude_contact_id)
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT 1
+            FROM contact_units
+            WHERE organization_id = $1::uuid
+              AND unit_id = $2::uuid
+              AND is_primary = true
+              AND status = ANY($3::contact_unit_status[])
+              {exclude_filter}
+            LIMIT 1
+            """,
+            *args,
+        )
+        return row is not None
+
     async def confirm_selection(
         self,
         *,

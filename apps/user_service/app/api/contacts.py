@@ -264,6 +264,7 @@ async def list_contacts(
     result = await service.list_contacts(
         search=body.search,
         status=body.status.value if body.status else None,
+        contact_type=body.contact_type.value if body.contact_type else None,
         dropdown_filters=dropdown_filters,
         page=body.page,
         page_size=body.page_size,
