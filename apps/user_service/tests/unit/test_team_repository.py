@@ -3,6 +3,7 @@
 import pytest
 
 from apps.user_service.app.db.repositories.team_repository import TeamRepository
+from apps.user_service.app.schemas.enums import TeamRoles
 from apps.user_service.app.schemas.teams import MemberData, TeamDbIn
 
 
@@ -75,6 +76,50 @@ async def test_insert_team_members_noop_on_empty():
     await repo._insert_team_members(team_id="t1", member_data=[], added_by="u1")  # pylint: disable=protected-access
 
     assert not conn.execute_calls
+
+
+@pytest.mark.asyncio
+async def test_insert_team_members_stores_role():
+    """insert_team_members persists explicit member role."""
+
+    conn = _FakeConn()
+    repo = TeamRepository(db_connection=conn)
+
+    await repo._insert_team_members(  # pylint: disable=protected-access
+        team_id="t1",
+        member_data=[
+            MemberData(
+                member_id="550e8400-e29b-41d4-a716-446655440000",
+                role=TeamRoles.LEAD,
+            )
+        ],
+        added_by="u1",
+    )
+
+    assert conn.execute_calls
+    roles = conn.execute_calls[0][1][2]
+    assert roles == [TeamRoles.LEAD.value]
+
+
+@pytest.mark.asyncio
+async def test_update_team_member_roles():
+    """update member roles executes batch update."""
+
+    conn = _FakeConn()
+    repo = TeamRepository(db_connection=conn)
+
+    await repo._update_team_member_roles(  # pylint: disable=protected-access
+        team_id="t1",
+        member_data=[
+            MemberData(
+                member_id="550e8400-e29b-41d4-a716-446655440000",
+                role=TeamRoles.PROJECT_LEAD,
+            )
+        ],
+    )
+
+    assert conn.execute_calls
+    assert "UPDATE team_members" in conn.execute_calls[0][0]
 
 
 @pytest.mark.asyncio

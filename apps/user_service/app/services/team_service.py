@@ -12,6 +12,7 @@ from apps.user_service.app.schemas.teams import (
     TeamDetailItem,
     TeamDetailResponse,
     TeamItem,
+    TeamMemberInput,
     TeamMemberItem,
     TeamsListResponse,
     UpdateTeamRequest,
@@ -51,22 +52,29 @@ class TeamService:
         self.team_repository = TeamRepository(db_connection=db_connection)
 
     @staticmethod
-    def _compute_member_changes(
+    def _member_data_from_input(members: list[TeamMemberInput]) -> list[MemberData]:
+        """Convert API member inputs to repository member payloads."""
+        return [MemberData(member_id=member.user_id, role=member.role) for member in members]
+
+    @staticmethod
+    def _compute_member_sync(
         current_member_ids: set[str],
-        new_member_ids: set[str],
-    ) -> tuple[list[str], list[str]]:
-        """Compute members to add and remove.
+        requested_members: list[TeamMemberInput],
+    ) -> tuple[list[MemberData], list[str], list[MemberData]]:
+        """Compute add, remove, and role-update operations for a member sync."""
+        role_by_user_id = {member.user_id: member.role for member in requested_members}
+        requested_ids = set(role_by_user_id.keys())
 
-        Args:
-            current_member_ids: Set of current member user IDs
-            new_member_ids: Set of new member user IDs
-
-        Returns:
-            Tuple containing (members_to_add, members_to_remove)
-        """
-        members_to_add = list(new_member_ids - current_member_ids)
-        members_to_remove = list(current_member_ids - new_member_ids)
-        return members_to_add, members_to_remove
+        members_to_add = [
+            MemberData(member_id=user_id, role=role_by_user_id[user_id])
+            for user_id in requested_ids - current_member_ids
+        ]
+        members_to_remove = list(current_member_ids - requested_ids)
+        members_to_update = [
+            MemberData(member_id=user_id, role=role_by_user_id[user_id])
+            for user_id in requested_ids & current_member_ids
+        ]
+        return members_to_add, members_to_remove, members_to_update
 
     async def create_team(
         self,
@@ -87,16 +95,10 @@ class TeamService:
 
         # Validate and deduplicate member IDs
         member_data = None
-        if request.member_ids is not None:
-            unique_member_ids = set(request.member_ids)
-            await self._validate_member_ids(
-                unique_member_ids,
-            )
-            # Convert member_ids to member_data format (with minimal additional_data)
-            member_data = [
-                MemberData(member_id=member_id, additional_data=None)
-                for member_id in unique_member_ids
-            ]
+        if request.members is not None:
+            member_user_ids = {member.user_id for member in request.members}
+            await self._validate_member_ids(member_user_ids)
+            member_data = self._member_data_from_input(request.members)
 
         # Create team
         db_in = TeamDbIn(
@@ -229,16 +231,15 @@ class TeamService:
         )
 
         # Compute member changes
-        members_to_add: list[str] = []
+        members_to_add: list[MemberData] = []
         members_to_remove: list[str] = []
-        if request.member_ids is not None:
-            new_member_ids = set(request.member_ids)
-            await self._validate_member_ids(
-                new_member_ids,
-            )
-            members_to_add, members_to_remove = self._compute_member_changes(
+        members_to_update: list[MemberData] = []
+        if request.members is not None:
+            requested_ids = {member.user_id for member in request.members}
+            await self._validate_member_ids(requested_ids)
+            members_to_add, members_to_remove, members_to_update = self._compute_member_sync(
                 current_member_ids,
-                new_member_ids,
+                request.members,
             )
 
         # Validate team name if provided
@@ -253,6 +254,7 @@ class TeamService:
             description=request.description,
             members_to_add=members_to_add,
             members_to_remove=members_to_remove,
+            members_to_update=members_to_update,
             added_by=self.user_context.user_id,
         )
         await self.team_repository.update_team(update_input)

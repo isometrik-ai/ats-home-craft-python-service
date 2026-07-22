@@ -428,7 +428,7 @@ async def update_team_endpoint(
         request: FastAPI request object
         db_connection: postgresql database connection
         current_user: Decoded JWT token containing user information
-        body: Update request with optional fields (name, description, member_ids)
+        body: Update request with optional fields (name, description, members)
 
     Raises:
         HTTPException: 400 for invalid team ID format or invalid data
