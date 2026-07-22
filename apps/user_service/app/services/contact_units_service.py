@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import asyncpg
+from asyncpg.exceptions import UniqueViolationError
 
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
     ContactOnboardingRepository,
@@ -16,7 +17,10 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
 from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
-from apps.user_service.app.schemas.enums import ContactOnboardingStep, ContactUnitStatus
+from apps.user_service.app.schemas.enums import (
+    ContactOnboardingStep,
+    ContactUnitStatus,
+)
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -85,11 +89,29 @@ class ContactUnitsService:
         contact_unit_ids: list[str],
     ) -> list[dict[str, Any]]:
         """Activate selected pending units or raise when any id is invalid."""
-        updated = await self.repo.confirm_selection(
+        conflicts = await self.repo.find_active_primary_conflicts(
             organization_id=organization_id,
             contact_id=contact_id,
             contact_unit_ids=contact_unit_ids,
         )
+        if conflicts:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_primary_already_assigned",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        try:
+            updated = await self.repo.confirm_selection(
+                organization_id=organization_id,
+                contact_id=contact_id,
+                contact_unit_ids=contact_unit_ids,
+            )
+        except UniqueViolationError as exc:
+            if exc.constraint_name == "uq_contact_units_primary_per_unit":
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.unit_primary_already_assigned",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                ) from exc
+            raise
         if len(updated) != len(contact_unit_ids):
             raise ValidationException(
                 message_key="contact_onboarding.errors.contact_unit_not_found",
@@ -272,6 +294,28 @@ class ContactUnitsService:
             raise NotFoundException(
                 message_key="contact_onboarding.errors.unit_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        existing = await self.repo.get_by_unit_and_contact(
+            organization_id=org_id,
+            unit_id=body.unit_id,
+            contact_id=contact_id,
+        )
+        if existing and existing.get("status") in {
+            ContactUnitStatus.PENDING.value,
+            ContactUnitStatus.ACTIVE.value,
+        }:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_already_assigned_to_contact",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if await self.repo.unit_has_primary_occupant(
+            organization_id=org_id,
+            unit_id=body.unit_id,
+            exclude_contact_id=contact_id,
+        ):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_already_assigned",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         row = await self.repo.insert_allotment(
             organization_id=org_id,

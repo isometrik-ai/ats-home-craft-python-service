@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from apps.user_service.app.schemas.enums import ContactOnboardingStep, SetupStepStatus
+from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
+from apps.user_service.app.schemas.enums import (
+    ContactOnboardingStep,
+    ContactUnitRelationship,
+    SetupStepStatus,
+)
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import ValidationException
@@ -35,6 +40,7 @@ def _service(*, onboarding_repo: AsyncMock | None = None) -> ContactUnitsService
     """Build ContactUnitsService with mocked repositories."""
     svc = ContactUnitsService(db_connection=MagicMock(), user_context=_user_context())
     svc.repo = AsyncMock()
+    svc.repo.find_active_primary_conflicts = AsyncMock(return_value=[])
     svc.onboarding_repo = onboarding_repo or AsyncMock()
     svc.unit_onboarding_repo = AsyncMock()
     svc.onboarding_repo.list_steps = AsyncMock(return_value=_completed_profile_steps())
@@ -144,6 +150,78 @@ async def test_claim_properties_activates_and_flags_default():
     )
     assert result["items"] == [{"id": "cu-2", "status": "active"}]
     assert result["requires_default_unit"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_assign_rejects_other_contact():
+    """Admin assign fails when another contact already holds the unit."""
+    svc = _service()
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
+    svc.repo.unit_has_primary_occupant = AsyncMock(return_value=True)
+    svc.repo.insert_allotment = AsyncMock()
+    body = AdminAssignUnitRequest(unit_id="unit-1", is_primary=True)
+
+    with pytest.raises(ValidationException):
+        await svc.admin_assign_unit(contact_id="contact-1", body=body)
+
+    svc.repo.insert_allotment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_assign_rejects_same_contact():
+    """Admin assign fails when the contact already has a pending or active link."""
+    svc = _service()
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.get_by_unit_and_contact = AsyncMock(return_value={"id": "cu-1", "status": "pending"})
+    svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
+    svc.repo.insert_allotment = AsyncMock()
+    body = AdminAssignUnitRequest(unit_id="unit-1", is_primary=True)
+
+    with pytest.raises(ValidationException):
+        await svc.admin_assign_unit(contact_id="contact-1", body=body)
+
+    svc.repo.insert_allotment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_assign_unit_creates_pending_allotment():
+    """Admin assign inserts a pending contact_units row when the unit is free."""
+    svc = _service()
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
+    svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
+    svc.repo.insert_allotment = AsyncMock(return_value={"id": "cu-1", "status": "pending"})
+    body = AdminAssignUnitRequest(
+        unit_id="unit-1",
+        is_primary=True,
+        relationship=ContactUnitRelationship.SELF,
+    )
+
+    result = await svc.admin_assign_unit(contact_id="contact-1", body=body)
+
+    svc.repo.insert_allotment.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="proj-1",
+        unit_id="unit-1",
+        contact_id="contact-1",
+        is_primary=True,
+        relationship="self",
+    )
+    assert result == {"id": "cu-1", "status": "pending"}
+
+
+@pytest.mark.asyncio
+async def test_confirm_properties_rejects_primary_conflict():
+    """Confirm fails when another contact is already the active primary occupant."""
+    svc = _service()
+    svc.repo.find_active_primary_conflicts = AsyncMock(return_value=["unit-1"])
+    svc.repo.confirm_selection = AsyncMock()
+
+    with pytest.raises(ValidationException):
+        await svc.confirm_properties(contact_id="contact-1", contact_unit_ids=["cu-1"])
+
+    svc.repo.confirm_selection.assert_not_awaited()
 
 
 @pytest.mark.asyncio
