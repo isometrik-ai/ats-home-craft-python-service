@@ -46,3 +46,49 @@ async def test_readiness_not_ready_on_db_fail() -> None:
 
     assert summary["ready"] is False
     assert summary["checks"]["database"]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_readiness_graphiti_error_marks_not_ready() -> None:
+    """Graphiti probe failures should mark readiness false when configured."""
+    with (
+        patch(
+            "libs.shared_utils.graphiti_health.check_database_readiness",
+            new=AsyncMock(return_value={"status": "ok"}),
+        ),
+        patch(
+            "libs.shared_utils.graphiti_health.is_graphiti_configured",
+            return_value=True,
+        ),
+        patch(
+            "libs.shared_utils.graphiti_health.check_graphiti_readiness",
+            new=AsyncMock(side_effect=RuntimeError("graphiti down")),
+        ),
+    ):
+        summary = await run_readiness_checks()
+
+    assert summary["ready"] is False
+    assert summary["checks"]["graphiti"]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_readiness_checks_graphiti_when_configured() -> None:
+    """Graphiti-enabled deployments should include graphiti readiness."""
+    with (
+        patch(
+            "libs.shared_utils.graphiti_health.check_database_readiness",
+            new=AsyncMock(return_value={"status": "ok"}),
+        ),
+        patch(
+            "libs.shared_utils.graphiti_health.is_graphiti_configured",
+            return_value=True,
+        ),
+        patch(
+            "libs.shared_utils.graphiti_health.check_graphiti_readiness",
+            new=AsyncMock(return_value={"status": "ok"}),
+        ),
+    ):
+        summary = await run_readiness_checks()
+
+    assert summary["ready"] is True
+    assert summary["checks"]["graphiti"]["status"] == "ok"

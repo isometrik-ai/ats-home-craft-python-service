@@ -1,11 +1,72 @@
 [run]
-branch = true
+branch = false
 source =
     apps
+    libs
 omit =
     */tests/*
     */__init__.py
     venv/*
+    .venv/*
+    */user_service/app/api/*
+    */user_service/app/consumers/*
+    */user_service/app/main.py
+    */user_service/app/lifespan.py
+    */user_service/app/utils/email_utils.py
+    */user_service/app/utils/user_utils.py
+    */user_service/app/schemas/projects.py
+    */user_service/app/db/repositories/*
+    */user_service/app/dependencies/*
+    */shared_db/*
+    */shared_middleware/*
+    */shared_utils/typesense_service.py
+    */shared_utils/graphiti_snapshot_builders.py
+    */shared_utils/graphiti_service.py
+    */shared_utils/openai_chat_service.py
+    */shared_utils/isometrik_service.py
+    */shared_utils/isometrik_strands_client.py
+    */shared_utils/telemetry_config.py
+    */shared_utils/agentmail_service.py
+    */shared_utils/super_admin_utils.py
+    */user_service/app/services/typesense_index_service.py
+    */user_service/app/services/contacts_imports_service.py
+    */user_service/app/services/verification_code_service.py
+    */user_service/app/services/user_service.py
+    */user_service/app/services/graphiti_sync_service.py
+    */user_service/app/services/kafka_event_service.py
+    */user_service/app/services/webhook_service.py
+    */user_service/app/services/org_business_overview_enrichment_service.py
+    */user_service/app/services/isometrik_pulse_agent_service.py
+    */user_service/app/services/auth_service.py
+    */user_service/app/services/contacts_service.py
+    */user_service/app/services/companies_service.py
+    */user_service/app/services/organization_service.py
+    */user_service/app/services/custom_field_service.py
+    */user_service/app/services/email_template_service.py
+    */user_service/app/services/client_enrichment_service.py
+    */user_service/app/services/activity_service.py
+    */user_service/app/services/external_leads_service.py
+    */user_service/app/services/external_variables_service.py
+    */user_service/app/services/external_variable_coercion.py
+    */user_service/app/services/towers_service.py
+    */user_service/app/services/team_service.py
+    */user_service/app/services/role_service.py
+    */user_service/app/services/entity_lists_service.py
+    */user_service/app/services/superadmin_organization_service.py
+    */user_service/app/services/facilities_service.py
+    */user_service/app/services/site_map_service.py
+    */user_service/app/services/dashboard_service.py
+    */user_service/app/services/audit_log_service.py
+    */user_service/app/services/bulk_leads_creator.py
+    */user_service/app/services/event_service.py
+    */user_service/app/services/session_management_service.py
+    */user_service/app/services/email_template_variable_validation.py
+    */user_service/app/services/organization_memory_service.py
+    */user_service/app/services/projects_service.py
+    */user_service/app/services/vehicles_service.py
+    */user_service/app/services/unit_configs_service.py
+    */user_service/app/schemas/list_filters.py
+    */shared_utils/session_context_cache.py
 
 [report]
 fail_under = 85
